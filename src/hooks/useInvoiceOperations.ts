@@ -14,16 +14,14 @@ export const useInvoiceOperations = () => {
       console.error('No company ID available for invoice number generation');
       throw new Error('No company ID available');
     }
-
-    const prefix = isCorrectiveInvoice ? 'R-FAC-2025' : 'FAC-2025';
     
     try {
-      console.log('Generating invoice number with company ID:', companyId, 'prefix:', prefix);
+      console.log('Generating invoice number with company ID:', companyId);
       
-      // Generar el número usando la función RPC
+      // Generate the number using the RPC function with correct parameter name
       const { data, error } = await supabase.rpc('generate_invoice_number', {
-        company_id: companyId,
-        prefix: prefix
+        p_company_id: companyId,
+        p_is_corrective: isCorrectiveInvoice
       });
 
       if (error) {
@@ -47,7 +45,7 @@ export const useInvoiceOperations = () => {
 
       console.log('Creating invoice with data:', { ...invoiceData, company_id: companyId });
 
-      // Validar que todos los campos requeridos estén presentes
+      // Validate required fields
       if (!invoiceData.number || !invoiceData.customer_id) {
         throw new Error('Missing required fields: number or customer_id');
       }

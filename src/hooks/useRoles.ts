@@ -6,16 +6,14 @@ import { toast } from 'sonner';
 export interface Role {
   id: string;
   name: string;
-  description: string;
-  is_system_role: boolean;
+  description: string | null;
   created_at: string;
-  updated_at: string;
 }
 
 export interface Permission {
   id: string;
-  name: string;
-  description: string;
+  name: string | null;
+  description: string | null;
   resource: string;
   action: string;
   created_at: string;
@@ -24,11 +22,10 @@ export interface Permission {
 export interface UserCompanyRole {
   id: string;
   user_id: string;
-  company_id: string;
-  role_id: string;
+  company_id: string | null;
+  role_id: string | null;
+  role: string;
   created_at: string;
-  updated_at: string;
-  role?: Role;
 }
 
 export const useRoles = () => {
@@ -71,10 +68,7 @@ export const useRoles = () => {
     try {
       const { data, error } = await supabase
         .from('user_company_roles')
-        .select(`
-          *,
-          role:roles(*)
-        `)
+        .select('*')
         .order('created_at', { ascending: false });
       
       if (error) throw error;
@@ -92,7 +86,8 @@ export const useRoles = () => {
         .insert([{
           user_id: userId,
           company_id: companyId,
-          role_id: roleId
+          role_id: roleId,
+          role: 'user'
         }]);
 
       if (error) throw error;

@@ -1,40 +1,49 @@
 
-import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 
 interface DocumentCategory {
   id: string;
   name: string;
   description?: string;
+  company_id: string;
+  parent_id?: string;
   created_at: string;
 }
 
 export const useDocumentCategories = () => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { companyId } = useCompanyFilter();
 
   // Fetch categories
   const { data: categories = [], isLoading } = useQuery({
-    queryKey: ['document-categories'],
+    queryKey: ['document-categories', companyId],
     queryFn: async () => {
+      if (!companyId) return [];
+      
       const { data, error } = await supabase
         .from('document_categories')
         .select('*')
+        .eq('company_id', companyId)
         .order('name');
 
       if (error) throw error;
-      return data || [];
-    }
+      return data as DocumentCategory[] || [];
+    },
+    enabled: !!companyId,
   });
 
   // Create category mutation
   const createCategoryMutation = useMutation({
     mutationFn: async ({ name, description }: { name: string; description?: string }) => {
+      if (!companyId) throw new Error('No company ID available');
+      
       const { data, error } = await supabase
         .from('document_categories')
-        .insert({ name, description })
+        .insert({ name, description, company_id: companyId })
         .select()
         .single();
 

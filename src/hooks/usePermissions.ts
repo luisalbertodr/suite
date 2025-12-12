@@ -16,34 +16,43 @@ export const usePermissions = () => {
 
   const fetchUserPermissions = async () => {
     if (!user || isSuperuser) {
-      // Los superusuarios tienen todos los permisos
+      // Superusers have all permissions
       setPermissions([]);
       setLoading(false);
       return;
     }
 
     try {
-      // Get user's company ID first
-      const { data: profile } = await supabase
-        .from('user_profiles')
-        .select('company_id')
-        .eq('user_id', user.id)
-        .single();
-
-      if (!profile?.company_id) {
-        setPermissions([]);
-        setLoading(false);
-        return;
-      }
-
-      // Get user permissions using the RPC function
+      // Get user permissions using the RPC function with correct parameter name
       const { data, error } = await supabase.rpc('get_user_permissions', {
-        user_id: user.id,
-        company_id: profile.company_id
+        p_user_id: user.id
       });
 
       if (error) throw error;
-      setPermissions(data || []);
+      
+      // The RPC returns an array of permission IDs (strings)
+      // Map them to UserPermission objects
+      const permissionIds = data as string[] || [];
+      
+      // If we have permission IDs, fetch the full permission details
+      if (permissionIds.length > 0) {
+        const { data: permissionDetails, error: detailsError } = await supabase
+          .from('permissions')
+          .select('*')
+          .in('id', permissionIds);
+          
+        if (detailsError) throw detailsError;
+        
+        const mappedPermissions: UserPermission[] = (permissionDetails || []).map(p => ({
+          permission_name: p.name || `${p.resource}:${p.action}`,
+          resource: p.resource,
+          action: p.action
+        }));
+        
+        setPermissions(mappedPermissions);
+      } else {
+        setPermissions([]);
+      }
       
     } catch (error) {
       console.error('Error fetching user permissions:', error);
@@ -54,14 +63,14 @@ export const usePermissions = () => {
   };
 
   const hasPermission = (resource: string, action: string): boolean => {
-    // Los superusuarios tienen todos los permisos
+    // Superusers have all permissions
     if (isSuperuser) return true;
     
     return permissions.some(p => p.resource === resource && p.action === action);
   };
 
   const canAccess = (resource: string): boolean => {
-    // Los superusuarios pueden acceder a todo
+    // Superusers can access everything
     if (isSuperuser) return true;
     
     return permissions.some(p => p.resource === resource);

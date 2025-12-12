@@ -1,6 +1,6 @@
 
-import { useState, useEffect } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { toast } from 'sonner';
@@ -13,52 +13,24 @@ export interface PlanillaFormData {
 export interface PlanillaItem {
   id?: string;
   planilla_id?: string;
-  articulo: string;
-  color: string;
-  precio: number;
-  descripcion?: string;
-  talla_16?: number;
-  talla_17?: number;
-  talla_18?: number;
-  talla_19?: number;
-  talla_20?: number;
-  talla_21?: number;
-  talla_22?: number;
-  talla_23?: number;
-  talla_24?: number;
-  talla_25?: number;
-  talla_26?: number;
-  talla_27?: number;
-  talla_28?: number;
-  talla_29?: number;
-  talla_30?: number;
-  talla_31?: number;
-  talla_32?: number;
-  talla_33?: number;
-  talla_34?: number;
-  talla_35?: number;
-  talla_36?: number;
-  talla_37?: number;
-  talla_38?: number;
-  talla_39?: number;
-  talla_40?: number;
-  talla_41?: number;
-  talla_42?: number;
-  talla_43?: number;
-  talla_44?: number;
-  talla_45?: number;
-  talla_46?: number;
+  article_id?: string | null;
+  customer_id?: string | null;
+  description?: string | null;
+  notes?: string | null;
+  quantity: number;
+  row_index: number;
   created_at?: string;
   updated_at?: string;
 }
 
 interface Planilla {
   id: string;
-  codigo: string;
-  fecha: string;
-  supplier_id?: string;
+  name: string;
+  description?: string;
+  start_date?: string;
+  end_date?: string;
   company_id: string;
-  estado: 'activa' | 'procesada' | 'cancelada';
+  status: string;
   created_at: string;
   updated_at: string;
 }
@@ -80,10 +52,7 @@ export const usePlanillas = () => {
       
       const { data, error } = await supabase
         .from('planillas')
-        .select(`
-          *,
-          suppliers(name)
-        `)
+        .select('*')
         .eq('company_id', companyId)
         .order('created_at', { ascending: false });
 
@@ -110,25 +79,25 @@ export const usePlanillas = () => {
     try {
       console.log('Creating planilla with data:', { ...formData, company_id: companyId });
       
-      // First generate the planilla code
+      // First generate the planilla code using correct parameter name
       const { data: codigoData, error: codigoError } = await supabase
-        .rpc('generate_planilla_code', { company_id: companyId });
+        .rpc('generate_planilla_code', { p_company_id: companyId });
 
       if (codigoError) {
         console.error('Error generating planilla code:', codigoError);
         throw codigoError;
       }
 
-      const codigo = codigoData;
-      console.log('Generated planilla code:', codigo);
+      const name = codigoData;
+      console.log('Generated planilla code:', name);
 
       // Create the planilla with the generated code
       const planillaData = {
-        codigo,
-        fecha: formData.fecha,
-        supplier_id: formData.supplier_id || null,
+        name,
+        description: `Planilla ${formData.fecha}`,
+        start_date: formData.fecha,
         company_id: companyId,
-        estado: 'activa' as const,
+        status: 'active',
       };
 
       console.log('Inserting planilla with data:', planillaData);
@@ -172,7 +141,7 @@ export const usePlanillas = () => {
         updated_at: new Date().toISOString(),
       })
       .eq('id', id)
-      .eq('company_id', companyId); // Ensure we can only update our company's planillas
+      .eq('company_id', companyId);
 
     if (error) {
       console.error('Error updating planilla:', error);
@@ -197,7 +166,7 @@ export const usePlanillas = () => {
       .from('planillas')
       .delete()
       .eq('id', id)
-      .eq('company_id', companyId); // Ensure we can only delete our company's planillas
+      .eq('company_id', companyId);
 
     if (error) {
       console.error('Error deleting planilla:', error);

@@ -118,19 +118,13 @@ export const useDeliveryNoteOperations = (onClose: () => void, isExit: boolean =
     }
 
     try {
-      const currentYear = new Date().getFullYear();
-      const prefix = isExit ? `ALS-${currentYear}` : `ALE-${currentYear}`;
-      
       console.log('🔄 Generating delivery note number...');
       console.log('Company ID:', companyId);
-      console.log('Prefix:', prefix);
-      console.log('Year:', currentYear);
       
-      // Use RPC function first
+      // Use RPC function
       console.log('🔄 Calling RPC function...');
       const { data: rpcResult, error: rpcError } = await supabase.rpc('generate_delivery_note_number', {
-        company_id: companyId,
-        prefix: prefix
+        p_company_id: companyId
       });
 
       console.log('RPC Result:', rpcResult);
@@ -153,7 +147,7 @@ export const useDeliveryNoteOperations = (onClose: () => void, isExit: boolean =
       console.error('❌ Error in generateDeliveryNoteNumber:', error);
       throw error;
     }
-  }, [companyId, isExit]);
+  }, [companyId]);
 
   const loadItems = useCallback(async (deliveryNoteId: string) => {
     try {
@@ -218,19 +212,6 @@ export const useDeliveryNoteOperations = (onClose: () => void, isExit: boolean =
       if (!data.deliveryNote.number || data.deliveryNote.number.trim() === '') {
         console.error('Invalid delivery note number:', data.deliveryNote.number);
         throw new Error('Número de albarán inválido o vacío');
-      }
-      
-      // Check if number follows expected format for new entries
-      if (!data.deliveryNoteId) {
-        const currentYear = new Date().getFullYear();
-        const expectedPrefix = isExit ? `ALS-${currentYear}` : `ALE-${currentYear}`;
-        if (!data.deliveryNote.number.startsWith(expectedPrefix)) {
-          console.error('Number format mismatch:', {
-            received: data.deliveryNote.number,
-            expected: expectedPrefix
-          });
-          throw new Error(`El número de albarán debe comenzar con ${expectedPrefix}`);
-        }
       }
       
       const cleanedDeliveryNote = {
