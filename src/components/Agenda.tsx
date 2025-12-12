@@ -85,14 +85,14 @@ export const Agenda: React.FC = () => {
   // Mapear citas desde la base de datos
   const appointments: Appointment[] = dbAppointments.map(apt => ({
     id: apt.id,
-    employeeId: apt.employee_id,
-    clientName: apt.client_name,
+    employeeId: apt.employee_id || '',
+    clientName: apt.title || '',
     description: apt.description || '',
-    startTime: apt.start_time,
-    endTime: apt.end_time,
-    date: apt.appointment_date,
-    color: apt.color,
-    status: apt.status
+    startTime: apt.start_time ? apt.start_time.split('T')[1]?.substring(0, 5) || apt.start_time : '',
+    endTime: apt.end_time ? apt.end_time.split('T')[1]?.substring(0, 5) || apt.end_time : '',
+    date: apt.start_time ? apt.start_time.split('T')[0] : '',
+    color: apt.color || '#3B82F6',
+    status: (apt.status === 'confirmed' || apt.status === 'pending' || apt.status === 'cancelled') ? apt.status : 'pending'
   }));
 
   const handleSlotClick = (employeeId: string, time: string) => {
@@ -144,10 +144,10 @@ export const Agenda: React.FC = () => {
       await updateAppointment.mutateAsync({
         id: appointmentId,
         employee_id: newEmployeeId,
-        client_name: appointment.clientName,
+        title: appointment.clientName,
         description: appointment.description,
-        start_time: newTime,
-        end_time: newEndTime,
+        start_time: `${format(selectedDate, 'yyyy-MM-dd')}T${newTime}:00`,
+        end_time: `${format(selectedDate, 'yyyy-MM-dd')}T${newEndTime}:00`,
         color: appointment.color,
         status: appointment.status
       });
@@ -168,13 +168,13 @@ export const Agenda: React.FC = () => {
 
   const handleAppointmentSave = async (appointment: CreateAppointmentData) => {
     try {
+      const dateStr = format(selectedDate, 'yyyy-MM-dd');
       await createAppointment.mutateAsync({
         employee_id: appointment.employeeId,
-        client_name: appointment.clientName,
+        title: appointment.clientName,
         description: appointment.description,
-        start_time: appointment.startTime,
-        end_time: appointment.endTime,
-        appointment_date: format(selectedDate, 'yyyy-MM-dd'),
+        start_time: `${dateStr}T${appointment.startTime}:00`,
+        end_time: `${dateStr}T${appointment.endTime}:00`,
         color: appointment.color,
         status: appointment.status
       });
@@ -191,10 +191,10 @@ export const Agenda: React.FC = () => {
       await updateAppointment.mutateAsync({
         id: updatedAppointment.id,
         employee_id: updatedAppointment.employeeId,
-        client_name: updatedAppointment.clientName,
+        title: updatedAppointment.clientName,
         description: updatedAppointment.description,
-        start_time: updatedAppointment.startTime,
-        end_time: updatedAppointment.endTime,
+        start_time: `${updatedAppointment.date}T${updatedAppointment.startTime}:00`,
+        end_time: `${updatedAppointment.date}T${updatedAppointment.endTime}:00`,
         color: updatedAppointment.color,
         status: updatedAppointment.status
       });

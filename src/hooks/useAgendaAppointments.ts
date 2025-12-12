@@ -5,21 +5,29 @@ import { useToast } from '@/hooks/use-toast';
 
 export interface AgendaAppointment {
   id: string;
-  employee_id: string; // UUID from agenda_employees table
-  client_name: string;
+  employee_id: string | null;
+  customer_id: string | null;
+  title: string;
   description: string | null;
   start_time: string;
   end_time: string;
-  appointment_date: string;
-  color: string;
-  status: 'confirmed' | 'pending' | 'cancelled';
-  company_id: string | null;
+  color: string | null;
+  status: string;
+  company_id: string;
   created_at: string;
   updated_at: string;
 }
 
-// Create a type for appointment creation that doesn't require company_id
-type CreateAppointmentInput = Omit<AgendaAppointment, 'id' | 'created_at' | 'updated_at' | 'company_id'>;
+type CreateAppointmentInput = {
+  employee_id?: string | null;
+  customer_id?: string | null;
+  title: string;
+  description?: string | null;
+  start_time: string;
+  end_time: string;
+  color?: string | null;
+  status?: string;
+};
 
 export const useAgendaAppointments = (date?: string) => {
   const { toast } = useToast();
@@ -34,7 +42,8 @@ export const useAgendaAppointments = (date?: string) => {
         .order('start_time');
 
       if (date) {
-        query = query.eq('appointment_date', date);
+        query = query.gte('start_time', `${date}T00:00:00`)
+                     .lt('start_time', `${date}T23:59:59`);
       }
 
       const { data, error } = await query;
@@ -44,7 +53,7 @@ export const useAgendaAppointments = (date?: string) => {
         throw error;
       }
 
-      return data as AgendaAppointment[];
+      return (data || []) as AgendaAppointment[];
     },
   });
 

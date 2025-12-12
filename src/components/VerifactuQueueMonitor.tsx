@@ -247,12 +247,12 @@ export const VerifactuQueueMonitor: React.FC = () => {
                   </div>
                   <div>
                     <span className="font-medium">Reintentos:</span>{' '}
-                    {item.retry_count}/{item.max_retries}
+                    {(item as any).retry_count || item.attempts || 0}/{(item as any).max_retries || 3}
                   </div>
-                  {item.next_retry_at && item.status === 'pending' && (
+                  {(item as any).next_retry_at && item.status === 'pending' && (
                     <div>
                       <span className="font-medium">Próximo intento:</span>{' '}
-                      {format(new Date(item.next_retry_at), 'dd/MM/yyyy HH:mm', { locale: es })}
+                      {format(new Date((item as any).next_retry_at), 'dd/MM/yyyy HH:mm', { locale: es })}
                     </div>
                   )}
                 </div>
@@ -263,10 +263,10 @@ export const VerifactuQueueMonitor: React.FC = () => {
                   </div>
                 )}
 
-                {item.processed_at && (
+                {(item as any).processed_at && (
                   <div className="text-sm text-gray-600">
                     <span className="font-medium">Procesado:</span>{' '}
-                    {format(new Date(item.processed_at), 'dd/MM/yyyy HH:mm', { locale: es })}
+                    {format(new Date((item as any).processed_at), 'dd/MM/yyyy HH:mm', { locale: es })}
                   </div>
                 )}
               </div>
