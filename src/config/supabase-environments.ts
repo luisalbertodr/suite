@@ -44,3 +44,11 @@ export const getActiveConfig = () => {
   const env = getActiveEnvironment();
   return SUPABASE_ENVIRONMENTS[env];
 };
+
+// Cambiar entorno de Supabase (recarga la página)
+export const switchSupabaseEnvironment = (env: 'cloud' | 'local'): void => {
+  setActiveEnvironment(env);
+  if (typeof window !== 'undefined') {
+    window.location.reload();
+  }
+};

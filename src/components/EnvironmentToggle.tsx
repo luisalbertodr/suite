@@ -7,9 +7,9 @@ import { AlertTriangle, Cloud, Server } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { 
   getActiveEnvironment, 
-  SUPABASE_ENVIRONMENTS 
+  SUPABASE_ENVIRONMENTS,
+  switchSupabaseEnvironment
 } from '@/config/supabase-environments';
-import { switchSupabaseEnvironment } from '@/integrations/supabase/client';
 
 export const EnvironmentToggle = () => {
   const [currentEnv, setCurrentEnv] = useState<'cloud' | 'local'>(getActiveEnvironment());

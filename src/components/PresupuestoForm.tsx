@@ -242,8 +242,8 @@ export const PresupuestoForm: React.FC<PresupuestoFormProps> = ({ quote, onClose
       try {
         const newNumber = await generateQuoteNumber();
         console.log('Generated quote number during submit:', newNumber);
-        currentFormData.number = newNumber;
-        setFormData(prev => ({ ...prev, number: newNumber }));
+        currentFormData.number = newNumber || '';
+        setFormData(prev => ({ ...prev, number: newNumber || '' }));
       } catch (error) {
         console.error('Error generating quote number during submit:', error);
         toast({

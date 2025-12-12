@@ -124,10 +124,13 @@ export const AlbaranesEntrada: React.FC = () => {
 
   const createFromOCRMutation = useMutation({
     mutationFn: async (data: any) => {
+      if (!companyId) throw new Error('No company ID available');
+      
       // Create delivery note
       const { data: newNote, error: noteError } = await supabase
         .from('delivery_notes')
         .insert([{
+          company_id: companyId,
           number: data.deliveryNote.number,
           supplier_id: data.deliveryNote.supplier_id,
           issue_date: data.deliveryNote.issue_date,
