@@ -11,18 +11,6 @@ export const useVerifactu = () => {
   const { companyId } = useCompanyFilter();
   const { storeXMLDocument } = useVerifactuXML();
 
-  // Validate invoice data before sending
-  const validateInvoiceData = useMutation({
-    mutationFn: async (invoiceId: string) => {
-      const { data, error } = await supabase.rpc('validate_verifactu_invoice_data', {
-        p_invoice_id: invoiceId
-      });
-
-      if (error) throw error;
-      return data;
-    },
-  });
-
   const sendToVerifactu = useMutation({
     mutationFn: async (invoiceId: string) => {
       console.log('Sending invoice to Verifactu:', invoiceId);
@@ -41,13 +29,6 @@ export const useVerifactu = () => {
       // Check for missing customer NIF
       if (!invoiceData.customers?.tax_id || invoiceData.customers.tax_id.trim() === '') {
         throw new Error(`El cliente "${invoiceData.customers?.name || 'sin nombre'}" no tiene NIF/CIF. Por favor, edita el cliente y añade su NIF/CIF antes de enviar a Verifactu.`);
-      }
-      
-      // Validate the invoice data
-      try {
-        await validateInvoiceData.mutateAsync(invoiceId);
-      } catch (validationError: any) {
-        throw new Error(`Validación fallida: ${validationError.message}`);
       }
 
       const { data, error } = await supabase.functions.invoke('verifactu', {
@@ -281,6 +262,5 @@ export const useVerifactu = () => {
     getCertificates,
     getVerifactuLogs,
     getCompanyConfig,
-    validateInvoiceData,
   };
 };

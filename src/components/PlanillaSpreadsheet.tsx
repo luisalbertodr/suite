@@ -27,7 +27,9 @@ export const PlanillaSpreadsheet: React.FC<PlanillaSpreadsheetProps> = ({
     articulo: '',
     color: '',
     precio: 0,
-    descripcion: '',
+    description: '',
+    quantity: 0,
+    row_index: 0,
     ...SIZE_COLUMNS.reduce((acc, size) => ({
       ...acc,
       [`talla_${size}`]: 0,
@@ -99,7 +101,7 @@ export const PlanillaSpreadsheet: React.FC<PlanillaSpreadsheetProps> = ({
       
       // Validate items - solo validar que tengan artículo y color
       const validItems = items.filter(item => 
-        item.articulo.trim() && item.color.trim()
+        (item.articulo || '').trim() && (item.color || '').trim()
       );
 
       console.log('Valid items to save:', validItems.length);
@@ -137,10 +139,10 @@ export const PlanillaSpreadsheet: React.FC<PlanillaSpreadsheetProps> = ({
     const csvContent = [
       headers.join(','),
       ...items.map(item => [
-        `"${item.articulo}"`,
-        `"${item.color}"`,
-        item.precio,
-        `"${item.descripcion || ''}"`,
+        `"${item.articulo || ''}"`,
+        `"${item.color || ''}"`,
+        item.precio || 0,
+        `"${item.description || ''}"`,
         ...SIZE_COLUMNS.map(size => (item as any)[`talla_${size}`] || 0)
       ].join(','))
     ].join('\n');
@@ -168,18 +170,20 @@ export const PlanillaSpreadsheet: React.FC<PlanillaSpreadsheetProps> = ({
         
         const importedItems: PlanillaItem[] = lines.slice(1)
           .filter(line => line.trim())
-          .map(line => {
+          .map((line, index) => {
             const values = line.split(',').map(v => v.replace(/"/g, ''));
             const item: PlanillaItem = {
               articulo: values[0] || '',
               color: values[1] || '',
               precio: parseFloat(values[2]) || 0,
-              descripcion: values[3] || '',
+              description: values[3] || '',
+              quantity: 0,
+              row_index: index,
             };
 
             // Map size columns
-            SIZE_COLUMNS.forEach((size, index) => {
-              const value = parseInt(values[4 + index]) || 0;
+            SIZE_COLUMNS.forEach((size, idx) => {
+              const value = parseInt(values[4 + idx]) || 0;
               (item as any)[`talla_${size}`] = value;
             });
 
@@ -346,7 +350,7 @@ export const PlanillaSpreadsheet: React.FC<PlanillaSpreadsheetProps> = ({
                   <td className="border border-gray-300 p-0">
                     <input
                       type="text"
-                      value={item.articulo}
+                      value={item.articulo || ''}
                       onChange={(e) => updateItem(index, 'articulo', e.target.value)}
                       onFocus={handleInputFocus}
                       className="w-full border-none outline-none px-2 py-1 text-xs"
@@ -355,7 +359,7 @@ export const PlanillaSpreadsheet: React.FC<PlanillaSpreadsheetProps> = ({
                   </td>
                   <td className="border border-gray-300 p-0">
                     <select
-                      value={item.color}
+                      value={item.color || ''}
                       onChange={(e) => updateItem(index, 'color', e.target.value)}
                       className="w-full border-none outline-none px-2 py-1 text-xs"
                     >
@@ -370,7 +374,7 @@ export const PlanillaSpreadsheet: React.FC<PlanillaSpreadsheetProps> = ({
                   <td className="border border-gray-300 p-0">
                     <input
                       type="number"
-                      value={item.precio}
+                      value={item.precio || 0}
                       onChange={(e) => updateItem(index, 'precio', parseFloat(e.target.value) || 0)}
                       onFocus={handleInputFocus}
                       className="w-full border-none outline-none px-2 py-1 text-xs"
@@ -381,8 +385,8 @@ export const PlanillaSpreadsheet: React.FC<PlanillaSpreadsheetProps> = ({
                   <td className="border border-gray-300 p-0">
                     <input
                       type="text"
-                      value={item.descripcion || ''}
-                      onChange={(e) => updateItem(index, 'descripcion', e.target.value)}
+                      value={item.description || ''}
+                      onChange={(e) => updateItem(index, 'description', e.target.value)}
                       onFocus={handleInputFocus}
                       className="w-full border-none outline-none px-2 py-1 text-xs"
                       placeholder="Descripción"

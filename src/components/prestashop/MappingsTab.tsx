@@ -24,10 +24,8 @@ export const MappingsTab: React.FC = () => {
             <TableHeader>
               <TableRow>
                 <TableHead>Artículo</TableHead>
-                <TableHead>Variación</TableHead>
                 <TableHead>ID PrestaShop</TableHead>
-                <TableHead>Combinación</TableHead>
-                <TableHead>Estado</TableHead>
+                <TableHead>Última Sync</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -36,17 +34,11 @@ export const MappingsTab: React.FC = () => {
                   <TableCell>
                     {(mapping as any).articles?.codigo} - {(mapping as any).articles?.descripcion}
                   </TableCell>
-                  <TableCell>
-                    {(mapping as any).article_variations && 
-                      `${(mapping as any).article_variations.talla} - ${(mapping as any).article_variations.color}`
-                    }
-                  </TableCell>
                   <TableCell>{mapping.prestashop_product_id}</TableCell>
-                  <TableCell>{mapping.prestashop_combination_id || '-'}</TableCell>
                   <TableCell>
-                    <Badge variant={mapping.sync_enabled ? 'default' : 'secondary'}>
-                      {mapping.sync_enabled ? 'Activo' : 'Inactivo'}
-                    </Badge>
+                    {mapping.last_synced_at 
+                      ? new Date(mapping.last_synced_at).toLocaleDateString() 
+                      : '-'}
                   </TableCell>
                 </TableRow>
               ))}

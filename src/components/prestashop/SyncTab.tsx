@@ -19,6 +19,8 @@ export const SyncTab: React.FC = () => {
     }
   };
 
+  const isEnabled = config?.enabled ?? false;
+
   return (
     <Card>
       <CardHeader>
@@ -31,7 +33,7 @@ export const SyncTab: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <Button
             onClick={() => handleSyncStock('inbound')}
-            disabled={isSyncing || !config?.is_active}
+            disabled={isSyncing || !isEnabled}
             className="flex items-center space-x-2"
           >
             <RefreshCw className="w-4 h-4" />
@@ -39,7 +41,7 @@ export const SyncTab: React.FC = () => {
           </Button>
           <Button
             onClick={() => handleSyncStock('outbound')}
-            disabled={isSyncing || !config?.is_active}
+            disabled={isSyncing || !isEnabled}
             className="flex items-center space-x-2"
           >
             <RefreshCw className="w-4 h-4" />
@@ -47,7 +49,7 @@ export const SyncTab: React.FC = () => {
           </Button>
           <Button
             onClick={() => handleSyncStock('bidirectional')}
-            disabled={isSyncing || !config?.is_active}
+            disabled={isSyncing || !isEnabled}
             className="flex items-center space-x-2"
           >
             <RefreshCw className="w-4 h-4" />
@@ -55,7 +57,7 @@ export const SyncTab: React.FC = () => {
           </Button>
         </div>
 
-        {!config?.is_active && (
+        {!isEnabled && (
           <Alert>
             <AlertDescription>
               Configure y active la integración para poder sincronizar stock
