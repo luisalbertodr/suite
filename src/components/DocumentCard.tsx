@@ -16,14 +16,13 @@ import { useToast } from '@/hooks/use-toast';
 interface DocumentData {
   id: string;
   name: string;
-  original_name: string;
-  file_path: string;
-  file_size: number;
-  mime_type: string;
-  category: string;
-  tags: string[];
-  company_id: string | null;
-  uploaded_by: string | null;
+  file_url: string;
+  file_size: number | null;
+  file_type: string | null;
+  category_id: string | null;
+  description: string | null;
+  tags: string[] | null;
+  company_id: string;
   created_at: string;
   updated_at: string;
 }
@@ -36,7 +35,8 @@ interface DocumentCardProps {
 export const DocumentCard: React.FC<DocumentCardProps> = ({ document, onDelete }) => {
   const { toast } = useToast();
 
-  const getFileIcon = (mimeType: string) => {
+  const getFileIcon = (mimeType: string | null) => {
+    if (!mimeType) return <FileText className="w-8 h-8 text-gray-500" />;
     if (mimeType.includes('pdf')) {
       return <FileText className="w-8 h-8 text-red-500" />;
     } else if (mimeType.includes('word') || mimeType.includes('document')) {
@@ -49,8 +49,8 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({ document, onDelete }
     return <FileText className="w-8 h-8 text-gray-500" />;
   };
 
-  const formatFileSize = (bytes: number) => {
-    if (bytes === 0) return '0 Bytes';
+  const formatFileSize = (bytes: number | null) => {
+    if (!bytes || bytes === 0) return '0 Bytes';
     const k = 1024;
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
@@ -59,75 +59,42 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({ document, onDelete }
 
   const handleDirectDownload = async () => {
     try {
-      console.log('🔽 Starting direct download for:', document.original_name);
+      console.log('🔽 Starting direct download for:', document.name);
       
-      // Opción 1: Usar URL pública directa
-      const publicUrl = `https://kztelbnarzrpbjlqastg.supabase.co/storage/v1/object/public/documents/${document.file_path}`;
-      
-      // Crear enlace de descarga directo
+      // Use file_url directly
       const link = window.document.createElement('a');
-      link.href = publicUrl;
-      link.download = document.original_name;
+      link.href = document.file_url;
+      link.download = document.name;
       link.target = '_blank';
       
-      // Agregar al DOM temporalmente
       window.document.body.appendChild(link);
       link.click();
       window.document.body.removeChild(link);
       
       toast({
         title: 'Descarga iniciada',
-        description: `Descargando ${document.original_name}`,
+        description: `Descargando ${document.name}`,
       });
       
     } catch (error) {
       console.error('❌ Error en descarga directa:', error);
-      
-      // Fallback: usar método tradicional de Supabase
-      try {
-        const { data, error: downloadError } = await supabase.storage
-          .from('documents')
-          .download(document.file_path);
-
-        if (downloadError) throw downloadError;
-
-        const url = URL.createObjectURL(data);
-        const link = window.document.createElement('a');
-        link.href = url;
-        link.download = document.original_name;
-        window.document.body.appendChild(link);
-        link.click();
-        window.document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-        
-        toast({
-          title: 'Descarga completada',
-          description: `${document.original_name} descargado correctamente.`,
-        });
-      } catch (fallbackError) {
-        console.error('❌ Error en descarga fallback:', fallbackError);
-        toast({
-          title: 'Error al descargar',
-          description: 'No se pudo descargar el archivo. Intenta de nuevo.',
-          variant: 'destructive',
-        });
-      }
+      toast({
+        title: 'Error al descargar',
+        description: 'No se pudo descargar el archivo. Intenta de nuevo.',
+        variant: 'destructive',
+      });
     }
   };
 
   const handleDirectView = () => {
     try {
-      console.log('👁️ Opening document in new tab:', document.original_name);
+      console.log('👁️ Opening document in new tab:', document.name);
       
-      // URL pública directa para visualización
-      const publicUrl = `https://kztelbnarzrpbjlqastg.supabase.co/storage/v1/object/public/documents/${document.file_path}`;
-      
-      // Abrir en nueva pestaña
-      window.open(publicUrl, '_blank');
+      window.open(document.file_url, '_blank');
       
       toast({
         title: 'Documento abierto',
-        description: `${document.original_name} se ha abierto en una nueva pestaña.`,
+        description: `${document.name} se ha abierto en una nueva pestaña.`,
       });
       
     } catch (error) {
@@ -144,7 +111,7 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({ document, onDelete }
     <Card className="hover:shadow-lg transition-shadow">
       <CardContent className="p-6">
         <div className="flex items-start justify-between mb-4">
-          {getFileIcon(document.mime_type)}
+          {getFileIcon(document.file_type)}
           <div className="flex space-x-1">
             <Button 
               variant="ghost" 
@@ -185,22 +152,28 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({ document, onDelete }
           </div>
           <div className="flex items-center">
             <span className="font-medium">{formatFileSize(document.file_size)}</span>
-            <span className="mx-2">•</span>
-            <span className="text-blue-600">{document.category}</span>
+            {document.file_type && (
+              <>
+                <span className="mx-2">•</span>
+                <span className="text-blue-600">{document.file_type}</span>
+              </>
+            )}
           </div>
         </div>
 
-        <div className="mt-4 flex flex-wrap gap-1">
-          {document.tags.map((tag, index) => (
-            <span
-              key={index}
-              className="inline-flex items-center px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full"
-            >
-              <Tag className="w-3 h-3 mr-1" />
-              {tag}
-            </span>
-          ))}
-        </div>
+        {document.tags && document.tags.length > 0 && (
+          <div className="mt-4 flex flex-wrap gap-1">
+            {document.tags.map((tag, index) => (
+              <span
+                key={index}
+                className="inline-flex items-center px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full"
+              >
+                <Tag className="w-3 h-3 mr-1" />
+                {tag}
+              </span>
+            ))}
+          </div>
+        )}
       </CardContent>
     </Card>
   );

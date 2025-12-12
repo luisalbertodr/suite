@@ -290,6 +290,35 @@ export type Database = {
           },
         ]
       }
+      colors: {
+        Row: {
+          company_id: string | null
+          created_at: string
+          id: string
+          name: string
+        }
+        Insert: {
+          company_id?: string | null
+          created_at?: string
+          id?: string
+          name: string
+        }
+        Update: {
+          company_id?: string | null
+          created_at?: string
+          id?: string
+          name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "colors_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       companies: {
         Row: {
           additional_info: string | null
@@ -343,6 +372,100 @@ export type Database = {
           website?: string | null
         }
         Relationships: []
+      }
+      customer_contacts: {
+        Row: {
+          contact_email: string | null
+          contact_name: string
+          contact_phone: string | null
+          created_at: string
+          customer_id: string
+          id: string
+          is_primary: boolean | null
+          observations: string | null
+          updated_at: string
+        }
+        Insert: {
+          contact_email?: string | null
+          contact_name: string
+          contact_phone?: string | null
+          created_at?: string
+          customer_id: string
+          id?: string
+          is_primary?: boolean | null
+          observations?: string | null
+          updated_at?: string
+        }
+        Update: {
+          contact_email?: string | null
+          contact_name?: string
+          contact_phone?: string | null
+          created_at?: string
+          customer_id?: string
+          id?: string
+          is_primary?: boolean | null
+          observations?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_contacts_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      customer_shipping_addresses: {
+        Row: {
+          address_city: string | null
+          address_country: string | null
+          address_name: string
+          address_postal_code: string | null
+          address_state: string | null
+          address_street: string | null
+          created_at: string
+          customer_id: string
+          id: string
+          is_default: boolean | null
+          updated_at: string
+        }
+        Insert: {
+          address_city?: string | null
+          address_country?: string | null
+          address_name: string
+          address_postal_code?: string | null
+          address_state?: string | null
+          address_street?: string | null
+          created_at?: string
+          customer_id: string
+          id?: string
+          is_default?: boolean | null
+          updated_at?: string
+        }
+        Update: {
+          address_city?: string | null
+          address_country?: string | null
+          address_name?: string
+          address_postal_code?: string | null
+          address_state?: string | null
+          address_street?: string | null
+          created_at?: string
+          customer_id?: string
+          id?: string
+          is_default?: boolean | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_shipping_addresses_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       customers: {
         Row: {
@@ -1912,6 +2035,8 @@ export type Database = {
           id: string
           is_active: boolean | null
           updated_at: string
+          valid_from: string | null
+          valid_until: string | null
         }
         Insert: {
           certificate_data?: string | null
@@ -1923,6 +2048,8 @@ export type Database = {
           id?: string
           is_active?: boolean | null
           updated_at?: string
+          valid_from?: string | null
+          valid_until?: string | null
         }
         Update: {
           certificate_data?: string | null
@@ -1934,12 +2061,91 @@ export type Database = {
           id?: string
           is_active?: boolean | null
           updated_at?: string
+          valid_from?: string | null
+          valid_until?: string | null
         }
         Relationships: [
           {
             foreignKeyName: "verifactu_certificates_company_id_fkey"
             columns: ["company_id"]
             isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      verifactu_company_config: {
+        Row: {
+          auto_send: boolean | null
+          company_id: string
+          created_at: string
+          enable_xades_signature: boolean | null
+          endpoint_url: string | null
+          environment: string | null
+          hash_anterior: string | null
+          id: string
+          id_software: string | null
+          include_timestamp: boolean | null
+          max_retries: number | null
+          nif_emisor: string | null
+          nombre_razon: string | null
+          numero_instalacion: string | null
+          retry_delay_seconds: number | null
+          software_name: string | null
+          software_version: string | null
+          timeout_seconds: number | null
+          updated_at: string
+          xades_signature_type: string | null
+        }
+        Insert: {
+          auto_send?: boolean | null
+          company_id: string
+          created_at?: string
+          enable_xades_signature?: boolean | null
+          endpoint_url?: string | null
+          environment?: string | null
+          hash_anterior?: string | null
+          id?: string
+          id_software?: string | null
+          include_timestamp?: boolean | null
+          max_retries?: number | null
+          nif_emisor?: string | null
+          nombre_razon?: string | null
+          numero_instalacion?: string | null
+          retry_delay_seconds?: number | null
+          software_name?: string | null
+          software_version?: string | null
+          timeout_seconds?: number | null
+          updated_at?: string
+          xades_signature_type?: string | null
+        }
+        Update: {
+          auto_send?: boolean | null
+          company_id?: string
+          created_at?: string
+          enable_xades_signature?: boolean | null
+          endpoint_url?: string | null
+          environment?: string | null
+          hash_anterior?: string | null
+          id?: string
+          id_software?: string | null
+          include_timestamp?: boolean | null
+          max_retries?: number | null
+          nif_emisor?: string | null
+          nombre_razon?: string | null
+          numero_instalacion?: string | null
+          retry_delay_seconds?: number | null
+          software_name?: string | null
+          software_version?: string | null
+          timeout_seconds?: number | null
+          updated_at?: string
+          xades_signature_type?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "verifactu_company_config_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
             referencedRelation: "companies"
             referencedColumns: ["id"]
           },
@@ -2059,6 +2265,10 @@ export type Database = {
           id: string
           invoice_id: string
           last_attempt_at: string | null
+          max_retries: number | null
+          next_retry_at: string | null
+          processed_at: string | null
+          retry_count: number | null
           status: string
         }
         Insert: {
@@ -2070,6 +2280,10 @@ export type Database = {
           id?: string
           invoice_id: string
           last_attempt_at?: string | null
+          max_retries?: number | null
+          next_retry_at?: string | null
+          processed_at?: string | null
+          retry_count?: number | null
           status?: string
         }
         Update: {
@@ -2081,6 +2295,10 @@ export type Database = {
           id?: string
           invoice_id?: string
           last_attempt_at?: string | null
+          max_retries?: number | null
+          next_retry_at?: string | null
+          processed_at?: string | null
+          retry_count?: number | null
           status?: string
         }
         Relationships: [
@@ -2110,6 +2328,7 @@ export type Database = {
           sent: boolean | null
           signed: boolean | null
           xml_content: string
+          xml_type: string | null
         }
         Insert: {
           company_id: string
@@ -2120,6 +2339,7 @@ export type Database = {
           sent?: boolean | null
           signed?: boolean | null
           xml_content: string
+          xml_type?: string | null
         }
         Update: {
           company_id?: string
@@ -2130,6 +2350,7 @@ export type Database = {
           sent?: boolean | null
           signed?: boolean | null
           xml_content?: string
+          xml_type?: string | null
         }
         Relationships: [
           {
@@ -2157,7 +2378,24 @@ export type Database = {
         Args: { p_email: string; p_password: string }
         Returns: string
       }
+      generate_delivery_note_number: {
+        Args: { p_company_id: string }
+        Returns: string
+      }
+      generate_invoice_number: {
+        Args: { p_company_id: string; p_is_corrective?: boolean }
+        Returns: string
+      }
+      generate_planilla_code: {
+        Args: { p_company_id: string }
+        Returns: string
+      }
+      generate_presupuesto_n_number: {
+        Args: { p_company_id: string }
+        Returns: string
+      }
       get_user_company_id: { Args: never; Returns: string }
+      get_user_permissions: { Args: { p_user_id: string }; Returns: string[] }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]

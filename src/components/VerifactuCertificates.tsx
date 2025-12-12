@@ -523,19 +523,19 @@ export const VerifactuCertificates: React.FC = () => {
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 gap-4 text-sm">
-                {certificate.valid_from && (
+                {(certificate as any).valid_from && (
                   <div>
                     <span className="font-medium">Válido desde:</span>
                     <p className="text-gray-600">
-                      {format(new Date(certificate.valid_from), 'dd/MM/yyyy')}
+                      {format(new Date((certificate as any).valid_from), 'dd/MM/yyyy')}
                     </p>
                   </div>
                 )}
-                {certificate.valid_until && (
+                {(certificate as any).valid_until && (
                   <div>
                     <span className="font-medium">Válido hasta:</span>
                     <p className="text-gray-600">
-                      {format(new Date(certificate.valid_until), 'dd/MM/yyyy')}
+                      {format(new Date((certificate as any).valid_until), 'dd/MM/yyyy')}
                     </p>
                   </div>
                 )}

@@ -90,10 +90,11 @@ export const PresupuestoNView: React.FC<PresupuestoNViewProps> = ({
           setCompanyData(companyData);
         }
         
+        const items = (presupuestoData as any).presupuestos_n_items as any[] | undefined;
         setPresupuesto({
           ...presupuestoData,
-          items: presupuestoData.presupuestos_n_items || []
-        });
+          items: Array.isArray(items) ? items : []
+        } as any);
       } catch (error: any) {
         console.error('Error fetching data:', error);
         toast({

@@ -47,8 +47,8 @@ export const VerifactuXMLDocuments: React.FC = () => {
                   <div>
                     <div className="flex items-center space-x-2 mb-2">
                       <span className="font-medium">Factura {doc.invoices?.number}</span>
-                      <Badge variant={doc.xml_type === 'request' ? 'default' : 'secondary'}>
-                        {doc.xml_type === 'request' ? 'Petición' : 'Respuesta'}
+                      <Badge variant={(doc as any).xml_type === 'request' || doc.document_type === 'request' ? 'default' : 'secondary'}>
+                        {(doc as any).xml_type === 'request' || doc.document_type === 'request' ? 'Petición' : 'Respuesta'}
                       </Badge>
                     </div>
                     <p className="text-sm text-gray-600">
@@ -66,7 +66,7 @@ export const VerifactuXMLDocuments: React.FC = () => {
                       <DialogContent className="max-w-4xl max-h-[80vh]">
                         <DialogHeader>
                           <DialogTitle>
-                            XML {doc.xml_type === 'request' ? 'Petición' : 'Respuesta'} - 
+                            XML {(doc as any).xml_type === 'request' || doc.document_type === 'request' ? 'Petición' : 'Respuesta'} - 
                             Factura {doc.invoices?.number}
                           </DialogTitle>
                         </DialogHeader>
@@ -83,7 +83,7 @@ export const VerifactuXMLDocuments: React.FC = () => {
                       onClick={() => handleDownloadXML(
                         doc.xml_content, 
                         doc.invoices?.number || 'unknown', 
-                        doc.xml_type
+                        (doc as any).xml_type || doc.document_type
                       )}
                     >
                       <Download className="w-4 h-4 mr-1" />

@@ -100,8 +100,9 @@ export const PresupuestoNForm: React.FC<PresupuestoNFormProps> = ({
             status: data.status as 'borrador' | 'enviado' | 'aceptado' | 'facturado',
             notes: data.notes || ''
           });
-          if (data.presupuestos_n_items && data.presupuestos_n_items.length > 0) {
-            setItems(data.presupuestos_n_items.map((item: any, idx: number) => ({
+          const items = (data as any).presupuestos_n_items as any[] | undefined;
+          if (items && Array.isArray(items) && items.length > 0) {
+            setItems(items.map((item: any, idx: number) => ({
               id: item.id,
               article_id: item.article_id,
               description: item.description,

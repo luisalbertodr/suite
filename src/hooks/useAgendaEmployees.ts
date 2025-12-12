@@ -6,9 +6,11 @@ import { useToast } from '@/hooks/use-toast';
 export interface AgendaEmployee {
   id: string;
   name: string;
-  color: string;
-  company_id: string | null;
-  is_active: boolean;
+  color: string | null;
+  email: string | null;
+  phone: string | null;
+  company_id: string;
+  active: boolean | null;
   created_at: string;
   updated_at: string;
 }
@@ -23,7 +25,7 @@ export const useAgendaEmployees = () => {
       const { data, error } = await supabase
         .from('agenda_employees')
         .select('*')
-        .eq('is_active', true)
+        .eq('active', true)
         .order('name');
 
       if (error) {
@@ -31,12 +33,12 @@ export const useAgendaEmployees = () => {
         throw error;
       }
 
-      return data as AgendaEmployee[];
+      return (data || []) as AgendaEmployee[];
     },
   });
 
   const createEmployee = useMutation({
-    mutationFn: async (employee: Omit<AgendaEmployee, 'id' | 'created_at' | 'updated_at'>) => {
+    mutationFn: async (employee: { name: string; color?: string; email?: string; phone?: string; active?: boolean }) => {
       const { data, error } = await supabase
         .from('agenda_employees')
         .insert([employee])
