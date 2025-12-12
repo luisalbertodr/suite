@@ -15,5 +15,32 @@ export const SUPABASE_ENVIRONMENTS = {
   }
 } as const;
 
-// Entorno activo actual
-export const ACTIVE_ENVIRONMENT = 'local' as const;
+// Entorno por defecto (Cloud)
+export const DEFAULT_ENVIRONMENT = 'cloud' as const;
+
+// Clave para localStorage
+export const ENVIRONMENT_STORAGE_KEY = 'supabase_environment';
+
+// Obtener entorno activo desde localStorage o usar el por defecto
+export const getActiveEnvironment = (): 'cloud' | 'local' => {
+  if (typeof window !== 'undefined') {
+    const stored = localStorage.getItem(ENVIRONMENT_STORAGE_KEY);
+    if (stored === 'cloud' || stored === 'local') {
+      return stored;
+    }
+  }
+  return DEFAULT_ENVIRONMENT;
+};
+
+// Guardar entorno en localStorage
+export const setActiveEnvironment = (env: 'cloud' | 'local'): void => {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(ENVIRONMENT_STORAGE_KEY, env);
+  }
+};
+
+// Obtener configuración del entorno activo
+export const getActiveConfig = () => {
+  const env = getActiveEnvironment();
+  return SUPABASE_ENVIRONMENTS[env];
+};

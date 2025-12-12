@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Settings, ShoppingCart, Palette, Mail, Shield, FileText, Download, Cloud, Server } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { ACTIVE_ENVIRONMENT } from '@/config/supabase-environments';
+import { getActiveEnvironment } from '@/config/supabase-environments';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -15,10 +15,12 @@ import { VerifactuCertificates } from './VerifactuCertificates';
 import { VerifactuCompanyConfig } from './VerifactuCompanyConfig';
 import { VerifactuXMLDocuments } from './VerifactuXMLDocuments';
 import { SecurityAudit } from './SecurityAudit';
+import { EnvironmentToggle } from './EnvironmentToggle';
 
 export const Configuracion: React.FC = () => {
   const { toast } = useToast();
   const [isGeneratingBackup, setIsGeneratingBackup] = useState(false);
+  const currentEnv = getActiveEnvironment();
 
   const handleGenerateBackup = async () => {
     try {
@@ -74,12 +76,12 @@ export const Configuracion: React.FC = () => {
         <Badge 
           variant="secondary"
           className={`ml-2 gap-1 ${
-            (ACTIVE_ENVIRONMENT as string) === 'cloud' 
+            currentEnv === 'cloud' 
               ? 'bg-blue-500 hover:bg-blue-600 text-white' 
               : 'bg-green-500 hover:bg-green-600 text-white'
           }`}
         >
-          {(ACTIVE_ENVIRONMENT as string) === 'cloud' ? (
+          {currentEnv === 'cloud' ? (
             <>
               <Cloud className="h-3 w-3" />
               Cloud
@@ -105,6 +107,8 @@ export const Configuracion: React.FC = () => {
         </TabsList>
 
         <TabsContent value="general" className="space-y-4">
+          <EnvironmentToggle />
+          
           <Card>
             <CardHeader>
               <CardTitle>Configuración General</CardTitle>
