@@ -21,14 +21,19 @@ export interface PlanillaItem {
   row_index: number;
   created_at?: string;
   updated_at?: string;
+  // Extended fields for spreadsheet (stored in description/notes as JSON or used locally)
+  articulo?: string;
+  color?: string;
+  precio?: number;
+  [key: string]: any; // For dynamic talla_X fields
 }
 
-interface Planilla {
+export interface Planilla {
   id: string;
   name: string;
-  description?: string;
-  start_date?: string;
-  end_date?: string;
+  description?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
   company_id: string;
   status: string;
   created_at: string;

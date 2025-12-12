@@ -1,17 +1,28 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
-import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
+// Use localStorage instead of a non-existent database table
+const STORAGE_KEY = 'user_appearance_preferences';
+
 interface UserAppearancePreferences {
-  id?: string;
-  user_id: string;
   sidebar_color: string;
-  logo_url?: string;
-  created_at?: string;
-  updated_at?: string;
+  logo_url?: string | null;
 }
+
+const getStoredPreferences = (userId: string): UserAppearancePreferences | null => {
+  try {
+    const stored = localStorage.getItem(`${STORAGE_KEY}_${userId}`);
+    return stored ? JSON.parse(stored) : null;
+  } catch {
+    return null;
+  }
+};
+
+const setStoredPreferences = (userId: string, prefs: UserAppearancePreferences) => {
+  localStorage.setItem(`${STORAGE_KEY}_${userId}`, JSON.stringify(prefs));
+};
 
 export const useUserAppearance = () => {
   const { user } = useAuth();
@@ -20,26 +31,19 @@ export const useUserAppearance = () => {
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Cargar preferencias del usuario al iniciar
+  // Load user preferences on init
   useEffect(() => {
-    const loadUserPreferences = async () => {
+    const loadUserPreferences = () => {
       if (!user) {
         setLoading(false);
         return;
       }
 
       try {
-        const { data, error } = await supabase
-          .from('user_appearance_preferences')
-          .select('*')
-          .eq('user_id', user.id)
-          .single();
-
-        if (error && error.code !== 'PGRST116') {
-          console.error('Error loading user preferences:', error);
-        } else if (data) {
-          setSidebarColor(data.sidebar_color);
-          setLogoUrl((data as any).logo_url || null);
+        const prefs = getStoredPreferences(user.id);
+        if (prefs) {
+          setSidebarColor(prefs.sidebar_color || 'blue');
+          setLogoUrl(prefs.logo_url || null);
         }
       } catch (error) {
         console.error('Error loading user preferences:', error);
@@ -51,7 +55,7 @@ export const useUserAppearance = () => {
     loadUserPreferences();
   }, [user]);
 
-  // Función para actualizar el color del sidebar
+  // Update sidebar color
   const updateSidebarColor = async (newColor: string) => {
     if (!user) {
       toast({
@@ -63,20 +67,10 @@ export const useUserAppearance = () => {
     }
 
     try {
-      const { error } = await supabase
-        .from('user_appearance_preferences')
-        .upsert({
-          user_id: user.id,
-          sidebar_color: newColor,
-          logo_url: logoUrl,
-          updated_at: new Date().toISOString()
-        }, {
-          onConflict: 'user_id'
-        });
-
-      if (error) {
-        throw error;
-      }
+      setStoredPreferences(user.id, {
+        sidebar_color: newColor,
+        logo_url: logoUrl,
+      });
 
       setSidebarColor(newColor);
       toast({
@@ -93,7 +87,7 @@ export const useUserAppearance = () => {
     }
   };
 
-  // Función para actualizar el logo
+  // Update logo (store in localStorage as base64 or URL)
   const updateLogo = async (file: File) => {
     if (!user) {
       toast({
@@ -105,45 +99,21 @@ export const useUserAppearance = () => {
     }
 
     try {
-      // Upload file to Supabase storage
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${user.id}-${Date.now()}.${fileExt}`;
-      const filePath = `logos/${fileName}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('documents')
-        .upload(filePath, file);
-
-      if (uploadError) {
-        throw uploadError;
-      }
-
-      // Get public URL
-      const { data: { publicUrl } } = supabase.storage
-        .from('documents')
-        .getPublicUrl(filePath);
-
-      // Update preferences
-      const { error } = await supabase
-        .from('user_appearance_preferences')
-        .upsert({
-          user_id: user.id,
+      // Convert to base64 for localStorage storage
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const base64 = e.target?.result as string;
+        setStoredPreferences(user.id, {
           sidebar_color: sidebarColor,
-          logo_url: publicUrl,
-          updated_at: new Date().toISOString()
-        }, {
-          onConflict: 'user_id'
+          logo_url: base64,
         });
-
-      if (error) {
-        throw error;
-      }
-
-      setLogoUrl(publicUrl);
-      toast({
-        title: "Logo actualizado",
-        description: "El logo ha sido subido correctamente"
-      });
+        setLogoUrl(base64);
+        toast({
+          title: "Logo actualizado",
+          description: "El logo ha sido subido correctamente"
+        });
+      };
+      reader.readAsDataURL(file);
     } catch (error) {
       console.error('Error updating logo:', error);
       toast({
@@ -154,25 +124,15 @@ export const useUserAppearance = () => {
     }
   };
 
-  // Función para eliminar el logo
+  // Remove logo
   const removeLogo = async () => {
     if (!user) return;
 
     try {
-      const { error } = await supabase
-        .from('user_appearance_preferences')
-        .upsert({
-          user_id: user.id,
-          sidebar_color: sidebarColor,
-          logo_url: null,
-          updated_at: new Date().toISOString()
-        }, {
-          onConflict: 'user_id'
-        });
-
-      if (error) {
-        throw error;
-      }
+      setStoredPreferences(user.id, {
+        sidebar_color: sidebarColor,
+        logo_url: null,
+      });
 
       setLogoUrl(null);
       toast({

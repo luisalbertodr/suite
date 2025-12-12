@@ -41,8 +41,8 @@ export const LogsTab: React.FC = () => {
               <TableRow>
                 <TableHead>Fecha</TableHead>
                 <TableHead>Tipo</TableHead>
-                <TableHead>Dirección</TableHead>
                 <TableHead>Estado</TableHead>
+                <TableHead>Items</TableHead>
                 <TableHead>Mensaje</TableHead>
               </TableRow>
             </TableHeader>
@@ -50,16 +50,16 @@ export const LogsTab: React.FC = () => {
               {syncLogs.map((log) => (
                 <TableRow key={log.id}>
                   <TableCell>
-                    {formatDistanceToNow(new Date(log.processed_at), { 
+                    {formatDistanceToNow(new Date(log.created_at), { 
                       addSuffix: true, 
                       locale: es 
                     })}
                   </TableCell>
                   <TableCell>{log.sync_type}</TableCell>
-                  <TableCell>{log.direction}</TableCell>
                   <TableCell>{getStatusBadge(log.status)}</TableCell>
+                  <TableCell>{log.items_synced ?? '-'}</TableCell>
                   <TableCell className="max-w-xs truncate">
-                    {log.message || '-'}
+                    {log.error_message || '-'}
                   </TableCell>
                 </TableRow>
               ))}

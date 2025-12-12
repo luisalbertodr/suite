@@ -35,7 +35,6 @@ export const useVerifactuXML = () => {
       invoiceId: string;
       xmlType: 'request' | 'response';
       xmlContent: string;
-      filePath?: string;
     }) => {
       if (!companyId) throw new Error('No company ID available');
 
@@ -46,7 +45,7 @@ export const useVerifactuXML = () => {
           invoice_id: data.invoiceId,
           xml_type: data.xmlType,
           xml_content: data.xmlContent,
-          file_path: data.filePath,
+          document_type: data.xmlType === 'request' ? 'alta' : 'respuesta',
         });
 
       if (error) throw error;

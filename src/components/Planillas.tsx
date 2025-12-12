@@ -4,7 +4,6 @@ import { Plus, Edit, Trash2, Calendar, Building2, FileSpreadsheet, CheckCircle, 
 import { usePlanillas } from '@/hooks/usePlanillas';
 import { PlanillaForm } from './PlanillaForm';
 import { PlanillaSpreadsheet } from './PlanillaSpreadsheet';
-import { toast } from 'sonner';
 
 export const Planillas: React.FC = () => {
   const { planillas, loading, createPlanilla, updatePlanilla, deletePlanilla, isCreating } = usePlanillas();
@@ -30,9 +29,9 @@ export const Planillas: React.FC = () => {
     }
   };
 
-  const handleChangeStatus = async (id: string, newStatus: 'activa' | 'procesada' | 'cancelada') => {
+  const handleChangeStatus = async (id: string, newStatus: 'active' | 'completed' | 'cancelled') => {
     try {
-      await updatePlanilla({ id, data: { estado: newStatus } });
+      await updatePlanilla({ id, data: { status: newStatus } });
     } catch (error) {
       console.error('Error updating planilla status:', error);
     }
@@ -40,11 +39,11 @@ export const Planillas: React.FC = () => {
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'activa':
+      case 'active':
         return <Clock className="w-4 h-4 text-blue-600" />;
-      case 'procesada':
+      case 'completed':
         return <CheckCircle className="w-4 h-4 text-green-600" />;
-      case 'cancelada':
+      case 'cancelled':
         return <XCircle className="w-4 h-4 text-red-600" />;
       default:
         return <Clock className="w-4 h-4 text-gray-600" />;
@@ -53,11 +52,11 @@ export const Planillas: React.FC = () => {
 
   const getStatusText = (status: string) => {
     switch (status) {
-      case 'activa':
+      case 'active':
         return 'Activa';
-      case 'procesada':
+      case 'completed':
         return 'Procesada';
-      case 'cancelada':
+      case 'cancelled':
         return 'Cancelada';
       default:
         return status;
@@ -66,11 +65,11 @@ export const Planillas: React.FC = () => {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'activa':
+      case 'active':
         return 'bg-blue-100 text-blue-800';
-      case 'procesada':
+      case 'completed':
         return 'bg-green-100 text-green-800';
-      case 'cancelada':
+      case 'cancelled':
         return 'bg-red-100 text-red-800';
       default:
         return 'bg-gray-100 text-gray-800';
@@ -121,7 +120,7 @@ export const Planillas: React.FC = () => {
             <Clock className="w-8 h-8 text-blue-600" />
             <div className="ml-4">
               <p className="text-2xl font-bold text-gray-900">
-                {planillas.filter(p => p.estado === 'activa').length}
+                {planillas.filter(p => p.status === 'active').length}
               </p>
               <p className="text-gray-600 text-sm">Activas</p>
             </div>
@@ -132,7 +131,7 @@ export const Planillas: React.FC = () => {
             <CheckCircle className="w-8 h-8 text-green-600" />
             <div className="ml-4">
               <p className="text-2xl font-bold text-gray-900">
-                {planillas.filter(p => p.estado === 'procesada').length}
+                {planillas.filter(p => p.status === 'completed').length}
               </p>
               <p className="text-gray-600 text-sm">Procesadas</p>
             </div>
@@ -143,7 +142,7 @@ export const Planillas: React.FC = () => {
             <XCircle className="w-8 h-8 text-red-600" />
             <div className="ml-4">
               <p className="text-2xl font-bold text-gray-900">
-                {planillas.filter(p => p.estado === 'cancelada').length}
+                {planillas.filter(p => p.status === 'cancelled').length}
               </p>
               <p className="text-gray-600 text-sm">Canceladas</p>
             </div>
@@ -164,7 +163,7 @@ export const Planillas: React.FC = () => {
                   Fecha
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Proveedor
+                  Descripción
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Estado
@@ -193,27 +192,27 @@ export const Planillas: React.FC = () => {
                       <div className="flex items-center">
                         <FileSpreadsheet className="w-5 h-5 text-gray-400 mr-2" />
                         <span className="text-sm font-medium text-gray-900">
-                          {planilla.codigo}
+                          {planilla.name}
                         </span>
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center text-sm text-gray-600">
                         <Calendar className="w-4 h-4 mr-2" />
-                        {new Date(planilla.fecha).toLocaleDateString()}
+                        {planilla.start_date ? new Date(planilla.start_date).toLocaleDateString() : '-'}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center text-sm text-gray-600">
                         <Building2 className="w-4 h-4 mr-2" />
-                        {(planilla as any).suppliers?.name || 'Sin proveedor'}
+                        {planilla.description || 'Sin descripción'}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center space-x-2">
-                        {getStatusIcon(planilla.estado)}
-                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(planilla.estado)}`}>
-                          {getStatusText(planilla.estado)}
+                        {getStatusIcon(planilla.status)}
+                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(planilla.status)}`}>
+                          {getStatusText(planilla.status)}
                         </span>
                       </div>
                     </td>
@@ -222,7 +221,7 @@ export const Planillas: React.FC = () => {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                       <div className="flex items-center justify-end space-x-2">
-                        {planilla.estado === 'activa' && (
+                        {planilla.status === 'active' && (
                           <>
                             <button
                               onClick={() => setEditingPlanilla(planilla.id)}
@@ -232,13 +231,13 @@ export const Planillas: React.FC = () => {
                               <Edit className="w-4 h-4" />
                             </button>
                             <select
-                              value={planilla.estado}
+                              value={planilla.status}
                               onChange={(e) => handleChangeStatus(planilla.id, e.target.value as any)}
                               className="text-xs border border-gray-300 rounded px-2 py-1"
                             >
-                              <option value="activa">Activa</option>
-                              <option value="procesada">Procesada</option>
-                              <option value="cancelada">Cancelada</option>
+                              <option value="active">Activa</option>
+                              <option value="completed">Procesada</option>
+                              <option value="cancelled">Cancelada</option>
                             </select>
                           </>
                         )}

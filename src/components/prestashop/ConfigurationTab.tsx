@@ -17,19 +17,15 @@ export const ConfigurationTab: React.FC = () => {
   const [formData, setFormData] = useState({
     api_url: '',
     api_key: '',
-    webhook_secret: '',
-    is_active: true,
-    sync_frequency: 300,
+    enabled: true,
   });
 
   useEffect(() => {
     if (config) {
       setFormData({
         api_url: config.api_url || '',
-        api_key: config.api_key || '',
-        webhook_secret: config.webhook_secret || '',
-        is_active: config.is_active,
-        sync_frequency: config.sync_frequency,
+        api_key: '', // Don't expose encrypted key
+        enabled: config.enabled ?? true,
       });
     }
   }, [config]);
@@ -38,8 +34,9 @@ export const ConfigurationTab: React.FC = () => {
     e.preventDefault();
     try {
       await saveConfig({
-        ...formData,
-        company_id: config?.company_id || '',
+        api_url: formData.api_url,
+        api_key_encrypted: formData.api_key || config?.api_key_encrypted || null,
+        enabled: formData.enabled,
       });
     } catch (error) {
       console.error('Error saving config:', error);
@@ -92,41 +89,22 @@ export const ConfigurationTab: React.FC = () => {
                 placeholder="Clave de API de PrestaShop"
                 value={formData.api_key}
                 onChange={(e) => setFormData({ ...formData, api_key: e.target.value })}
-                required
               />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="webhook_secret">Webhook Secret (Opcional)</Label>
-              <Input
-                id="webhook_secret"
-                type="password"
-                placeholder="Secreto para webhooks"
-                value={formData.webhook_secret}
-                onChange={(e) => setFormData({ ...formData, webhook_secret: e.target.value })}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="sync_frequency">Frecuencia de Sync (segundos)</Label>
-              <Input
-                id="sync_frequency"
-                type="number"
-                min="60"
-                placeholder="300"
-                value={formData.sync_frequency}
-                onChange={(e) => setFormData({ ...formData, sync_frequency: parseInt(e.target.value) || 300 })}
-              />
+              {config?.api_key_encrypted && (
+                <p className="text-xs text-muted-foreground">
+                  Ya hay una API key configurada. Déjelo vacío para mantenerla.
+                </p>
+              )}
             </div>
           </div>
 
           <div className="flex items-center space-x-2">
             <Switch
-              id="is_active"
-              checked={formData.is_active}
-              onCheckedChange={(checked) => setFormData({ ...formData, is_active: checked })}
+              id="enabled"
+              checked={formData.enabled}
+              onCheckedChange={(checked) => setFormData({ ...formData, enabled: checked })}
             />
-            <Label htmlFor="is_active">Activar integración</Label>
+            <Label htmlFor="enabled">Activar integración</Label>
           </div>
 
           <div className="flex space-x-2">
@@ -137,7 +115,7 @@ export const ConfigurationTab: React.FC = () => {
               type="button"
               variant="outline"
               onClick={handleTestConnection}
-              disabled={isTesting || !formData.api_url || !formData.api_key}
+              disabled={isTesting || !formData.api_url}
             >
               <TestTube className="w-4 h-4 mr-2" />
               {isTesting ? 'Probando...' : 'Probar Conexión'}

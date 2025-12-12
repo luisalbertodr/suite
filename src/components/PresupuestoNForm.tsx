@@ -32,11 +32,13 @@ export const PresupuestoNForm: React.FC<PresupuestoNFormProps> = ({
   const [formData, setFormData] = useState<{
     customer_id: string;
     issue_date: string;
+    valid_until: string;
     status: 'borrador' | 'enviado' | 'aceptado' | 'facturado';
     notes: string;
   }>({
     customer_id: '',
     issue_date: new Date().toISOString().split('T')[0],
+    valid_until: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     status: 'borrador',
     notes: ''
   });
@@ -97,6 +99,7 @@ export const PresupuestoNForm: React.FC<PresupuestoNFormProps> = ({
           setFormData({
             customer_id: data.customer_id,
             issue_date: data.issue_date,
+            valid_until: data.valid_until,
             status: data.status as 'borrador' | 'enviado' | 'aceptado' | 'facturado',
             notes: data.notes || ''
           });
