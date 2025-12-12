@@ -25,14 +25,13 @@ import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 interface DocumentData {
   id: string;
   name: string;
-  original_name: string;
-  file_path: string;
-  file_size: number;
-  mime_type: string;
-  category: string;
-  tags: string[];
-  company_id: string | null;
-  uploaded_by: string | null;
+  file_url: string;
+  file_size: number | null;
+  file_type: string | null;
+  category_id: string | null;
+  description: string | null;
+  tags: string[] | null;
+  company_id: string;
   created_at: string;
   updated_at: string;
 }
@@ -100,18 +99,20 @@ export const GestionDocumental: React.FC = () => {
 
       if (uploadError) throw uploadError;
 
+      // Get public URL for the file
+      const { data: urlData } = supabase.storage.from('documents').getPublicUrl(fileName);
+
       // Insertar registro
       const { data, error: dbError } = await supabase
         .from('documents')
         .insert({
           name: file.name,
-          original_name: file.name,
-          file_path: fileName,
+          file_url: urlData.publicUrl,
           file_size: file.size,
-          mime_type: file.type,
-          category,
-          tags,
-          uploaded_by: user.id,
+          file_type: file.type,
+          category_id: category || null,
+          tags: tags.length > 0 ? tags : null,
+          description: '',
           company_id: companyId
         })
         .select()
@@ -142,7 +143,10 @@ export const GestionDocumental: React.FC = () => {
 
   const deleteMutation = useMutation({
     mutationFn: async (document: DocumentData) => {
-      await supabase.storage.from('documents').remove([document.file_path]);
+      // Extract filename from file_url
+      const urlParts = document.file_url.split('/');
+      const fileName = urlParts[urlParts.length - 1];
+      await supabase.storage.from('documents').remove([fileName]);
       await supabase.from('documents').delete().eq('id', document.id);
     },
     onSuccess: () => {
@@ -184,17 +188,17 @@ export const GestionDocumental: React.FC = () => {
   const categoryOptions = [
     { id: 'todos', name: 'Todos', count: documents.length },
     ...categories.map(cat => ({
-      id: cat.name.toLowerCase(),
+      id: cat.id,
       name: cat.name,
-      count: documents.filter(d => d.category === cat.name).length
+      count: documents.filter(d => d.category_id === cat.id).length
     }))
   ];
 
   const filteredDocuments = documents.filter(doc => {
     const matchesSearch = doc.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         doc.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()));
+                         (doc.tags || []).some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchesCategory = selectedCategory === 'todos' || 
-                           doc.category.toLowerCase() === selectedCategory.toLowerCase();
+                           doc.category_id === selectedCategory;
     return matchesSearch && matchesCategory;
   });
 

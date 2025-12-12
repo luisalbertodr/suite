@@ -241,7 +241,7 @@ export const FacturaForm: React.FC<FacturaFormProps> = ({ invoice, onClose, budg
     setIsGeneratingNumber(true);
     try {
       const newNumber = await generateInvoiceNumber(isCorrectiveInvoice);
-      setFormData(prev => ({ ...prev, number: newNumber }));
+      setFormData(prev => ({ ...prev, number: newNumber || '' }));
       console.log('Invoice number generated successfully:', newNumber);
     } catch (error) {
       console.error('Error generating invoice number:', error);
