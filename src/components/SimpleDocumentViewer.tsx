@@ -8,14 +8,13 @@ import { useToast } from '@/hooks/use-toast';
 interface DocumentData {
   id: string;
   name: string;
-  original_name: string;
-  file_path: string;
-  file_size: number;
-  mime_type: string;
-  category: string;
-  tags: string[];
-  company_id: string | null;
-  uploaded_by: string | null;
+  file_url: string;
+  file_size: number | null;
+  file_type: string | null;
+  category_id: string | null;
+  description: string | null;
+  tags: string[] | null;
+  company_id: string;
   created_at: string;
   updated_at: string;
 }
@@ -35,12 +34,10 @@ export const SimpleDocumentViewer: React.FC<SimpleDocumentViewerProps> = ({
 
   if (!document) return null;
 
-  const publicUrl = `https://kztelbnarzrpbjlqastg.supabase.co/storage/v1/object/public/documents/${document.file_path}`;
-
   const handleDownload = () => {
     const link = window.document.createElement('a');
-    link.href = publicUrl;
-    link.download = document.original_name;
+    link.href = document.file_url;
+    link.download = document.name;
     link.target = '_blank';
     window.document.body.appendChild(link);
     link.click();
@@ -48,27 +45,27 @@ export const SimpleDocumentViewer: React.FC<SimpleDocumentViewerProps> = ({
     
     toast({
       title: 'Descarga iniciada',
-      description: `Descargando ${document.original_name}`,
+      description: `Descargando ${document.name}`,
     });
   };
 
   const handleOpenExternal = () => {
-    window.open(publicUrl, '_blank');
+    window.open(document.file_url, '_blank');
     toast({
       title: 'Documento abierto',
       description: 'El documento se ha abierto en una nueva pestaña.',
     });
   };
 
-  const isPdf = document.mime_type === 'application/pdf';
-  const isImage = document.mime_type.startsWith('image/');
+  const isPdf = document.file_type === 'application/pdf';
+  const isImage = document.file_type?.startsWith('image/') || false;
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-4xl max-h-[90vh]">
         <DialogHeader className="flex flex-row items-center justify-between">
           <DialogTitle className="text-lg font-semibold truncate pr-4">
-            {document.original_name}
+            {document.name}
           </DialogTitle>
           <div className="flex items-center space-x-2">
             <Button variant="outline" size="sm" onClick={handleDownload}>
@@ -89,16 +86,16 @@ export const SimpleDocumentViewer: React.FC<SimpleDocumentViewerProps> = ({
           {isPdf ? (
             <div className="w-full h-[70vh] border rounded-lg">
               <iframe
-                src={`${publicUrl}#toolbar=1`}
+                src={`${document.file_url}#toolbar=1`}
                 className="w-full h-full rounded-lg"
-                title={document.original_name}
+                title={document.name}
               />
             </div>
           ) : isImage ? (
             <div className="flex justify-center items-center bg-gray-50 rounded-lg p-4">
               <img
-                src={publicUrl}
-                alt={document.original_name}
+                src={document.file_url}
+                alt={document.name}
                 className="max-w-full max-h-[70vh] object-contain rounded-lg shadow-lg"
               />
             </div>

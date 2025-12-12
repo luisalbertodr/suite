@@ -2,6 +2,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 
 export interface AgendaAppointment {
   id: string;
@@ -32,13 +33,17 @@ type CreateAppointmentInput = {
 export const useAgendaAppointments = (date?: string) => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { companyId } = useCompanyFilter();
 
   const { data: appointments = [], isLoading, error } = useQuery({
-    queryKey: ['agenda-appointments', date],
+    queryKey: ['agenda-appointments', date, companyId],
     queryFn: async () => {
+      if (!companyId) return [];
+      
       let query = supabase
         .from('agenda_appointments')
         .select('*')
+        .eq('company_id', companyId)
         .order('start_time');
 
       if (date) {
@@ -55,13 +60,16 @@ export const useAgendaAppointments = (date?: string) => {
 
       return (data || []) as AgendaAppointment[];
     },
+    enabled: !!companyId,
   });
 
   const createAppointment = useMutation({
     mutationFn: async (appointment: CreateAppointmentInput) => {
+      if (!companyId) throw new Error('No company ID available');
+      
       const { data, error } = await supabase
         .from('agenda_appointments')
-        .insert([appointment])
+        .insert([{ ...appointment, company_id: companyId }])
         .select()
         .single();
 

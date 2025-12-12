@@ -1,5 +1,5 @@
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
@@ -20,33 +20,40 @@ export const useQuoteOperations = () => {
       
       if (!companyId) {
         console.error('❌ No company ID available for quote number generation');
-        console.log('Company filter state:', { companyId });
         return `${prefix}-000001`;
       }
 
       console.log('✅ Generating quote number for company:', companyId, 'with prefix:', prefix);
       
-      // Use a transaction to prevent race conditions
-      const { data, error } = await supabase.rpc('generate_quote_number', {
-        company_id: companyId,
-        prefix: prefix
-      });
+      // Generate number manually since generate_quote_number RPC doesn't exist
+      const { data: existingQuotes, error: fetchError } = await supabase
+        .from('quotes')
+        .select('number')
+        .eq('company_id', companyId)
+        .like('number', `${prefix}-%`)
+        .order('number', { ascending: false })
+        .limit(1);
 
-      console.log('RPC generate_quote_number result:', { data, error });
-
-      if (error) {
-        console.error('❌ Error generating quote number:', error);
-        // Fallback to timestamp-based number to avoid conflicts
+      if (fetchError) {
+        console.error('❌ Error fetching existing quotes:', fetchError);
         const timestamp = Date.now().toString().slice(-6);
         return `${prefix}-${timestamp}`;
       }
 
-      const newNumber = data || `${prefix}-000001`;
-      console.log('✅ Generated quote number:', newNumber, 'for company:', companyId);
+      let nextNumber = 1;
+      if (existingQuotes && existingQuotes.length > 0) {
+        const lastNumber = existingQuotes[0].number;
+        const match = lastNumber.match(/-(\d+)$/);
+        if (match) {
+          nextNumber = parseInt(match[1], 10) + 1;
+        }
+      }
+
+      const newNumber = `${prefix}-${nextNumber.toString().padStart(6, '0')}`;
+      console.log('✅ Generated quote number:', newNumber);
       return newNumber;
     } catch (error) {
       console.error('❌ Error in generateQuoteNumber:', error);
-      // Fallback to timestamp-based number to avoid conflicts
       const currentYear = new Date().getFullYear();
       const prefix = `PRES-${currentYear}`;
       const timestamp = Date.now().toString().slice(-6);
@@ -62,7 +69,6 @@ export const useQuoteOperations = () => {
       
       if (!companyId) {
         console.error('❌ No company ID available for quote creation');
-        console.log('Company filter state at mutation time:', { companyId });
         throw new Error('No company ID available');
       }
 
@@ -101,13 +107,6 @@ export const useQuoteOperations = () => {
     },
     onError: (error: any) => {
       console.error('❌ Quote creation error:', error);
-      console.log('Error details:', {
-        message: error.message,
-        code: error.code,
-        details: error.details,
-        hint: error.hint
-      });
-      
       toast({
         title: 'Error al crear presupuesto',
         description: error.message || 'Ha ocurrido un error al crear el presupuesto.',

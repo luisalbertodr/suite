@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
@@ -9,12 +10,14 @@ export interface PresupuestoN {
   customer_id: string;
   number: string;
   issue_date: string;
+  valid_until: string;
   accepted_date?: string;
-  status: 'borrador' | 'enviado' | 'aceptado' | 'facturado';
+  status: 'draft' | 'sent' | 'accepted' | 'expired' | 'rejected' | 'borrador' | 'enviado' | 'aceptado' | 'facturado';
   subtotal: number;
   tax_amount: number;
   total_amount: number;
   notes?: string;
+  terms?: string;
   created_at: string;
   updated_at: string;
   customer?: {
@@ -27,12 +30,15 @@ export interface PresupuestoN {
 
 export interface PresupuestoNItem {
   id: string;
-  presupuesto_n_id: string;
+  presupuesto_id: string;
   article_id?: string;
   description: string;
   quantity: number;
   unit_price: number;
+  discount_percent?: number;
+  tax_percent?: number;
   total_price: number;
+  sort_order?: number;
   created_at: string;
 }
 

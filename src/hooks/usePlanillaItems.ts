@@ -1,10 +1,21 @@
 
-import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { PlanillaItem } from './usePlanillas';
 import { useCompanyFilter } from './useCompanyFilter';
+
+export interface PlanillaItem {
+  id?: string;
+  planilla_id?: string;
+  article_id?: string | null;
+  customer_id?: string | null;
+  description?: string | null;
+  notes?: string | null;
+  quantity: number;
+  row_index: number;
+  created_at?: string;
+  updated_at?: string;
+}
 
 export const usePlanillaItems = (planillaId?: string) => {
   const queryClient = useQueryClient();
@@ -24,7 +35,7 @@ export const usePlanillaItems = (planillaId?: string) => {
         .from('planilla_items')
         .select('*')
         .eq('planilla_id', planillaId)
-        .order('created_at', { ascending: true });
+        .order('row_index', { ascending: true });
 
       if (error) {
         console.error('Error fetching planilla items:', error);
@@ -32,7 +43,7 @@ export const usePlanillaItems = (planillaId?: string) => {
       }
 
       console.log('Fetched planilla items:', data?.length || 0);
-      return (data as PlanillaItem[]) || [];
+      return (data || []) as PlanillaItem[];
     },
     enabled: !!planillaId,
   });
@@ -78,23 +89,15 @@ export const usePlanillaItems = (planillaId?: string) => {
 
       // Insert new items
       if (itemsData.length > 0) {
-        const itemsWithPlanillaId = itemsData.map(item => {
-          // Ensure all required fields are present and properly typed
-          const cleanItem = {
-            planilla_id: planillaId,
-            articulo: item.articulo.trim(),
-            color: item.color.trim(),
-            precio: Number(item.precio) || 0,
-            descripcion: item.descripcion?.trim() || null,
-          };
-
-          // Add size columns
-          SIZE_COLUMNS.forEach(size => {
-            (cleanItem as any)[`talla_${size}`] = Number((item as any)[`talla_${size}`]) || 0;
-          });
-
-          return cleanItem;
-        });
+        const itemsWithPlanillaId = itemsData.map((item, index) => ({
+          planilla_id: planillaId,
+          article_id: item.article_id || null,
+          customer_id: item.customer_id || null,
+          description: item.description || null,
+          notes: item.notes || null,
+          quantity: item.quantity || 0,
+          row_index: item.row_index ?? index,
+        }));
 
         const { data, error } = await supabase
           .from('planilla_items')
@@ -130,6 +133,3 @@ export const usePlanillaItems = (planillaId?: string) => {
     isSaving: saveItemsMutation.isPending,
   };
 };
-
-// Size columns constant for consistency
-const SIZE_COLUMNS = Array.from({ length: 31 }, (_, i) => i + 16);

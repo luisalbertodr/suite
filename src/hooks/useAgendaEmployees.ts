@@ -2,6 +2,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 
 export interface AgendaEmployee {
   id: string;
@@ -18,13 +19,17 @@ export interface AgendaEmployee {
 export const useAgendaEmployees = () => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { companyId } = useCompanyFilter();
 
   const { data: employees = [], isLoading, error } = useQuery({
-    queryKey: ['agenda-employees'],
+    queryKey: ['agenda-employees', companyId],
     queryFn: async () => {
+      if (!companyId) return [];
+      
       const { data, error } = await supabase
         .from('agenda_employees')
         .select('*')
+        .eq('company_id', companyId)
         .eq('active', true)
         .order('name');
 
@@ -35,13 +40,16 @@ export const useAgendaEmployees = () => {
 
       return (data || []) as AgendaEmployee[];
     },
+    enabled: !!companyId,
   });
 
   const createEmployee = useMutation({
     mutationFn: async (employee: { name: string; color?: string; email?: string; phone?: string; active?: boolean }) => {
+      if (!companyId) throw new Error('No company ID available');
+      
       const { data, error } = await supabase
         .from('agenda_employees')
-        .insert([employee])
+        .insert([{ ...employee, company_id: companyId }])
         .select()
         .single();
 
