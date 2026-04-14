@@ -178,8 +178,6 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
               <div key={employee.id} className={`p-3 border-r border-border font-semibold text-sm text-center ${employee.color}`}>
                 {employee.name}
               </div>
-                {employee.name}
-              </div>
             ))}
           </div>
         </div>
