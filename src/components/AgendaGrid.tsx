@@ -163,20 +163,21 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
     return dragOverSlot?.employeeId === employeeId && dragOverSlot?.time === time;
   };
 
+  const colCount = employees.length + 1;
+
   return (
-    <div className="h-full overflow-auto bg-white">
+    <div className="h-full overflow-auto bg-card">
       <div className="min-w-[900px] relative">
         {/* Header con nombres de empleados */}
-        <div className="sticky top-0 bg-white z-10 border-b-2 border-gray-300">
-          <div className="grid grid-cols-7 gap-0">
-            <div className="p-3 bg-gray-100 border-r border-gray-300 font-semibold text-sm text-center">
+        <div className="sticky top-0 bg-card z-10 border-b-2 border-border">
+          <div className="grid gap-0" style={{ gridTemplateColumns: `80px repeat(${employees.length}, 1fr)` }}>
+            <div className="p-3 bg-muted border-r border-border font-semibold text-sm text-center">
               Hora
             </div>
             {employees.map((employee) => (
-              <div
-                key={employee.id}
-                className={`p-3 border-r border-gray-300 font-semibold text-sm text-center ${employee.color}`}
-              >
+              <div key={employee.id} className={`p-3 border-r border-border font-semibold text-sm text-center ${employee.color}`}>
+                {employee.name}
+              </div>
                 {employee.name}
               </div>
             ))}
@@ -184,7 +185,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
         </div>
 
         {/* Grid de tiempo - usando CSS Grid */}
-        <div className="grid grid-cols-7 gap-0 relative">
+        <div className="grid gap-0 relative" style={{ gridTemplateColumns: `80px repeat(${employees.length}, 1fr)` }}>
           {/* Renderizar las citas como elementos posicionados absolutamente */}
           {appointments.map((appointment) => {
             const startSlotIndex = getSlotIndex(appointment.startTime);
@@ -193,8 +194,9 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
             
             if (startSlotIndex === -1 || employeeIndex === -1) return null;
             
-            const topPosition = startSlotIndex * 32; // 32px por slot
-            const leftPosition = (employeeIndex + 1) * (100 / 7); // Porcentaje para cada columna
+            const topPosition = startSlotIndex * 32;
+            const leftPercent = ((employeeIndex + 1) / colCount) * 100;
+            const widthPercent = (1 / colCount) * 100;
             const height = durationInSlots * 32;
             
             return (
@@ -203,10 +205,10 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
                 className="absolute z-20 cursor-move hover:opacity-80"
                 style={{
                   top: `${topPosition}px`,
-                  left: `${leftPosition}%`,
-                  width: `${100 / 7}%`,
+                  left: `${leftPercent}%`,
+                  width: `${widthPercent}%`,
                   height: `${height}px`,
-                  paddingRight: '1px' // Para el borde
+                  paddingRight: '1px'
                 }}
                 onClick={() => onAppointmentClick?.(appointment)}
                 onDragOver={(e) => handleDragOver(e, appointment.employeeId, appointment.startTime)}
