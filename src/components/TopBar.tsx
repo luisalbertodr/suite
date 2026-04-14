@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Bell, User, LogOut, Settings, ChevronDown, Moon, Sun } from 'lucide-react';
+import { User, LogOut, Settings, ChevronDown, Moon, Sun } from 'lucide-react';
+import { NotificationBell } from './NotificationBell';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from 'next-themes';
 import {
@@ -74,10 +75,8 @@ export const TopBar: React.FC = () => {
             )}
           </button>
 
-          {/* Notifications bell */}
-          <button className="relative p-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 transition-colors">
-            <Bell className="h-4 w-4 text-foreground/60" />
-          </button>
+          {/* Notifications */}
+          <NotificationBell />
 
           {/* Date & Time */}
           <button
