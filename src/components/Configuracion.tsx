@@ -17,7 +17,6 @@ import { SecurityAudit } from './SecurityAudit';
 export const Configuracion: React.FC = () => {
   const { toast } = useToast();
   const [isGeneratingBackup, setIsGeneratingBackup] = useState(false);
-  const currentEnv = getActiveEnvironment();
 
   const handleGenerateBackup = async () => {
     try {
