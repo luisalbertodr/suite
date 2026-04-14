@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { X, Save } from 'lucide-react';
 import { PlanillaFormData } from '@/hooks/usePlanillas';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { toast } from 'sonner';
 

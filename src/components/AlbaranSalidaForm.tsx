@@ -3,7 +3,7 @@ import React, { useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, Save } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabase';
 import { useDeliveryNoteOperations } from '@/hooks/useDeliveryNoteOperations';
 import { useDeliveryNoteForm } from '@/hooks/useDeliveryNoteForm';
 import { DeliveryNoteHeader } from './delivery-note/DeliveryNoteHeader';

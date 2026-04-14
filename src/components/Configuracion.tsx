@@ -2,11 +2,9 @@
 import React, { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Settings, ShoppingCart, Palette, Mail, Shield, FileText, Download, Cloud, Server } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
-import { getActiveEnvironment } from '@/config/supabase-environments';
+import { Settings, ShoppingCart, Palette, Mail, Shield, FileText, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
 import { PrestashopConfig } from './PrestashopConfig';
 import { AppearanceConfig } from './AppearanceConfig';
@@ -15,12 +13,10 @@ import { VerifactuCertificates } from './VerifactuCertificates';
 import { VerifactuCompanyConfig } from './VerifactuCompanyConfig';
 import { VerifactuXMLDocuments } from './VerifactuXMLDocuments';
 import { SecurityAudit } from './SecurityAudit';
-import { EnvironmentToggle } from './EnvironmentToggle';
 
 export const Configuracion: React.FC = () => {
   const { toast } = useToast();
   const [isGeneratingBackup, setIsGeneratingBackup] = useState(false);
-  const currentEnv = getActiveEnvironment();
 
   const handleGenerateBackup = async () => {
     try {
@@ -73,26 +69,6 @@ export const Configuracion: React.FC = () => {
       <div className="flex items-center space-x-2">
         <Settings className="h-6 w-6" />
         <h1 className="text-2xl font-bold">Configuración</h1>
-        <Badge 
-          variant="secondary"
-          className={`ml-2 gap-1 ${
-            currentEnv === 'cloud' 
-              ? 'bg-blue-500 hover:bg-blue-600 text-white' 
-              : 'bg-green-500 hover:bg-green-600 text-white'
-          }`}
-        >
-          {currentEnv === 'cloud' ? (
-            <>
-              <Cloud className="h-3 w-3" />
-              Cloud
-            </>
-          ) : (
-            <>
-              <Server className="h-3 w-3" />
-              Local
-            </>
-          )}
-        </Badge>
       </div>
 
       <Tabs defaultValue="general" className="w-full">
@@ -107,7 +83,6 @@ export const Configuracion: React.FC = () => {
         </TabsList>
 
         <TabsContent value="general" className="space-y-4">
-          <EnvironmentToggle />
           
           <Card>
             <CardHeader>

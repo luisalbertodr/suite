@@ -9,7 +9,7 @@ import { Plus, Trash2, Save, ArrowLeft } from 'lucide-react';
 import { CustomerSelector } from '@/components/forms/CustomerSelector';
 import { usePresupuestoNOperations } from '@/hooks/usePresupuestoNOperations';
 import { usePresupuestoNItems } from '@/hooks/usePresupuestoNItems';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
 interface Customer {
   id: string;

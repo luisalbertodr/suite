@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { useVerifactu } from '@/hooks/useVerifactu';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
 import { FileText, CheckCircle, XCircle, Plus, AlertCircle, Shield, Clock, Trash2, Upload, Activity } from 'lucide-react';
 import { format } from 'date-fns';

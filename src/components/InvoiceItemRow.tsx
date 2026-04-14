@@ -5,7 +5,7 @@ import { Label } from '@/components/ui/label';
 import { Trash2, Barcode } from 'lucide-react';
 import { ArticleSearch } from './ArticleSearch';
 import { BarcodeScanner } from './BarcodeScanner';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { useQuery } from '@tanstack/react-query';
 
