@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabase';
 import { ArrowLeft, Edit2, FileText, Download, Globe, Mail } from 'lucide-react';
 import html2pdf from 'html2pdf.js';
 import { Quote } from '@/types/quote';

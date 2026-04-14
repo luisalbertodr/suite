@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { useArticles } from '@/hooks/useArticles';
 import { useArticleVariations } from '@/hooks/useArticleVariations';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabase';
 import { ArticleForm } from './ArticleForm';
 import { FamilyManager } from './FamilyManager';
 

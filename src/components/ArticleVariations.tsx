@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { Plus, Edit2, Trash2, Package, Euro, Barcode, AlertTriangle, DollarSign, Percent } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 
 interface ArticleVariation {

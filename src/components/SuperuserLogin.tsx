@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { Building2, User, Lock, Eye, EyeOff, Shield } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabase';
 
 export const SuperuserLogin: React.FC = () => {
   const [email, setEmail] = useState('');

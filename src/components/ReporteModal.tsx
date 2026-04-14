@@ -13,7 +13,7 @@ import { es } from 'date-fns/locale';
 import { CalendarIcon, Filter, Download, Mail, FileText, FileSpreadsheet } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ReporteResults } from './ReporteResults';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabase';
 import { useQuery } from '@tanstack/react-query';
 
 interface Report {

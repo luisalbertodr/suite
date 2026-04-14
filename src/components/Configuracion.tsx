@@ -6,7 +6,7 @@ import { Settings, ShoppingCart, Palette, Mail, Shield, FileText, Download, Clou
 import { Badge } from '@/components/ui/badge';
 import { getActiveEnvironment } from '@/config/supabase-environments';
 import { Button } from '@/components/ui/button';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
 import { PrestashopConfig } from './PrestashopConfig';
 import { AppearanceConfig } from './AppearanceConfig';

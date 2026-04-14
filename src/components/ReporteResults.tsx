@@ -18,7 +18,7 @@ import {
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { Bar, BarChart, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabase';
 import { useQuery } from '@tanstack/react-query';
 
 interface Report {

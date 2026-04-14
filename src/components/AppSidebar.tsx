@@ -6,7 +6,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { useSidebar } from '@/components/ui/sidebar';
 import { useUserAppearance } from '@/hooks/useUserAppearance';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabase';
 import {
   Sidebar,
   SidebarContent,

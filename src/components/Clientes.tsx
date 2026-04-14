@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabase';
 import { Plus, Search, Edit2, Trash2, Users, Mail, Phone, MapPin, User } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { ClienteForm } from './ClienteForm';
