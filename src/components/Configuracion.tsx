@@ -112,6 +112,10 @@ export const Configuracion: React.FC = () => {
           </Card>
         </TabsContent>
 
+        <TabsContent value="empresa" className="space-y-4">
+          <Empresas />
+        </TabsContent>
+
         <TabsContent value="apariencia" className="space-y-4">
           <AppearanceConfig />
         </TabsContent>
