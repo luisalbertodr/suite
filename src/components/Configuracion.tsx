@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Settings, ShoppingCart, Palette, Mail, Shield, FileText, Download, Building2 } from 'lucide-react';
+import { Settings, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
@@ -14,6 +14,8 @@ import { VerifactuCompanyConfig } from './VerifactuCompanyConfig';
 import { VerifactuXMLDocuments } from './VerifactuXMLDocuments';
 import { SecurityAudit } from './SecurityAudit';
 import { Empresas } from './Empresas';
+import { RecursosCabinas } from './RecursosCabinas';
+import { EmployeesConfig } from './EmployeesConfig';
 
 export const Configuracion: React.FC = () => {
   const { toast } = useToast();
@@ -38,7 +40,6 @@ export const Configuracion: React.FC = () => {
         throw response.error;
       }
 
-      // Create blob and download
       const blob = new Blob([response.data], { type: 'text/plain' });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -76,6 +77,8 @@ export const Configuracion: React.FC = () => {
         <TabsList className="flex flex-wrap">
           <TabsTrigger value="general">General</TabsTrigger>
           <TabsTrigger value="empresa">Empresa</TabsTrigger>
+          <TabsTrigger value="empleados">Empleados</TabsTrigger>
+          <TabsTrigger value="recursos">Recursos y Cabinas</TabsTrigger>
           <TabsTrigger value="apariencia">Apariencia</TabsTrigger>
           <TabsTrigger value="email">Email</TabsTrigger>
           <TabsTrigger value="prestashop">PrestaShop</TabsTrigger>
@@ -85,13 +88,10 @@ export const Configuracion: React.FC = () => {
         </TabsList>
 
         <TabsContent value="general" className="space-y-4">
-          
           <Card>
             <CardHeader>
               <CardTitle>Configuración General</CardTitle>
-              <CardDescription>
-                Configuraciones básicas del sistema
-              </CardDescription>
+              <CardDescription>Configuraciones básicas del sistema</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div>
@@ -99,11 +99,7 @@ export const Configuracion: React.FC = () => {
                 <p className="text-sm text-muted-foreground mb-4">
                   Genera y descarga una copia de seguridad de todos los datos de tu empresa en formato SQL.
                 </p>
-                <Button
-                  onClick={handleGenerateBackup}
-                  disabled={isGeneratingBackup}
-                  className="gap-2"
-                >
+                <Button onClick={handleGenerateBackup} disabled={isGeneratingBackup} className="gap-2">
                   <Download className="h-4 w-4" />
                   {isGeneratingBackup ? 'Generando...' : 'Descargar Copia de Seguridad'}
                 </Button>
@@ -114,6 +110,14 @@ export const Configuracion: React.FC = () => {
 
         <TabsContent value="empresa" className="space-y-4">
           <Empresas />
+        </TabsContent>
+
+        <TabsContent value="empleados" className="space-y-4">
+          <EmployeesConfig />
+        </TabsContent>
+
+        <TabsContent value="recursos" className="space-y-4">
+          <RecursosCabinas />
         </TabsContent>
 
         <TabsContent value="apariencia" className="space-y-4">
