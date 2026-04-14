@@ -290,6 +290,111 @@ export type Database = {
           },
         ]
       }
+      bono_uso: {
+        Row: {
+          bono_id: string
+          created_at: string
+          empleado_id: string | null
+          fecha: string
+          id: string
+          notas: string | null
+        }
+        Insert: {
+          bono_id: string
+          created_at?: string
+          empleado_id?: string | null
+          fecha?: string
+          id?: string
+          notas?: string | null
+        }
+        Update: {
+          bono_id?: string
+          created_at?: string
+          empleado_id?: string | null
+          fecha?: string
+          id?: string
+          notas?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bono_uso_bono_id_fkey"
+            columns: ["bono_id"]
+            isOneToOne: false
+            referencedRelation: "bonos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bono_uso_empleado_id_fkey"
+            columns: ["empleado_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_employees"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bonos: {
+        Row: {
+          company_id: string
+          created_at: string
+          customer_id: string
+          descripcion: string | null
+          estado: string
+          fecha_compra: string
+          fecha_vencimiento: string | null
+          id: string
+          nombre: string
+          precio_total: number
+          sesiones_totales: number
+          sesiones_usadas: number
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          customer_id: string
+          descripcion?: string | null
+          estado?: string
+          fecha_compra?: string
+          fecha_vencimiento?: string | null
+          id?: string
+          nombre: string
+          precio_total?: number
+          sesiones_totales?: number
+          sesiones_usadas?: number
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          customer_id?: string
+          descripcion?: string | null
+          estado?: string
+          fecha_compra?: string
+          fecha_vencimiento?: string | null
+          id?: string
+          nombre?: string
+          precio_total?: number
+          sesiones_totales?: number
+          sesiones_usadas?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bonos_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bonos_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       colors: {
         Row: {
           company_id: string | null
@@ -372,6 +477,60 @@ export type Database = {
           website?: string | null
         }
         Relationships: []
+      }
+      consentimientos: {
+        Row: {
+          company_id: string
+          contenido: string | null
+          created_at: string
+          customer_id: string
+          fecha_firma: string | null
+          firma_url: string | null
+          firmado: boolean | null
+          id: string
+          tipo: string
+          titulo: string
+        }
+        Insert: {
+          company_id: string
+          contenido?: string | null
+          created_at?: string
+          customer_id: string
+          fecha_firma?: string | null
+          firma_url?: string | null
+          firmado?: boolean | null
+          id?: string
+          tipo: string
+          titulo: string
+        }
+        Update: {
+          company_id?: string
+          contenido?: string | null
+          created_at?: string
+          customer_id?: string
+          fecha_firma?: string | null
+          firma_url?: string | null
+          firmado?: boolean | null
+          id?: string
+          tipo?: string
+          titulo?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "consentimientos_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "consentimientos_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       customer_contacts: {
         Row: {
@@ -861,6 +1020,85 @@ export type Database = {
             columns: ["parent_id"]
             isOneToOne: false
             referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      historial_clinico: {
+        Row: {
+          company_id: string
+          created_at: string
+          customer_id: string
+          descripcion: string | null
+          empleado_id: string | null
+          fecha: string
+          firma_cliente_url: string | null
+          firma_profesional_url: string | null
+          fotos_antes: string[] | null
+          fotos_despues: string[] | null
+          id: string
+          observaciones: string | null
+          tipo: string
+          titulo: string
+          tratamiento: string | null
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          customer_id: string
+          descripcion?: string | null
+          empleado_id?: string | null
+          fecha?: string
+          firma_cliente_url?: string | null
+          firma_profesional_url?: string | null
+          fotos_antes?: string[] | null
+          fotos_despues?: string[] | null
+          id?: string
+          observaciones?: string | null
+          tipo?: string
+          titulo: string
+          tratamiento?: string | null
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          customer_id?: string
+          descripcion?: string | null
+          empleado_id?: string | null
+          fecha?: string
+          firma_cliente_url?: string | null
+          firma_profesional_url?: string | null
+          fotos_antes?: string[] | null
+          fotos_despues?: string[] | null
+          id?: string
+          observaciones?: string | null
+          tipo?: string
+          titulo?: string
+          tratamiento?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "historial_clinico_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "historial_clinico_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "historial_clinico_empleado_id_fkey"
+            columns: ["empleado_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_employees"
             referencedColumns: ["id"]
           },
         ]
