@@ -340,9 +340,8 @@ export const FacturaView: React.FC<FacturaViewProps> = ({ invoice, onClose, onEd
                   </tr>
                 </thead>
                 <tbody>
-                  {invoiceItems?.map((item, index) => (
-                    <React.Fragment key={index}>
-                      <tr>
+                  {invoiceItems?.map((item, index) => [
+                      <tr key={`item-${index}`}>
                         <td className="border border-gray-300 px-3 py-2">{item.description}</td>
                         <td className="border border-gray-300 px-3 py-2 text-center">{Number(item.quantity).toFixed(2)}</td>
                         <td className="border border-gray-300 px-3 py-2 text-right">€{Number(item.unit_price).toFixed(2)}</td>
@@ -352,16 +351,15 @@ export const FacturaView: React.FC<FacturaViewProps> = ({ invoice, onClose, onEd
                           <td className="border border-gray-300 px-3 py-2 text-right">{Number(item.re_percentage || 0).toFixed(1)}%</td>
                         )}
                         <td className="border border-gray-300 px-3 py-2 text-right">€{Number(item.total_price).toFixed(2)}</td>
-                      </tr>
-                      {invoice.is_intracomunitario && (
-                        <tr>
+                      </tr>,
+                      invoice.is_intracomunitario ? (
+                        <tr key={`item-${index}-intracom`}>
                           <td colSpan={6} className="border border-gray-300 px-3 py-1 text-xs text-blue-600 italic">
                             Intracomunitario exento (Bienes)
                           </td>
                         </tr>
-                      )}
-                    </React.Fragment>
-                  ))}
+                      ) : null
+                  ])}
                 </tbody>
               </table>
             </div>

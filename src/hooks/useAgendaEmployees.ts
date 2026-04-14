@@ -11,7 +11,7 @@ export interface AgendaEmployee {
   email: string | null;
   phone: string | null;
   company_id: string;
-  active: boolean | null;
+  is_active: boolean | null;
   created_at: string;
   updated_at: string;
 }
@@ -30,7 +30,7 @@ export const useAgendaEmployees = () => {
         .from('agenda_employees')
         .select('*')
         .eq('company_id', companyId)
-        .eq('active', true)
+        .eq('is_active', true)
         .order('name');
 
       if (error) {
@@ -44,7 +44,7 @@ export const useAgendaEmployees = () => {
   });
 
   const createEmployee = useMutation({
-    mutationFn: async (employee: { name: string; color?: string; email?: string; phone?: string; active?: boolean }) => {
+    mutationFn: async (employee: { name: string; color?: string; email?: string; phone?: string; is_active?: boolean }) => {
       if (!companyId) throw new Error('No company ID available');
       
       const { data, error } = await supabase

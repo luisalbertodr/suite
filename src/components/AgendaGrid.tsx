@@ -243,7 +243,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
             const isHourMark = slot.minute === 0;
             
             return (
-              <React.Fragment key={slot.time}>
+              <div key={slot.time} className="contents">
                 {/* Columna de tiempo */}
                 <div className={`p-2 border-r border-gray-300 text-xs text-center font-medium h-8 ${
                   isHourMark 
@@ -276,7 +276,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
                     />
                   );
                 })}
-              </React.Fragment>
+              </div>
             );
           })}
         </div>

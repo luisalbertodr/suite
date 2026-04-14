@@ -271,9 +271,8 @@ export const Articulos: React.FC = () => {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {filteredArticles.map((articulo) => (
-                <React.Fragment key={articulo.id}>
-                  <tr className="hover:bg-gray-50 transition-colors">
+              {filteredArticles.map((articulo) => [
+                  <tr key={articulo.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
                         {articulo.foto_url ? (
@@ -382,10 +381,10 @@ export const Articulos: React.FC = () => {
                         </button>
                       </div>
                     </td>
-                  </tr>
+                  </tr>,
                   
-                  {expandedArticles[articulo.id] && hasVariations(articulo) && (
-                    <tr>
+                  expandedArticles[articulo.id] && hasVariations(articulo) ? (
+                    <tr key={`${articulo.id}-variations`}>
                       <td colSpan={8} className="px-6 py-4 bg-gray-50">
                         {loadingVariations[articulo.id] ? (
                           <div className="flex items-center justify-center py-4">
@@ -453,9 +452,8 @@ export const Articulos: React.FC = () => {
                         )}
                       </td>
                     </tr>
-                  )}
-                </React.Fragment>
-              ))}
+                  ) : null
+                ])}
             </tbody>
           </table>
         </div>

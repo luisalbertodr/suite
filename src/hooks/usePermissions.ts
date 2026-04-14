@@ -3,6 +3,12 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 
+const debugError = (...args: unknown[]) => {
+  if (import.meta.env.DEV) {
+    console.error(...args);
+  }
+};
+
 export interface UserPermission {
   permission_name: string;
   resource: string;
@@ -29,10 +35,23 @@ export const usePermissions = () => {
       });
 
       if (error) throw error;
-      
-      // The RPC returns an array of permission IDs (strings)
-      // Map them to UserPermission objects
-      const permissionIds = data as string[] || [];
+
+      // The RPC output can vary by environment/migration state:
+      // - ["uuid1", "uuid2"]
+      // - [{ id: "uuid1" }, { permission_id: "uuid2" }]
+      // Normalize everything into plain UUID strings.
+      const rawPermissionItems = Array.isArray(data) ? data : [];
+      const permissionIds = rawPermissionItems
+        .map((item) => {
+          if (typeof item === 'string') return item;
+          if (item && typeof item === 'object') {
+            const record = item as Record<string, unknown>;
+            const candidate = record.id ?? record.permission_id ?? record.permissionId;
+            return typeof candidate === 'string' ? candidate : null;
+          }
+          return null;
+        })
+        .filter((id): id is string => !!id);
       
       // If we have permission IDs, fetch the full permission details
       if (permissionIds.length > 0) {
@@ -55,7 +74,7 @@ export const usePermissions = () => {
       }
       
     } catch (error) {
-      console.error('Error fetching user permissions:', error);
+      debugError('Error fetching user permissions:', error);
       setPermissions([]);
     } finally {
       setLoading(false);

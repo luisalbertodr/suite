@@ -1,28 +1,61 @@
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
+
+const debugLog = (...args: unknown[]) => {
+  if (import.meta.env.DEV) {
+    console.log(...args);
+  }
+};
+
+const debugError = (...args: unknown[]) => {
+  if (import.meta.env.DEV) {
+    console.error(...args);
+  }
+};
+
+const debugWarn = (...args: unknown[]) => {
+  if (import.meta.env.DEV) {
+    console.warn(...args);
+  }
+};
 
 export const useCompanyFilter = () => {
   const { user, loading: authLoading } = useAuth();
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const setupInProgressForUser = useRef<string | null>(null);
 
   useEffect(() => {
+    const userId = user?.id ?? null;
+    const setupKey = authLoading ? null : (userId ?? '__anonymous__');
+
+    if (setupKey && setupInProgressForUser.current === setupKey) {
+      return;
+    }
+
+    if (setupKey) {
+      setupInProgressForUser.current = setupKey;
+    }
+
+    let cancelled = false;
+
     const setupCompanyFilter = async () => {
-      console.log('=== setupCompanyFilter START ===');
-      console.log('Auth loading:', authLoading);
-      console.log('Current user:', user?.id, user?.email);
+      debugLog('=== setupCompanyFilter START ===');
+      debugLog('Auth loading:', authLoading);
+      debugLog('Current user:', user?.id, user?.email);
       
       // Si auth está cargando, esperar
       if (authLoading) {
-        console.log('⏳ Auth still loading, waiting...');
+        debugLog('⏳ Auth still loading, waiting...');
         return;
       }
 
       // Si no hay usuario, limpiar y finalizar
       if (!user) {
-        console.log('❌ No authenticated user, clearing company filter');
+        debugLog('❌ No authenticated user, clearing company filter');
+        if (cancelled) return;
         setCompanyId(null);
         sessionStorage.removeItem('current_company_id');
         sessionStorage.removeItem('current_user_id');
@@ -31,23 +64,24 @@ export const useCompanyFilter = () => {
       }
 
       try {
-        console.log('🔄 Setting up company filter for user:', user.id, user.email);
+        debugLog('🔄 Setting up company filter for user:', user.id, user.email);
         
         // Verificar si el company_id cacheado corresponde al usuario actual
         const cachedCompanyId = sessionStorage.getItem('current_company_id');
         const cachedUserId = sessionStorage.getItem('current_user_id');
         
         if (cachedCompanyId && cachedUserId === user.id) {
-          console.log('✅ Using cached company ID for current user:', cachedCompanyId);
+          debugLog('✅ Using cached company ID for current user:', cachedCompanyId);
+          if (cancelled) return;
           setCompanyId(cachedCompanyId);
           setLoading(false);
           return;
         } else if (cachedCompanyId && cachedUserId !== user.id) {
-          console.log('🔄 Cached company ID belongs to different user, clearing cache');
+          debugLog('🔄 Cached company ID belongs to different user, clearing cache');
           sessionStorage.removeItem('current_company_id');
         }
 
-        console.log('🔍 Fetching user profile from database...');
+        debugLog('🔍 Fetching user profile from database...');
         // Get user's company ID from user_profiles
         const { data: profile, error } = await supabase
           .from('user_profiles')
@@ -55,7 +89,7 @@ export const useCompanyFilter = () => {
           .eq('user_id', user.id)
           .single();
 
-        console.log('📋 Profile query result:', { 
+        debugLog('📋 Profile query result:', {
           profile, 
           error,
           user_id: user.id,
@@ -63,7 +97,7 @@ export const useCompanyFilter = () => {
         });
 
         if (error && error.code !== 'PGRST116') {
-          console.error('❌ Error fetching user profile:', error);
+          debugError('❌ Error fetching user profile:', error);
           
           // If no profile exists, let's check if there are any profiles for this user
           const { data: allProfiles, error: allProfilesError } = await supabase
@@ -71,24 +105,25 @@ export const useCompanyFilter = () => {
             .select('*')
             .eq('user_id', user.id);
             
-          console.log('🔍 All profiles for user:', { allProfiles, allProfilesError });
+          debugLog('🔍 All profiles for user:', { allProfiles, allProfilesError });
           
           // Also let's check what companies exist
           const { data: companies, error: companiesError } = await supabase
             .from('companies')
             .select('id, name');
             
-          console.log('🏢 Available companies:', { companies, companiesError });
+          debugLog('🏢 Available companies:', { companies, companiesError });
           
           // Check if RLS policies are working
-          console.log('🔐 Testing RLS - calling get_user_company_id function');
+          debugLog('🔐 Testing RLS - calling get_user_company_id function');
           const { data: funcResult, error: funcError } = await supabase
             .rpc('get_user_company_id');
-          console.log('🔐 get_user_company_id result:', { funcResult, funcError });
+          debugLog('🔐 get_user_company_id result:', { funcResult, funcError });
           
           // If RLS function works, use that result
           if (funcResult && !funcError) {
-            console.log('✅ Using company ID from RLS function:', funcResult);
+            debugLog('✅ Using company ID from RLS function:', funcResult);
+            if (cancelled) return;
             setCompanyId(funcResult);
             sessionStorage.setItem('current_company_id', funcResult);
             sessionStorage.setItem('current_user_id', user.id);
@@ -96,10 +131,12 @@ export const useCompanyFilter = () => {
             return;
           }
           
+          if (cancelled) return;
           setCompanyId(null);
           setLoading(false);
         } else if (profile?.company_id) {
-          console.log('✅ Company filter set for company:', profile.company_id);
+          debugLog('✅ Company filter set for company:', profile.company_id);
+          if (cancelled) return;
           setCompanyId(profile.company_id);
           
           // Store in session storage with user tracking
@@ -107,58 +144,72 @@ export const useCompanyFilter = () => {
           sessionStorage.setItem('current_user_id', user.id);
           setLoading(false);
         } else {
-          console.warn('⚠️ No company_id found for user profile:', profile);
+          debugWarn('⚠️ No company_id found for user profile:', profile);
           
           // Try the RLS function as fallback
-          console.log('🔐 Trying RLS function as fallback');
+          debugLog('🔐 Trying RLS function as fallback');
           const { data: funcResult, error: funcError } = await supabase
             .rpc('get_user_company_id');
-          console.log('🔐 Fallback get_user_company_id result:', { funcResult, funcError });
+          debugLog('🔐 Fallback get_user_company_id result:', { funcResult, funcError });
           
           if (funcResult && !funcError) {
-            console.log('✅ Using fallback company ID from RLS function:', funcResult);
+            debugLog('✅ Using fallback company ID from RLS function:', funcResult);
+            if (cancelled) return;
             setCompanyId(funcResult);
             sessionStorage.setItem('current_company_id', funcResult);
             sessionStorage.setItem('current_user_id', user.id);
           } else {
+            if (cancelled) return;
             setCompanyId(null);
           }
+          if (cancelled) return;
           setLoading(false);
         }
       } catch (error) {
-        console.error('❌ Error setting up company filter:', error);
+        debugError('❌ Error setting up company filter:', error);
         
         // Last resort: try the RLS function
         try {
-          console.log('🔐 Last resort: trying RLS function');
+          debugLog('🔐 Last resort: trying RLS function');
           const { data: funcResult, error: funcError } = await supabase
             .rpc('get_user_company_id');
-          console.log('🔐 Last resort get_user_company_id result:', { funcResult, funcError });
+          debugLog('🔐 Last resort get_user_company_id result:', { funcResult, funcError });
           
           if (funcResult && !funcError) {
-            console.log('✅ Using last resort company ID from RLS function:', funcResult);
+            debugLog('✅ Using last resort company ID from RLS function:', funcResult);
+            if (cancelled) return;
             setCompanyId(funcResult);
             sessionStorage.setItem('current_company_id', funcResult);
             sessionStorage.setItem('current_user_id', user.id);
           } else {
+            if (cancelled) return;
             setCompanyId(null);
           }
         } catch (finalError) {
-          console.error('❌ Final error in company filter setup:', finalError);
+          debugError('❌ Final error in company filter setup:', finalError);
+          if (cancelled) return;
           setCompanyId(null);
         }
+        if (cancelled) return;
         setLoading(false);
       }
       
-      console.log('=== setupCompanyFilter END ===');
+      debugLog('=== setupCompanyFilter END ===');
     };
 
     setupCompanyFilter();
+
+    return () => {
+      cancelled = true;
+      if (setupKey && setupInProgressForUser.current === setupKey) {
+        setupInProgressForUser.current = null;
+      }
+    };
   }, [user, authLoading]);
 
   // Log company filter state changes
   useEffect(() => {
-    console.log('🏢 Company filter state changed:', {
+    debugLog('🏢 Company filter state changed:', {
       companyId,
       loading: authLoading || loading,
       user: user?.email,
