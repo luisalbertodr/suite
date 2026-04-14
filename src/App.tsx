@@ -13,6 +13,7 @@ import TPVPage from '@/pages/TPVPage';
 import AgendaPage from '@/pages/AgendaPage';
 import GestionDocumentalPage from '@/pages/GestionDocumentalPage';
 import ConfiguracionPage from '@/pages/ConfiguracionPage';
+import RecursosCabinasPage from '@/pages/RecursosCabinasPage';
 import SuperuserPage from '@/pages/SuperuserPage';
 import SuperuserManagementPage from '@/pages/SuperuserManagementPage';
 
@@ -56,6 +57,9 @@ function App() {
         } />
         <Route path="/configuracion" element={
           <ProtectedLayout><ConfiguracionPage /></ProtectedLayout>
+        } />
+        <Route path="/recursos-cabinas" element={
+          <ProtectedLayout><RecursosCabinasPage /></ProtectedLayout>
         } />
         <Route path="/superuser" element={<SuperuserPage />} />
         <Route path="/superuser-management" element={
