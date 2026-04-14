@@ -1,20 +1,20 @@
-
 import React, { useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { IbanInput } from '@/components/ui/iban-input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
-import { ArrowLeft, Save } from 'lucide-react';
+import { ArrowLeft, Save, User, Heart, Calendar, FileText, Receipt, Gift, StickyNote } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useForm } from 'react-hook-form';
-import { CustomerPhotoUpload } from './CustomerPhotoUpload';
-import { CustomerAdvancedForm } from './CustomerAdvancedForm';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { useCustomerAdvanced } from '@/hooks/useCustomerAdvanced';
+import { ClienteDatosTab } from './cliente/ClienteDatosTab';
+import { ClienteHistorialTab } from './cliente/ClienteHistorialTab';
+import { ClienteCitasTab } from './cliente/ClienteCitasTab';
+import { ClienteDocumentacionTab } from './cliente/ClienteDocumentacionTab';
+import { ClienteFacturacionTab } from './cliente/ClienteFacturacionTab';
+import { ClienteBonosTab } from './cliente/ClienteBonosTab';
+import { ClienteNotasTab } from './cliente/ClienteNotasTab';
 
 interface Customer {
   id: string;
@@ -69,7 +69,6 @@ export const ClienteForm: React.FC<ClienteFormProps> = ({ customer, onClose }) =
   const queryClient = useQueryClient();
   const { companyId } = useCompanyFilter();
   const { contacts, addresses, saveContacts, saveAddresses } = useCustomerAdvanced(customer?.id);
-
   const [advancedContacts, setAdvancedContacts] = useState<any[]>([]);
   const [advancedAddresses, setAdvancedAddresses] = useState<any[]>([]);
 
@@ -96,315 +95,137 @@ export const ClienteForm: React.FC<ClienteFormProps> = ({ customer, onClose }) =
     }
   });
 
-  const watchedPaymentTerms = watch('payment_terms');
-  const watchedIbanAccount = watch('iban_account');
-  const watchedPhotoUrl = watch('photo_url');
-  const watchedRePercentage = watch('re_percentage');
-  const watchedIrpfPercentage = watch('irpf_percentage');
-  const watchedIntracomunitario = watch('intracomunitario');
+  const watchedNotes = watch('notes');
 
   const saveCustomerMutation = useMutation({
     mutationFn: async (data: FormData) => {
-      console.log('Starting customer save process...', { customer, companyId, data });
-      
-      if (!companyId) {
-        throw new Error('No se pudo obtener el ID de la empresa');
-      }
+      if (!companyId) throw new Error('No se pudo obtener el ID de la empresa');
 
-      // Convert payment_terms back to appropriate format for database
       let paymentTermsValue: number | null = null;
-      if (data.payment_terms === '30 días') {
-        paymentTermsValue = 30;
-      } else if (data.payment_terms === '60 días') {
-        paymentTermsValue = 60;
-      } else {
-        paymentTermsValue = null; // For efectivo, tarjeta, transferencia
-      }
+      if (data.payment_terms === '30 días') paymentTermsValue = 30;
+      else if (data.payment_terms === '60 días') paymentTermsValue = 60;
 
-      const customerData = {
-        ...data,
-        payment_terms: paymentTermsValue,
-        company_id: companyId,
-      };
-
-      console.log('Customer data to save:', customerData);
-
+      const customerData = { ...data, payment_terms: paymentTermsValue, company_id: companyId };
       let savedCustomerId: string;
 
       if (customer) {
-        console.log('Updating existing customer:', customer.id);
-        const { data: updatedData, error } = await supabase
-          .from('customers')
-          .update(customerData)
-          .eq('id', customer.id)
-          .select();
-        
-        if (error) {
-          console.error('Error updating customer:', error);
-          throw error;
-        }
-        
-        console.log('Customer updated successfully:', updatedData);
+        const { error } = await supabase.from('customers').update(customerData).eq('id', customer.id);
+        if (error) throw error;
         savedCustomerId = customer.id;
       } else {
-        console.log('Creating new customer');
-        const { data: newData, error } = await supabase
-          .from('customers')
-          .insert([customerData])
-          .select();
-        
-        if (error) {
-          console.error('Error creating customer:', error);
-          throw error;
-        }
-        
-        console.log('Customer created successfully:', newData);
+        const { data: newData, error } = await supabase.from('customers').insert([customerData]).select();
+        if (error) throw error;
         savedCustomerId = newData[0].id;
       }
 
-      // Save advanced contacts and addresses
-      if (advancedContacts.length > 0) {
-        await saveContacts(savedCustomerId, advancedContacts);
-      }
-      if (advancedAddresses.length > 0) {
-        await saveAddresses(savedCustomerId, advancedAddresses);
-      }
-
+      if (advancedContacts.length > 0) await saveContacts(savedCustomerId, advancedContacts);
+      if (advancedAddresses.length > 0) await saveAddresses(savedCustomerId, advancedAddresses);
       return { customerId: savedCustomerId };
     },
     onSuccess: () => {
-      console.log('Customer save mutation successful');
       queryClient.invalidateQueries({ queryKey: ['customers'] });
-      queryClient.invalidateQueries({ queryKey: ['customers', companyId] });
-      toast({
-        title: customer ? "Cliente actualizado" : "Cliente creado",
-        description: customer ? "El cliente ha sido actualizado exitosamente." : "El nuevo cliente ha sido creado exitosamente.",
-      });
+      toast({ title: customer ? 'Cliente actualizado' : 'Cliente creado' });
       onClose();
     },
     onError: (error) => {
-      console.error('Customer save mutation error:', error);
-      toast({
-        title: "Error",
-        description: "No se pudo guardar el cliente: " + (error as any).message,
-        variant: "destructive",
-      });
+      toast({ title: 'Error', description: (error as any).message, variant: 'destructive' });
     },
   });
 
   const onSubmit = (data: FormData) => {
-    console.log('Form submitted with data:', data);
-    
     if (!companyId) {
-      toast({
-        title: "Error",
-        description: "No se pudo obtener la información de la empresa. Por favor, recarga la página.",
-        variant: "destructive",
-      });
+      toast({ title: 'Error', description: 'No se pudo obtener la empresa.', variant: 'destructive' });
       return;
     }
-    
     saveCustomerMutation.mutate(data);
   };
 
-  const handlePhotoChange = (photoUrl: string | null) => {
-    setValue('photo_url', photoUrl || '');
-  };
-
   if (!companyId) {
-    return (
-      <div className="flex justify-center items-center h-64">
-        <div className="text-center">
-          <h2 className="text-xl font-semibold text-gray-700">Cargando información de la empresa...</h2>
-          <p className="text-gray-500 mt-2">Por favor, espera un momento.</p>
-        </div>
-      </div>
-    );
+    return <div className="flex justify-center items-center h-64 text-muted-foreground">Cargando...</div>;
   }
 
+  const isExisting = !!customer?.id;
+
+  const tabItems = [
+    { value: 'datos', label: 'Datos', icon: User },
+    ...(isExisting ? [
+      { value: 'historial', label: 'Historial', icon: Heart },
+      { value: 'citas', label: 'Citas', icon: Calendar },
+      { value: 'documentacion', label: 'Documentación', icon: FileText },
+      { value: 'facturacion', label: 'Facturación', icon: Receipt },
+      { value: 'bonos', label: 'Bonos', icon: Gift },
+    ] : []),
+    { value: 'notas', label: 'Notas', icon: StickyNote },
+  ];
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center space-x-4">
-        <Button variant="ghost" onClick={onClose}>
-          <ArrowLeft className="w-4 h-4 mr-2" />
-          Volver
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            <ArrowLeft className="w-4 h-4 mr-1" /> Volver
+          </Button>
+          <h1 className="text-2xl font-bold">{customer ? customer.name : 'Nuevo Cliente'}</h1>
+        </div>
+        <Button onClick={handleSubmit(onSubmit)} disabled={saveCustomerMutation.isPending}>
+          <Save className="w-4 h-4 mr-2" />
+          {saveCustomerMutation.isPending ? 'Guardando...' : 'Guardar'}
         </Button>
-        <h1 className="text-3xl font-bold text-gray-900">
-          {customer ? 'Editar Cliente' : 'Nuevo Cliente'}
-        </h1>
       </div>
 
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Información Básica</CardTitle>
-          </CardHeader>
-          <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="md:col-span-2">
-              <CustomerPhotoUpload
-                currentPhotoUrl={watchedPhotoUrl}
-                onPhotoChange={handlePhotoChange}
-                customerId={customer?.id}
-              />
-            </div>
-            <div>
-              <Label htmlFor="name">Nombre *</Label>
-              <Input
-                id="name"
-                {...register('name', { required: 'El nombre es obligatorio' })}
-              />
-              {errors.name && (
-                <p className="text-red-500 text-sm mt-1">{errors.name.message}</p>
-              )}
-            </div>
-            <div>
-              <Label htmlFor="tax_id">DNI/CIF</Label>
-              <Input
-                id="tax_id"
-                {...register('tax_id')}
-              />
-            </div>
-            <div>
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                {...register('email')}
-              />
-            </div>
-            <div>
-              <Label htmlFor="phone">Teléfono</Label>
-              <Input
-                id="phone"
-                {...register('phone')}
-              />
-            </div>
-            <div>
-              <Label htmlFor="contact_person">Persona de Contacto</Label>
-              <Input
-                id="contact_person"
-                {...register('contact_person')}
-              />
-            </div>
-            <div>
-              <Label htmlFor="payment_terms">Forma de Pago</Label>
-              <Select
-                value={watchedPaymentTerms}
-                onValueChange={(value) => setValue('payment_terms', value)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecciona una forma de pago" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="efectivo">Efectivo</SelectItem>
-                  <SelectItem value="tarjeta">Tarjeta</SelectItem>
-                  <SelectItem value="transferencia">Transferencia</SelectItem>
-                  <SelectItem value="30 días">30 días</SelectItem>
-                  <SelectItem value="60 días">60 días</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="credit_limit">Límite de Crédito (€)</Label>
-              <Input
-                id="credit_limit"
-                type="number"
-                min="0"
-                step="0.01"
-                {...register('credit_limit', { valueAsNumber: true })}
-              />
-            </div>
-            <div>
-              <Label htmlFor="iban_account">Cuenta Bancaria (tipo IBAN)</Label>
-              <IbanInput
-                value={watchedIbanAccount}
-                onChange={(value) => setValue('iban_account', value)}
-              />
-            </div>
-          </CardContent>
-        </Card>
+      <Tabs defaultValue="datos" className="w-full">
+        <TabsList className="w-full justify-start overflow-x-auto">
+          {tabItems.map((tab) => (
+            <TabsTrigger key={tab.value} value={tab.value} className="flex items-center gap-1.5">
+              <tab.icon className="w-4 h-4" />
+              <span className="hidden sm:inline">{tab.label}</span>
+            </TabsTrigger>
+          ))}
+        </TabsList>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Dirección Principal</CardTitle>
-          </CardHeader>
-          <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="md:col-span-2">
-              <Label htmlFor="address_street">Dirección</Label>
-              <Input
-                id="address_street"
-                {...register('address_street')}
-              />
-            </div>
-            <div>
-              <Label htmlFor="address_city">Ciudad</Label>
-              <Input
-                id="address_city"
-                {...register('address_city')}
-              />
-            </div>
-            <div>
-              <Label htmlFor="address_state">Provincia</Label>
-              <Input
-                id="address_state"
-                {...register('address_state')}
-              />
-            </div>
-            <div>
-              <Label htmlFor="address_postal_code">Código Postal</Label>
-              <Input
-                id="address_postal_code"
-                {...register('address_postal_code')}
-              />
-            </div>
-            <div>
-              <Label htmlFor="address_country">País</Label>
-              <Input
-                id="address_country"
-                {...register('address_country')}
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        <CustomerAdvancedForm
-          customerId={customer?.id}
-          initialContacts={contacts}
-          initialAddresses={addresses}
-          onContactsChange={setAdvancedContacts}
-          onAddressesChange={setAdvancedAddresses}
-          rePercentage={watchedRePercentage}
-          irpfPercentage={watchedIrpfPercentage}
-          intracomunitario={watchedIntracomunitario}
-          onRePercentageChange={(value) => setValue('re_percentage', value)}
-          onIrpfPercentageChange={(value) => setValue('irpf_percentage', value)}
-          onIntracomunitarioChange={(value) => setValue('intracomunitario', value)}
-        />
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Notas</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <textarea
-              {...register('notes')}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              rows={4}
-              placeholder="Notas adicionales sobre el cliente..."
+        <div className="mt-4">
+          <TabsContent value="datos">
+            <ClienteDatosTab
+              register={register}
+              setValue={setValue}
+              watch={watch}
+              errors={errors}
+              customerId={customer?.id}
+              contacts={contacts}
+              addresses={addresses}
+              onContactsChange={setAdvancedContacts}
+              onAddressesChange={setAdvancedAddresses}
             />
-          </CardContent>
-        </Card>
+          </TabsContent>
 
-        <div className="flex justify-end space-x-4">
-          <Button type="button" variant="outline" onClick={onClose}>
-            Cancelar
-          </Button>
-          <Button type="submit" disabled={saveCustomerMutation.isPending}>
-            <Save className="w-4 h-4 mr-2" />
-            {saveCustomerMutation.isPending ? 'Guardando...' : 'Guardar Cliente'}
-          </Button>
+          {isExisting && (
+            <>
+              <TabsContent value="historial">
+                <ClienteHistorialTab customerId={customer!.id} />
+              </TabsContent>
+              <TabsContent value="citas">
+                <ClienteCitasTab customerId={customer!.id} />
+              </TabsContent>
+              <TabsContent value="documentacion">
+                <ClienteDocumentacionTab customerId={customer!.id} />
+              </TabsContent>
+              <TabsContent value="facturacion">
+                <ClienteFacturacionTab customerId={customer!.id} />
+              </TabsContent>
+              <TabsContent value="bonos">
+                <ClienteBonosTab customerId={customer!.id} />
+              </TabsContent>
+            </>
+          )}
+
+          <TabsContent value="notas">
+            <ClienteNotasTab
+              notes={watchedNotes}
+              onChange={(v) => setValue('notes', v)}
+            />
+          </TabsContent>
         </div>
-      </form>
+      </Tabs>
     </div>
   );
 };
