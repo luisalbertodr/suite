@@ -35,7 +35,7 @@ export const Header: React.FC = () => {
       <SidebarTrigger className="h-8 w-8" />
       <div className="flex-1">
         <h1 className="text-lg font-semibold text-gray-900">
-          MOGES - Sistema de Gestión
+          Lipoout - Sistema de Gestión
         </h1>
         {company && (
           <p className="text-sm text-gray-600">

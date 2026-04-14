@@ -185,14 +185,11 @@ export const AppSidebar: React.FC = () => {
           <SidebarGroupLabel className="text-white/70 px-2 py-3">
             {!isCollapsed ? (
               <div>
-                <div className="font-bold text-white text-lg">MOGES</div>
-                <div className="text-xs text-white/60 mt-1">
-                  Movicas Gestión
-                </div>
+                <div className="font-bold text-white text-lg">Lipoout</div>
               </div>
             ) : (
               <div className="text-center">
-                <div className="font-bold text-white text-xs">MG</div>
+                <div className="font-bold text-white text-xs">LP</div>
               </div>
             )}
           </SidebarGroupLabel>
