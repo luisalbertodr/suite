@@ -30,7 +30,7 @@ export const useAgendaEmployees = () => {
         .from('agenda_employees')
         .select('*')
         .eq('company_id', companyId)
-        .eq('is_active', true)
+        .eq('active', true)
         .order('name');
 
       if (error) {
@@ -38,7 +38,7 @@ export const useAgendaEmployees = () => {
         throw error;
       }
 
-      return (data || []) as AgendaEmployee[];
+      return (data || []).map(d => ({ ...d, is_active: d.active })) as unknown as AgendaEmployee[];
     },
     enabled: !!companyId,
   });
