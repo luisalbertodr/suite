@@ -46,7 +46,7 @@ export const Login: React.FC = () => {
             </div>
           </div>
           <h2 className="text-4xl font-bold text-white mb-2">
-            <span className="bg-gradient-to-r from-blue-400 to-green-400 bg-clip-text text-transparent">Gestión Movicas</span>
+            <span className="bg-gradient-to-r from-blue-400 to-green-400 bg-clip-text text-transparent">Lipoout</span>
           </h2>
         </div>
 
@@ -93,14 +93,14 @@ export const Login: React.FC = () => {
 
           <div className="mt-6 text-center">
             <p className="text-xs text-gray-400">
-              By Movicas
+              By Lipoout
             </p>
           </div>
         </div>
 
         <div className="text-center">
           <p className="text-sm text-gray-400">
-            © 2025 Gestion Movicas
+            © 2025 Lipoout
           </p>
         </div>
       </div>
