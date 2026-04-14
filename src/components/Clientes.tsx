@@ -8,6 +8,7 @@ import { supabase } from '@/lib/supabase';
 import { Plus, Search, Edit2, Trash2, Users, Mail, Phone, MapPin, User } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { ClienteForm } from './ClienteForm';
+import { ClienteDetailView } from './ClienteDetailView';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 
 interface Customer {
@@ -28,10 +29,13 @@ interface Customer {
   photo_url?: string;
 }
 
+type View = 'list' | 'form' | 'detail';
+
 export const Clientes: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [showForm, setShowForm] = useState(false);
+  const [view, setView] = useState<View>('list');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { companyId, loading: companyLoading } = useCompanyFilter();
@@ -39,25 +43,13 @@ export const Clientes: React.FC = () => {
   const { data: customers, isLoading } = useQuery({
     queryKey: ['customers', companyId],
     queryFn: async () => {
-      if (!companyId) {
-        console.log('No company ID available, skipping customers query');
-        return [];
-      }
-
-      console.log('Fetching customers for company:', companyId);
-      
+      if (!companyId) return [];
       const { data, error } = await supabase
         .from('customers')
         .select('*')
         .eq('company_id', companyId)
         .order('name');
-
-      if (error) {
-        console.error('Error fetching customers:', error);
-        throw error;
-      }
-      
-      console.log('Fetched customers:', data?.length || 0);
+      if (error) throw error;
       return data as Customer[];
     },
     enabled: !!companyId && !companyLoading,
@@ -65,114 +57,90 @@ export const Clientes: React.FC = () => {
 
   const deleteCustomerMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from('customers')
-        .delete()
-        .eq('id', id);
-      
+      const { error } = await supabase.from('customers').delete().eq('id', id);
       if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['customers', companyId] });
-      toast({
-        title: "Cliente eliminado",
-        description: "El cliente ha sido eliminado exitosamente.",
-      });
+      toast({ title: "Cliente eliminado" });
     },
-    onError: (error) => {
-      toast({
-        title: "Error",
-        description: "No se pudo eliminar el cliente.",
-        variant: "destructive",
-      });
-    },
+    onError: () => toast({ title: "Error al eliminar", variant: "destructive" }),
   });
 
-  const filteredCustomers = customers?.filter(customer =>
-    customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    customer.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    customer.tax_id?.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredCustomers = customers?.filter(c =>
+    c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    c.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    c.tax_id?.toLowerCase().includes(searchTerm.toLowerCase())
   ) || [];
-
-  const handleEdit = (customer: Customer) => {
-    setSelectedCustomer(customer);
-    setShowForm(true);
-  };
-
-  const handleNameClick = (customer: Customer) => {
-    handleEdit(customer);
-  };
-
-  const handleDelete = (id: string) => {
-    if (window.confirm('¿Estás seguro de que quieres eliminar este cliente?')) {
-      deleteCustomerMutation.mutate(id);
-    }
-  };
-
-  const handleFormClose = () => {
-    setShowForm(false);
-    setSelectedCustomer(null);
-  };
 
   if (companyLoading) {
     return (
       <div className="flex justify-center items-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-        <span className="ml-2">Cargando información de la empresa...</span>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-sky-500" />
       </div>
     );
   }
 
   if (!companyId) {
     return (
-      <div className="flex justify-center items-center h-64">
-        <div className="text-center">
-          <h2 className="text-xl font-semibold text-gray-700">No se encontró información de empresa</h2>
-          <p className="text-gray-500 mt-2">Por favor, contacta con el administrador.</p>
+      <div className="flex justify-center items-center h-64 text-center">
+        <div>
+          <h2 className="text-xl font-semibold text-foreground">No se encontró empresa</h2>
+          <p className="text-muted-foreground mt-2">Contacta con el administrador.</p>
         </div>
       </div>
     );
   }
 
-  if (showForm) {
+  // Detail view
+  if (view === 'detail' && selectedCustomerId) {
     return (
-      <ClienteForm
-        customer={selectedCustomer}
-        onClose={handleFormClose}
+      <ClienteDetailView
+        customerId={selectedCustomerId}
+        onBack={() => { setView('list'); setSelectedCustomerId(null); }}
       />
     );
   }
 
+  // Form view
+  if (view === 'form') {
+    return (
+      <ClienteForm
+        customer={selectedCustomer}
+        onClose={() => { setView('list'); setSelectedCustomer(null); }}
+      />
+    );
+  }
+
+  // List view
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Clientes</h1>
-          <p className="text-gray-600 mt-2">Gestión completa de clientes</p>
+          <h1 className="text-2xl font-bold text-foreground">Clientes</h1>
+          <p className="text-sm text-muted-foreground mt-1">Gestión de clientes</p>
         </div>
         <Button
-          onClick={() => setShowForm(true)}
-          className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700"
+          onClick={() => { setSelectedCustomer(null); setView('form'); }}
+          className="bg-sky-500 hover:bg-sky-600 text-white"
         >
-          <Plus className="w-4 h-4 mr-2" />
-          Nuevo Cliente
+          <Plus className="w-4 h-4 mr-2" /> Nuevo Cliente
         </Button>
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center space-x-2">
-            <Users className="w-5 h-5" />
-            <span>Lista de Clientes</span>
-          </CardTitle>
-          <div className="flex items-center space-x-2">
-            <div className="relative flex-1 max-w-sm">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+        <CardHeader className="pb-4">
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Users className="w-4 h-4" /> Lista de Clientes
+            </CardTitle>
+            <div className="relative w-64">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground w-4 h-4" />
               <Input
-                placeholder="Buscar clientes..."
+                placeholder="Buscar..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
+                className="pl-9 h-9"
               />
             </div>
           </div>
@@ -180,7 +148,7 @@ export const Clientes: React.FC = () => {
         <CardContent>
           {isLoading ? (
             <div className="flex justify-center py-8">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-sky-500" />
             </div>
           ) : (
             <Table>
@@ -189,100 +157,51 @@ export const Clientes: React.FC = () => {
                   <TableHead>Cliente</TableHead>
                   <TableHead>Contacto</TableHead>
                   <TableHead>DNI/CIF</TableHead>
-                  <TableHead>Ubicación</TableHead>
-                  <TableHead>Términos Pago</TableHead>
-                  <TableHead>Límite Crédito</TableHead>
+                  <TableHead>Ciudad</TableHead>
                   <TableHead className="text-right">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredCustomers.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center text-gray-500 py-8">
+                    <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
                       No se encontraron clientes
                     </TableCell>
                   </TableRow>
                 ) : (
                   filteredCustomers.map((customer) => (
-                    <TableRow key={customer.id}>
-                      <TableCell className="font-medium">
-                        <div className="flex items-center">
-                          <div className="w-10 h-10 rounded-full flex items-center justify-center overflow-hidden mr-3 border">
+                    <TableRow key={customer.id} className="cursor-pointer hover:bg-sky-50/50 dark:hover:bg-sky-950/20" onClick={() => { setSelectedCustomerId(customer.id); setView('detail'); }}>
+                      <TableCell>
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-full overflow-hidden flex-shrink-0">
                             {customer.photo_url ? (
-                              <img
-                                src={customer.photo_url}
-                                alt={customer.name}
-                                className="w-full h-full object-cover"
-                              />
+                              <img src={customer.photo_url} alt="" className="w-full h-full object-cover" />
                             ) : (
-                              <div className="w-full h-full bg-gradient-to-r from-blue-500 to-purple-500 flex items-center justify-center text-white font-semibold">
-                                {customer.name.charAt(0).toUpperCase()}
+                              <div className="w-full h-full bg-gradient-to-br from-sky-400 to-blue-500 flex items-center justify-center text-white text-sm font-semibold">
+                                {customer.name.charAt(0)}
                               </div>
                             )}
                           </div>
-                          <div>
-                            <div 
-                              className="text-sm font-medium text-blue-600 hover:text-blue-800 cursor-pointer hover:underline"
-                              onClick={() => handleNameClick(customer)}
-                            >
-                              {customer.name}
-                            </div>
-                            {customer.contact_person && (
-                              <div className="text-sm text-gray-500">
-                                {customer.contact_person}
-                              </div>
-                            )}
-                          </div>
+                          <span className="font-medium text-sm">{customer.name}</span>
                         </div>
                       </TableCell>
                       <TableCell>
-                        {customer.email && (
-                          <div className="text-sm text-gray-900 flex items-center">
-                            <Mail className="w-4 h-4 mr-1 text-gray-400" />
-                            {customer.email}
-                          </div>
-                        )}
-                        {customer.phone && (
-                          <div className="text-sm text-gray-500 flex items-center">
-                            <Phone className="w-4 h-4 mr-1 text-gray-400" />
-                            {customer.phone}
-                          </div>
-                        )}
-                        {!customer.email && !customer.phone && 'N/A'}
+                        <div className="text-xs space-y-0.5">
+                          {customer.email && <div className="flex items-center gap-1 text-muted-foreground"><Mail className="w-3 h-3" /> {customer.email}</div>}
+                          {customer.phone && <div className="flex items-center gap-1 text-muted-foreground"><Phone className="w-3 h-3" /> {customer.phone}</div>}
+                        </div>
                       </TableCell>
-                      <TableCell>{customer.tax_id || 'N/A'}</TableCell>
-                      <TableCell>
-                        {customer.address_city && (
-                          <div className="text-sm text-gray-900 flex items-center">
-                            <MapPin className="w-4 h-4 mr-1 text-gray-400" />
-                            {customer.address_city}
-                          </div>
-                        )}
-                        {customer.address_postal_code && (
-                          <div className="text-sm text-gray-500">
-                            {customer.address_postal_code}
-                          </div>
-                        )}
-                        {!customer.address_city && !customer.address_postal_code && 'N/A'}
-                      </TableCell>
-                      <TableCell>{customer.payment_terms ? `${customer.payment_terms} días` : 'N/A'}</TableCell>
-                      <TableCell>{customer.credit_limit ? `€${customer.credit_limit.toFixed(2)}` : 'N/A'}</TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end space-x-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleEdit(customer)}
-                          >
-                            <Edit2 className="w-4 h-4" />
+                      <TableCell className="text-sm">{customer.tax_id || '—'}</TableCell>
+                      <TableCell className="text-sm">{customer.address_city || '—'}</TableCell>
+                      <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex justify-end gap-1">
+                          <Button variant="ghost" size="sm" onClick={() => { setSelectedCustomer(customer); setView('form'); }}>
+                            <Edit2 className="w-3.5 h-3.5" />
                           </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDelete(customer.id)}
-                            className="text-red-600 hover:text-red-700"
-                          >
-                            <Trash2 className="w-4 h-4" />
+                          <Button variant="ghost" size="sm" className="text-destructive" onClick={() => {
+                            if (window.confirm('¿Eliminar este cliente?')) deleteCustomerMutation.mutate(customer.id);
+                          }}>
+                            <Trash2 className="w-3.5 h-3.5" />
                           </Button>
                         </div>
                       </TableCell>
