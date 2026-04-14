@@ -336,6 +336,63 @@ export type Database = {
           },
         ]
       }
+      attendance_records: {
+        Row: {
+          check_in: string
+          check_in_lat: number | null
+          check_in_lng: number | null
+          check_out: string | null
+          check_out_lat: number | null
+          check_out_lng: number | null
+          company_id: string
+          created_at: string
+          date: string
+          employee_id: string
+          id: string
+        }
+        Insert: {
+          check_in: string
+          check_in_lat?: number | null
+          check_in_lng?: number | null
+          check_out?: string | null
+          check_out_lat?: number | null
+          check_out_lng?: number | null
+          company_id: string
+          created_at?: string
+          date?: string
+          employee_id: string
+          id?: string
+        }
+        Update: {
+          check_in?: string
+          check_in_lat?: number | null
+          check_in_lng?: number | null
+          check_out?: string | null
+          check_out_lat?: number | null
+          check_out_lng?: number | null
+          company_id?: string
+          created_at?: string
+          date?: string
+          employee_id?: string
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "attendance_records_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "attendance_records_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_employees"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       bono_uso: {
         Row: {
           bono_id: string
