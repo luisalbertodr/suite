@@ -29,6 +29,7 @@ const pageTitles: Record<string, string> = {
   '/reportes': 'Reportes',
   '/empresas': 'Empresas',
   '/recursos-cabinas': 'Recursos y Cabinas',
+  '/asistencia': 'Fichaje y Asistencia',
 };
 
 export const TopBar: React.FC = () => {

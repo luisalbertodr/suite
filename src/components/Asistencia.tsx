@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { MapPin, Clock, LogIn, LogOut, Loader2, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
+import React, { useState } from 'react';
+import { MapPin, Clock, LogIn, LogOut, Loader2, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -13,35 +13,30 @@ import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
-interface AttendanceRecord {
-  id: string;
-  employee_id: string;
-  check_in: string;
-  check_out: string | null;
-  check_in_lat: number | null;
-  check_in_lng: number | null;
-  check_out_lat: number | null;
-  check_out_lng: number | null;
-  date: string;
-  employee_name?: string;
-}
+const getLocation = (): Promise<{ lat: number; lng: number }> =>
+  new Promise((resolve, reject) => {
+    if (!navigator.geolocation) return reject(new Error('No GPS'));
+    navigator.geolocation.getCurrentPosition(
+      (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
+      reject,
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  });
 
 export const Asistencia: React.FC = () => {
   const { companyId } = useCompanyFilter();
   const { employees } = useAgendaEmployees();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [selectedEmployee, setSelectedEmployee] = useState<string>('');
+  const [selectedEmployee, setSelectedEmployee] = useState('');
   const [gettingLocation, setGettingLocation] = useState(false);
-  const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
   const today = format(new Date(), 'yyyy-MM-dd');
 
-  // Fetch today's attendance
   const { data: records, isLoading } = useQuery({
     queryKey: ['attendance', companyId, today],
     queryFn: async () => {
       if (!companyId) return [];
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .from('attendance_records')
         .select('*, agenda_employees(name)')
         .eq('company_id', companyId)
@@ -49,41 +44,27 @@ export const Asistencia: React.FC = () => {
         .order('check_in', { ascending: false });
       if (error) throw error;
       return (data || []).map((r: any) => ({
-        ...r,
+        id: r.id as string,
+        employee_id: r.employee_id as string,
+        check_in: r.check_in as string,
+        check_out: r.check_out as string | null,
+        check_in_lat: r.check_in_lat as number | null,
+        check_in_lng: r.check_in_lng as number | null,
         employee_name: r.agenda_employees?.name || 'Desconocido',
-      })) as AttendanceRecord[];
+      }));
     },
     enabled: !!companyId,
   });
-
-  const getLocation = (): Promise<{ lat: number; lng: number }> => {
-    return new Promise((resolve, reject) => {
-      if (!navigator.geolocation) {
-        reject(new Error('Geolocalización no soportada'));
-        return;
-      }
-      navigator.geolocation.getCurrentPosition(
-        (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-        (err) => reject(err),
-        { enableHighAccuracy: true, timeout: 10000 }
-      );
-    });
-  };
 
   const checkInMutation = useMutation({
     mutationFn: async () => {
       if (!companyId || !selectedEmployee) throw new Error('Selecciona un empleado');
       setGettingLocation(true);
       let loc: { lat: number; lng: number } | null = null;
-      try {
-        loc = await getLocation();
-        setCurrentLocation(loc);
-      } catch {
-        // Continue without location
-      }
+      try { loc = await getLocation(); } catch { /* continue */ }
       setGettingLocation(false);
 
-      const { error } = await supabase.from('attendance_records').insert({
+      const { error } = await (supabase as any).from('attendance_records').insert({
         company_id: companyId,
         employee_id: selectedEmployee,
         date: today,
@@ -98,7 +79,7 @@ export const Asistencia: React.FC = () => {
       toast({ title: 'Entrada registrada ✓' });
     },
     onError: (e: any) => {
-      toast({ title: 'Error al fichar entrada', description: e.message, variant: 'destructive' });
+      toast({ title: 'Error', description: e.message, variant: 'destructive' });
     },
   });
 
@@ -106,14 +87,10 @@ export const Asistencia: React.FC = () => {
     mutationFn: async (recordId: string) => {
       setGettingLocation(true);
       let loc: { lat: number; lng: number } | null = null;
-      try {
-        loc = await getLocation();
-      } catch {
-        // Continue without location
-      }
+      try { loc = await getLocation(); } catch { /* continue */ }
       setGettingLocation(false);
 
-      const { error } = await supabase
+      const { error } = await (supabase as any)
         .from('attendance_records')
         .update({
           check_out: new Date().toISOString(),
@@ -128,11 +105,10 @@ export const Asistencia: React.FC = () => {
       toast({ title: 'Salida registrada ✓' });
     },
     onError: (e: any) => {
-      toast({ title: 'Error al fichar salida', description: e.message, variant: 'destructive' });
+      toast({ title: 'Error', description: e.message, variant: 'destructive' });
     },
   });
 
-  // Check if selected employee already has an open check-in
   const openRecord = records?.find(
     (r) => r.employee_id === selectedEmployee && !r.check_out
   );
@@ -159,7 +135,6 @@ export const Asistencia: React.FC = () => {
         </p>
       </div>
 
-      {/* Check-in/out card */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Registrar Fichaje</CardTitle>
@@ -171,9 +146,7 @@ export const Asistencia: React.FC = () => {
             </SelectTrigger>
             <SelectContent>
               {employees.map((emp) => (
-                <SelectItem key={emp.id} value={emp.id}>
-                  {emp.name}
-                </SelectItem>
+                <SelectItem key={emp.id} value={emp.id}>{emp.name}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -186,11 +159,9 @@ export const Asistencia: React.FC = () => {
                 disabled={checkOutMutation.isPending || gettingLocation}
                 onClick={() => checkOutMutation.mutate(openRecord.id)}
               >
-                {checkOutMutation.isPending || gettingLocation ? (
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                ) : (
-                  <LogOut className="w-4 h-4 mr-2" />
-                )}
+                {checkOutMutation.isPending || gettingLocation
+                  ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  : <LogOut className="w-4 h-4 mr-2" />}
                 Fichar Salida
               </Button>
             ) : (
@@ -199,11 +170,9 @@ export const Asistencia: React.FC = () => {
                 disabled={!selectedEmployee || checkInMutation.isPending || gettingLocation}
                 onClick={() => checkInMutation.mutate()}
               >
-                {checkInMutation.isPending || gettingLocation ? (
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                ) : (
-                  <LogIn className="w-4 h-4 mr-2" />
-                )}
+                {checkInMutation.isPending || gettingLocation
+                  ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  : <LogIn className="w-4 h-4 mr-2" />}
                 Fichar Entrada
               </Button>
             )}
@@ -211,19 +180,16 @@ export const Asistencia: React.FC = () => {
 
           {gettingLocation && (
             <p className="text-xs text-muted-foreground flex items-center gap-1">
-              <MapPin className="w-3 h-3 animate-pulse" />
-              Obteniendo ubicación GPS...
+              <MapPin className="w-3 h-3 animate-pulse" /> Obteniendo ubicación GPS...
             </p>
           )}
         </CardContent>
       </Card>
 
-      {/* Today's records */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">
-            <Clock className="w-4 h-4" />
-            Registros de Hoy
+            <Clock className="w-4 h-4" /> Registros de Hoy
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -235,10 +201,7 @@ export const Asistencia: React.FC = () => {
           ) : (
             <div className="space-y-3">
               {records.map((record) => (
-                <div
-                  key={record.id}
-                  className="flex items-center justify-between p-3 rounded-lg bg-muted/50 border"
-                >
+                <div key={record.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/50 border">
                   <div className="flex items-center gap-3">
                     <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center">
                       <span className="text-xs font-bold text-primary">
@@ -249,18 +212,16 @@ export const Asistencia: React.FC = () => {
                       <p className="text-sm font-medium">{record.employee_name}</p>
                       <div className="flex items-center gap-3 text-xs text-muted-foreground">
                         <span className="flex items-center gap-1">
-                          <LogIn className="w-3 h-3 text-green-500" />
+                          <LogIn className="w-3 h-3 text-emerald-500" />
                           {format(new Date(record.check_in), 'HH:mm')}
                         </span>
                         {record.check_out && (
                           <span className="flex items-center gap-1">
-                            <LogOut className="w-3 h-3 text-red-500" />
+                            <LogOut className="w-3 h-3 text-destructive" />
                             {format(new Date(record.check_out), 'HH:mm')}
                           </span>
                         )}
-                        {record.check_in_lat && (
-                          <MapPin className="w-3 h-3 text-emerald-500" />
-                        )}
+                        {record.check_in_lat && <MapPin className="w-3 h-3 text-emerald-500" />}
                       </div>
                     </div>
                   </div>
