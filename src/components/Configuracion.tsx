@@ -69,26 +69,6 @@ export const Configuracion: React.FC = () => {
       <div className="flex items-center space-x-2">
         <Settings className="h-6 w-6" />
         <h1 className="text-2xl font-bold">Configuración</h1>
-        <Badge 
-          variant="secondary"
-          className={`ml-2 gap-1 ${
-            currentEnv === 'cloud' 
-              ? 'bg-blue-500 hover:bg-blue-600 text-white' 
-              : 'bg-green-500 hover:bg-green-600 text-white'
-          }`}
-        >
-          {currentEnv === 'cloud' ? (
-            <>
-              <Cloud className="h-3 w-3" />
-              Cloud
-            </>
-          ) : (
-            <>
-              <Server className="h-3 w-3" />
-              Local
-            </>
-          )}
-        </Badge>
       </div>
 
       <Tabs defaultValue="general" className="w-full">
@@ -103,7 +83,6 @@ export const Configuracion: React.FC = () => {
         </TabsList>
 
         <TabsContent value="general" className="space-y-4">
-          <EnvironmentToggle />
           
           <Card>
             <CardHeader>
