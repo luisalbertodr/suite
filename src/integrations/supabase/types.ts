@@ -532,6 +532,51 @@ export type Database = {
           },
         ]
       }
+      customer_aesthetic_history: {
+        Row: {
+          company_id: string
+          created_at: string
+          customer_id: string
+          data: Json
+          event_date: string
+          event_type: string
+          id: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          customer_id: string
+          data?: Json
+          event_date?: string
+          event_type?: string
+          id?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          customer_id?: string
+          data?: Json
+          event_date?: string
+          event_type?: string
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_aesthetic_history_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_aesthetic_history_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       customer_contacts: {
         Row: {
           contact_email: string | null
@@ -619,6 +664,76 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "customer_shipping_addresses_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      customer_vouchers: {
+        Row: {
+          article_id: string | null
+          company_id: string
+          created_at: string
+          customer_id: string
+          expiry_date: string | null
+          id: string
+          is_active: boolean
+          notes: string | null
+          purchase_date: string
+          total_sessions: number
+          updated_at: string
+          used_sessions: number
+          voucher_code: string | null
+        }
+        Insert: {
+          article_id?: string | null
+          company_id: string
+          created_at?: string
+          customer_id: string
+          expiry_date?: string | null
+          id?: string
+          is_active?: boolean
+          notes?: string | null
+          purchase_date?: string
+          total_sessions?: number
+          updated_at?: string
+          used_sessions?: number
+          voucher_code?: string | null
+        }
+        Update: {
+          article_id?: string | null
+          company_id?: string
+          created_at?: string
+          customer_id?: string
+          expiry_date?: string | null
+          id?: string
+          is_active?: boolean
+          notes?: string | null
+          purchase_date?: string
+          total_sessions?: number
+          updated_at?: string
+          used_sessions?: number
+          voucher_code?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_vouchers_article_id_fkey"
+            columns: ["article_id"]
+            isOneToOne: false
+            referencedRelation: "articles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_vouchers_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_vouchers_customer_id_fkey"
             columns: ["customer_id"]
             isOneToOne: false
             referencedRelation: "customers"
