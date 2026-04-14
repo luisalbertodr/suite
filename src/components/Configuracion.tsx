@@ -2,9 +2,7 @@
 import React, { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Settings, ShoppingCart, Palette, Mail, Shield, FileText, Download, Cloud, Server } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
-import { getActiveEnvironment } from '@/config/supabase-environments';
+import { Settings, ShoppingCart, Palette, Mail, Shield, FileText, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
@@ -15,7 +13,6 @@ import { VerifactuCertificates } from './VerifactuCertificates';
 import { VerifactuCompanyConfig } from './VerifactuCompanyConfig';
 import { VerifactuXMLDocuments } from './VerifactuXMLDocuments';
 import { SecurityAudit } from './SecurityAudit';
-import { EnvironmentToggle } from './EnvironmentToggle';
 
 export const Configuracion: React.FC = () => {
   const { toast } = useToast();
