@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Bell, User, LogOut, Settings, ChevronDown } from 'lucide-react';
+import { User, LogOut, Settings, ChevronDown, Moon, Sun } from 'lucide-react';
+import { NotificationBell } from './NotificationBell';
 import { useAuth } from '@/hooks/useAuth';
+import { useTheme } from 'next-themes';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,6 +38,7 @@ export const TopBar: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
+  const { theme, setTheme } = useTheme();
   const [currentDateTime, setCurrentDateTime] = useState(new Date());
 
   useEffect(() => {
@@ -44,8 +47,8 @@ export const TopBar: React.FC = () => {
   }, []);
 
   const pageTitle = pageTitles[location.pathname] || 'Lipoout';
-
   const handleDateClick = () => navigate('/agenda');
+  const toggleTheme = () => setTheme(theme === 'dark' ? 'light' : 'dark');
 
   return (
     <header className="fixed top-0 left-0 right-0 z-40 h-12">
@@ -57,31 +60,34 @@ export const TopBar: React.FC = () => {
           </h1>
         </div>
 
-        {/* Right: Notifications, DateTime, User */}
-        <div className="flex items-center gap-4">
-          {/* Notifications bell */}
-          <button className="relative p-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 transition-colors">
-            <Bell className="h-4 w-4 text-foreground/60" />
-            {/* Badge placeholder */}
+        {/* Right: Theme toggle, Notifications, DateTime, User */}
+        <div className="flex items-center gap-3">
+          {/* Dark mode toggle */}
+          <button
+            onClick={toggleTheme}
+            className="relative p-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
+            aria-label="Cambiar tema"
+          >
+            {theme === 'dark' ? (
+              <Sun className="h-4 w-4 text-amber-400" />
+            ) : (
+              <Moon className="h-4 w-4 text-foreground/60" />
+            )}
           </button>
 
-          {/* Date & Time - clickable to Agenda */}
+          {/* Notifications */}
+          <NotificationBell />
+
+          {/* Date & Time */}
           <button
             onClick={handleDateClick}
             className="flex items-center gap-2 text-xs text-foreground/60 hover:text-foreground/80 transition-colors"
           >
             <span className="font-medium">
-              {currentDateTime.toLocaleTimeString('es-ES', {
-                hour: '2-digit',
-                minute: '2-digit',
-              })}
+              {currentDateTime.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
             </span>
             <span>
-              {currentDateTime.toLocaleDateString('es-ES', {
-                weekday: 'short',
-                day: 'numeric',
-                month: 'short',
-              })}
+              {currentDateTime.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })}
             </span>
           </button>
 

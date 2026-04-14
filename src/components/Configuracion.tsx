@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Settings, ShoppingCart, Palette, Mail, Shield, FileText, Download } from 'lucide-react';
+import { Settings, ShoppingCart, Palette, Mail, Shield, FileText, Download, Building2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
@@ -13,6 +13,7 @@ import { VerifactuCertificates } from './VerifactuCertificates';
 import { VerifactuCompanyConfig } from './VerifactuCompanyConfig';
 import { VerifactuXMLDocuments } from './VerifactuXMLDocuments';
 import { SecurityAudit } from './SecurityAudit';
+import { Empresas } from './Empresas';
 
 export const Configuracion: React.FC = () => {
   const { toast } = useToast();
@@ -72,8 +73,9 @@ export const Configuracion: React.FC = () => {
       </div>
 
       <Tabs defaultValue="general" className="w-full">
-        <TabsList className="grid w-full grid-cols-7">
+        <TabsList className="flex flex-wrap">
           <TabsTrigger value="general">General</TabsTrigger>
+          <TabsTrigger value="empresa">Empresa</TabsTrigger>
           <TabsTrigger value="apariencia">Apariencia</TabsTrigger>
           <TabsTrigger value="email">Email</TabsTrigger>
           <TabsTrigger value="prestashop">PrestaShop</TabsTrigger>
@@ -108,6 +110,10 @@ export const Configuracion: React.FC = () => {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="empresa" className="space-y-4">
+          <Empresas />
         </TabsContent>
 
         <TabsContent value="apariencia" className="space-y-4">
