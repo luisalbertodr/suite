@@ -1,65 +1,35 @@
-
 import React from 'react';
-import { 
-  Users, 
-  Package, 
-  FileText, 
-  Receipt, 
-  TrendingUp, 
-  Calendar,
-  DollarSign,
-  Activity,
-  Loader2,
-  AlertCircle,
-  RefreshCw,
-  Truck,
-  ShoppingCart
+import {
+  Users, Calendar, Receipt, TrendingUp, DollarSign, Activity,
+  Loader2, AlertCircle, RefreshCw, CreditCard
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
 import { useDashboardData } from '../hooks/useDashboardData';
-import { useQuery } from '@tanstack/react-query';
 
 export const Dashboard: React.FC = () => {
   const { stats, chartData, recentActivity, isLoading } = useDashboardData();
 
-  // Función para refrescar datos manualmente
-  const { refetch: refetchStats } = useQuery({
-    queryKey: ['dashboard-stats'],
-    enabled: false
-  });
-
-  const handleRefresh = () => {
-    console.log('Refrescando datos del dashboard...');
-    refetchStats();
-    window.location.reload(); // Forzar recarga completa como último recurso
-  };
-
   if (isLoading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[400px] space-y-4">
-        <Loader2 className="w-12 h-12 animate-spin text-blue-600" />
+        <Loader2 className="w-12 h-12 animate-spin text-primary" />
         <div className="text-center">
-          <h3 className="text-lg font-semibold text-gray-900">Cargando Dashboard</h3>
-          <p className="text-gray-600 mt-1">Obteniendo datos del sistema...</p>
+          <h3 className="text-lg font-semibold text-foreground">Cargando Dashboard</h3>
+          <p className="text-muted-foreground mt-1">Obteniendo datos...</p>
         </div>
       </div>
     );
   }
 
-  // Mostrar mensaje si no hay datos
-  if (!stats && !isLoading) {
+  if (!stats) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[400px] space-y-4">
         <AlertCircle className="w-12 h-12 text-orange-500" />
         <div className="text-center">
-          <h3 className="text-lg font-semibold text-gray-900">No se pudieron cargar los datos</h3>
-          <p className="text-gray-600 mt-1">Intenta refrescar la página</p>
-          <button 
-            onClick={handleRefresh}
-            className="mt-3 inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            <RefreshCw className="w-4 h-4 mr-2" />
-            Refrescar
+          <h3 className="text-lg font-semibold text-foreground">Sin datos disponibles</h3>
+          <button onClick={() => window.location.reload()}
+            className="mt-3 inline-flex items-center px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90">
+            <RefreshCw className="w-4 h-4 mr-2" /> Refrescar
           </button>
         </div>
       </div>
@@ -67,81 +37,48 @@ export const Dashboard: React.FC = () => {
   }
 
   const statsCards = [
+    { title: 'Citas Hoy', value: stats.todayAppointments.toString(), icon: Calendar, color: 'from-blue-500 to-blue-600' },
+    { title: 'Clientes Activos', value: stats.activeClients.toString(), icon: Users, color: 'from-pink-500 to-pink-600' },
+    { title: 'Bonos Activos', value: stats.activeVouchers.toString(), icon: CreditCard, color: 'from-purple-500 to-purple-600' },
     {
-      title: 'Clientes Activos',
-      value: stats?.activeClients?.toString() || '0',
-      change: '+12%',
-      icon: Users,
-      color: 'from-blue-500 to-blue-600'
-    },
-    {
-      title: 'Artículos en Stock',
-      value: stats?.totalStock?.toLocaleString('es-ES') || '0',
-      change: '+8%',
-      icon: Package,
-      color: 'from-green-500 to-green-600'
-    },
-    {
-      title: 'Presupuestos Mes',
-      value: stats?.monthlyQuotes?.toString() || '0',
-      change: '+25%',
-      icon: FileText,
-      color: 'from-purple-500 to-purple-600'
-    },
-    {
-      title: 'Facturación Mensual',
-      value: `€${(stats?.monthlyRevenue || 0).toLocaleString('es-ES', { minimumFractionDigits: 2 })}`,
-      change: '+18%',
+      title: 'Facturación Mes',
+      value: `€${stats.monthlyRevenue.toLocaleString('es-ES', { minimumFractionDigits: 2 })}`,
       icon: Receipt,
-      color: 'from-orange-500 to-orange-600'
-    }
+      color: 'from-emerald-500 to-emerald-600',
+    },
   ];
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-          <p className="text-gray-600">Resumen general del sistema</p>
+          <h1 className="text-3xl font-bold text-foreground">Dashboard</h1>
+          <p className="text-muted-foreground">Resumen de la clínica</p>
         </div>
-        <div className="flex items-center space-x-4">
-          <button 
-            onClick={handleRefresh}
-            className="inline-flex items-center px-3 py-2 text-sm bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-            title="Refrescar datos"
-          >
-            <RefreshCw className="w-4 h-4 mr-2" />
-            Actualizar
+        <div className="flex items-center gap-3">
+          <button onClick={() => window.location.reload()}
+            className="inline-flex items-center px-3 py-2 text-sm bg-card border rounded-lg hover:bg-muted transition-colors">
+            <RefreshCw className="w-4 h-4 mr-2" /> Actualizar
           </button>
-          <div className="flex items-center space-x-2 text-sm text-gray-500">
-            <Calendar className="w-4 h-4" />
-            <span>{new Date().toLocaleDateString('es-ES', { 
-              weekday: 'long', 
-              year: 'numeric', 
-              month: 'long', 
-              day: 'numeric' 
-            })}</span>
-          </div>
+          <span className="text-xs text-muted-foreground hidden sm:block">
+            {new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+          </span>
         </div>
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {statsCards.map((stat, index) => {
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {statsCards.map((stat, i) => {
           const Icon = stat.icon;
           return (
-            <div key={index} className="bg-white rounded-xl shadow-lg hover:shadow-xl transition-shadow duration-300 p-6 border border-gray-100">
+            <div key={i} className="bg-card rounded-xl shadow-lg hover:shadow-xl transition-shadow p-5 border">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-gray-600">{stat.title}</p>
-                  <p className="text-2xl font-bold text-gray-900 mt-1">{stat.value}</p>
-                  <div className="flex items-center mt-2">
-                    <TrendingUp className="w-4 h-4 text-green-500 mr-1" />
-                    <span className="text-sm font-medium text-green-600">{stat.change}</span>
-                  </div>
+                  <p className="text-xs font-medium text-muted-foreground">{stat.title}</p>
+                  <p className="text-2xl font-bold text-foreground mt-1">{stat.value}</p>
                 </div>
-                <div className={`w-12 h-12 rounded-lg bg-gradient-to-br ${stat.color} flex items-center justify-center`}>
-                  <Icon className="w-6 h-6 text-white" />
+                <div className={`w-11 h-11 rounded-lg bg-gradient-to-br ${stat.color} flex items-center justify-center`}>
+                  <Icon className="w-5 h-5 text-white" />
                 </div>
               </div>
             </div>
@@ -149,65 +86,44 @@ export const Dashboard: React.FC = () => {
         })}
       </div>
 
-      {/* Charts Section */}
+      {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-semibold text-gray-900">Evolución de Ventas</h3>
-            <div className="flex items-center space-x-2">
-              <DollarSign className="w-4 h-4 text-green-500" />
-              <span className="text-sm text-gray-600">Últimos 6 meses</span>
+        <div className="bg-card rounded-xl shadow-lg p-6 border">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base font-semibold text-foreground">Evolución de Ventas</h3>
+            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+              <DollarSign className="w-3.5 h-3.5" /> 6 meses
             </div>
           </div>
-          <ResponsiveContainer width="100%" height={300}>
+          <ResponsiveContainer width="100%" height={260}>
             <LineChart data={chartData || []}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="name" stroke="#666" />
-              <YAxis stroke="#666" />
-              <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: 'white', 
-                  border: '1px solid #e5e7eb',
-                  borderRadius: '8px',
-                  boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
-                }}
-                formatter={(value: number) => [`€${value.toLocaleString('es-ES')}`, 'Ventas']}
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <XAxis dataKey="name" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+              <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+              <Tooltip
+                contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px' }}
+                formatter={(v: number) => [`€${v.toLocaleString('es-ES')}`, 'Ventas']}
               />
-              <Line 
-                type="monotone" 
-                dataKey="ventas" 
-                stroke="#3b82f6" 
-                strokeWidth={3}
-                dot={{ fill: '#3b82f6', strokeWidth: 2, r: 4 }}
-              />
+              <Line type="monotone" dataKey="ventas" stroke="hsl(var(--primary))" strokeWidth={2.5} dot={{ r: 3 }} />
             </LineChart>
           </ResponsiveContainer>
         </div>
 
-        <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-semibold text-gray-900">Presupuestos vs Ventas</h3>
-            <div className="flex items-center space-x-2">
-              <Activity className="w-4 h-4 text-purple-500" />
-              <span className="text-sm text-gray-600">Comparativa mensual</span>
+        <div className="bg-card rounded-xl shadow-lg p-6 border">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base font-semibold text-foreground">Presupuestos vs Ventas</h3>
+            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+              <Activity className="w-3.5 h-3.5" /> Comparativa
             </div>
           </div>
-          <ResponsiveContainer width="100%" height={300}>
+          <ResponsiveContainer width="100%" height={260}>
             <BarChart data={chartData || []}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="name" stroke="#666" />
-              <YAxis stroke="#666" />
-              <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: 'white', 
-                  border: '1px solid #e5e7eb',
-                  borderRadius: '8px',
-                  boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
-                }}
-                formatter={(value: number, name: string) => [
-                  `€${value.toLocaleString('es-ES')}`, 
-                  name === 'presupuestos' ? 'Presupuestos' : 'Ventas'
-                ]}
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <XAxis dataKey="name" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+              <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+              <Tooltip
+                contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px' }}
+                formatter={(v: number, n: string) => [`€${v.toLocaleString('es-ES')}`, n === 'presupuestos' ? 'Presupuestos' : 'Ventas']}
               />
               <Bar dataKey="presupuestos" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
               <Bar dataKey="ventas" fill="#10b981" radius={[4, 4, 0, 0]} />
@@ -217,44 +133,31 @@ export const Dashboard: React.FC = () => {
       </div>
 
       {/* Recent Activity */}
-      <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="text-lg font-semibold text-gray-900">Actividad Reciente</h3>
-          <button className="text-sm text-blue-600 hover:text-blue-700 font-medium">
-            Ver todo
-          </button>
-        </div>
-        <div className="space-y-4">
+      <div className="bg-card rounded-xl shadow-lg p-6 border">
+        <h3 className="text-base font-semibold text-foreground mb-4">Actividad Reciente</h3>
+        <div className="space-y-3">
           {recentActivity && recentActivity.length > 0 ? (
-            recentActivity.map((activity, index) => (
-              <div key={index} className="flex items-center space-x-4 p-3 rounded-lg hover:bg-gray-50 transition-colors">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                  activity.type === 'factura' ? 'bg-green-100 text-green-600' :
-                  activity.type === 'cliente' ? 'bg-blue-100 text-blue-600' :
-                  activity.type === 'presupuesto' ? 'bg-purple-100 text-purple-600' :
-                  activity.type === 'articulo' ? 'bg-orange-100 text-orange-600' :
-                  activity.type === 'proveedor' ? 'bg-indigo-100 text-indigo-600' :
-                  activity.type === 'albaran' ? 'bg-cyan-100 text-cyan-600' :
-                  'bg-gray-100 text-gray-600'
+            recentActivity.map((a, i) => (
+              <div key={i} className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-muted/50 transition-colors">
+                <div className={`w-9 h-9 rounded-full flex items-center justify-center ${
+                  a.type === 'factura' ? 'bg-emerald-100 text-emerald-600' :
+                  a.type === 'cita' ? 'bg-blue-100 text-blue-600' :
+                  'bg-pink-100 text-pink-600'
                 }`}>
-                  {activity.type === 'factura' && <Receipt className="w-5 h-5" />}
-                  {activity.type === 'cliente' && <Users className="w-5 h-5" />}
-                  {activity.type === 'presupuesto' && <FileText className="w-5 h-5" />}
-                  {activity.type === 'articulo' && <Package className="w-5 h-5" />}
-                  {activity.type === 'proveedor' && <ShoppingCart className="w-5 h-5" />}
-                  {activity.type === 'albaran' && <Truck className="w-5 h-5" />}
-                  {activity.type === 'stock' && <Package className="w-5 h-5" />}
+                  {a.type === 'factura' && <Receipt className="w-4 h-4" />}
+                  {a.type === 'cita' && <Calendar className="w-4 h-4" />}
+                  {a.type === 'cliente' && <Users className="w-4 h-4" />}
                 </div>
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-gray-900">{activity.description}</p>
-                  <p className="text-xs text-gray-500">{activity.time}</p>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">{a.description}</p>
+                  <p className="text-xs text-muted-foreground">{a.time}</p>
                 </div>
               </div>
             ))
           ) : (
-            <div className="text-center py-8 text-gray-500">
-              <Activity className="w-8 h-8 mx-auto mb-2 opacity-50" />
-              <p>No hay actividad reciente</p>
+            <div className="text-center py-6 text-muted-foreground">
+              <Activity className="w-7 h-7 mx-auto mb-2 opacity-50" />
+              <p className="text-sm">Sin actividad reciente</p>
             </div>
           )}
         </div>
