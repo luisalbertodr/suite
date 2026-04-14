@@ -125,6 +125,52 @@ export type Database = {
           },
         ]
       }
+      appointment_resources: {
+        Row: {
+          appointment_id: string
+          cabina_id: string | null
+          created_at: string
+          id: string
+          recurso_id: string | null
+        }
+        Insert: {
+          appointment_id: string
+          cabina_id?: string | null
+          created_at?: string
+          id?: string
+          recurso_id?: string | null
+        }
+        Update: {
+          appointment_id?: string
+          cabina_id?: string | null
+          created_at?: string
+          id?: string
+          recurso_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "appointment_resources_appointment_id_fkey"
+            columns: ["appointment_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_appointments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "appointment_resources_cabina_id_fkey"
+            columns: ["cabina_id"]
+            isOneToOne: false
+            referencedRelation: "cabinas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "appointment_resources_recurso_id_fkey"
+            columns: ["recurso_id"]
+            isOneToOne: false
+            referencedRelation: "recursos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       article_families: {
         Row: {
           company_id: string
@@ -391,6 +437,50 @@ export type Database = {
             columns: ["customer_id"]
             isOneToOne: false
             referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cabinas: {
+        Row: {
+          activa: boolean
+          capacidad: number
+          color: string | null
+          company_id: string
+          created_at: string
+          descripcion: string | null
+          id: string
+          nombre: string
+          updated_at: string
+        }
+        Insert: {
+          activa?: boolean
+          capacidad?: number
+          color?: string | null
+          company_id: string
+          created_at?: string
+          descripcion?: string | null
+          id?: string
+          nombre: string
+          updated_at?: string
+        }
+        Update: {
+          activa?: boolean
+          capacidad?: number
+          color?: string | null
+          company_id?: string
+          created_at?: string
+          descripcion?: string | null
+          id?: string
+          nombre?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cabinas_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
             referencedColumns: ["id"]
           },
         ]
@@ -1972,6 +2062,57 @@ export type Database = {
             columns: ["customer_id"]
             isOneToOne: false
             referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      recursos: {
+        Row: {
+          activo: boolean
+          cabina_id: string | null
+          company_id: string
+          created_at: string
+          descripcion: string | null
+          id: string
+          nombre: string
+          tipo: string
+          updated_at: string
+        }
+        Insert: {
+          activo?: boolean
+          cabina_id?: string | null
+          company_id: string
+          created_at?: string
+          descripcion?: string | null
+          id?: string
+          nombre: string
+          tipo?: string
+          updated_at?: string
+        }
+        Update: {
+          activo?: boolean
+          cabina_id?: string | null
+          company_id?: string
+          created_at?: string
+          descripcion?: string | null
+          id?: string
+          nombre?: string
+          tipo?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "recursos_cabina_id_fkey"
+            columns: ["cabina_id"]
+            isOneToOne: false
+            referencedRelation: "cabinas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "recursos_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
             referencedColumns: ["id"]
           },
         ]
