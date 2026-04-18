@@ -1,14 +1,21 @@
-// Cliente Supabase personalizado apuntando a supabase.lipoout.com
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from '@/integrations/supabase/types';
 
-const SUPABASE_URL = "https://supabase.lipoout.com";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNjc4ODg2NDAwLCJleHAiOjE3OTk1MzU2MDB9.fHmgj0NPdMpBwNnHUeHElnXo08u6j9tUy8rGlDq6XzA";
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+const supabaseAnonKey =
+  (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ||
+  (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined);
 
-export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_ANON_KEY, {
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error(
+    'Faltan VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY (o VITE_SUPABASE_PUBLISHABLE_KEY). Crea un archivo .env en la raíz del proyecto (puedes partir de .env.example).'
+  );
+}
+
+export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   auth: {
     storage: localStorage,
     persistSession: true,
     autoRefreshToken: true,
-  }
+  },
 });

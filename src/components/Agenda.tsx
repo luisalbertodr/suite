@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
-import { Calendar, Clock, ChevronLeft, ChevronRight, Plus, AlertCircle } from 'lucide-react';
+import { Calendar, Clock, ChevronLeft, ChevronRight, AlertCircle } from 'lucide-react';
 import { AgendaGrid } from './AgendaGrid';
 import { AppointmentForm } from './AppointmentForm';
 import { EditAppointmentForm } from './EditAppointmentForm';
@@ -11,6 +13,9 @@ import { format, addDays, subDays } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { useToast } from '@/hooks/use-toast';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useAgendaPreferences } from '@/hooks/useAgendaPreferences';
+import { appointmentItemsQueryKey, syncAppointmentItems } from '@/hooks/useAppointmentItems';
+import type { AppointmentItemDraft } from '@/types/agenda';
 
 interface Employee {
   id: string;
@@ -23,6 +28,14 @@ interface Appointment {
   employeeId: string;
   clientName: string;
   description: string;
+  serviceCode?: string;
+  serviceName?: string;
+  legacyEmployeeCode?: string;
+  legacyClientCode?: string;
+  legacyPlanincId?: number | null;
+  legacyHourInText?: string;
+  cabina_id?: string | null;
+  recurso_id?: string | null;
   startTime: string;
   endTime: string;
   date: string;
@@ -36,10 +49,12 @@ type CreateAppointmentData = {
   description: string;
   startTime: string;
   endTime: string;
+  date: string;
   color: string;
   status: 'confirmed' | 'pending' | 'cancelled';
   cabina_id?: string | null;
   recurso_id?: string | null;
+  items?: AppointmentItemDraft[];
 };
 
 // Generate a Tailwind bg class from a hex color
@@ -64,6 +79,7 @@ export const Agenda: React.FC = () => {
   const [selectedSlot, setSelectedSlot] = useState<{ employeeId: string; time: string } | null>(null);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const { employees: dbEmployees, isLoading: employeesLoading } = useAgendaEmployees();
   const {
@@ -76,6 +92,27 @@ export const Agenda: React.FC = () => {
 
   const { cabinas } = useCabinas();
   const { recursos } = useRecursos();
+  const { preferences, isLoading: prefsLoading } = useAgendaPreferences();
+  const appointmentIds = useMemo(() => dbAppointments.map((a) => a.id), [dbAppointments]);
+  const { data: appointmentResources = {} } = useQuery({
+    queryKey: ['appointment-resources', appointmentIds.join('|')],
+    enabled: appointmentIds.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('appointment_resources')
+        .select('appointment_id,cabina_id,recurso_id')
+        .in('appointment_id', appointmentIds);
+      if (error) {
+        if (error.code === 'PGRST205' || error.code === '42P01') return {};
+        throw error;
+      }
+      const out: Record<string, { cabina_id: string | null; recurso_id: string | null }> = {};
+      for (const row of data || []) {
+        out[row.appointment_id] = { cabina_id: row.cabina_id, recurso_id: row.recurso_id };
+      }
+      return out;
+    },
+  });
 
   // Map DB employees to grid employees with proper colors
   const employees: Employee[] = dbEmployees.map((emp, idx) => ({
@@ -84,29 +121,93 @@ export const Agenda: React.FC = () => {
     color: hexToTailwindBg(emp.color || '#3B82F6', idx),
   }));
 
-  // Map appointments
-  const appointments: Appointment[] = dbAppointments.map((apt) => ({
-    id: apt.id,
-    employeeId: apt.employee_id || '',
-    clientName: apt.title || '',
-    description: apt.description || '',
-    startTime: apt.start_time ? apt.start_time.split('T')[1]?.substring(0, 5) || '' : '',
-    endTime: apt.end_time ? apt.end_time.split('T')[1]?.substring(0, 5) || '' : '',
-    date: apt.start_time ? apt.start_time.split('T')[0] : '',
-    color: apt.color || '#3B82F6',
-    status: (['confirmed', 'pending', 'cancelled'].includes(apt.status) ? apt.status : 'pending') as any,
-  }));
+  const parseServiceFromDescription = (
+    description: string
+  ): { code: string; service: string; hourInText: string } => {
+    // Legacy sample: "[16:00] 214 - ZONA L..."
+    const match = description.match(/\[(\d{1,2}:\d{2})\]\s*([^\s-]+)\s*-\s*(.+)$/);
+    if (!match) return { code: '', service: '', hourInText: '' };
+    return {
+      hourInText: match[1]?.trim() || '',
+      code: match[2]?.trim() || '',
+      service: match[3]?.trim() || '',
+    };
+  };
 
-  // Overlap check helper
-  const checkOverlap = (employeeId: string, startTime: string, endTime: string, excludeId?: string): boolean => {
+  const normalizeTime = (value?: string | null): string => {
+    if (!value) return '';
+    const str = String(value);
+    if (str.includes('T')) {
+      const part = str.split('T')[1] || '';
+      const hh = part.substring(0, 2);
+      const mm = part.substring(3, 5);
+      if (/^\d{2}$/.test(hh) && /^\d{2}$/.test(mm)) return `${hh}:${mm}`;
+    }
+    const m = str.match(/^(\d{1,2}):(\d{2})/);
+    if (m) return `${m[1].padStart(2, '0')}:${m[2]}`;
+    return str.substring(0, 5);
+  };
+
+  const normalizeDate = (start?: string | null, legacyDate?: string | null): string => {
+    if (start && String(start).includes('T')) return String(start).split('T')[0];
+    return legacyDate ? String(legacyDate) : format(selectedDate, 'yyyy-MM-dd');
+  };
+
+  // Map appointments (schema moderno + legado)
+  const appointments: Appointment[] = dbAppointments.map((apt) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const row: any = apt;
+    const description = row.description || '';
+    const parsedService = parseServiceFromDescription(description);
+    const clientName = row.client_name || row.title || '';
+    return {
+      id: row.id,
+      employeeId: row.employee_id || '',
+      clientName,
+      description,
+      serviceCode: parsedService.code,
+      serviceName: parsedService.service,
+      legacyEmployeeCode: row.legacy_codemp || undefined,
+      legacyClientCode: row.legacy_codcli || undefined,
+      legacyPlanincId: row.legacy_planinc_id ?? null,
+      legacyHourInText: parsedService.hourInText || undefined,
+      cabina_id: appointmentResources[row.id]?.cabina_id ?? row.cabina_id ?? null,
+      recurso_id: appointmentResources[row.id]?.recurso_id ?? row.recurso_id ?? null,
+      startTime: normalizeTime(row.start_time),
+      endTime: normalizeTime(row.end_time),
+      date: normalizeDate(row.start_time, row.appointment_date),
+      color: row.color || '#3B82F6',
+      status: (['confirmed', 'pending', 'cancelled'].includes(row.status) ? row.status : 'pending') as any,
+    };
+  });
+
+  const effectiveSelectedIds = preferences.visibleEmployeeIds.length
+    ? preferences.visibleEmployeeIds
+    : employees.map((e) => e.id);
+  const filteredEmployees = employees.filter((e) => effectiveSelectedIds.includes(e.id));
+  const filteredAppointments = appointments.filter((apt) => effectiveSelectedIds.includes(apt.employeeId));
+
+  // Allow overlaps on same employee, but not on same cabina/recurso.
+  const checkResourceConflict = (
+    date: string,
+    startTime: string,
+    endTime: string,
+    cabinaId?: string | null,
+    recursoId?: string | null,
+    excludeId?: string
+  ): boolean => {
+    if (!cabinaId && !recursoId) return false;
     return appointments.some((apt) => {
       if (apt.id === excludeId) return false;
-      if (apt.employeeId !== employeeId) return false;
-      return (
+      if (apt.date !== date) return false;
+      const overlaps =
         (startTime >= apt.startTime && startTime < apt.endTime) ||
         (endTime > apt.startTime && endTime <= apt.endTime) ||
-        (startTime <= apt.startTime && endTime >= apt.endTime)
-      );
+        (startTime <= apt.startTime && endTime >= apt.endTime);
+      if (!overlaps) return false;
+      const sameCabina = !!cabinaId && apt.cabina_id === cabinaId;
+      const sameRecurso = !!recursoId && apt.recurso_id === recursoId;
+      return sameCabina || sameRecurso;
     });
   };
 
@@ -133,8 +234,8 @@ export const Agenda: React.FC = () => {
       const newEndMin = newH * 60 + newM + duration;
       const newEndTime = `${Math.floor(newEndMin / 60).toString().padStart(2, '0')}:${(newEndMin % 60).toString().padStart(2, '0')}`;
 
-      if (checkOverlap(newEmployeeId, newTime, newEndTime, appointmentId)) {
-        toast({ title: 'Conflicto de horario', description: 'Ya existe una cita en ese horario.', variant: 'destructive' });
+      if (checkResourceConflict(format(selectedDate, 'yyyy-MM-dd'), newTime, newEndTime, appointment.cabina_id, appointment.recurso_id, appointmentId)) {
+        toast({ title: 'Conflicto de recurso/cabina', description: 'Ese recurso o cabina ya está ocupado en ese tramo.', variant: 'destructive' });
         return;
       }
 
@@ -148,6 +249,17 @@ export const Agenda: React.FC = () => {
         color: appointment.color,
         status: appointment.status,
       });
+      try {
+        if (appointment.cabina_id || appointment.recurso_id) {
+          await supabase.from('appointment_resources').upsert({
+            appointment_id: appointmentId,
+            cabina_id: appointment.cabina_id || null,
+            recurso_id: appointment.recurso_id || null,
+          }, { onConflict: 'appointment_id' });
+        }
+      } catch {
+        // noop for environments without appointment_resources
+      }
 
       toast({ title: 'Cita movida' });
     } catch {
@@ -157,15 +269,15 @@ export const Agenda: React.FC = () => {
 
   const handleAppointmentSave = async (data: CreateAppointmentData) => {
     try {
-      const dateStr = format(selectedDate, 'yyyy-MM-dd');
+      const dateStr = data.date || format(selectedDate, 'yyyy-MM-dd');
+      const items = data.items ?? [];
 
-      // Calculate end time for overlap check
-      if (checkOverlap(data.employeeId, data.startTime, data.endTime)) {
-        toast({ title: 'Conflicto de horario', description: 'Ya existe una cita en ese horario para esta empleada.', variant: 'destructive' });
+      if (checkResourceConflict(dateStr, data.startTime, data.endTime, data.cabina_id, data.recurso_id)) {
+        toast({ title: 'Conflicto de recurso/cabina', description: 'Ese recurso o cabina ya está ocupado en ese tramo.', variant: 'destructive' });
         return;
       }
 
-      await createAppointment.mutateAsync({
+      const created = await createAppointment.mutateAsync({
         employee_id: data.employeeId,
         title: data.clientName,
         description: data.description,
@@ -174,6 +286,24 @@ export const Agenda: React.FC = () => {
         color: data.color,
         status: data.status,
       });
+      try {
+        if (data.cabina_id || data.recurso_id) {
+          await supabase.from('appointment_resources').upsert({
+            appointment_id: created.id,
+            cabina_id: data.cabina_id || null,
+            recurso_id: data.recurso_id || null,
+          }, { onConflict: 'appointment_id' });
+        }
+      } catch {
+        // noop for environments without appointment_resources
+      }
+
+      try {
+        await syncAppointmentItems(created.id, items);
+        await queryClient.invalidateQueries({ queryKey: appointmentItemsQueryKey(created.id) });
+      } catch (e) {
+        console.error('appointment_items sync', e);
+      }
 
       setShowAppointmentForm(false);
       setSelectedSlot(null);
@@ -182,10 +312,10 @@ export const Agenda: React.FC = () => {
     }
   };
 
-  const handleAppointmentUpdate = async (updated: Appointment) => {
+  const handleAppointmentUpdate = async (updated: Appointment, items: AppointmentItemDraft[]) => {
     try {
-      if (checkOverlap(updated.employeeId, updated.startTime, updated.endTime, updated.id)) {
-        toast({ title: 'Conflicto de horario', description: 'Ya existe una cita en ese horario.', variant: 'destructive' });
+      if (checkResourceConflict(updated.date, updated.startTime, updated.endTime, updated.cabina_id, updated.recurso_id, updated.id)) {
+        toast({ title: 'Conflicto de recurso/cabina', description: 'Ese recurso o cabina ya está ocupado en ese tramo.', variant: 'destructive' });
         return;
       }
 
@@ -199,6 +329,26 @@ export const Agenda: React.FC = () => {
         color: updated.color,
         status: updated.status,
       });
+      try {
+        if (updated.cabina_id || updated.recurso_id) {
+          await supabase.from('appointment_resources').upsert({
+            appointment_id: updated.id,
+            cabina_id: updated.cabina_id || null,
+            recurso_id: updated.recurso_id || null,
+          }, { onConflict: 'appointment_id' });
+        } else {
+          await supabase.from('appointment_resources').delete().eq('appointment_id', updated.id);
+        }
+      } catch {
+        // noop for environments without appointment_resources
+      }
+
+      try {
+        await syncAppointmentItems(updated.id, items);
+        await queryClient.invalidateQueries({ queryKey: appointmentItemsQueryKey(updated.id) });
+      } catch (e) {
+        console.error('appointment_items sync', e);
+      }
 
       setShowEditForm(false);
       setSelectedAppointment(null);
@@ -210,6 +360,11 @@ export const Agenda: React.FC = () => {
   const handleAppointmentDelete = async (appointmentId: string) => {
     try {
       await deleteAppointment.mutateAsync(appointmentId);
+      try {
+        await supabase.from('appointment_resources').delete().eq('appointment_id', appointmentId);
+      } catch {
+        // noop for environments without appointment_resources
+      }
       setShowEditForm(false);
       setSelectedAppointment(null);
     } catch (error) {
@@ -217,7 +372,7 @@ export const Agenda: React.FC = () => {
     }
   };
 
-  if (employeesLoading || appointmentsLoading) {
+  if (employeesLoading || appointmentsLoading || prefsLoading) {
     return (
       <div className="space-y-4">
         <Skeleton className="h-16 w-full" />
@@ -252,7 +407,7 @@ export const Agenda: React.FC = () => {
             Agenda
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {employees.length} empleada{employees.length !== 1 ? 's' : ''} · Arrastra para mover citas
+            {filteredEmployees.length} de {employees.length} empleada{employees.length !== 1 ? 's' : ''} visibles · Configurable en Configuración → Agenda
           </p>
         </div>
 
@@ -276,7 +431,7 @@ export const Agenda: React.FC = () => {
 
       {/* Employee legend */}
       <div className="flex items-center gap-4 overflow-x-auto pb-3 mb-2">
-        {employees.map((emp) => (
+        {filteredEmployees.map((emp) => (
           <div key={emp.id} className="flex items-center gap-1.5 flex-shrink-0">
             <div className={`w-3 h-3 rounded-full border ${emp.color}`} />
             <span className="text-xs font-medium text-foreground">{emp.name}</span>
@@ -287,11 +442,14 @@ export const Agenda: React.FC = () => {
       {/* Grid */}
       <div className="flex-1 overflow-hidden rounded-lg border bg-card">
         <AgendaGrid
-          employees={employees}
-          appointments={appointments}
+          employees={filteredEmployees}
+          appointments={filteredAppointments}
           onSlotClick={handleSlotClick}
           onAppointmentClick={handleAppointmentClick}
           onAppointmentMove={handleAppointmentMove}
+          visibleFields={preferences.visibleFields}
+          slotMinutes={preferences.slotMinutes}
+          cellHeight={preferences.cellHeight}
         />
       </div>
 

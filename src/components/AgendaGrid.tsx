@@ -9,6 +9,16 @@ interface AgendaGridProps {
   onSlotClick: (employeeId: string, time: string) => void;
   onAppointmentClick?: (appointment: Appointment) => void;
   onAppointmentMove?: (appointmentId: string, newEmployeeId: string, newTime: string) => void;
+  slotMinutes?: 15 | 30;
+  cellHeight?: number;
+  visibleFields?: {
+    clientName: boolean;
+    service: boolean;
+    description: boolean;
+    timeRange: boolean;
+    status: boolean;
+    legacyCodes: boolean;
+  };
 }
 
 export const AgendaGrid: React.FC<AgendaGridProps> = ({
@@ -16,16 +26,26 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
   appointments,
   onSlotClick,
   onAppointmentClick,
-  onAppointmentMove
+  onAppointmentMove,
+  slotMinutes = 15,
+  cellHeight = 32,
+  visibleFields = {
+    clientName: true,
+    service: true,
+    description: true,
+    timeRange: true,
+    status: true,
+    legacyCodes: false,
+  }
 }) => {
   const [draggedAppointment, setDraggedAppointment] = React.useState<string | null>(null);
   const [dragOverSlot, setDragOverSlot] = React.useState<{ employeeId: string; time: string } | null>(null);
 
-  // Generar slots de tiempo cada 15 minutos de 8:00 a 20:00
+  // Generar slots de tiempo de 8:00 a 20:00 con salto configurable
   const generateTimeSlots = (): TimeSlot[] => {
     const slots: TimeSlot[] = [];
     for (let hour = 8; hour < 20; hour++) {
-      for (let minute = 0; minute < 60; minute += 15) {
+      for (let minute = 0; minute < 60; minute += slotMinutes) {
         const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
         slots.push({
           time: timeString,
@@ -39,7 +59,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
 
   const timeSlots = generateTimeSlots();
 
-  // Calcular la duración de una cita en slots de 15 minutos
+  // Calcular la duración de una cita en slots
   const calculateDurationInSlots = (startTime: string, endTime: string): number => {
     const [startHour, startMin] = startTime.split(':').map(Number);
     const [endHour, endMin] = endTime.split(':').map(Number);
@@ -48,7 +68,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
     const endMinutes = endHour * 60 + endMin;
     
     const durationMinutes = endMinutes - startMinutes;
-    return Math.ceil(durationMinutes / 15);
+    return Math.max(1, Math.ceil(durationMinutes / slotMinutes));
   };
 
   // Verificar si una cita empieza exactamente en este slot
@@ -84,8 +104,24 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
   };
 
   // Obtener el índice del slot actual
+  /** Último slot cuyo inicio es <= hora de la cita (evita invisibilidad si hora no cae en :00/:15/:30 exactos). */
   const getSlotIndex = (time: string): number => {
-    return timeSlots.findIndex(slot => slot.time === time);
+    const parseMin = (t: string) => {
+      const [h, m] = t.split(':').map(Number);
+      return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
+    };
+    const tMin = parseMin(time);
+    if (!timeSlots.length) return -1;
+    const first = parseMin(timeSlots[0].time);
+    const last = parseMin(timeSlots[timeSlots.length - 1].time);
+    if (tMin <= first) return 0;
+    if (tMin >= last) return timeSlots.length - 1;
+    let best = 0;
+    for (let i = 0; i < timeSlots.length; i++) {
+      if (parseMin(timeSlots[i].time) <= tMin) best = i;
+      else break;
+    }
+    return best;
   };
 
   const getStatusIcon = (status: string) => {
@@ -164,6 +200,23 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
   };
 
   const colCount = employees.length + 1;
+  const overlapMap = React.useMemo(() => {
+    const byKey: Record<string, Appointment[]> = {};
+    for (const apt of appointments) {
+      const key = `${apt.employeeId}|${apt.startTime}`;
+      if (!byKey[key]) byKey[key] = [];
+      byKey[key].push(apt);
+    }
+    const out: Record<string, { index: number; total: number }> = {};
+    for (const key of Object.keys(byKey)) {
+      const items = byKey[key].slice().sort((a, b) => a.id.localeCompare(b.id));
+      const total = items.length;
+      items.forEach((apt, idx) => {
+        out[apt.id] = { index: idx, total };
+      });
+    }
+    return out;
+  }, [appointments]);
 
   return (
     <div className="h-full overflow-auto bg-card">
@@ -192,10 +245,13 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
             
             if (startSlotIndex === -1 || employeeIndex === -1) return null;
             
-            const topPosition = startSlotIndex * 32;
+            const topPosition = startSlotIndex * cellHeight;
             const leftPercent = ((employeeIndex + 1) / colCount) * 100;
-            const widthPercent = (1 / colCount) * 100;
-            const height = durationInSlots * 32;
+            const baseWidthPercent = (1 / colCount) * 100;
+            const overlap = overlapMap[appointment.id] || { index: 0, total: 1 };
+            const widthPercent = baseWidthPercent / overlap.total;
+            const leftOffsetPercent = widthPercent * overlap.index;
+            const height = durationInSlots * cellHeight;
             
             return (
               <div
@@ -203,7 +259,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
                 className="absolute z-20 cursor-move hover:opacity-80"
                 style={{
                   top: `${topPosition}px`,
-                  left: `${leftPercent}%`,
+                  left: `${leftPercent + leftOffsetPercent}%`,
                   width: `${widthPercent}%`,
                   height: `${height}px`,
                   paddingRight: '1px'
@@ -213,23 +269,40 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
                 onDragLeave={handleDragLeave}
                 onDrop={(e) => handleDrop(e, appointment.employeeId, appointment.startTime)}
               >
-                <div 
-                  className={`h-full p-2 text-xs overflow-hidden rounded border-2 border-gray-400 cursor-move ${employees[employeeIndex]?.color}`}
+                <div
+                  className={`h-full p-1 text-[11px] overflow-hidden rounded border-2 border-gray-400 cursor-move ${employees[employeeIndex]?.color}`}
                   draggable
                   onDragStart={(e) => handleDragStart(e, appointment)}
                   onDragEnd={handleDragEnd}
                 >
-                  <div className="bg-white bg-opacity-90 rounded px-2 py-1 text-gray-800 font-medium h-full">
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="font-semibold truncate flex-1">{appointment.clientName}</div>
-                      {getStatusIcon(appointment.status)}
+                  <div className="bg-white/90 rounded px-1.5 py-1 text-gray-800 font-medium h-full leading-tight">
+                    <div className="flex items-center justify-between mb-1 gap-1">
+                      {visibleFields.clientName && (
+                        <div className="font-semibold truncate flex-1">{appointment.clientName}</div>
+                      )}
+                      {visibleFields.status && getStatusIcon(appointment.status)}
                     </div>
-                    <div className="text-xs text-gray-600 truncate">
-                      {appointment.startTime} - {appointment.endTime}
-                    </div>
-                    {appointment.description && (
+                    {visibleFields.timeRange && (
+                      <div className="text-xs text-gray-600 truncate mt-1">
+                        {appointment.startTime} - {appointment.endTime}
+                      </div>
+                    )}
+                    {visibleFields.service && appointment.serviceName && (
+                      <div className="text-xs text-gray-700 truncate mt-1 font-medium">
+                        {appointment.serviceCode ? `${appointment.serviceCode} - ` : ''}{appointment.serviceName}
+                      </div>
+                    )}
+                    {visibleFields.description && appointment.description && (
                       <div className="text-xs text-gray-600 truncate mt-1">
                         {appointment.description}
+                      </div>
+                    )}
+                    {visibleFields.legacyCodes && (
+                      <div className="text-[10px] text-gray-600 truncate mt-1">
+                        {appointment.legacyEmployeeCode ? `EMP:${appointment.legacyEmployeeCode}` : ''}
+                        {appointment.legacyClientCode ? ` · CLI:${appointment.legacyClientCode}` : ''}
+                        {appointment.legacyPlanincId ? ` · ID:${appointment.legacyPlanincId}` : ''}
+                        {appointment.legacyHourInText ? ` · H:${appointment.legacyHourInText}` : ''}
                       </div>
                     )}
                   </div>
@@ -268,7 +341,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
                       } ${isOccupied ? 'bg-gray-50' : 'bg-white cursor-pointer hover:bg-blue-50'} ${
                         isHighlighted ? 'bg-blue-100 border-blue-300' : ''
                       }`}
-                      style={{ height: '32px' }}
+                      style={{ height: `${cellHeight}px` }}
                       onClick={() => !isOccupied && onSlotClick(employee.id, slot.time)}
                       onDragOver={(e) => handleDragOver(e, employee.id, slot.time)}
                       onDragLeave={handleDragLeave}

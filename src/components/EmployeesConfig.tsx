@@ -15,13 +15,11 @@ const COLORS = [
 
 interface EmployeeFormData {
   name: string;
-  email: string;
-  phone: string;
   color: string;
   active: boolean;
 }
 
-const emptyForm: EmployeeFormData = { name: '', email: '', phone: '', color: COLORS[0], active: true };
+const emptyForm: EmployeeFormData = { name: '', color: COLORS[0], active: true };
 
 export const EmployeesConfig: React.FC = () => {
   const { employees, isLoading, createEmployee, updateEmployee } = useAgendaEmployees();
@@ -40,8 +38,6 @@ export const EmployeesConfig: React.FC = () => {
   const handleEdit = (emp: any) => {
     setForm({
       name: emp.name,
-      email: emp.email || '',
-      phone: emp.phone || '',
       color: emp.color || COLORS[0],
       active: emp.is_active ?? true,
     });
@@ -56,16 +52,12 @@ export const EmployeesConfig: React.FC = () => {
       await updateEmployee.mutateAsync({
         id: editingId,
         name: form.name,
-        email: form.email || null,
-        phone: form.phone || null,
         color: form.color,
         is_active: form.active,
       } as any);
     } else {
       await createEmployee.mutateAsync({
         name: form.name,
-        email: form.email || undefined,
-        phone: form.phone || undefined,
         color: form.color,
         is_active: form.active,
       });
@@ -112,18 +104,10 @@ export const EmployeesConfig: React.FC = () => {
           {showForm && (
             <div className="mb-6 p-4 border rounded-lg bg-muted/30 space-y-4">
               <h4 className="font-medium text-sm">{editingId ? 'Editar empleado' : 'Nuevo empleado'}</h4>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 gap-4">
                 <div>
                   <Label>Nombre *</Label>
                   <Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Nombre completo" />
-                </div>
-                <div>
-                  <Label>Email</Label>
-                  <Input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="email@ejemplo.com" />
-                </div>
-                <div>
-                  <Label>Teléfono</Label>
-                  <Input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} placeholder="+34 600 000 000" />
                 </div>
               </div>
               <div className="flex items-center gap-6">
@@ -169,9 +153,6 @@ export const EmployeesConfig: React.FC = () => {
                   <div className="w-4 h-4 rounded-full shrink-0" style={{ backgroundColor: emp.color || COLORS[0] }} />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{emp.name}</p>
-                    <p className="text-xs text-muted-foreground truncate">
-                      {[emp.email, emp.phone].filter(Boolean).join(' · ') || 'Sin contacto'}
-                    </p>
                   </div>
                   <span className={`text-xs px-2 py-0.5 rounded-full ${emp.is_active ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400' : 'bg-muted text-muted-foreground'}`}>
                     {emp.is_active ? 'Activo' : 'Inactivo'}

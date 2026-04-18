@@ -6,6 +6,10 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { X, Save, User, Clock, DoorOpen, Cpu } from 'lucide-react';
+import { format } from 'date-fns';
+import { AppointmentItemsEditor } from '@/components/AppointmentItemsEditor';
+import type { AppointmentItemDraft } from '@/types/agenda';
+import { calcEndFromStart, effectiveDurationMinutes } from '@/lib/agendaAppointmentItems';
 
 interface Employee {
   id: string;
@@ -29,35 +33,43 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
   const [formData, setFormData] = useState({
     clientName: '',
     description: '',
+    date: format(new Date(), 'yyyy-MM-dd'),
+    employeeId,
     startTime: time,
-    endTime: calcEnd(time, 30),
     status: 'confirmed' as const,
     cabina_id: null as string | null,
     recurso_id: null as string | null,
   });
 
-  const employee = employees.find(e => e.id === employeeId);
+  const [items, setItems] = useState<AppointmentItemDraft[]>(() => [
+    {
+      clientKey: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `k-${Date.now()}`,
+      kind: 'service',
+      label: '',
+      duration_minutes: 30,
+      occupies_time: true,
+    },
+  ]);
 
-  function calcEnd(start: string, mins: number): string {
-    const [h, m] = start.split(':').map(Number);
-    const total = h * 60 + m + mins;
-    return `${Math.floor(total / 60).toString().padStart(2, '0')}:${(total % 60).toString().padStart(2, '0')}`;
-  }
+  const employee = employees.find(e => e.id === employeeId);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.clientName.trim()) return;
+    const selectedEmployee = employees.find(e => e.id === formData.employeeId);
+    const endTime = calcEndFromStart(formData.startTime, effectiveDurationMinutes(items));
     onSave({
-      employeeId,
+      employeeId: formData.employeeId,
       clientName: formData.clientName,
       description: formData.description,
+      date: formData.date,
       startTime: formData.startTime,
-      endTime: formData.endTime,
-      color: employee?.color || '',
+      endTime,
+      color: selectedEmployee?.color || '',
       status: formData.status,
       cabina_id: formData.cabina_id,
       recurso_id: formData.recurso_id,
-      date: '',
+      items,
     });
   };
 
@@ -79,6 +91,21 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs">Fecha</Label>
+                <Input type="date" value={formData.date} onChange={(e) => setFormData({ ...formData, date: e.target.value })} />
+              </div>
+              <div>
+                <Label className="text-xs">Empleado</Label>
+                <Select value={formData.employeeId} onValueChange={(v) => setFormData({ ...formData, employeeId: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {employees.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
             <div>
               <Label className="text-xs">Cliente *</Label>
               <Input value={formData.clientName} onChange={(e) => setFormData({ ...formData, clientName: e.target.value })} placeholder="Nombre del cliente" required />
@@ -87,26 +114,16 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
               <Label className="text-xs">Descripción</Label>
               <Textarea value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} rows={2} placeholder="Tratamiento o notas" />
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs">Hora inicio</Label>
-                <Input type="time" value={formData.startTime} onChange={(e) => setFormData({ ...formData, startTime: e.target.value, endTime: calcEnd(e.target.value, 30) })} />
-              </div>
-              <div>
-                <Label className="text-xs">Duración</Label>
-                <Select defaultValue="30" onValueChange={(v) => setFormData({ ...formData, endTime: calcEnd(formData.startTime, parseInt(v)) })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="15">15 min</SelectItem>
-                    <SelectItem value="30">30 min</SelectItem>
-                    <SelectItem value="45">45 min</SelectItem>
-                    <SelectItem value="60">1 hora</SelectItem>
-                    <SelectItem value="90">1.5 h</SelectItem>
-                    <SelectItem value="120">2 h</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+            <div>
+              <Label className="text-xs">Hora inicio</Label>
+              <Input
+                type="time"
+                value={formData.startTime}
+                onChange={(e) => setFormData({ ...formData, startTime: e.target.value })}
+              />
             </div>
+
+            <AppointmentItemsEditor startTime={formData.startTime} items={items} onChange={setItems} />
 
             {/* Cabina & Recurso */}
             <div className="grid grid-cols-2 gap-3">

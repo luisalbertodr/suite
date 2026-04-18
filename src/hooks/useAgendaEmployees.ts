@@ -30,7 +30,7 @@ export const useAgendaEmployees = () => {
         .from('agenda_employees')
         .select('*')
         .eq('company_id', companyId)
-        .eq('active', true)
+        .eq('is_active', true)
         .order('name');
 
       if (error) {
@@ -38,9 +38,10 @@ export const useAgendaEmployees = () => {
         throw error;
       }
 
-      return (data || []).map(d => ({ ...d, is_active: d.active })) as unknown as AgendaEmployee[];
+      return (data || []) as AgendaEmployee[];
     },
     enabled: !!companyId,
+    retry: false,
   });
 
   const createEmployee = useMutation({

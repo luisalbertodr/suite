@@ -16,6 +16,7 @@ import { SecurityAudit } from './SecurityAudit';
 import { Empresas } from './Empresas';
 import { RecursosCabinas } from './RecursosCabinas';
 import { EmployeesConfig } from './EmployeesConfig';
+import { AgendaPreferencesConfig } from './AgendaPreferencesConfig';
 
 export const Configuracion: React.FC = () => {
   const { toast } = useToast();
@@ -78,6 +79,7 @@ export const Configuracion: React.FC = () => {
           <TabsTrigger value="general">General</TabsTrigger>
           <TabsTrigger value="empresa">Empresa</TabsTrigger>
           <TabsTrigger value="empleados">Empleados</TabsTrigger>
+          <TabsTrigger value="agenda">Agenda</TabsTrigger>
           <TabsTrigger value="recursos">Recursos y Cabinas</TabsTrigger>
           <TabsTrigger value="apariencia">Apariencia</TabsTrigger>
           <TabsTrigger value="email">Email</TabsTrigger>
@@ -114,6 +116,10 @@ export const Configuracion: React.FC = () => {
 
         <TabsContent value="empleados" className="space-y-4">
           <EmployeesConfig />
+        </TabsContent>
+
+        <TabsContent value="agenda" className="space-y-4">
+          <AgendaPreferencesConfig />
         </TabsContent>
 
         <TabsContent value="recursos" className="space-y-4">

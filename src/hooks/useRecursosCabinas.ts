@@ -3,6 +3,14 @@ import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { useToast } from '@/hooks/use-toast';
 
+const isMissingRelation = (error: { code?: string; message?: string } | null) =>
+  !!error && (
+    error.code === 'PGRST205' ||
+    error.code === '42P01' ||
+    /Could not find the table/i.test(error.message || '') ||
+    /relation .* does not exist/i.test(error.message || '')
+  );
+
 export const useCabinas = () => {
   const { companyId } = useCompanyFilter();
   const { toast } = useToast();
@@ -16,10 +24,12 @@ export const useCabinas = () => {
         .select('*')
         .eq('company_id', companyId!)
         .order('nombre');
+      if (isMissingRelation(error)) return [];
       if (error) throw error;
       return data;
     },
     enabled: !!companyId,
+    retry: false,
   });
 
   const create = useMutation({
@@ -65,10 +75,12 @@ export const useRecursos = () => {
         .select('*, cabinas(nombre)')
         .eq('company_id', companyId!)
         .order('nombre');
+      if (isMissingRelation(error)) return [];
       if (error) throw error;
       return data;
     },
     enabled: !!companyId,
+    retry: false,
   });
 
   const create = useMutation({
