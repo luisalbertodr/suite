@@ -317,11 +317,11 @@ export const PresupuestoNView: React.FC<PresupuestoNViewProps> = ({
       element.innerHTML = pdfContent;
       
       const opt = {
-        margin: [0.3, 0.3, 0.8, 0.3], // top, left, bottom, right - more bottom margin for footer
+        margin: [0.3, 0.3, 0.8, 0.3] as [number, number, number, number],
         filename: `presupuesto-${presupuesto.number}.pdf`,
-        image: { type: 'jpeg', quality: 0.98 },
+        image: { type: 'jpeg' as const, quality: 0.98 },
         html2canvas: { scale: 2, useCORS: true },
-        jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
+        jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' as const }
       };
 
       await html2pdf().set(opt).from(element).save();

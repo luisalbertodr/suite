@@ -39,7 +39,7 @@ export const EmployeesConfig: React.FC = () => {
     setForm({
       name: emp.name,
       color: emp.color || COLORS[0],
-      active: emp.is_active ?? true,
+      active: emp.active ?? true,
     });
     setEditingId(emp.id);
     setShowForm(true);
@@ -53,13 +53,13 @@ export const EmployeesConfig: React.FC = () => {
         id: editingId,
         name: form.name,
         color: form.color,
-        is_active: form.active,
-      } as any);
+        active: form.active,
+      });
     } else {
       await createEmployee.mutateAsync({
         name: form.name,
         color: form.color,
-        is_active: form.active,
+        active: form.active,
       });
     }
     setShowForm(false);
@@ -67,7 +67,7 @@ export const EmployeesConfig: React.FC = () => {
   };
 
   const handleDeactivate = async (id: string, currentActive: boolean) => {
-    await updateEmployee.mutateAsync({ id, is_active: !currentActive } as any);
+    await updateEmployee.mutateAsync({ id, active: !currentActive });
   };
 
   if (isLoading) {
@@ -154,13 +154,13 @@ export const EmployeesConfig: React.FC = () => {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{emp.name}</p>
                   </div>
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${emp.is_active ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400' : 'bg-muted text-muted-foreground'}`}>
-                    {emp.is_active ? 'Activo' : 'Inactivo'}
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${emp.active ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400' : 'bg-muted text-muted-foreground'}`}>
+                    {emp.active ? 'Activo' : 'Inactivo'}
                   </span>
                   <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => handleEdit(emp)}>
                     <Edit2 className="h-3.5 w-3.5" />
                   </Button>
-                  <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => handleDeactivate(emp.id, emp.is_active ?? true)}>
+                  <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => handleDeactivate(emp.id, emp.active ?? true)}>
                     <Trash2 className="h-3.5 w-3.5 text-destructive" />
                   </Button>
                 </div>

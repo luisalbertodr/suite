@@ -151,19 +151,11 @@ export const TPV: React.FC = () => {
 
       const saleRecord = {
         company_id: companyId,
-        ticket_number: '', // Empty string to trigger auto-generation
+        ticket_number: '',
         total_amount: saleData.total,
-        subtotal: subtotal,
-        tax_amount: taxAmount,
         payment_method: saleData.paymentMethod,
-        amount_paid: saleData.amountPaid || 0,
-        change_amount: saleData.change || 0,
         status: 'completed' as const,
-        currency: 'EUR',
         customer_name: null,
-        customer_email: null,
-        customer_phone: null,
-        notes: null
       };
 
       console.log('💾 Creating sale record:', JSON.stringify(saleRecord, null, 2));
@@ -197,8 +189,7 @@ export const TPV: React.FC = () => {
       const saleItems = saleData.items.map(item => {
         const saleItem = {
           sale_id: sale.id,
-          article_id: item.variationId ? null : item.id,
-          variation_id: item.variationId || null,
+          article_id: item.id || null,
           description: item.name,
           quantity: item.quantity,
           unit_price: item.price,
