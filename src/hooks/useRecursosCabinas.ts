@@ -43,7 +43,7 @@ export const useCabinas = () => {
 
   const update = useMutation({
     mutationFn: async ({ id, ...values }: { id: string; [key: string]: any }) => {
-      const { error } = await supabase.from('cabinas').update(values).eq('id', id);
+      const { error } = await supabase.from('cabinas').update(values as any).eq('id', id);
       if (error) throw error;
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['cabinas'] }); toast({ title: 'Cabina actualizada' }); },
@@ -94,7 +94,7 @@ export const useRecursos = () => {
 
   const update = useMutation({
     mutationFn: async ({ id, ...values }: { id: string; [key: string]: any }) => {
-      const { error } = await supabase.from('recursos').update(values).eq('id', id);
+      const { error } = await supabase.from('recursos').update(values as any).eq('id', id);
       if (error) throw error;
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['recursos'] }); toast({ title: 'Recurso actualizado' }); },

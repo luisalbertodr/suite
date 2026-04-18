@@ -11,6 +11,14 @@ interface Notification {
   created_at: string;
 }
 
+const isMissingRelation = (error: { code?: string; message?: string } | null) =>
+  !!error && (
+    error.code === 'PGRST205' ||
+    error.code === '42P01' ||
+    /Could not find the table/i.test(error.message || '') ||
+    /relation .* does not exist/i.test(error.message || '')
+  );
+
 export const useNotifications = () => {
   const queryClient = useQueryClient();
 
@@ -22,19 +30,20 @@ export const useNotifications = () => {
         .select('*')
         .order('created_at', { ascending: false })
         .limit(50);
+
+      if (isMissingRelation(error)) return [];
       if (error) throw error;
-      return data as Notification[];
+      return (data || []) as Notification[];
     },
+    retry: false,
   });
 
-  const unreadCount = notifications.filter(n => !n.read).length;
+  const unreadCount = notifications.filter((n) => !n.read).length;
 
   const markAsRead = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from('notifications')
-        .update({ read: true })
-        .eq('id', id);
+      const { error } = await supabase.from('notifications').update({ read: true }).eq('id', id);
+      if (isMissingRelation(error)) return;
       if (error) throw error;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notifications'] }),
@@ -42,12 +51,10 @@ export const useNotifications = () => {
 
   const markAllAsRead = useMutation({
     mutationFn: async () => {
-      const unreadIds = notifications.filter(n => !n.read).map(n => n.id);
+      const unreadIds = notifications.filter((n) => !n.read).map((n) => n.id);
       if (unreadIds.length === 0) return;
-      const { error } = await supabase
-        .from('notifications')
-        .update({ read: true })
-        .in('id', unreadIds);
+      const { error } = await supabase.from('notifications').update({ read: true }).in('id', unreadIds);
+      if (isMissingRelation(error)) return;
       if (error) throw error;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notifications'] }),

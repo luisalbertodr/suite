@@ -138,14 +138,14 @@ export const VerifactuCertificates: React.FC = () => {
 
       const { error } = await supabase
         .from('verifactu_certificates')
-        .insert({
+        .insert([{
           company_id: companyId,
           certificate_name: formData.name.trim(),
           certificate_data: encryptedCertificate,
-          certificate_password: encryptedPassword,
+          certificate_password_encrypted: encryptedPassword,
           valid_from: formData.validFrom ? new Date(formData.validFrom).toISOString() : null,
           valid_until: formData.validUntil ? new Date(formData.validUntil).toISOString() : null,
-        });
+        }]);
 
       if (error) throw error;
 

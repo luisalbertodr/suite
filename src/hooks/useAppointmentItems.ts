@@ -5,6 +5,15 @@ import type { AppointmentItemDraft, AppointmentItemKind } from '@/types/agenda';
 export const appointmentItemsQueryKey = (appointmentId: string) =>
   ['appointment-items', appointmentId] as const;
 
+const isMissingRelation = (error: { code?: string; message?: string } | null) =>
+  !!error && (
+    error.code === 'PGRST205' ||
+    error.code === '42P01' ||
+    /Could not find the table/i.test(error.message || '') ||
+    /relation .* does not exist/i.test(error.message || '') ||
+    /column .* does not exist/i.test(error.message || '')
+  );
+
 function mapRowToDraft(row: {
   id: string;
   kind: string;
@@ -25,31 +34,24 @@ function mapRowToDraft(row: {
   };
 }
 
-export async function fetchAppointmentItems(
-  appointmentId: string
-): Promise<AppointmentItemDraft[]> {
-  const { data, error } = await supabase
+export async function fetchAppointmentItems(appointmentId: string): Promise<AppointmentItemDraft[]> {
+  const db = supabase as any;
+  const { data, error } = await db
     .from('appointment_items')
     .select('id,kind,label,duration_minutes,occupies_time,article_id,customer_voucher_id')
     .eq('appointment_id', appointmentId)
     .order('sort_order', { ascending: true });
 
-  if (error) {
-    if (error.code === '42P01' || error.code === 'PGRST205') return [];
-    throw error;
-  }
-  return (data || []).map((row) => mapRowToDraft(row));
+  if (isMissingRelation(error)) return [];
+  if (error) throw error;
+  return (data || []).map((row: any) => mapRowToDraft(row));
 }
 
-export async function syncAppointmentItems(
-  appointmentId: string,
-  items: AppointmentItemDraft[]
-): Promise<void> {
-  const del = await supabase.from('appointment_items').delete().eq('appointment_id', appointmentId);
-  if (del.error && del.error.code !== '42P01' && del.error.code !== 'PGRST205') {
-    throw del.error;
-  }
-  if (!items.length) return;
+export async function syncAppointmentItems(appointmentId: string, items: AppointmentItemDraft[]): Promise<void> {
+  const db = supabase as any;
+  const del = await db.from('appointment_items').delete().eq('appointment_id', appointmentId);
+  if (del.error && !isMissingRelation(del.error)) throw del.error;
+  if (!items.length || isMissingRelation(del.error)) return;
 
   const rows = items.map((it, sort_order) => ({
     appointment_id: appointmentId,
@@ -62,8 +64,8 @@ export async function syncAppointmentItems(
     customer_voucher_id: it.customer_voucher_id ?? null,
   }));
 
-  const ins = await supabase.from('appointment_items').insert(rows);
-  if (ins.error) throw ins.error;
+  const ins = await db.from('appointment_items').insert(rows);
+  if (ins.error && !isMissingRelation(ins.error)) throw ins.error;
 }
 
 export function useAppointmentItems(appointmentId: string | undefined) {

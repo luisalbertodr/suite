@@ -40,15 +40,6 @@ export const useAgendaAppointments = (date?: string) => {
     queryFn: async () => {
       if (!companyId) return [];
 
-      const base = supabase
-        .from('agenda_appointments')
-        .select('*')
-        .eq('company_id', companyId);
-
-      // Soporta ambos esquemas:
-      // - Legacy: appointment_date + start_time(HH:mm)
-      // - Moderno: start_time/end_time TIMESTAMP
-      // Si existe appointment_date pero las citas importadas tienen solo start_time, legacy devuelve 0 filas: se usa moderno.
       const nextCalendarDay = (ymd: string) => {
         const [y, mo, d] = ymd.split('-').map(Number);
         const dt = new Date(y, mo - 1, d);
@@ -59,37 +50,26 @@ export const useAgendaAppointments = (date?: string) => {
         return `${yy}-${mm}-${dd}`;
       };
 
-      if (date) {
-        const legacyResult = await base
-          .eq('appointment_date', date)
-          .order('start_time');
+      let query = supabase
+        .from('agenda_appointments')
+        .select('*')
+        .eq('company_id', companyId)
+        .order('start_time');
 
-        if (!legacyResult.error) {
-          const legacyRows = (legacyResult.data || []) as AgendaAppointment[];
-          if (legacyRows.length > 0) {
-            return legacyRows;
-          }
-        } else if (legacyResult.error.code !== '42703') {
-          console.error('Error fetching appointments (legacy mode):', legacyResult.error);
-          throw legacyResult.error;
-        }
-      }
-
-      let modernQuery = base.order('start_time');
       if (date) {
         const next = nextCalendarDay(date);
-        modernQuery = modernQuery
+        query = query
           .gte('start_time', `${date}T00:00:00`)
           .lt('start_time', `${next}T00:00:00`);
       }
 
-      const modernResult = await modernQuery;
-      if (modernResult.error) {
-        console.error('Error fetching appointments (modern mode):', modernResult.error);
-        throw modernResult.error;
+      const { data, error } = await query;
+      if (error) {
+        console.error('Error fetching appointments:', error);
+        throw error;
       }
 
-      return (modernResult.data || []) as AgendaAppointment[];
+      return (data || []) as AgendaAppointment[];
     },
     enabled: !!companyId,
   });
