@@ -46,6 +46,11 @@ interface UpdateUserPayload {
 }
 
 export const useUsers = () => {
+  const supabaseApiKey =
+    (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined) ||
+    (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ||
+    '';
+
   const getMainErrorMessage = async (payload: Record<string, unknown>) => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -53,7 +58,7 @@ export const useUsers = () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+          apikey: supabaseApiKey,
           ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
         },
         body: JSON.stringify(payload),

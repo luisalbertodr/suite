@@ -33,7 +33,7 @@ export const ClienteDetailView: React.FC<Props> = ({ customerId, onBack }) => {
       if (Object.keys(editedFields).length === 0) return;
       const { error } = await supabase
         .from('customers')
-        .update(editedFields)
+        .update(editedFields as any)
         .eq('id', customerId);
       if (error) throw error;
     },

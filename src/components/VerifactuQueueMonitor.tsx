@@ -75,7 +75,7 @@ export const VerifactuQueueMonitor: React.FC = () => {
           retry_count: 0,
           next_retry_at: new Date().toISOString(),
           error_message: null,
-          updated_at: new Date().toISOString()
+          last_attempt_at: new Date().toISOString()
         })
         .eq('id', itemId);
 
