@@ -120,9 +120,19 @@ serve(async (req) => {
         try {
           const { data: profile } = await supabaseAdmin
             .from('user_profiles')
-            .select('company_id, companies:company_id(name)')
+            .select('company_id, employee_id, companies:company_id(name)')
             .eq('user_id', user.id)
             .maybeSingle()
+
+          let employeeName: string | null = null
+          if (profile?.employee_id) {
+            const { data: employee } = await supabaseAdmin
+              .from('agenda_employees')
+              .select('name')
+              .eq('id', profile.employee_id)
+              .maybeSingle()
+            employeeName = employee?.name ?? null
+          }
 
           // Get roles for this user
           const { data: roles } = await supabaseAdmin
@@ -137,6 +147,7 @@ serve(async (req) => {
             last_sign_in_at: user.last_sign_in_at,
             email_confirmed_at: user.email_confirmed_at,
             profiles: profile,
+            employee_name: employeeName,
             user_company_roles: roles || []
           }
         } catch (error) {
@@ -148,6 +159,7 @@ serve(async (req) => {
             last_sign_in_at: user.last_sign_in_at,
             email_confirmed_at: user.email_confirmed_at,
             profiles: null,
+            employee_name: null,
             user_company_roles: []
           }
         }

@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -45,6 +46,8 @@ interface ArticleVariation {
 }
 
 export const TPV: React.FC = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [cart, setCart] = useState<CartItem[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [barcodeInput, setBarcodeInput] = useState('');
@@ -56,6 +59,34 @@ export const TPV: React.FC = () => {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { companyId, loading: companyLoading } = useCompanyFilter();
+  const prefilledSourceRef = useRef<string | null>(null);
+
+  type PrefillItem = CartItem & { sourceKind?: string; sourceBonusMode?: string | null };
+  type PrefillState = {
+    prefillFromAppointment?: {
+      appointmentId: string;
+      customerId?: string | null;
+      customerName?: string | null;
+      date?: string;
+      items: PrefillItem[];
+    };
+  };
+
+  const prefill = (location.state as PrefillState | null)?.prefillFromAppointment;
+
+  useEffect(() => {
+    if (!prefill || !prefill.appointmentId) return;
+    if (prefilledSourceRef.current === prefill.appointmentId) return;
+    prefilledSourceRef.current = prefill.appointmentId;
+    if (prefill.items?.length) {
+      setCart(prefill.items.map((it) => ({ ...it })));
+      toast({
+        title: 'Carrito precargado',
+        description: `Cita ${prefill.appointmentId.slice(0, 8)} preparada para cobro.`,
+      });
+    }
+    navigate(location.pathname, { replace: true, state: {} });
+  }, [prefill, navigate, location.pathname]);
 
   const { data: articles = [], isLoading } = useQuery({
     queryKey: ['tpv-articles', searchTerm, companyId],
@@ -118,6 +149,8 @@ export const TPV: React.FC = () => {
       paymentMethod: string;
       amountPaid: number;
       change: number;
+      notes?: string | null;
+      customerName?: string | null;
     }) => {
       console.log('=== STARTING SALE PROCESSING ===');
       console.log('Sale data:', JSON.stringify(saleData, null, 2));
@@ -160,10 +193,10 @@ export const TPV: React.FC = () => {
         change_amount: saleData.change || 0,
         status: 'completed' as const,
         currency: 'EUR',
-        customer_name: null,
+        customer_name: saleData.customerName || null,
         customer_email: null,
         customer_phone: null,
-        notes: null
+        notes: saleData.notes ?? null
       };
 
       console.log('💾 Creating sale record:', JSON.stringify(saleRecord, null, 2));
@@ -500,7 +533,23 @@ export const TPV: React.FC = () => {
       total: total,
       paymentMethod,
       amountPaid: parseFloat(amountPaid) || 0,
-      change: getChange()
+      change: getChange(),
+      customerName: prefill?.customerName || null,
+      notes: prefill
+        ? JSON.stringify({
+            source: 'agenda_appointment',
+            appointment_id: prefill.appointmentId,
+            customer_id: prefill.customerId ?? null,
+            customer_name: prefill.customerName ?? null,
+            appointment_date: prefill.date ?? null,
+            items: prefill.items.map((it) => ({
+              name: it.name,
+              total: it.total,
+              source_kind: it.sourceKind ?? null,
+              source_bonus_mode: it.sourceBonusMode ?? null,
+            })),
+          })
+        : null,
     });
   };
 

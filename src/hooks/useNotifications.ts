@@ -11,20 +11,37 @@ interface Notification {
   created_at: string;
 }
 
+let notificationsTableMissing = false;
+
 export const useNotifications = () => {
   const queryClient = useQueryClient();
+  const isMissingRelation = (error: { code?: string; message?: string } | null) =>
+    !!error && (
+      error.code === 'PGRST205' ||
+      error.code === '42P01' ||
+      /Could not find the table/i.test(error.message || '') ||
+      /relation .* does not exist/i.test(error.message || '') ||
+      /not found/i.test(error.message || '')
+    );
 
   const { data: notifications = [], isLoading } = useQuery({
     queryKey: ['notifications'],
     queryFn: async () => {
+      if (notificationsTableMissing) return [];
       const { data, error } = await supabase
         .from('notifications')
         .select('*')
         .order('created_at', { ascending: false })
         .limit(50);
+      if (isMissingRelation(error)) {
+        notificationsTableMissing = true;
+        return [];
+      }
       if (error) throw error;
       return data as Notification[];
     },
+    retry: false,
+    refetchOnWindowFocus: !notificationsTableMissing,
   });
 
   const unreadCount = notifications.filter(n => !n.read).length;

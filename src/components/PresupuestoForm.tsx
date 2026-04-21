@@ -22,6 +22,7 @@ interface Customer {
   name: string;
   email?: string;
   tax_id?: string;
+  phone?: string | null;
 }
 
 interface Article {
@@ -80,7 +81,7 @@ export const PresupuestoForm: React.FC<PresupuestoFormProps> = ({ quote, onClose
       
       const { data, error } = await supabase
         .from('customers')
-        .select('id, name, email, tax_id')
+        .select('id, name, email, tax_id, phone')
         .eq('company_id', companyId)
         .order('name');
       

@@ -72,7 +72,7 @@ export const useDeliveryNoteOperations = (onClose: () => void, isExit: boolean =
 
       const { data, error } = await supabase
         .from('customers')
-        .select('id, name')
+        .select('id, name, email, tax_id, phone')
         .eq('company_id', companyId)
         .order('name');
       

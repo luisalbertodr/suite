@@ -9,6 +9,8 @@ export interface Appointment {
   id: string;
   employeeId: string;
   clientName: string;
+  /** Ficha de cliente en BD, si existe */
+  customerId?: string | null;
   description: string;
   serviceCode?: string;
   serviceName?: string;
@@ -30,6 +32,7 @@ export interface TimeSlot {
 }
 
 export type AppointmentItemKind = 'service' | 'product' | 'bonus' | 'other';
+export type BonusPaymentMode = 'none' | 'full' | '60' | '40';
 
 /** Borrador de ítem de cita (UI); `clientKey` es estable en el cliente para listas y drag. */
 export interface AppointmentItemDraft {
@@ -38,6 +41,9 @@ export interface AppointmentItemDraft {
   label: string;
   duration_minutes: number;
   occupies_time: boolean;
+  quantity?: number;
+  unit_price?: number;
+  bonus_payment_mode?: BonusPaymentMode;
   article_id?: string | null;
   customer_voucher_id?: string | null;
 }

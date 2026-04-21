@@ -26,7 +26,12 @@ const ProtectedLayout: React.FC<{ children: React.ReactNode }> = ({ children }) 
 
 function App() {
   return (
-    <Router>
+    <Router
+      future={{
+        v7_startTransition: true,
+        v7_relativeSplatPath: true,
+      }}
+    >
       <Routes>
         {/* Default: redirect to Agenda */}
         <Route path="/" element={

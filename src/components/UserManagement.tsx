@@ -3,22 +3,39 @@ import React, { useState } from 'react';
 import { useRoles } from '@/hooks/useRoles';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useUsers } from '@/hooks/useUsers';
+import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Badge } from '@/components/ui/badge';
-import { Trash2, UserPlus, Shield, RefreshCw } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { UserPlus, Shield, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { UserListTable } from '@/components/UserListTable';
+import { useAgendaEmployees } from '@/hooks/useAgendaEmployees';
 
 export const UserManagement = () => {
-  const { roles, userRoles, loading: rolesLoading, assignUserRole, removeUserRole } = useRoles();
+  const { roles, permissions, loading: rolesLoading } = useRoles();
   const { hasPermission } = usePermissions();
-  const { users, loading: usersLoading, fetchUsers, deleteUser } = useUsers();
-  const [newUserId, setNewUserId] = useState('');
-  const [selectedRole, setSelectedRole] = useState('');
-  const [isAssigning, setIsAssigning] = useState(false);
+  const { companyId, loading: companyLoading } = useCompanyFilter();
+  const { users, loading: usersLoading, fetchUsers, deleteUser, createUser, updateUser } = useUsers();
+  const { employees: agendaEmployees, isLoading: employeesLoading } = useAgendaEmployees({ agendaOnly: false });
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [creatingUser, setCreatingUser] = useState(false);
+  const [createEmail, setCreateEmail] = useState('');
+  const [createPassword, setCreatePassword] = useState('');
+  const [createRoleId, setCreateRoleId] = useState('');
+  const [createEmployeeId, setCreateEmployeeId] = useState<string>('none');
+  const [createPermissionIds, setCreatePermissionIds] = useState<string[]>([]);
+  const [editingUser, setEditingUser] = useState<any | null>(null);
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editRoleId, setEditRoleId] = useState('');
+  const [editEmployeeId, setEditEmployeeId] = useState<string>('none');
+  const [editPermissionIds, setEditPermissionIds] = useState<string[]>([]);
+  const [editPermissionsTouched, setEditPermissionsTouched] = useState(false);
+  const [updatingUser, setUpdatingUser] = useState(false);
 
   // Check if user has permission to manage users
   if (!hasPermission('users', 'read')) {
@@ -35,34 +52,6 @@ export const UserManagement = () => {
     );
   }
 
-  const handleAssignRole = async () => {
-    if (!newUserId || !selectedRole) {
-      toast.error('Por favor completa todos los campos');
-      return;
-    }
-
-    setIsAssigning(true);
-    try {
-      // For now, we'll use a placeholder company ID - in a real implementation
-      // this would come from the current user's context
-      const companyId = '00000000-0000-0000-0000-000000000000';
-      
-      await assignUserRole(newUserId, companyId, selectedRole);
-      setNewUserId('');
-      setSelectedRole('');
-    } catch (error) {
-      // Error already handled in the hook
-    } finally {
-      setIsAssigning(false);
-    }
-  };
-
-  const handleRemoveRole = async (userRoleId: string) => {
-    if (window.confirm('¿Estás seguro de que quieres remover este rol?')) {
-      await removeUserRole(userRoleId);
-    }
-  };
-
   const handleDeleteUser = async (userId: string, email: string) => {
     if (window.confirm(`¿Estás seguro de que quieres eliminar el usuario ${email}?`)) {
       await deleteUser(userId);
@@ -70,15 +59,107 @@ export const UserManagement = () => {
   };
 
   const handleEditUser = (user: any) => {
-    // TODO: Implement edit user functionality
-    toast.info('Funcionalidad de edición en desarrollo');
+    setEditingUser(user);
+    const roleName = user?.user_company_roles?.[0]?.role?.name;
+    const roleId = roleName ? (roles.find((r) => r.name === roleName)?.id || '') : '';
+    setEditRoleId(roleId);
+    setEditEmployeeId(user?.profiles?.employee_id || 'none');
+    setEditPermissionIds(Array.isArray(user?.permission_ids) ? user.permission_ids : []);
+    setEditPermissionsTouched(false);
+    setIsEditOpen(true);
+  };
+
+  const getRoleDefaultPermissionIds = async (roleId: string): Promise<string[]> => {
+    if (!roleId) return [];
+    const roleName = (roles.find((r) => r.id === roleId)?.name || '').toLowerCase();
+    if (roleName === 'admin') {
+      return permissions.map((p) => p.id).filter(Boolean);
+    }
+
+    const { data: rolePerms, error } = await supabase
+      .from('role_permissions')
+      .select('permission_id')
+      .eq('role_id', roleId);
+    if (error) {
+      console.error('role_permissions query', error);
+      return [];
+    }
+    return (rolePerms || []).map((rp: any) => rp.permission_id).filter(Boolean);
+  };
+
+  const handleCreateRoleChange = async (roleId: string) => {
+    setCreateRoleId(roleId);
+    const defaultPerms = await getRoleDefaultPermissionIds(roleId);
+    setCreatePermissionIds(defaultPerms);
+  };
+
+  const handleEditRoleChange = async (roleId: string) => {
+    setEditRoleId(roleId);
+    const defaultPerms = await getRoleDefaultPermissionIds(roleId);
+    setEditPermissionIds(defaultPerms);
+    setEditPermissionsTouched(true);
   };
 
   const handleRefresh = () => {
     fetchUsers();
   };
 
-  if (rolesLoading || usersLoading) {
+  const handleCreateUser = async () => {
+    if (!companyId) {
+      toast.error('No se ha podido resolver la empresa activa');
+      return;
+    }
+    if (!createEmail.trim() || !createPassword.trim() || !createRoleId) {
+      toast.error('Completa email, contraseña y rol');
+      return;
+    }
+
+    setCreatingUser(true);
+    try {
+      const ok = await createUser({
+        email: createEmail.trim(),
+        password: createPassword,
+        company_id: companyId,
+        role_id: createRoleId,
+        employee_id: createEmployeeId === 'none' ? null : createEmployeeId,
+        permissions: createPermissionIds,
+      });
+      if (!ok) return;
+      setCreateEmail('');
+      setCreatePassword('');
+      setCreateRoleId('');
+      setCreateEmployeeId('none');
+      setCreatePermissionIds([]);
+      setIsCreateOpen(false);
+    } finally {
+      setCreatingUser(false);
+    }
+  };
+
+  const handleUpdateUser = async () => {
+    if (!editingUser?.id) return;
+    if (!companyId) {
+      toast.error('No se ha podido resolver la empresa activa');
+      return;
+    }
+    setUpdatingUser(true);
+    try {
+      const ok = await updateUser({
+        userId: editingUser.id,
+        role_id: editRoleId || undefined,
+        company_id: companyId,
+        employee_id: editEmployeeId === 'none' ? null : editEmployeeId,
+        ...(editPermissionsTouched ? { permission_ids: editPermissionIds } : {}),
+      });
+      if (!ok) return;
+      setIsEditOpen(false);
+      setEditingUser(null);
+    } finally {
+      setUpdatingUser(false);
+    }
+  };
+
+  if (rolesLoading || usersLoading || companyLoading || employeesLoading) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
@@ -93,55 +174,192 @@ export const UserManagement = () => {
           <h1 className="text-2xl font-bold text-gray-900">Gestión de Usuarios</h1>
           <p className="text-gray-600">Administra usuarios y roles de tu empresa</p>
         </div>
-        <Button onClick={handleRefresh} variant="outline" size="sm">
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Actualizar
-        </Button>
+        <div className="flex items-center gap-2">
+          {hasPermission('users', 'create') && (
+            <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+              <DialogTrigger asChild>
+                <Button size="sm" disabled={!companyId}>
+                  <UserPlus className="h-4 w-4 mr-2" />
+                  Nuevo usuario
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Crear nuevo usuario</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="new-user-email">Email</Label>
+                    <Input
+                      id="new-user-email"
+                      type="email"
+                      value={createEmail}
+                      onChange={(e) => setCreateEmail(e.target.value)}
+                      placeholder="usuario@empresa.com"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="new-user-password">Contraseña</Label>
+                    <Input
+                      id="new-user-password"
+                      type="password"
+                      value={createPassword}
+                      onChange={(e) => setCreatePassword(e.target.value)}
+                      placeholder="Mínimo 6 caracteres"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Rol base</Label>
+                    <Select value={createRoleId} onValueChange={handleCreateRoleChange}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Seleccionar rol" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {roles.map((role) => (
+                          <SelectItem key={role.id} value={role.id}>
+                            {role.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Permisos granulares</Label>
+                    <div className="max-h-44 overflow-auto rounded border p-2 space-y-1">
+                      {permissions.map((perm) => {
+                        const checked = createPermissionIds.includes(perm.id);
+                        const label = perm.name || `${perm.resource}:${perm.action}`;
+                        return (
+                          <label key={perm.id} className="flex items-center gap-2 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => {
+                                setCreatePermissionIds((prev) =>
+                                  e.target.checked ? [...prev, perm.id] : prev.filter((id) => id !== perm.id),
+                                );
+                              }}
+                            />
+                            <span>{label}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Al elegir rol se marcan permisos por defecto; puedes ajustarlos antes de crear.
+                    </p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Empleado vinculado (opcional)</Label>
+                    <Select value={createEmployeeId} onValueChange={setCreateEmployeeId}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Sin vincular" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Sin vincular</SelectItem>
+                        {agendaEmployees.map((emp) => (
+                          <SelectItem key={emp.id} value={emp.id}>
+                            {emp.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex justify-end gap-2 pt-2">
+                    <Button type="button" variant="outline" onClick={() => setIsCreateOpen(false)}>
+                      Cancelar
+                    </Button>
+                    <Button type="button" onClick={handleCreateUser} disabled={creatingUser || !companyId}>
+                      {creatingUser ? 'Creando...' : 'Crear usuario'}
+                    </Button>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+          )}
+          <Button onClick={handleRefresh} variant="outline" size="sm">
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Actualizar
+          </Button>
+        </div>
       </div>
 
-      {/* Assign Role Form */}
-      {hasPermission('users', 'create') && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <UserPlus className="h-5 w-5" />
-              Asignar Rol a Usuario
-            </CardTitle>
-            <CardDescription>
-              Asigna un rol específico a un usuario en tu empresa
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex gap-4">
-              <Input
-                placeholder="ID del Usuario"
-                value={newUserId}
-                onChange={(e) => setNewUserId(e.target.value)}
-                className="flex-1"
-              />
-              <Select value={selectedRole} onValueChange={setSelectedRole}>
-                <SelectTrigger className="w-48">
+      <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Editar usuario</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">{editingUser?.email}</p>
+            <div className="space-y-1.5">
+              <Label>Rol base</Label>
+              <Select value={editRoleId} onValueChange={handleEditRoleChange}>
+                <SelectTrigger>
                   <SelectValue placeholder="Seleccionar rol" />
                 </SelectTrigger>
                 <SelectContent>
                   {roles.map((role) => (
                     <SelectItem key={role.id} value={role.id}>
-                      {role.name} - {role.description}
+                      {role.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              <Button 
-                onClick={handleAssignRole} 
-                disabled={isAssigning}
-                className="whitespace-nowrap"
-              >
-                {isAssigning ? 'Asignando...' : 'Asignar Rol'}
+            </div>
+            <div className="space-y-1.5">
+              <Label>Empleado vinculado (opcional)</Label>
+              <Select value={editEmployeeId} onValueChange={setEditEmployeeId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Sin vincular" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Sin vincular</SelectItem>
+                  {agendaEmployees.map((emp) => (
+                    <SelectItem key={emp.id} value={emp.id}>
+                      {emp.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Permisos granulares</Label>
+              <div className="max-h-52 overflow-auto rounded border p-2 space-y-1">
+                {permissions.map((perm) => {
+                  const checked = editPermissionIds.includes(perm.id);
+                  const label = perm.name || `${perm.resource}:${perm.action}`;
+                  return (
+                    <label key={perm.id} className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          setEditPermissionsTouched(true);
+                          setEditPermissionIds((prev) =>
+                            e.target.checked ? [...prev, perm.id] : prev.filter((id) => id !== perm.id),
+                          );
+                        }}
+                      />
+                      <span>{label}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Puedes ajustar permisos manualmente además del rol base.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button type="button" variant="outline" onClick={() => setIsEditOpen(false)}>
+                Cancelar
+              </Button>
+              <Button type="button" onClick={handleUpdateUser} disabled={updatingUser || !companyId}>
+                {updatingUser ? 'Guardando...' : 'Guardar cambios'}
               </Button>
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Users List */}
       <Card>

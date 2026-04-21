@@ -25,6 +25,7 @@ export interface PresupuestoN {
     name: string;
     email?: string;
     tax_id?: string;
+    phone?: string | null;
   };
 }
 
@@ -57,7 +58,7 @@ export const usePresupuestosN = () => {
         .from('presupuestos_n')
         .select(`
           *,
-          customer:customers(id, name, email, tax_id)
+          customer:customers(id, name, email, tax_id, phone)
         `)
         .order('created_at', { ascending: false });
 

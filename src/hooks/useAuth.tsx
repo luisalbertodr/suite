@@ -4,13 +4,13 @@ import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 
 const debugLog = (...args: unknown[]) => {
-  if (import.meta.env.DEV) {
+  if (import.meta.env.DEV && import.meta.env.VITE_DEBUG_AUTH === '1') {
     console.log(...args);
   }
 };
 
 const debugError = (...args: unknown[]) => {
-  if (import.meta.env.DEV) {
+  if (import.meta.env.DEV && import.meta.env.VITE_DEBUG_AUTH === '1') {
     console.error(...args);
   }
 };

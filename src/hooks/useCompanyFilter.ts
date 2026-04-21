@@ -4,19 +4,19 @@ import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabase';
 
 const debugLog = (...args: unknown[]) => {
-  if (import.meta.env.DEV) {
+  if (import.meta.env.DEV && import.meta.env.VITE_DEBUG_AUTH === '1') {
     console.log(...args);
   }
 };
 
 const debugError = (...args: unknown[]) => {
-  if (import.meta.env.DEV) {
+  if (import.meta.env.DEV && import.meta.env.VITE_DEBUG_AUTH === '1') {
     console.error(...args);
   }
 };
 
 const debugWarn = (...args: unknown[]) => {
-  if (import.meta.env.DEV) {
+  if (import.meta.env.DEV && import.meta.env.VITE_DEBUG_AUTH === '1') {
     console.warn(...args);
   }
 };
@@ -205,7 +205,7 @@ export const useCompanyFilter = () => {
         setupInProgressForUser.current = null;
       }
     };
-  }, [user, authLoading]);
+  }, [user?.id, authLoading]);
 
   // Log company filter state changes
   useEffect(() => {

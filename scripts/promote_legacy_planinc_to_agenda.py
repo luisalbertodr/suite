@@ -3,9 +3,11 @@ Promueve filas de legacy.planinc a public.agenda_appointments.
 
 - Tramos consecutivos (mismo día, mismo cliente y mismo empleado Dunasoft) se fusionan
   en una sola cita; el bloque horario va del inicio del primero al fin del último (sin solapes).
-- Se crean filas en public.appointment_items: un ítem "service" por tramo fusionado y
-  ítems "product" por líneas de legacy.planart (idplan) con etiqueta desde legacy.articulos.
-  article_id / customer_voucher_id no se resuelven aquí (quedan null); se puede enriquecer luego.
+- PLANINC guarda historial: varias filas comparten IDPLAN (código de seguimiento). Para la agenda
+  solo se usa la última versión (mayor FECHORINC / idplaninc como desempate). El resto queda en
+  legacy.planinc para auditoría.
+- PROMOTE_EXCLUDE_TIPINC: valores de TIPINC que indican borrado (coma-separados; se comparan en mayúsculas).
+  Por defecto se usa BORRAR (Dunasoft Style). Si defines la variable vacía, no se excluye ningún TIPINC.
 
 Variables (.env o entorno):
   SUPABASE_DB_URL
@@ -14,10 +16,11 @@ Variables (.env o entorno):
   PROMOTE_STATUS       ej. confirmed
   PROMOTE_MERGE_CONSECUTIVE  1|0   (default 1: fusionar tramos consecutivos)
   PROMOTE_MERGE_GAP_MINUTES  minutos máximos entre fin de un tramo e inicio del siguiente
-                              para seguir considerándolos consecutivos (default 1)
+                              para seguir considerándolos consecutivos (default 15; p. ej. hueco de un slot)
+  PROMOTE_EXCLUDE_TIPINC   coma-separados; por defecto BORRAR. Vacío = no excluir por TIPINC
 
 Reimportación el día del corte a producción (Style Dunasoft → Suite):
-  1) Exportar DBF desde Style al directorio habitual (LEGACY_DBF_DIR).
+  1) Exportar DBF desde Style al directorio habitual (por defecto LEGACY_DBF_DIR=E:\\dbf).
   2) Volcar legacy en Postgres: LEGACY_IMPORT_SCOPE=all python scripts/legacy_dbf_import_wave1.py
   3) Sustituir citas en la app: python scripts/promote_legacy_planinc_to_agenda.py --clean-import
 
@@ -100,6 +103,42 @@ def ts_for_column(data_type: str, date_s: str, hhmm: str) -> str:
 def norm_cli_key(codcli: str) -> str:
     c = str(codcli or "").strip()
     return c.lstrip("0") or "0"
+
+
+def norm_idplan(value) -> str:
+    return str(value or "").strip()
+
+
+def planinc_row_sort_key(r: dict) -> tuple[int, int]:
+    """
+    Ordenar versiones de la misma cita (IDPLAN): FECHORINC si se puede interpretar,
+    si no FECHA; desempate idplaninc ascendente (suele crecer con el tiempo).
+    """
+    fch = str(r.get("fechorinc") or "").strip()
+    digits = "".join(ch for ch in fch if ch.isdigit())
+    ts = 0
+    if len(digits) >= 14:
+        ts = int(digits[:14])
+    elif len(digits) >= 8:
+        ts = int(digits[:8]) * 10**6
+    else:
+        da = norm_date(r.get("fecha"))
+        if da and len(da) >= 10 and da[:4].isdigit():
+            ts = int(da.replace("-", "")[:8]) * 10**6
+    inc = 0
+    if str(r.get("idplaninc") or "").strip().isdigit():
+        inc = int(str(r.get("idplaninc")).strip())
+    return (ts, inc)
+
+
+def exclude_tipinc_set() -> set[str]:
+    """Dunasoft Style suele usar TIPINC='BORRAR' en el historial; se puede ampliar vía .env."""
+    if "PROMOTE_EXCLUDE_TIPINC" in os.environ:
+        raw = os.environ.get("PROMOTE_EXCLUDE_TIPINC", "").strip()
+        if not raw:
+            return set()
+        return {x.strip().upper() for x in raw.split(",") if x.strip()}
+    return {"BORRAR"}
 
 
 def table_column_types(cur, table: str) -> dict[str, str]:
@@ -239,7 +278,7 @@ def main() -> None:
         "false",
         "no",
     )
-    gap_max = int(os.environ.get("PROMOTE_MERGE_GAP_MINUTES", "1").strip() or "1")
+    gap_max = int(os.environ.get("PROMOTE_MERGE_GAP_MINUTES", "15").strip() or "15")
     if gap_max < 0:
         gap_max = 0
 
@@ -309,7 +348,11 @@ def main() -> None:
     cur.execute("SELECT * FROM legacy.planinc")
     source_rows = cur.fetchall()
 
-    by_planinc: "OrderedDict[str, dict]" = OrderedDict()
+    # idplan -> mejor fila (última modificación por FECHORINC / idplaninc)
+    winners_by_idplan: dict[str, tuple[tuple[int, int], dict]] = {}
+    # sin idplan: una fila por idplaninc (comportamiento anterior)
+    by_planinc_only: "OrderedDict[str, dict]" = OrderedDict()
+
     for r in source_rows:
         date = norm_date(r.get("fecha"))
         if not date:
@@ -332,23 +375,6 @@ def main() -> None:
         planinc_id = r.get("idplaninc")
         legacy_planinc_id = int(planinc_id) if str(planinc_id or "").strip().isdigit() else None
 
-        if legacy_planinc_id is not None and "legacy_planinc_id" in types:
-            dedupe_key = f"planinc:{legacy_planinc_id}"
-        else:
-            dedupe_key = "|".join(
-                [
-                    str(legacy_planinc_id or ""),
-                    date,
-                    start_time,
-                    codemp_raw,
-                    codcli,
-                    client_name,
-                    description,
-                ]
-            )
-        if dedupe_key in by_planinc:
-            continue
-
         try:
             sm = time_to_minutes(start_time)
             em = time_to_minutes(end_time)
@@ -356,6 +382,10 @@ def main() -> None:
             continue
         if em < sm:
             continue
+
+        idplan_s = norm_idplan(r.get("idplan"))
+        tipinc_s = str(r.get("tipinc") or "").strip()
+        sk = planinc_row_sort_key(r)
 
         seg = {
             "date": date,
@@ -371,12 +401,49 @@ def main() -> None:
             "description": description[:1000],
             "planart_txt": planart_txt,
             "texto": texto,
-            "idplan": str(r.get("idplan") or "").strip(),
+            "idplan": idplan_s,
             "legacy_planinc_id": legacy_planinc_id,
+            "tipinc": tipinc_s,
         }
-        by_planinc[dedupe_key] = seg
 
-    segments = list(by_planinc.values())
+        if idplan_s:
+            wk = f"idplan:{idplan_s}"
+            prev = winners_by_idplan.get(wk)
+            if prev is None or sk > prev[0]:
+                winners_by_idplan[wk] = (sk, seg)
+            continue
+
+        if legacy_planinc_id is not None and "legacy_planinc_id" in types:
+            dedupe_key = f"planinc:{legacy_planinc_id}"
+        else:
+            dedupe_key = "|".join(
+                [
+                    str(legacy_planinc_id or ""),
+                    date,
+                    start_time,
+                    codemp_raw,
+                    codcli,
+                    client_name,
+                    description,
+                ]
+            )
+        if dedupe_key in by_planinc_only:
+            continue
+        by_planinc_only[dedupe_key] = seg
+
+    exclude_tip = exclude_tipinc_set()
+    dropped_deleted = 0
+    segments: list[dict] = []
+    for _wk, (_sk, seg) in winners_by_idplan.items():
+        tip_u = str(seg.get("tipinc") or "").strip().upper()
+        if exclude_tip and tip_u in exclude_tip:
+            dropped_deleted += 1
+            continue
+        seg.pop("tipinc", None)
+        segments.append(seg)
+    for seg in by_planinc_only.values():
+        seg.pop("tipinc", None)
+        segments.append(seg)
     segments.sort(
         key=lambda s: (
             s["date"],
@@ -437,6 +504,9 @@ def main() -> None:
             row_out["status"] = status_default
         if "legacy_planinc_id" in types:
             row_out["legacy_planinc_id"] = canon_id
+        if "legacy_idplan" in types:
+            idp = str(first.get("idplan") or "").strip()
+            row_out["legacy_idplan"] = idp[:120] if idp else None
         if "legacy_codemp" in types:
             row_out["legacy_codemp"] = first["codemp_raw"]
         if "legacy_codcli" in types:
@@ -449,7 +519,9 @@ def main() -> None:
         items_for_appointments.append((appt_id, item_templates))
 
     print("legacy.planinc filas leídas:", len(source_rows))
-    print("tramos tras deduplicar id planinc:", len(segments))
+    print("tramos (última versión por IDPLAN / FECHORINC + filas sin IDPLAN):", len(segments))
+    if exclude_tip:
+        print("omitidas última versión = borrado (TIPINC en PROMOTE_EXCLUDE_TIPINC):", dropped_deleted)
     print("fusionado consecutivos:", "sí" if merge_on else "no", f"(hueco máx. {gap_max} min)")
     print("grupos con >1 tramo:", fused)
     print("citas a crear:", len(payload))
@@ -472,12 +544,18 @@ def main() -> None:
         cur.execute("DELETE FROM public.agenda_appointments WHERE company_id = %s", (company_id,))
         label = "PROMOTE_CLEAR=all" if not args.clean_import else "--clean-import"
         print(f"Eliminadas {n_del} citas de la empresa ({label}).")
-    elif "legacy_planinc_id" in types:
-        cur.execute(
-            "DELETE FROM public.agenda_appointments WHERE company_id = %s AND legacy_planinc_id IS NOT NULL",
-            (company_id,),
-        )
-        print("Eliminadas citas con legacy_planinc_id (PROMOTE_CLEAR=legacy_only).")
+    elif "legacy_planinc_id" in types or "legacy_idplan" in types:
+        parts: list[str] = []
+        if "legacy_planinc_id" in types:
+            parts.append("legacy_planinc_id IS NOT NULL")
+        if "legacy_idplan" in types:
+            parts.append("(legacy_idplan IS NOT NULL AND legacy_idplan <> '')")
+        if parts:
+            cur.execute(
+                f"DELETE FROM public.agenda_appointments WHERE company_id = %s AND ({' OR '.join(parts)})",
+                (company_id,),
+            )
+            print("Eliminadas citas importadas legacy (PROMOTE_CLEAR=legacy_only).")
     else:
         print(
             "Aviso: agenda_appointments no tiene legacy_planinc_id; no se borró nada. "

@@ -12,12 +12,14 @@ import { useInvoiceOperations } from '@/hooks/useInvoiceOperations';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { useInvoiceItems } from '@/hooks/useInvoiceItems';
 import { InvoiceItemRow } from './InvoiceItemRow';
+import { CustomerSelector } from '@/components/forms/CustomerSelector';
 
 interface Customer {
   id: string;
   name: string;
   email?: string;
   tax_id?: string;
+  phone?: string | null;
   re_percentage?: number;
   intracomunitario?: string;
 }
@@ -110,7 +112,7 @@ export const FacturaForm: React.FC<FacturaFormProps> = ({ invoice, onClose, budg
 
       const { data, error } = await supabase
         .from('customers')
-        .select('id, name, email, tax_id, re_percentage, intracomunitario')
+        .select('id, name, email, tax_id, phone, re_percentage, intracomunitario')
         .eq('company_id', companyId)
         .order('name');
       
@@ -501,23 +503,13 @@ export const FacturaForm: React.FC<FacturaFormProps> = ({ invoice, onClose, budg
                 </Button>
               </div>
             </div>
-            <div>
-              <Label htmlFor="customer_id">Cliente</Label>
-              <select
-                id="customer_id"
-                value={formData.customer_id}
-                onChange={(e) => setFormData({ ...formData, customer_id: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                required
-              >
-                <option value="">Seleccionar cliente...</option>
-                {customers?.map((customer) => (
-                  <option key={customer.id} value={customer.id}>
-                    {customer.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <CustomerSelector
+              customers={customers}
+              value={formData.customer_id}
+              onChange={(value) => setFormData({ ...formData, customer_id: value })}
+              allowEmptyOption
+              required
+            />
             <div>
               <Label htmlFor="issue_date">Fecha de Emisión</Label>
               <Input

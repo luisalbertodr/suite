@@ -40,14 +40,17 @@ export const Facturas: React.FC = () => {
         .from('invoices')
         .select(`
           *,
-          customers!inner(name, tax_id),
+          customers!inner(name, tax_id, email, phone),
           companies!inner(name)
         `)
         .eq('company_id', companyId)
         .order('created_at', { ascending: false });
 
       if (searchTerm) {
-        query = query.or(`number.ilike.%${searchTerm}%,customers.name.ilike.%${searchTerm}%`);
+        const st = searchTerm.replace(/%/g, '');
+        query = query.or(
+          `number.ilike.%${st}%,customers.name.ilike.%${st}%,customers.email.ilike.%${st}%,customers.tax_id.ilike.%${st}%,customers.phone.ilike.%${st}%`,
+        );
       }
 
       const { data, error } = await query;
@@ -206,7 +209,7 @@ export const Facturas: React.FC = () => {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
               <Input
-                placeholder="Buscar facturas..."
+                placeholder="Número, nombre de cliente, DNI, teléfono o email…"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-10"

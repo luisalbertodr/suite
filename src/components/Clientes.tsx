@@ -10,6 +10,7 @@ import { useToast } from '@/hooks/use-toast';
 import { ClienteForm } from './ClienteForm';
 import { ClienteDetailView } from './ClienteDetailView';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { customerMatchesSearch } from '@/lib/customerSearch';
 
 interface Customer {
   id: string;
@@ -67,11 +68,13 @@ export const Clientes: React.FC = () => {
     onError: () => toast({ title: "Error al eliminar", variant: "destructive" }),
   });
 
-  const filteredCustomers = customers?.filter(c =>
-    c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.tax_id?.toLowerCase().includes(searchTerm.toLowerCase())
-  ) || [];
+  const filteredCustomers =
+    customers?.filter((c) =>
+      customerMatchesSearch(
+        { id: c.id, name: c.name, email: c.email, tax_id: c.tax_id, phone: c.phone },
+        searchTerm,
+      ),
+    ) || [];
 
   if (companyLoading) {
     return (
@@ -137,7 +140,7 @@ export const Clientes: React.FC = () => {
             <div className="relative w-64">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground w-4 h-4" />
               <Input
-                placeholder="Buscar..."
+                placeholder="Nombre, DNI, teléfono o email…"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-9 h-9"

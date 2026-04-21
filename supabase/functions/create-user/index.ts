@@ -18,9 +18,9 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
 
-    const { email, password, company_id, role_id, permissions } = await req.json()
+    const { email, password, company_id, role_id, permissions, employee_id } = await req.json()
 
-    console.log('Creating user with data:', { email, company_id, role_id, permissions: permissions?.length || 0 })
+    console.log('Creating user with data:', { email, company_id, role_id, employee_id, permissions: permissions?.length || 0 })
 
     // Validate required fields
     if (!email || !password || !company_id || !role_id) {
@@ -79,7 +79,8 @@ serve(async (req) => {
         .from('user_profiles')
         .insert({
           user_id: userId,
-          company_id: company_id
+          company_id: company_id,
+          employee_id: employee_id || null,
         })
 
       if (profileError) {

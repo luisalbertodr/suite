@@ -6,7 +6,7 @@ Requisitos:
 
 Variables (o en .env del repo):
   SUPABASE_DB_URL=postgresql://...
-  LEGACY_DBF_DIR=E:\\APP Lipoout\\dbf
+  LEGACY_DBF_DIR=E:\\dbf
   IMPORT_BATCH=mi-lote-2026-04-20   (opcional)
   LEGACY_IMPORT_SCOPE=wave1|all   (por defecto wave1)
     - wave1: solo las 8 tablas iniciales (clientes, empleados, …).
@@ -17,7 +17,9 @@ Uso:
 
 Notas:
   - LEGACY_DBF_ENCODING: por defecto cp1252 (Windows español). Si tildes/ñ salen mal (DÝaz, A±on), prueba latin-1 o cp850.
-  - Filas con fechas o campos corruptos (p. ej. fecha = bytes nulos) se omiten y se cuenta aviso.
+  - Visual FoxPro: algunas filas activas empiezan con 0x00 (no solo espacio); dbfread las omitiría — aquí se leen igual.
+  - Campos tipo fecha (D) con bytes nulos: se tratan como vacíos en lugar de fallar toda la fila.
+  - Filas que sigan fallando al parsear se omiten y se cuenta aviso.
   - LEGACY_IGNORE_MISSING_MEMO=1 (por defecto) si falta el .fpt del memo.
   - Cada tabla hace COMMIT al terminar para no perder el lote si falla la siguiente.
   - Archivos muy grandes: si dbfread es lento, exportar con ogr2ogr a CSV y usar psql \\copy.
@@ -31,7 +33,7 @@ import sys
 from pathlib import Path
 
 try:
-    from dbfread import DBF
+    from dbfread import DBF, FieldParser
 except ImportError:
     print("Instala dependencias: pip install dbfread psycopg2-binary", file=sys.stderr)
     raise
@@ -42,6 +44,38 @@ from legacy_structure import WAVE1_IMPORT_ORDER
 
 ROOT = Path(__file__).resolve().parents[1]
 ENV_PATH = ROOT / ".env"
+
+# Prefijos de registro "activo" en DBF (FoxPro a veces usa 0x00; dbfread solo acepta espacio).
+_ACTIVE_RECORD_SEPS = (b" ", b"\x00")
+
+
+class LenientFieldParser(FieldParser):
+    """No abortar un registro por un campo corrupto (\\x00 en D, N, etc.)."""
+
+    def parse(self, field, data):
+        try:
+            return super().parse(field, data)
+        except Exception:
+            return None
+
+
+def iter_legacy_dbf_records(dbf: DBF):
+    """Itera registros activos como dbfread, pero incluye filas con prefijo 0x00."""
+    with open(dbf.filename, mode="rb") as infile, dbf._open_memofile() as memofile:
+        field_parser = LenientFieldParser(dbf, memofile)
+        parse = field_parser.parse
+        infile.seek(dbf.header.headerlen, 0)
+        read = infile.read
+        skip_record = dbf._skip_record
+        while True:
+            sep = read(1)
+            if sep in _ACTIVE_RECORD_SEPS:
+                items = [(field.name, parse(field, read(field.length))) for field in dbf.fields]
+                yield dbf.recfactory(items)
+            elif sep in (b"\x1a", b""):
+                break
+            else:
+                skip_record(infile)
 
 
 def load_dotenv() -> None:
@@ -134,7 +168,11 @@ def import_one(
 
     print(f"  leyendo {dbf_name} …")
     ignore_memo = os.environ.get("LEGACY_IGNORE_MISSING_MEMO", "1").strip() not in ("0", "false", "no")
-    dbf_kw: dict = {"encoding": encoding, "char_decode_errors": "replace"}
+    dbf_kw: dict = {
+        "encoding": encoding,
+        "char_decode_errors": "replace",
+        "parserclass": LenientFieldParser,
+    }
     if ignore_memo:
         dbf_kw["ignore_missing_memofile"] = True
     try:
@@ -148,7 +186,7 @@ def import_one(
     w = csv.writer(buf, delimiter=",", quoting=csv.QUOTE_MINIMAL, lineterminator="\n")
     n = 0
     skipped = 0
-    it = iter(dbf)
+    it = iter_legacy_dbf_records(dbf)
     while True:
         try:
             rec = next(it)
@@ -182,7 +220,7 @@ def import_one(
 
 def main() -> None:
     load_dotenv()
-    legacy_dir = Path(os.environ.get("LEGACY_DBF_DIR", r"E:\APP Lipoout\dbf"))
+    legacy_dir = Path(os.environ.get("LEGACY_DBF_DIR", r"E:\dbf"))
     scope = os.environ.get("LEGACY_IMPORT_SCOPE", "wave1").strip().lower()
     batch = os.environ.get("IMPORT_BATCH", "wave1").strip() or "wave1"
     # CP1252 suele ser el de Visual FoxPro / Windows ES; CP850 era MS-DOS.

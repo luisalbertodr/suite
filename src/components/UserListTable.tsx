@@ -12,10 +12,12 @@ interface UserWithDetails {
   email_confirmed_at?: string;
   profiles?: {
     company_id: string;
+    employee_id?: string | null;
     companies?: {
       name: string;
     };
   };
+  employee_name?: string | null;
   user_company_roles?: Array<{
     id: string;
     role: {
@@ -74,6 +76,7 @@ export const UserListTable: React.FC<UserListTableProps> = ({
           <TableRow>
             <TableHead>Email</TableHead>
             <TableHead>Empresa</TableHead>
+            <TableHead>Empleado vinculado</TableHead>
             <TableHead>Roles</TableHead>
             <TableHead>Estado</TableHead>
             <TableHead>Último acceso</TableHead>
@@ -96,6 +99,9 @@ export const UserListTable: React.FC<UserListTableProps> = ({
               </TableCell>
               <TableCell>
                 {user.profiles?.companies?.name || 'Sin empresa'}
+              </TableCell>
+              <TableCell>
+                {user.employee_name || 'Sin vincular'}
               </TableCell>
               <TableCell>
                 <div className="flex flex-wrap gap-1">

@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Plus, FileText, Edit, Trash2, Eye } from 'lucide-react';
 import { usePresupuestosN } from '@/hooks/usePresupuestosN';
 import { PresupuestoNForm } from './PresupuestoNForm';
+import { customerMatchesSearch } from '@/lib/customerSearch';
 import { PresupuestoNView } from './PresupuestoNView';
 
 export const PresupuestosN: React.FC = () => {
@@ -15,10 +16,17 @@ export const PresupuestosN: React.FC = () => {
   const [viewingPresupuesto, setViewingPresupuesto] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
 
-  const filteredPresupuestosN = presupuestosN.filter(presupuesto =>
-    presupuesto.number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    presupuesto.customer?.name?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredPresupuestosN = presupuestosN.filter((presupuesto) => {
+    const q = searchTerm.trim();
+    if (!q) return true;
+    if (presupuesto.number?.toLowerCase().includes(q.toLowerCase())) return true;
+    const c = presupuesto.customer;
+    if (!c) return false;
+    return customerMatchesSearch(
+      { id: c.id, name: c.name, email: c.email, tax_id: c.tax_id, phone: c.phone },
+      q,
+    );
+  });
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -99,7 +107,7 @@ export const PresupuestosN: React.FC = () => {
 
       <div className="flex gap-4">
         <Input
-          placeholder="Buscar por número o cliente..."
+          placeholder="Número, nombre, DNI, teléfono o email…"
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           className="max-w-sm"

@@ -12,10 +12,13 @@ interface UserWithDetails {
   email_confirmed_at?: string;
   profiles?: {
     company_id: string;
+    employee_id?: string | null;
     companies?: {
       name: string;
     };
   };
+  employee_name?: string | null;
+  permission_ids?: string[];
   user_company_roles?: Array<{
     id: string;
     role: {
@@ -25,7 +28,45 @@ interface UserWithDetails {
   }>;
 }
 
+interface CreateUserPayload {
+  email: string;
+  password: string;
+  company_id: string;
+  role_id: string;
+  employee_id?: string | null;
+  permissions?: string[];
+}
+
+interface UpdateUserPayload {
+  userId: string;
+  role_id?: string;
+  company_id?: string;
+  employee_id?: string | null;
+  permission_ids?: string[];
+}
+
 export const useUsers = () => {
+  const getMainErrorMessage = async (payload: Record<string, unknown>) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/main`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        },
+        body: JSON.stringify(payload),
+      });
+      const body = await resp.json().catch(() => null) as { error?: string; code?: string } | null;
+      if (body?.error && body?.code) return `${body.error} (${body.code})`;
+      if (body?.error) return body.error;
+      return `main returned HTTP ${resp.status}`;
+    } catch {
+      return null;
+    }
+  };
+
   const [users, setUsers] = useState<UserWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
   const { isSuperuser } = useAuth();
@@ -47,15 +88,13 @@ export const useUsers = () => {
         headers['Authorization'] = `Bearer ${session.access_token}`;
       }
 
-      // Build URL with superuser parameter if needed
-      let url = 'list-users';
-      if (isSuperuser) {
-        url += '?is_superuser=true';
-      }
-
-      const { data, error } = await supabase.functions.invoke(url, {
-        method: 'GET',
+      const { data, error } = await supabase.functions.invoke('main', {
         headers
+        ,
+        body: {
+          action: 'listUsers',
+          isSuperuser,
+        },
       });
 
       console.log('Users response:', { data, error, isSuperuser });
@@ -86,8 +125,20 @@ export const useUsers = () => {
 
   const deleteUser = async (userId: string) => {
     try {
-      const { data, error } = await supabase.functions.invoke('delete-user', {
-        body: { userId }
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (session?.access_token) {
+        headers['Authorization'] = `Bearer ${session.access_token}`;
+      }
+
+      const { data, error } = await supabase.functions.invoke('main', {
+        headers,
+        body: {
+          action: 'deleteUser',
+          userId,
+        },
       });
 
       if (error) {
@@ -111,6 +162,86 @@ export const useUsers = () => {
     }
   };
 
+  const createUser = async (payload: CreateUserPayload) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (session?.access_token) {
+        headers['Authorization'] = `Bearer ${session.access_token}`;
+      }
+
+      const { data, error } = await supabase.functions.invoke('main', {
+        headers,
+        body: {
+          action: 'createUser',
+          payload,
+        },
+      });
+
+      if (error) {
+        console.error('Error creating user:', error);
+        toast.error('Error al crear el usuario');
+        return false;
+      }
+
+      if (data?.success) {
+        toast.success('Usuario creado correctamente');
+        await fetchUsers();
+        return true;
+      }
+
+      toast.error(data?.error || 'Error al crear el usuario');
+      return false;
+    } catch (error) {
+      console.error('Error in createUser:', error);
+      toast.error('Error al crear el usuario');
+      return false;
+    }
+  };
+
+  const updateUser = async (payload: UpdateUserPayload) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (session?.access_token) {
+        headers['Authorization'] = `Bearer ${session.access_token}`;
+      }
+
+      const { data, error } = await supabase.functions.invoke('main', {
+        headers,
+        body: {
+          action: 'updateUser',
+          ...payload,
+        },
+      });
+
+      if (error) {
+        console.error('Error updating user:', error);
+        const detail = await getMainErrorMessage({ action: 'updateUser', ...payload });
+        toast.error(detail || 'Error al actualizar el usuario (función main)');
+        return false;
+      }
+
+      if (data?.success) {
+        toast.success('Usuario actualizado correctamente');
+        await fetchUsers();
+        return true;
+      }
+
+      toast.error(data?.error || 'Error al actualizar el usuario');
+      return false;
+    } catch (error) {
+      console.error('Error in updateUser:', error);
+      const detail = await getMainErrorMessage({ action: 'updateUser', ...payload });
+      toast.error(detail || 'Error al actualizar el usuario');
+      return false;
+    }
+  };
+
   useEffect(() => {
     fetchUsers();
   }, [isSuperuser]); // Re-fetch when superuser status changes
@@ -119,6 +250,8 @@ export const useUsers = () => {
     users,
     loading,
     fetchUsers,
-    deleteUser
+    deleteUser,
+    createUser,
+    updateUser,
   };
 };

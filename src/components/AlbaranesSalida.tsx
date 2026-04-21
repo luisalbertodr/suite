@@ -10,6 +10,7 @@ import { Plus, Edit, Eye, Trash2, Search, Truck } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { AlbaranSalidaForm } from './AlbaranSalidaForm';
+import { customerMatchesSearch } from '@/lib/customerSearch';
 import { AlbaranSalidaView } from './AlbaranSalidaView';
 
 interface DispatchNote {
@@ -26,6 +27,9 @@ interface DispatchNote {
   total_amount: number;
   customers: {
     name: string;
+    email?: string | null;
+    tax_id?: string | null;
+    phone?: string | null;
   } | null;
 }
 
@@ -65,7 +69,10 @@ export const AlbaranesSalida: React.FC = () => {
           tax_amount,
           total_amount,
           customers (
-            name
+            name,
+            email,
+            tax_id,
+            phone
           )
         `)
         .eq('company_id', companyId)
@@ -99,10 +106,23 @@ export const AlbaranesSalida: React.FC = () => {
     }
   });
 
-  const filteredNotes = dispatchNotes.filter(note =>
-    note.number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (note.customers?.name || '').toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredNotes = dispatchNotes.filter((note) => {
+    const q = searchTerm.trim();
+    if (!q) return true;
+    if (note.number.toLowerCase().includes(q.toLowerCase())) return true;
+    const c = note.customers;
+    if (!c) return false;
+    return customerMatchesSearch(
+      {
+        id: note.customer_id,
+        name: c.name,
+        email: c.email,
+        tax_id: c.tax_id,
+        phone: c.phone,
+      },
+      q,
+    );
+  });
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -241,7 +261,7 @@ export const AlbaranesSalida: React.FC = () => {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
               <Input
-                placeholder="Buscar por número o cliente..."
+                placeholder="Número, nombre, DNI, teléfono o email…"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-10"

@@ -17,6 +17,60 @@ export interface AgendaAppointment {
   company_id: string;
   created_at: string;
   updated_at: string;
+  /** Importación legacy; no debe repetirse por empresa (índice único en migración). */
+  legacy_planinc_id?: number | null;
+  /** IDPLAN Dunasoft: identifica la cita lógica (historial en planinc). */
+  legacy_idplan?: string | null;
+}
+
+/** Una fila por legacy_idplan (misma cita lógica). */
+function dedupeByLegacyIdPlan<T extends AgendaAppointment>(rows: T[]): T[] {
+  const best = new Map<string, T>();
+  for (const r of rows) {
+    const p = r.legacy_idplan != null ? String(r.legacy_idplan).trim() : '';
+    if (!p) continue;
+    const cur = best.get(p);
+    if (!cur) {
+      best.set(p, r);
+      continue;
+    }
+    const tNew = new Date(r.updated_at || 0).getTime();
+    const tOld = new Date(cur.updated_at || 0).getTime();
+    if (tNew >= tOld) best.set(p, r);
+  }
+  return rows.filter((r) => {
+    const p = r.legacy_idplan != null ? String(r.legacy_idplan).trim() : '';
+    if (!p) return true;
+    const chosen = best.get(p);
+    return chosen?.id === r.id;
+  });
+}
+
+/** Evita mostrar la misma cita legacy dos veces si la BD tiene filas duplicadas. */
+function dedupeByLegacyPlanincId<T extends AgendaAppointment>(rows: T[]): T[] {
+  const best = new Map<number, T>();
+  for (const r of rows) {
+    const lid = r.legacy_planinc_id;
+    if (lid == null || lid === undefined) continue;
+    const n = typeof lid === 'number' ? lid : Number(lid);
+    if (!Number.isFinite(n)) continue;
+    const cur = best.get(n);
+    if (!cur) {
+      best.set(n, r);
+      continue;
+    }
+    const tNew = new Date(r.updated_at || 0).getTime();
+    const tOld = new Date(cur.updated_at || 0).getTime();
+    if (tNew >= tOld) best.set(n, r);
+  }
+  return rows.filter((r) => {
+    const lid = r.legacy_planinc_id;
+    if (lid == null || lid === undefined) return true;
+    const n = typeof lid === 'number' ? lid : Number(lid);
+    if (!Number.isFinite(n)) return true;
+    const chosen = best.get(n);
+    return chosen?.id === r.id;
+  });
 }
 
 type CreateAppointmentInput = {
@@ -67,7 +121,7 @@ export const useAgendaAppointments = (date?: string) => {
         if (!legacyResult.error) {
           const legacyRows = (legacyResult.data || []) as AgendaAppointment[];
           if (legacyRows.length > 0) {
-            return legacyRows;
+            return dedupeByLegacyPlanincId(dedupeByLegacyIdPlan(legacyRows));
           }
         } else if (legacyResult.error.code !== '42703') {
           console.error('Error fetching appointments (legacy mode):', legacyResult.error);
@@ -89,7 +143,9 @@ export const useAgendaAppointments = (date?: string) => {
         throw modernResult.error;
       }
 
-      return (modernResult.data || []) as AgendaAppointment[];
+      return dedupeByLegacyPlanincId(
+        dedupeByLegacyIdPlan((modernResult.data || []) as AgendaAppointment[]),
+      );
     },
     enabled: !!companyId,
   });

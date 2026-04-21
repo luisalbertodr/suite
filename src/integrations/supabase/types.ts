@@ -84,6 +84,7 @@ export type Database = {
       agenda_employees: {
         Row: {
           active: boolean | null
+          agenda_sort_order: number
           color: string | null
           company_id: string
           created_at: string
@@ -91,10 +92,13 @@ export type Database = {
           id: string
           name: string
           phone: string | null
+          unavailability: Json
           updated_at: string
+          weekly_hours: Json | null
         }
         Insert: {
           active?: boolean | null
+          agenda_sort_order?: number
           color?: string | null
           company_id: string
           created_at?: string
@@ -102,10 +106,13 @@ export type Database = {
           id?: string
           name: string
           phone?: string | null
+          unavailability?: Json
           updated_at?: string
+          weekly_hours?: Json | null
         }
         Update: {
           active?: boolean | null
+          agenda_sort_order?: number
           color?: string | null
           company_id?: string
           created_at?: string
@@ -113,7 +120,9 @@ export type Database = {
           id?: string
           name?: string
           phone?: string | null
+          unavailability?: Json
           updated_at?: string
+          weekly_hours?: Json | null
         }
         Relationships: [
           {
@@ -129,6 +138,7 @@ export type Database = {
         Row: {
           appointment_id: string
           article_id: string | null
+          bonus_payment_mode: string
           created_at: string
           customer_voucher_id: string | null
           duration_minutes: number
@@ -137,12 +147,15 @@ export type Database = {
           label: string
           notes: string | null
           occupies_time: boolean
+          quantity: number
           sort_order: number
+          unit_price: number
           updated_at: string
         }
         Insert: {
           appointment_id: string
           article_id?: string | null
+          bonus_payment_mode?: string
           created_at?: string
           customer_voucher_id?: string | null
           duration_minutes?: number
@@ -151,12 +164,15 @@ export type Database = {
           label: string
           notes?: string | null
           occupies_time?: boolean
+          quantity?: number
           sort_order?: number
+          unit_price?: number
           updated_at?: string
         }
         Update: {
           appointment_id?: string
           article_id?: string | null
+          bonus_payment_mode?: string
           created_at?: string
           customer_voucher_id?: string | null
           duration_minutes?: number
@@ -165,7 +181,9 @@ export type Database = {
           label?: string
           notes?: string | null
           occupies_time?: boolean
+          quantity?: number
           sort_order?: number
+          unit_price?: number
           updated_at?: string
         }
         Relationships: [
@@ -334,6 +352,7 @@ export type Database = {
       }
       articles: {
         Row: {
+          article_kind: string
           codigo: string
           codigo_barras: string | null
           codigo_serie: string | null
@@ -346,14 +365,20 @@ export type Database = {
           foto_url: string | null
           id: string
           iva_percentage: number
+          legacy_codart: string | null
+          legacy_familia_code: string | null
+          legacy_photo_path: string | null
+          legacy_tipart: string | null
           precio: number
           precio_compra: number | null
+          duration_minutes: number
           stock_actual: number
           stock_minimo: number
           tipo_producto: string
           updated_at: string
         }
         Insert: {
+          article_kind?: string
           codigo: string
           codigo_barras?: string | null
           codigo_serie?: string | null
@@ -366,14 +391,20 @@ export type Database = {
           foto_url?: string | null
           id?: string
           iva_percentage?: number
+          legacy_codart?: string | null
+          legacy_familia_code?: string | null
+          legacy_photo_path?: string | null
+          legacy_tipart?: string | null
           precio?: number
           precio_compra?: number | null
+          duration_minutes?: number
           stock_actual?: number
           stock_minimo?: number
           tipo_producto?: string
           updated_at?: string
         }
         Update: {
+          article_kind?: string
           codigo?: string
           codigo_barras?: string | null
           codigo_serie?: string | null
@@ -386,8 +417,13 @@ export type Database = {
           foto_url?: string | null
           id?: string
           iva_percentage?: number
+          legacy_codart?: string | null
+          legacy_familia_code?: string | null
+          legacy_photo_path?: string | null
+          legacy_tipart?: string | null
           precio?: number
           precio_compra?: number | null
+          duration_minutes?: number
           stock_actual?: number
           stock_minimo?: number
           tipo_producto?: string
@@ -646,6 +682,7 @@ export type Database = {
           address_postal_code: string | null
           address_state: string | null
           address_street: string | null
+          agenda_center_hours: Json | null
           created_at: string
           email: string
           id: string
@@ -663,6 +700,7 @@ export type Database = {
           address_postal_code?: string | null
           address_state?: string | null
           address_street?: string | null
+          agenda_center_hours?: Json | null
           created_at?: string
           email: string
           id?: string
@@ -680,6 +718,7 @@ export type Database = {
           address_postal_code?: string | null
           address_state?: string | null
           address_street?: string | null
+          agenda_center_hours?: Json | null
           created_at?: string
           email?: string
           id?: string
@@ -973,8 +1012,11 @@ export type Database = {
           irpf_percentage: number | null
           name: string
           notes: string | null
+          legacy_codcli: string | null
           payment_terms: number | null
           phone: string | null
+          phone_home: string | null
+          phone_mobile: string | null
           photo_url: string | null
           re_percentage: number | null
           tax_id: string | null
@@ -997,8 +1039,11 @@ export type Database = {
           irpf_percentage?: number | null
           name: string
           notes?: string | null
+          legacy_codcli?: string | null
           payment_terms?: number | null
           phone?: string | null
+          phone_home?: string | null
+          phone_mobile?: string | null
           photo_url?: string | null
           re_percentage?: number | null
           tax_id?: string | null
@@ -1021,8 +1066,11 @@ export type Database = {
           irpf_percentage?: number | null
           name?: string
           notes?: string | null
+          legacy_codcli?: string | null
           payment_terms?: number | null
           phone?: string | null
+          phone_home?: string | null
+          phone_mobile?: string | null
           photo_url?: string | null
           re_percentage?: number | null
           tax_id?: string | null

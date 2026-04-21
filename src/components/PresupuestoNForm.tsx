@@ -66,7 +66,7 @@ export const PresupuestoNForm: React.FC<PresupuestoNFormProps> = ({
         const {
           data,
           error
-        } = await supabase.from('customers').select('id, name, email, tax_id').order('name');
+        } = await supabase.from('customers').select('id, name, email, tax_id, phone').order('name');
         if (error) throw error;
         setCustomers(data || []);
       } catch (error: any) {

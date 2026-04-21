@@ -5,8 +5,9 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { GripVertical, Plus, Trash2 } from 'lucide-react';
-import type { AppointmentItemDraft, AppointmentItemKind } from '@/types/agenda';
+import type { AppointmentItemDraft, AppointmentItemKind, BonusPaymentMode } from '@/types/agenda';
 import { calcEndFromStart, effectiveDurationMinutes } from '@/lib/agendaAppointmentItems';
+import { appointmentItemLineTotal, appointmentItemsTotal } from '@/lib/agendaAppointmentPricing';
 
 function newClientKey(): string {
   return typeof crypto !== 'undefined' && crypto.randomUUID
@@ -53,6 +54,9 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
         label: '',
         duration_minutes: 15,
         occupies_time: true,
+        quantity: 1,
+        unit_price: 0,
+        bonus_payment_mode: 'none',
       },
     ]);
   };
@@ -62,11 +66,16 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
     onChange(items.filter((_, i) => i !== index));
   };
 
+  const totalPreview = appointmentItemsTotal(items);
+
   return (
     <div className="space-y-2 rounded-md border bg-muted/30 p-2">
       <div className="flex items-center justify-between gap-2">
         <Label className="text-xs font-medium">Ítems de la cita</Label>
-        <span className="text-[10px] text-muted-foreground tabular-nums">Fin: {endPreview}</span>
+        <div className="flex items-center gap-3">
+          <span className="text-[10px] text-muted-foreground tabular-nums">Fin: {endPreview}</span>
+          <span className="text-[10px] font-medium tabular-nums">Total: {totalPreview.toFixed(2)} EUR</span>
+        </div>
       </div>
       <p className="text-[10px] text-muted-foreground leading-tight">
         Arrastra el asa para ordenar. Solo los ítems con «ocupa tiempo» suman duración.
@@ -143,6 +152,54 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
                 className="scale-75 origin-center"
               />
             </div>
+            {item.kind === 'bonus' ? (
+              <div className="flex items-center gap-1">
+                <Select
+                  value={item.bonus_payment_mode ?? 'none'}
+                  onValueChange={(v) => updateAt(index, { bonus_payment_mode: v as BonusPaymentMode })}
+                >
+                  <SelectTrigger className="h-7 w-[78px] text-[11px] px-1.5">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Sin cobro</SelectItem>
+                    <SelectItem value="full">100%</SelectItem>
+                    <SelectItem value="60">60%</SelectItem>
+                    <SelectItem value="40">40%</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  className="h-7 w-16 text-xs px-1"
+                  value={item.unit_price ?? 0}
+                  onChange={(e) => updateAt(index, { unit_price: parseFloat(e.target.value) || 0 })}
+                />
+              </div>
+            ) : (
+              <div className="flex items-center gap-1">
+                <Input
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  className="h-7 w-14 text-xs px-1"
+                  value={item.quantity ?? 1}
+                  onChange={(e) => updateAt(index, { quantity: parseFloat(e.target.value) || 0 })}
+                />
+                <Input
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  className="h-7 w-16 text-xs px-1"
+                  value={item.unit_price ?? 0}
+                  onChange={(e) => updateAt(index, { unit_price: parseFloat(e.target.value) || 0 })}
+                />
+              </div>
+            )}
+            <span className="text-[10px] tabular-nums min-w-[55px] text-right">
+              {appointmentItemLineTotal(item).toFixed(2)} EUR
+            </span>
             <Button
               type="button"
               variant="ghost"

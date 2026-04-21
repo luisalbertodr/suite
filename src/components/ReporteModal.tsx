@@ -15,6 +15,8 @@ import { cn } from '@/lib/utils';
 import { ReporteResults } from './ReporteResults';
 import { supabase } from '@/lib/supabase';
 import { useQuery } from '@tanstack/react-query';
+import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { CustomerSelector } from '@/components/forms/CustomerSelector';
 
 interface Report {
   id: string;
@@ -48,18 +50,22 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
   const [showResults, setShowResults] = useState(false);
   const [filters, setFilters] = useState<FilterValues>({});
   const [loading, setLoading] = useState(false);
+  const { companyId, loading: companyLoading } = useCompanyFilter();
 
   // Consultas para obtener datos reales para los filtros
   const { data: customers } = useQuery({
-    queryKey: ['customers'],
+    queryKey: ['customers', companyId, 'reporte-modal'],
     queryFn: async () => {
+      if (!companyId) return [];
       const { data, error } = await supabase
         .from('customers')
-        .select('id, name')
+        .select('id, name, email, tax_id, phone')
+        .eq('company_id', companyId)
         .order('name');
       if (error) throw error;
       return data;
     },
+    enabled: !!companyId && !companyLoading,
   });
 
   const { data: suppliers } = useQuery({
@@ -236,20 +242,14 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
       case "cliente":
         return (
           <div className="space-y-2">
-            <Label>Cliente</Label>
-            <Select onValueChange={(value) => setFilters(prev => ({ ...prev, cliente: value }))}>
-              <SelectTrigger>
-                <SelectValue placeholder="Seleccionar cliente" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="todos">Todos los clientes</SelectItem>
-                {customers?.map((customer) => (
-                  <SelectItem key={customer.id} value={customer.id}>
-                    {customer.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <CustomerSelector
+              label="Cliente"
+              customers={customers}
+              value={filters.cliente ?? 'todos'}
+              onChange={(value) => setFilters((prev) => ({ ...prev, cliente: value || 'todos' }))}
+              allowEmptyOption={false}
+              topOptions={[{ value: 'todos', label: 'Todos los clientes' }]}
+            />
           </div>
         );
 

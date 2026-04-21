@@ -11,6 +11,7 @@ export interface Article {
   descripcion_larga: string | null;
   familia: string;
   precio: number;
+  precio_compra?: number | null;
   stock_actual: number;
   stock_minimo: number;
   codigo_barras: string | null;
@@ -18,6 +19,8 @@ export interface Article {
   foto_url: string | null;
   estado: 'activo' | 'inactivo';
   tipo_producto: 'textil' | 'calzado' | 'standard';
+  article_kind?: 'producto' | 'servicio' | 'bono';
+  duration_minutes?: number;
   company_id: string | null;
   iva_percentage: number;
   created_at: string;
@@ -30,6 +33,7 @@ export interface ArticleFormData {
   descripcion_larga: string;
   familia: string;
   precio: number;
+  precio_compra: number;
   stock_actual: number;
   stock_minimo: number;
   codigo_barras: string;
@@ -38,6 +42,8 @@ export interface ArticleFormData {
   talla: string; // Keep for backward compatibility but won't be used
   color: string; // Keep for backward compatibility but won't be used
   tipo_producto: 'textil' | 'calzado' | 'standard';
+  article_kind: 'producto' | 'servicio' | 'bono';
+  duration_minutes: number;
   iva_percentage: number;
   foto_url?: string;
 }

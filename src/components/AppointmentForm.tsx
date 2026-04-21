@@ -10,6 +10,9 @@ import { format } from 'date-fns';
 import { AppointmentItemsEditor } from '@/components/AppointmentItemsEditor';
 import type { AppointmentItemDraft } from '@/types/agenda';
 import { calcEndFromStart, effectiveDurationMinutes } from '@/lib/agendaAppointmentItems';
+import { appointmentItemsTotal } from '@/lib/agendaAppointmentPricing';
+import { AppointmentClientePicker, type AppointmentClientPick } from '@/components/forms/AppointmentClientePicker';
+import type { CustomerSearchRow } from '@/lib/customerSearch';
 
 interface Employee {
   id: string;
@@ -21,6 +24,7 @@ interface AppointmentFormProps {
   employeeId: string;
   time: string;
   employees: Employee[];
+  customers: CustomerSearchRow[];
   cabinas?: any[];
   recursos?: any[];
   onSave: (appointment: any) => void;
@@ -28,10 +32,11 @@ interface AppointmentFormProps {
 }
 
 export const AppointmentForm: React.FC<AppointmentFormProps> = ({
-  employeeId, time, employees, cabinas = [], recursos = [], onSave, onCancel
+  employeeId, time, employees, customers, cabinas = [], recursos = [], onSave, onCancel
 }) => {
+  const [clientPick, setClientPick] = useState<AppointmentClientPick | null>(null);
+
   const [formData, setFormData] = useState({
-    clientName: '',
     description: '',
     date: format(new Date(), 'yyyy-MM-dd'),
     employeeId,
@@ -48,19 +53,27 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
       label: '',
       duration_minutes: 30,
       occupies_time: true,
+      quantity: 1,
+      unit_price: 0,
+      bonus_payment_mode: 'none',
     },
   ]);
 
   const employee = employees.find(e => e.id === employeeId);
+  const total = appointmentItemsTotal(items);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.clientName.trim()) return;
+    if (!clientPick) return;
+    const clientName = clientPick.kind === 'customer' ? clientPick.displayName : clientPick.name;
+    if (!clientName.trim()) return;
+
     const selectedEmployee = employees.find(e => e.id === formData.employeeId);
     const endTime = calcEndFromStart(formData.startTime, effectiveDurationMinutes(items));
     onSave({
       employeeId: formData.employeeId,
-      clientName: formData.clientName,
+      clientName: clientName.trim(),
+      customerId: clientPick.kind === 'customer' ? clientPick.customerId : null,
       description: formData.description,
       date: formData.date,
       startTime: formData.startTime,
@@ -74,8 +87,8 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <Card className="w-full max-w-md">
+    <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-50 px-4 pt-3 pb-24 sm:p-4">
+      <Card className="w-full max-w-md max-h-[calc(100dvh-7rem)] overflow-y-auto">
         <CardHeader className="pb-3">
           <div className="flex justify-between items-center">
             <CardTitle className="text-base flex items-center gap-2">
@@ -91,13 +104,12 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs">Fecha</Label>
-                <Input type="date" value={formData.date} onChange={(e) => setFormData({ ...formData, date: e.target.value })} />
+            <div className="grid grid-cols-4 gap-2 items-end">
+              <div className="col-span-3">
+                <AppointmentClientePicker customers={customers} value={clientPick} onChange={setClientPick} />
               </div>
-              <div>
-                <Label className="text-xs">Empleado</Label>
+              <div className="col-span-1">
+                <Label className="text-xs">Empleada</Label>
                 <Select value={formData.employeeId} onValueChange={(v) => setFormData({ ...formData, employeeId: v })}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -106,24 +118,30 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
                 </Select>
               </div>
             </div>
-            <div>
-              <Label className="text-xs">Cliente *</Label>
-              <Input value={formData.clientName} onChange={(e) => setFormData({ ...formData, clientName: e.target.value })} placeholder="Nombre del cliente" required />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs">Fecha</Label>
+                <Input type="date" value={formData.date} onChange={(e) => setFormData({ ...formData, date: e.target.value })} />
+              </div>
+              <div>
+                <Label className="text-xs">Hora inicio</Label>
+                <Input
+                  type="time"
+                  value={formData.startTime}
+                  onChange={(e) => setFormData({ ...formData, startTime: e.target.value })}
+                />
+              </div>
             </div>
             <div>
               <Label className="text-xs">Descripción</Label>
               <Textarea value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} rows={2} placeholder="Tratamiento o notas" />
             </div>
-            <div>
-              <Label className="text-xs">Hora inicio</Label>
-              <Input
-                type="time"
-                value={formData.startTime}
-                onChange={(e) => setFormData({ ...formData, startTime: e.target.value })}
-              />
-            </div>
 
             <AppointmentItemsEditor startTime={formData.startTime} items={items} onChange={setItems} />
+            <div className="rounded-md border bg-muted/30 px-2 py-1.5 text-xs flex items-center justify-between">
+              <span className="text-muted-foreground">Importe cita</span>
+              <span className="font-semibold tabular-nums">{total.toFixed(2)} EUR</span>
+            </div>
 
             {/* Cabina & Recurso */}
             <div className="grid grid-cols-2 gap-3">
@@ -134,7 +152,7 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
                     <SelectTrigger><SelectValue placeholder="Sin asignar" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">Sin asignar</SelectItem>
-                      {cabinas.filter(c => c.activa).map(c => (
+                      {cabinas.filter((c: any) => c.activa).map((c: any) => (
                         <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>
                       ))}
                     </SelectContent>
@@ -148,7 +166,7 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
                     <SelectTrigger><SelectValue placeholder="Sin asignar" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">Sin asignar</SelectItem>
-                      {recursos.filter(r => r.activo).map(r => (
+                      {recursos.filter((r: any) => r.activo).map((r: any) => (
                         <SelectItem key={r.id} value={r.id}>{r.nombre}</SelectItem>
                       ))}
                     </SelectContent>
@@ -159,7 +177,7 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
 
             <div>
               <Label className="text-xs">Estado</Label>
-              <Select value={formData.status} onValueChange={(v) => setFormData({ ...formData, status: v as any })}>
+              <Select value={formData.status} onValueChange={(v) => setFormData({ ...formData, status: v as 'confirmed' | 'pending' | 'cancelled' })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="confirmed">Confirmada</SelectItem>
@@ -170,7 +188,9 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
             </div>
 
             <div className="flex gap-2 pt-2">
-              <Button type="submit" className="flex-1 gap-1"><Save className="w-4 h-4" /> Guardar</Button>
+              <Button type="submit" className="flex-1 gap-1" disabled={!clientPick}>
+                <Save className="w-4 h-4" /> Guardar
+              </Button>
               <Button type="button" variant="outline" onClick={onCancel}>Cancelar</Button>
             </div>
           </form>

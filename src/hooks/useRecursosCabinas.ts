@@ -8,7 +8,8 @@ const isMissingRelation = (error: { code?: string; message?: string } | null) =>
     error.code === 'PGRST205' ||
     error.code === '42P01' ||
     /Could not find the table/i.test(error.message || '') ||
-    /relation .* does not exist/i.test(error.message || '')
+    /relation .* does not exist/i.test(error.message || '') ||
+    /not found/i.test(error.message || '')
   );
 
 export const useCabinas = () => {

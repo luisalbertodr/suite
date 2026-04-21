@@ -38,6 +38,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
     descripcion_larga: '',
     familia: '',
     precio: 0,
+    precio_compra: 0,
     stock_actual: 0,
     stock_minimo: 0,
     codigo_barras: '',
@@ -45,6 +46,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
     talla: '',
     color: '',
     tipo_producto: 'standard',
+    article_kind: 'producto',
+    duration_minutes: 0,
     estado: 'activo',
     iva_percentage: 21
   });
@@ -67,6 +70,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
         descripcion_larga: article.descripcion_larga || '',
         familia: article.familia,
         precio: article.precio,
+        precio_compra: article.precio_compra || 0,
         stock_actual: article.stock_actual,
         stock_minimo: article.stock_minimo,
         codigo_barras: article.codigo_barras || '',
@@ -74,6 +78,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
         talla: '',
         color: '',
         tipo_producto: article.tipo_producto || 'standard',
+        article_kind: article.article_kind || 'producto',
+        duration_minutes: article.duration_minutes || 0,
         estado: article.estado,
         iva_percentage: article.iva_percentage || 21
       });
@@ -105,6 +111,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
             descripcion_larga: '',
             familia: 'Varios',
             precio: 0,
+            precio_compra: 0,
             stock_actual: 0,
             stock_minimo: 0,
             codigo_barras: '',
@@ -112,6 +119,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
             talla: '',
             color: '',
             tipo_producto: 'standard',
+            article_kind: 'producto',
+            duration_minutes: 0,
             estado: 'activo',
             iva_percentage: 21
           });
@@ -130,6 +139,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
             descripcion_larga: '',
             familia: '',
             precio: 0,
+            precio_compra: 0,
             stock_actual: 0,
             stock_minimo: 0,
             codigo_barras: '',
@@ -137,6 +147,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
             talla: '',
             color: '',
             tipo_producto: 'standard',
+            article_kind: 'producto',
+            duration_minutes: 0,
             estado: 'activo',
             iva_percentage: 21
           });
@@ -162,7 +174,13 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
     const { name, value } = e.target;
     setFormData(prev => ({
       ...prev,
-      [name]: name === 'precio' || name === 'stock_actual' || name === 'stock_minimo' || name === 'iva_percentage'
+      [name]:
+        name === 'precio' ||
+        name === 'precio_compra' ||
+        name === 'stock_actual' ||
+        name === 'stock_minimo' ||
+        name === 'iva_percentage' ||
+        name === 'duration_minutes'
         ? parseFloat(value) || 0 
         : value
     }));

@@ -23,6 +23,7 @@ import { FamilyManager } from './FamilyManager';
 export const Articulos: React.FC = () => {
   const { articles, loading, deleteArticle, refetch } = useArticles();
   const [searchTerm, setSearchTerm] = useState('');
+  const [activeKind, setActiveKind] = useState<'producto' | 'servicio' | 'bono'>('producto');
   const [showForm, setShowForm] = useState(false);
   const [showFamilyManager, setShowFamilyManager] = useState(false);
   const [selectedArticle, setSelectedArticle] = useState(null);
@@ -30,12 +31,16 @@ export const Articulos: React.FC = () => {
   const [articleVariations, setArticleVariations] = useState<{[key: string]: any[]}>({});
   const [loadingVariations, setLoadingVariations] = useState<{[key: string]: boolean}>({});
 
-  const filteredArticles = articles.filter(article =>
-    article.descripcion.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    article.codigo.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    article.familia.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    article.tipo_producto.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredArticles = articles.filter(article => {
+    if ((article.article_kind || 'producto') !== activeKind) return false;
+    const term = searchTerm.toLowerCase();
+    return (
+      article.descripcion.toLowerCase().includes(term) ||
+      article.codigo.toLowerCase().includes(term) ||
+      article.familia.toLowerCase().includes(term) ||
+      article.tipo_producto.toLowerCase().includes(term)
+    );
+  });
 
   const articulosBajoStock = articles.filter(art => art.stock_actual <= art.stock_minimo);
   const familias = [...new Set(articles.map(art => art.familia))];
@@ -219,6 +224,20 @@ export const Articulos: React.FC = () => {
       </div>
 
       <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
+        <div className="mb-4 inline-flex rounded-lg border border-gray-200 p-1 bg-gray-50">
+          {(['producto', 'servicio', 'bono'] as const).map((kind) => (
+            <button
+              key={kind}
+              type="button"
+              onClick={() => setActiveKind(kind)}
+              className={`px-3 py-1.5 rounded-md text-sm transition-colors ${
+                activeKind === kind ? 'bg-white shadow text-blue-700' : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              {kind === 'producto' ? 'Productos' : kind === 'servicio' ? 'Servicios' : 'Bonos'}
+            </button>
+          ))}
+        </div>
         <div className="flex flex-col md:flex-row md:items-center md:justify-between space-y-4 md:space-y-0">
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
@@ -303,7 +322,7 @@ export const Articulos: React.FC = () => {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="space-y-1">
                         <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getProductTypeColor(articulo.tipo_producto)}`}>
-                          {getProductTypeLabel(articulo.tipo_producto)}
+                          {articulo.article_kind === 'servicio' ? 'Servicio' : articulo.article_kind === 'bono' ? 'Bono' : getProductTypeLabel(articulo.tipo_producto)}
                         </span>
                         <br />
                         <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">

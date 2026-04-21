@@ -11,6 +11,12 @@ const PRODUCT_TYPES = [
   { value: 'calzado', label: 'Calzado' }
 ];
 
+const ARTICLE_KINDS = [
+  { value: 'producto', label: 'Producto' },
+  { value: 'servicio', label: 'Servicio' },
+  { value: 'bono', label: 'Bono' },
+];
+
 interface ArticleFormFieldsProps {
   formData: ArticleFormData;
   families: string[];
@@ -53,12 +59,31 @@ export const ArticleFormFields: React.FC<ArticleFormFieldsProps> = ({
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
+            Categoría *
+          </label>
+          <select
+            name="article_kind"
+            value={formData.article_kind}
+            onChange={onInputChange}
+            title="Categoría"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            required
+            disabled={fieldsDisabled}
+          >
+            {ARTICLE_KINDS.map(kind => (
+              <option key={kind.value} value={kind.value}>{kind.label}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
             Tipo de Producto *
           </label>
           <select 
             name="tipo_producto"
             value={formData.tipo_producto}
             onChange={onProductTypeChange}
+            title="Tipo de producto"
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             required
             disabled={fieldsDisabled}
@@ -76,6 +101,7 @@ export const ArticleFormFields: React.FC<ArticleFormFieldsProps> = ({
             name="familia"
             value={formData.familia}
             onChange={onFamiliaChange}
+            title="Familia"
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             required
             disabled={fieldsDisabled}
@@ -154,6 +180,22 @@ export const ArticleFormFields: React.FC<ArticleFormFieldsProps> = ({
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
+            Precio Coste (€)
+          </label>
+          <input
+            type="number"
+            name="precio_compra"
+            value={formData.precio_compra}
+            onChange={onInputChange}
+            step="0.01"
+            min="0"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            placeholder="0.00"
+            disabled={fieldsDisabled}
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
             IVA (%) *
           </label>
           <input
@@ -168,6 +210,22 @@ export const ArticleFormFields: React.FC<ArticleFormFieldsProps> = ({
             placeholder="21.00"
             required
             disabled={fieldsDisabled}
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Duración (min)
+          </label>
+          <input
+            type="number"
+            name="duration_minutes"
+            value={formData.duration_minutes}
+            onChange={onInputChange}
+            min="0"
+            step="5"
+            placeholder="0"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            disabled={fieldsDisabled || formData.article_kind !== 'servicio'}
           />
         </div>
         <div>

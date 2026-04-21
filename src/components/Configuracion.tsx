@@ -17,6 +17,9 @@ import { Empresas } from './Empresas';
 import { RecursosCabinas } from './RecursosCabinas';
 import { EmployeesConfig } from './EmployeesConfig';
 import { AgendaPreferencesConfig } from './AgendaPreferencesConfig';
+import { AgendaCenterHoursConfig } from './AgendaCenterHoursConfig';
+import { AgendaEmployeeHoursConfig } from './AgendaEmployeeHoursConfig';
+import { UserManagement } from './UserManagement';
 
 export const Configuracion: React.FC = () => {
   const { toast } = useToast();
@@ -87,6 +90,7 @@ export const Configuracion: React.FC = () => {
           <TabsTrigger value="verifactu">Verifactu</TabsTrigger>
           <TabsTrigger value="verifactu-xml">XML Docs</TabsTrigger>
           <TabsTrigger value="seguridad">Seguridad</TabsTrigger>
+          <TabsTrigger value="usuarios-permisos">Usuarios y permisos</TabsTrigger>
         </TabsList>
 
         <TabsContent value="general" className="space-y-4">
@@ -119,6 +123,8 @@ export const Configuracion: React.FC = () => {
         </TabsContent>
 
         <TabsContent value="agenda" className="space-y-4">
+          <AgendaCenterHoursConfig />
+          <AgendaEmployeeHoursConfig />
           <AgendaPreferencesConfig />
         </TabsContent>
 
@@ -151,6 +157,10 @@ export const Configuracion: React.FC = () => {
 
         <TabsContent value="seguridad" className="space-y-4">
           <SecurityAudit />
+        </TabsContent>
+
+        <TabsContent value="usuarios-permisos" className="space-y-4">
+          <UserManagement />
         </TabsContent>
       </Tabs>
     </div>

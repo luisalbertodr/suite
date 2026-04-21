@@ -1,21 +1,39 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
-import { Calendar, Clock, ChevronLeft, ChevronRight, AlertCircle } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, ChevronLeft, ChevronRight, AlertCircle } from 'lucide-react';
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { AgendaGrid } from './AgendaGrid';
 import { AppointmentForm } from './AppointmentForm';
 import { EditAppointmentForm } from './EditAppointmentForm';
 import { useAgendaEmployees } from '@/hooks/useAgendaEmployees';
 import { useAgendaAppointments } from '@/hooks/useAgendaAppointments';
 import { useCabinas, useRecursos } from '@/hooks/useRecursosCabinas';
-import { format, addDays, subDays } from 'date-fns';
+import { format, addDays, subDays, parse, isValid } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { useToast } from '@/hooks/use-toast';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAgendaPreferences } from '@/hooks/useAgendaPreferences';
 import { appointmentItemsQueryKey, syncAppointmentItems } from '@/hooks/useAppointmentItems';
 import type { AppointmentItemDraft } from '@/types/agenda';
+import { useAuth } from '@/hooks/useAuth';
+import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import type { CustomerSearchRow } from '@/lib/customerSearch';
+import {
+  loadAgendaViewPersisted,
+  mergePersistedLastDate,
+  saveAgendaViewPersisted,
+} from '@/lib/agendaViewPersistence';
+import {
+  parseAgendaDayHoursMap,
+  parseUnavailability,
+  type AgendaDayHoursMap,
+  type AgendaUnavailabilityEntry,
+} from '@/lib/agendaHours';
+import { appointmentItemLineTotal } from '@/lib/agendaAppointmentPricing';
 
 interface Employee {
   id: string;
@@ -27,6 +45,7 @@ interface Appointment {
   id: string;
   employeeId: string;
   clientName: string;
+  customerId?: string | null;
   description: string;
   serviceCode?: string;
   serviceName?: string;
@@ -46,6 +65,7 @@ interface Appointment {
 type CreateAppointmentData = {
   employeeId: string;
   clientName: string;
+  customerId?: string | null;
   description: string;
   startTime: string;
   endTime: string;
@@ -73,22 +93,170 @@ const hexToTailwindBg = (hex: string, index: number): string => {
 };
 
 export const Agenda: React.FC = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { user } = useAuth();
+  const { companyId, loading: companyLoading } = useCompanyFilter();
+  const skipPersistDateOnceRef = useRef(false);
+
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [showAppointmentForm, setShowAppointmentForm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<{ employeeId: string; time: string } | null>(null);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
+  const [goToTodayRequestId, setGoToTodayRequestId] = useState(0);
+  const [scrollToTimeRequest, setScrollToTimeRequest] = useState<{ requestId: number; time: string } | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const { employees: dbEmployees, isLoading: employeesLoading } = useAgendaEmployees();
+  const selectedDateYmd = useMemo(() => format(selectedDate, 'yyyy-MM-dd'), [selectedDate]);
+  const pendingOpenAppointmentIdRef = useRef<string | null>(null);
+
+  useLayoutEffect(() => {
+    if (!user?.id) return;
+    const p = loadAgendaViewPersisted(user.id);
+    if (!p?.lastDateYmd) return;
+    const d = parse(p.lastDateYmd, 'yyyy-MM-dd', new Date());
+    if (!isValid(d)) return;
+    setSelectedDate(d);
+    skipPersistDateOnceRef.current = true;
+  }, [user?.id]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const dateParam = params.get('date');
+    const appointmentParam = params.get('appointment');
+
+    if (appointmentParam) {
+      pendingOpenAppointmentIdRef.current = appointmentParam;
+    }
+
+    if (!dateParam) return;
+    const parsedDate = parse(dateParam, 'yyyy-MM-dd', new Date());
+    if (!isValid(parsedDate)) return;
+    if (format(parsedDate, 'yyyy-MM-dd') === selectedDateYmd) return;
+    setSelectedDate(parsedDate);
+  }, [location.search, selectedDateYmd]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    if (skipPersistDateOnceRef.current) {
+      skipPersistDateOnceRef.current = false;
+      return;
+    }
+    const prev = loadAgendaViewPersisted(user.id);
+    saveAgendaViewPersisted(user.id, mergePersistedLastDate(prev, selectedDateYmd));
+  }, [user?.id, selectedDateYmd]);
+
+  const { data: companyAgendaRow } = useQuery({
+    queryKey: ['company-agenda-center-hours', companyId],
+    queryFn: async () => {
+      if (!companyId) return null;
+      const { data, error } = await supabase
+        .from('companies')
+        .select('agenda_center_hours')
+        .eq('id', companyId)
+        .single();
+      if (error) throw error;
+      return data as { agenda_center_hours: unknown };
+    },
+    enabled: !!companyId && !companyLoading,
+  });
+
+  const centerHours: AgendaDayHoursMap = useMemo(
+    () => parseAgendaDayHoursMap(companyAgendaRow?.agenda_center_hours),
+    [companyAgendaRow?.agenda_center_hours],
+  );
+
+  const { data: agendaCustomers = [] } = useQuery({
+    queryKey: ['customers', companyId, 'agenda-picker'],
+    queryFn: async () => {
+      if (!companyId) return [];
+      const { data, error } = await supabase
+        .from('customers')
+        .select('id, name, email, tax_id, phone, phone_home, phone_mobile')
+        .eq('company_id', companyId)
+        .order('name');
+      if (error) throw error;
+      return (data || []) as CustomerSearchRow[];
+    },
+    enabled: !!companyId && !companyLoading,
+  });
+
+  const { data: notifyRecipients = [] } = useQuery({
+    queryKey: ['notify-recipients', companyId, user?.id],
+    queryFn: async () => {
+      if (!companyId || !user?.id) return [];
+      const employeesBaseQuery = () =>
+        supabase
+          .from('agenda_employees')
+          .select('id, name')
+          .eq('company_id', companyId);
+
+      let employeesResult = await employeesBaseQuery().eq('is_active', true);
+      if (employeesResult.error?.code === '42703') {
+        employeesResult = await employeesBaseQuery().eq('active', true);
+      }
+      if (employeesResult.error) throw employeesResult.error;
+
+      const activeEmployees = (employeesResult.data || []) as Array<{ id: string; name: string | null }>;
+      const activeEmployeeIds = activeEmployees.map((e) => e.id).filter(Boolean);
+      if (!activeEmployeeIds.length) return [];
+
+      const { data: usersData, error: usersError } = await supabase.functions.invoke('main', {
+        body: { action: 'listUsers', isSuperuser: false },
+      });
+      if (usersError) throw usersError;
+
+      const nameByEmployeeId = new Map(activeEmployees.map((e) => [e.id, e.name || 'Empleado']));
+      const recipients = ((usersData?.users || []) as any[])
+        .filter((u: any) => u.id && u.id !== user.id)
+        .map((u: any) => {
+          const employeeId = u?.profiles?.employee_id ? String(u.profiles.employee_id) : null;
+          if (!employeeId || !activeEmployeeIds.includes(employeeId)) return null;
+          const employeeName = nameByEmployeeId.get(employeeId) || 'Empleado';
+          return { userId: String(u.id), label: employeeName };
+        })
+        .filter(Boolean) as Array<{ userId: string; label: string }>;
+
+      // Evita duplicados por userId.
+      const uniqueByUserId = new Map<string, { userId: string; label: string }>();
+      for (const item of recipients) uniqueByUserId.set(item.userId, item);
+      return Array.from(uniqueByUserId.values()).sort((a, b) => a.label.localeCompare(b.label, 'es'));
+    },
+    enabled: !!companyId && !!user?.id,
+  });
+
+  const { employees: dbEmployeesRaw, isLoading: employeesLoading } = useAgendaEmployees({ agendaOnly: true });
+
+  const dbEmployees = useMemo(() => {
+    return [...dbEmployeesRaw].sort((a, b) => {
+      const ao = a.agenda_sort_order ?? 0;
+      const bo = b.agenda_sort_order ?? 0;
+      if (ao !== bo) return ao - bo;
+      return a.name.localeCompare(b.name, 'es');
+    });
+  }, [dbEmployeesRaw]);
+
+  const employeeAgendaById = useMemo(() => {
+    const m: Record<string, { weekly: AgendaDayHoursMap | null; blocks: AgendaUnavailabilityEntry[] }> = {};
+    for (const e of dbEmployees) {
+      m[e.id] = {
+        weekly: e.weekly_hours == null ? null : parseAgendaDayHoursMap(e.weekly_hours),
+        blocks: parseUnavailability(e.unavailability),
+      };
+    }
+    return m;
+  }, [dbEmployees]);
+
   const {
     appointments: dbAppointments,
     isLoading: appointmentsLoading,
     createAppointment,
     updateAppointment,
     deleteAppointment,
-  } = useAgendaAppointments(format(selectedDate, 'yyyy-MM-dd'));
+  } = useAgendaAppointments(selectedDateYmd);
 
   const { cabinas } = useCabinas();
   const { recursos } = useRecursos();
@@ -103,7 +271,11 @@ export const Agenda: React.FC = () => {
         .select('appointment_id,cabina_id,recurso_id')
         .in('appointment_id', appointmentIds);
       if (error) {
-        if (error.code === 'PGRST205' || error.code === '42P01') return {};
+        if (
+          error.code === 'PGRST205' ||
+          error.code === '42P01' ||
+          /not found/i.test(error.message || '')
+        ) return {};
         throw error;
       }
       const out: Record<string, { cabina_id: string | null; recurso_id: string | null }> = {};
@@ -164,6 +336,7 @@ export const Agenda: React.FC = () => {
       id: row.id,
       employeeId: row.employee_id || '',
       clientName,
+      customerId: row.customer_id ?? null,
       description,
       serviceCode: parsedService.code,
       serviceName: parsedService.service,
@@ -180,6 +353,30 @@ export const Agenda: React.FC = () => {
       status: (['confirmed', 'pending', 'cancelled'].includes(row.status) ? row.status : 'pending') as any,
     };
   });
+
+  useEffect(() => {
+    const targetId = pendingOpenAppointmentIdRef.current;
+    if (!targetId) return;
+    const found = appointments.find((a) => a.id === targetId);
+    if (!found) return;
+    setSelectedAppointment(found);
+    setShowEditForm(true);
+    setScrollToTimeRequest({
+      requestId: Date.now(),
+      time: found.startTime,
+    });
+    pendingOpenAppointmentIdRef.current = null;
+
+    const params = new URLSearchParams(location.search);
+    params.delete('appointment');
+    navigate(
+      {
+        pathname: location.pathname,
+        search: params.toString() ? `?${params.toString()}` : '',
+      },
+      { replace: true },
+    );
+  }, [appointments, location.pathname, location.search, navigate]);
 
   const effectiveSelectedIds = preferences.visibleEmployeeIds.length
     ? preferences.visibleEmployeeIds
@@ -242,6 +439,7 @@ export const Agenda: React.FC = () => {
       await updateAppointment.mutateAsync({
         id: appointmentId,
         employee_id: newEmployeeId,
+        customer_id: appointment.customerId ?? null,
         title: appointment.clientName,
         description: appointment.description,
         start_time: `${format(selectedDate, 'yyyy-MM-dd')}T${newTime}:00`,
@@ -279,6 +477,7 @@ export const Agenda: React.FC = () => {
 
       const created = await createAppointment.mutateAsync({
         employee_id: data.employeeId,
+        customer_id: data.customerId ?? null,
         title: data.clientName,
         description: data.description,
         start_time: `${dateStr}T${data.startTime}:00`,
@@ -322,6 +521,7 @@ export const Agenda: React.FC = () => {
       await updateAppointment.mutateAsync({
         id: updated.id,
         employee_id: updated.employeeId,
+        customer_id: updated.customerId ?? null,
         title: updated.clientName,
         description: updated.description,
         start_time: `${updated.date}T${updated.startTime}:00`,
@@ -372,6 +572,89 @@ export const Agenda: React.FC = () => {
     }
   };
 
+  const handleChargeAppointment = (apt: Appointment, items: AppointmentItemDraft[]) => {
+    const prefilledCart = items
+      .filter((it) => appointmentItemLineTotal(it) > 0)
+      .map((it, idx) => {
+        const bonusMode = it.kind === 'bonus' ? (it.bonus_payment_mode ?? 'none') : null;
+        const lineTotal = appointmentItemLineTotal(it);
+        const qty = it.kind === 'bonus' ? 1 : Math.max(1, Number(it.quantity ?? 1));
+        const unit = it.kind === 'bonus' ? lineTotal : Math.max(0, Number(it.unit_price ?? 0));
+        const labelSuffix =
+          it.kind === 'bonus' && bonusMode && bonusMode !== 'none'
+            ? ` (Bono ${bonusMode === 'full' ? '100%' : `${bonusMode}%`})`
+            : '';
+        return {
+          id: it.article_id || `apt-${apt.id}-${idx}`,
+          name: `${it.label || 'Ítem'}${labelSuffix}`,
+          price: unit,
+          quantity: qty,
+          total: lineTotal,
+          variationId: undefined as string | undefined,
+          size: undefined as string | undefined,
+          color: undefined as string | undefined,
+          sourceKind: it.kind,
+          sourceBonusMode: bonusMode,
+        };
+      });
+
+    navigate('/tpv', {
+      state: {
+        prefillFromAppointment: {
+          appointmentId: apt.id,
+          customerId: apt.customerId ?? null,
+          customerName: apt.clientName,
+          date: apt.date,
+          items: prefilledCart,
+        },
+      },
+    });
+  };
+
+  const handleNotifyAppointment = async (
+    apt: Appointment,
+    recipientUserId: string,
+    message: string
+  ) => {
+    if (!companyId || !user?.id) return;
+    const link = `/agenda?date=${apt.date}&appointment=${apt.id}`;
+    const title = `Observación cita · ${apt.clientName}`;
+    // Intento extendido (si existen columnas nuevas).
+    let { error } = await supabase.from('notifications').insert({
+      company_id: companyId,
+      user_id: recipientUserId,
+      from_user_id: user.id,
+      appointment_id: apt.id,
+      title,
+      message,
+      type: 'appointment',
+      link,
+      read: false,
+      metadata: { appointment_id: apt.id, appointment_date: apt.date },
+    });
+    if (error?.code === '42703') {
+      // Fallback para esquemas con estructura mínima.
+      ({ error } = await supabase.from('notifications').insert({
+        company_id: companyId,
+        user_id: recipientUserId,
+        title,
+        message,
+        type: 'info',
+        link,
+        read: false,
+      }));
+    }
+    if (error) {
+      toast({
+        title: 'No se pudo enviar la notificación',
+        description: error.message,
+        variant: 'destructive',
+      });
+      return;
+    }
+    toast({ title: 'Notificación enviada' });
+  };
+
   if (employeesLoading || appointmentsLoading || prefsLoading) {
     return (
       <div className="space-y-4">
@@ -384,59 +667,96 @@ export const Agenda: React.FC = () => {
 
   if (!employees.length) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 text-center">
+      <div className="flex flex-col items-center justify-center py-20 text-center px-4">
         <AlertCircle className="w-12 h-12 text-muted-foreground mb-4" />
-        <h2 className="text-lg font-semibold">Sin empleados configurados</h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          Configura empleados en Configuración → Agenda para ver la agenda.
+        <h2 className="text-lg font-semibold">Sin empleados activos en la agenda</h2>
+        <p className="text-sm text-muted-foreground mt-2 max-w-md">
+          Si ya tienes empleados dados de alta pero están inactivos, entra en Configuración → Agenda → horario por
+          empleado y activa al menos uno con el interruptor «Activo en la agenda». Allí también puedes editar horarios
+          y el orden de las columnas aunque estén inactivos.
         </p>
       </div>
     );
   }
 
-  // Dynamic grid columns based on employee count
-  const gridCols = employees.length + 1; // +1 for time column
-
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-3">
         <div>
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-            <Calendar className="w-5 h-5 text-sky-500" />
+            <CalendarIcon className="w-5 h-5 text-sky-500" />
             Agenda
           </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {filteredEmployees.length} de {employees.length} empleada{employees.length !== 1 ? 's' : ''} visibles · Configurable en Configuración → Agenda
-          </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <div className="flex items-center bg-muted rounded-lg p-0.5">
-            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => setSelectedDate(subDays(selectedDate, 1))}>
-              <ChevronLeft className="w-4 h-4" />
-            </Button>
-            <div className="px-3 py-1 text-sm font-medium min-w-[160px] text-center capitalize">
-              {format(selectedDate, 'EEEE, d MMM yyyy', { locale: es })}
+        <div className="flex flex-nowrap items-center gap-1.5 min-w-0">
+          <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
+            <div className="flex flex-nowrap items-center rounded-md border border-border/60 bg-muted/80 p-0 h-7">
+              <Button variant="ghost" size="sm" className="h-7 w-7 shrink-0 p-0 rounded-none rounded-l-md" onClick={() => setSelectedDate(subDays(selectedDate, 1))}>
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </Button>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 min-w-0 max-w-[11rem] sm:max-w-[13rem] px-2 text-xs font-medium tabular-nums capitalize rounded-none border-x border-border/50"
+                >
+                  {format(selectedDate, 'EEE d MMM yyyy', { locale: es })}
+                </Button>
+              </PopoverTrigger>
+              <Button variant="ghost" size="sm" className="h-7 w-7 shrink-0 p-0 rounded-none rounded-r-md" onClick={() => setSelectedDate(addDays(selectedDate, 1))}>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </Button>
             </div>
-            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => setSelectedDate(addDays(selectedDate, 1))}>
-              <ChevronRight className="w-4 h-4" />
-            </Button>
-          </div>
-          <Button variant="outline" size="sm" onClick={() => setSelectedDate(new Date())}>
-            <Clock className="w-4 h-4 mr-1" /> Hoy
+            <PopoverContent className="w-auto p-0" align="center">
+              <Calendar
+                key={format(selectedDate, 'yyyy-MM')}
+                mode="single"
+                selected={selectedDate}
+                onSelect={(d) => {
+                  if (d) {
+                    setSelectedDate(d);
+                    setDatePickerOpen(false);
+                  }
+                }}
+                defaultMonth={selectedDate}
+                locale={es}
+                captionLayout="dropdown"
+                fromYear={1990}
+                toYear={2040}
+                initialFocus
+                className="pointer-events-auto p-2"
+                classNames={{
+                  month: 'space-y-1',
+                  caption: 'flex justify-center pt-0 pb-1 px-0 relative items-center',
+                  caption_dropdowns: 'flex flex-row flex-nowrap items-center justify-center gap-1',
+                  /** Oculta el texto duplicado (mes/año + icono) junto al desplegable nativo */
+                  caption_label: 'hidden',
+                  dropdown: 'h-7 rounded-md border border-input bg-background px-1.5 py-0 text-xs font-medium cursor-pointer',
+                  dropdown_month: 'shrink-0 max-h-7',
+                  dropdown_year: 'shrink-0 max-h-7 w-[4.25rem]',
+                }}
+                labels={{
+                  labelMonthDropdown: () => 'Mes',
+                  labelYearDropdown: () => 'Año',
+                }}
+              />
+            </PopoverContent>
+          </Popover>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 px-2 text-xs shrink-0"
+            onClick={() => {
+              setSelectedDate(new Date());
+              setGoToTodayRequestId((n) => n + 1);
+            }}
+          >
+            <Clock className="w-3.5 h-3.5 mr-1" /> Hoy
           </Button>
         </div>
-      </div>
-
-      {/* Employee legend */}
-      <div className="flex items-center gap-4 overflow-x-auto pb-3 mb-2">
-        {filteredEmployees.map((emp) => (
-          <div key={emp.id} className="flex items-center gap-1.5 flex-shrink-0">
-            <div className={`w-3 h-3 rounded-full border ${emp.color}`} />
-            <span className="text-xs font-medium text-foreground">{emp.name}</span>
-          </div>
-        ))}
       </div>
 
       {/* Grid */}
@@ -447,6 +767,12 @@ export const Agenda: React.FC = () => {
           onSlotClick={handleSlotClick}
           onAppointmentClick={handleAppointmentClick}
           onAppointmentMove={handleAppointmentMove}
+          persistUserId={user?.id ?? null}
+          viewDateYmd={selectedDateYmd}
+          goToTodayRequestId={goToTodayRequestId}
+          scrollToTimeRequest={scrollToTimeRequest}
+          centerHours={centerHours}
+          employeeAgendaById={employeeAgendaById}
           visibleFields={preferences.visibleFields}
           slotMinutes={preferences.slotMinutes}
           cellHeight={preferences.cellHeight}
@@ -459,6 +785,7 @@ export const Agenda: React.FC = () => {
           employeeId={selectedSlot.employeeId}
           time={selectedSlot.time}
           employees={employees}
+          customers={agendaCustomers}
           cabinas={cabinas.data || []}
           recursos={recursos.data || []}
           onSave={handleAppointmentSave}
@@ -471,9 +798,13 @@ export const Agenda: React.FC = () => {
         <EditAppointmentForm
           appointment={selectedAppointment}
           employees={employees}
+          customers={agendaCustomers}
+          notifyRecipients={notifyRecipients}
           cabinas={cabinas.data || []}
           recursos={recursos.data || []}
           onSave={handleAppointmentUpdate}
+          onCharge={handleChargeAppointment}
+          onNotify={handleNotifyAppointment}
           onDelete={handleAppointmentDelete}
           onCancel={() => { setShowEditForm(false); setSelectedAppointment(null); }}
         />
