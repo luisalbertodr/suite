@@ -19,6 +19,7 @@ import { useArticleVariations } from '@/hooks/useArticleVariations';
 import { supabase } from '@/lib/supabase';
 import { ArticleForm } from './ArticleForm';
 import { FamilyManager } from './FamilyManager';
+import { BonusDefinitionsManager } from './BonusDefinitionsManager';
 
 export const Articulos: React.FC = () => {
   const { articles, loading, deleteArticle, refetch } = useArticles();
@@ -26,6 +27,7 @@ export const Articulos: React.FC = () => {
   const [activeKind, setActiveKind] = useState<'producto' | 'servicio' | 'bono'>('producto');
   const [showForm, setShowForm] = useState(false);
   const [showFamilyManager, setShowFamilyManager] = useState(false);
+  const [showBonusDefinitionsManager, setShowBonusDefinitionsManager] = useState(false);
   const [selectedArticle, setSelectedArticle] = useState(null);
   const [expandedArticles, setExpandedArticles] = useState<{[key: string]: boolean}>({});
   const [articleVariations, setArticleVariations] = useState<{[key: string]: any[]}>({});
@@ -158,6 +160,15 @@ export const Articulos: React.FC = () => {
             <Settings className="w-4 h-4" />
             <span>Gestionar Familias</span>
           </button>
+          {activeKind === 'bono' && (
+            <button
+              onClick={() => setShowBonusDefinitionsManager(true)}
+              className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-violet-500 to-violet-600 text-white rounded-lg hover:from-violet-600 hover:to-violet-700 transition-all shadow-lg"
+            >
+              <Settings className="w-4 h-4" />
+              <span>Plantillas de Bonos</span>
+            </button>
+          )}
           <button
             onClick={() => setShowForm(true)}
             className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg hover:from-blue-600 hover:to-blue-700 transition-all shadow-lg"
@@ -167,20 +178,6 @@ export const Articulos: React.FC = () => {
           </button>
         </div>
       </div>
-
-      {articulosBajoStock.length > 0 && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
-          <div className="flex items-center">
-            <AlertTriangle className="w-5 h-5 text-yellow-600 mr-2" />
-            <span className="text-yellow-800 font-medium">
-              {articulosBajoStock.length} artículo(s) con stock bajo
-            </span>
-          </div>
-          <div className="mt-2 text-sm text-yellow-700">
-            {articulosBajoStock.map(art => art.descripcion).join(', ')}
-          </div>
-        </div>
-      )}
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
@@ -488,6 +485,10 @@ export const Articulos: React.FC = () => {
 
       {showFamilyManager && (
         <FamilyManager onClose={() => setShowFamilyManager(false)} />
+      )}
+
+      {showBonusDefinitionsManager && (
+        <BonusDefinitionsManager onClose={() => setShowBonusDefinitionsManager(false)} />
       )}
     </div>
   );

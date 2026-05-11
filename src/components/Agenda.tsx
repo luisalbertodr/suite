@@ -261,7 +261,166 @@ export const Agenda: React.FC = () => {
   const { cabinas } = useCabinas();
   const { recursos } = useRecursos();
   const { preferences, isLoading: prefsLoading } = useAgendaPreferences();
+
+  const registerAppointmentHistory = async (
+    customerId: string | null | undefined,
+    dateYmd: string,
+    items: AppointmentItemDraft[],
+    appointmentId: string
+  ) => {
+    if (!companyId || !customerId) return;
+    const safeDateYmd = /^\d{4}-\d{2}-\d{2}$/.test(String(dateYmd || ''))
+      ? String(dateYmd)
+      : format(new Date(), 'yyyy-MM-dd');
+    const summaryItems = items.map((it) => ({
+      label: it.label || 'Ítem',
+      kind: it.kind,
+      quantity: Number(it.quantity ?? 1),
+      unit_price: Number(it.unit_price ?? 0),
+      total: Number(appointmentItemLineTotal(it)),
+      article_id: it.article_id ?? null,
+      customer_voucher_id: it.customer_voucher_id ?? null,
+    }));
+    const payload = {
+      company_id: companyId,
+      customer_id: customerId,
+      event_type: 'appointment',
+      event_date: `${safeDateYmd}T00:00:00`,
+      data: {
+        appointment_id: appointmentId,
+        source: 'agenda',
+        items: summaryItems,
+        total_amount: Number(summaryItems.reduce((s, it) => s + Number(it.total || 0), 0)),
+      },
+    };
+
+    // Upsert lógico por appointment_id (en JSON data) para evitar duplicados al editar.
+    const { data: existing, error: existingError } = await supabase
+      .from('customer_aesthetic_history')
+      .select('id,data')
+      .eq('company_id', companyId)
+      .eq('customer_id', customerId)
+      .eq('event_type', 'appointment');
+    if (existingError) throw existingError;
+
+    const existingRow = (existing || []).find(
+      (row: any) => String(row?.data?.appointment_id || '') === String(appointmentId)
+    );
+
+    if (existingRow?.id) {
+      const { error } = await supabase
+        .from('customer_aesthetic_history')
+        .update(payload)
+        .eq('id', existingRow.id);
+      if (error) throw error;
+      return;
+    }
+
+    const { error } = await supabase.from('customer_aesthetic_history').insert(payload);
+    if (error) throw error;
+  };
   const appointmentIds = useMemo(() => dbAppointments.map((a) => a.id), [dbAppointments]);
+  const { data: appointmentTotals = {} } = useQuery({
+    queryKey: ['appointment-item-totals', companyId, appointmentIds.join('|')],
+    enabled: !!companyId && appointmentIds.length > 0,
+    queryFn: async () => {
+      const parsePricingFromNotes = (notes: string | null) => {
+        if (!notes || !notes.startsWith('__pricing__')) return { quantity: 1, unit_price: 0, bonus_payment_mode: 'none' as const };
+        try {
+          const parsed = JSON.parse(notes.slice('__pricing__'.length)) as {
+            quantity?: number;
+            unit_price?: number;
+            bonus_payment_mode?: 'none' | 'full' | '60' | '40';
+          };
+          return {
+            quantity: Number(parsed.quantity ?? 1),
+            unit_price: Number(parsed.unit_price ?? 0),
+            bonus_payment_mode: parsed.bonus_payment_mode ?? 'none',
+          };
+        } catch {
+          return { quantity: 1, unit_price: 0, bonus_payment_mode: 'none' as const };
+        }
+      };
+
+      let data: any[] | null = null;
+      let error: any = null;
+
+      ({ data, error } = await supabase
+        .from('appointment_items')
+        .select('appointment_id,kind,label,notes,article_id,articles(precio)')
+        .in('appointment_id', appointmentIds));
+
+      if (
+        error &&
+        error.code !== '42P01' &&
+        error.code !== 'PGRST205'
+      ) {
+        throw error;
+      }
+      if (!data || error) return {};
+
+      const normalizeText = (value: string | null | undefined) =>
+        String(value || '')
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+      const inferItemPriceFromLabel = (
+        label: string | null | undefined,
+        byCode: Map<string, number>,
+        byDescription: Map<string, number>
+      ) => {
+        const raw = String(label || '').trim();
+        if (!raw) return 0;
+        const codeMatch = raw.match(/^([A-Za-z0-9._-]+)\s*[-:]/);
+        if (codeMatch?.[1]) {
+          const p = byCode.get(codeMatch[1].toLowerCase());
+          if (typeof p === 'number' && p > 0) return p;
+        }
+        const normalized = normalizeText(raw.replace(/^([A-Za-z0-9._-]+)\s*[-:]\s*/, ''));
+        return Math.max(0, Number(byDescription.get(normalized) || 0));
+      };
+
+      const byCode = new Map<string, number>();
+      const byDescription = new Map<string, number>();
+      const { data: articleRows } = await supabase
+        .from('articles')
+        .select('codigo,descripcion,precio')
+        .eq('company_id', companyId);
+      for (const a of articleRows || []) {
+        const price = Math.max(0, Number(a.precio || 0));
+        if (price <= 0) continue;
+        if (a.codigo) byCode.set(String(a.codigo).toLowerCase(), price);
+        if (a.descripcion) byDescription.set(normalizeText(a.descripcion), price);
+      }
+
+      const totals: Record<string, number> = {};
+      for (const row of data) {
+        const fallback = parsePricingFromNotes(row.notes ?? null);
+        const qty = Math.max(0, Number(fallback.quantity ?? 1));
+        const baseUnit = Math.max(0, Number(fallback.unit_price ?? 0));
+        const articlePrice = Math.max(0, Number(row.articles?.precio ?? 0));
+        const inferredLabelPrice =
+          !row.article_id && baseUnit <= 0
+            ? inferItemPriceFromLabel(row.label, byCode, byDescription)
+            : 0;
+        const unit = baseUnit > 0 ? baseUnit : (row.article_id ? articlePrice : inferredLabelPrice);
+        const mode = String(fallback.bonus_payment_mode ?? 'none');
+        let line = qty * unit;
+        if (row.kind === 'bonus') {
+          if (mode === '60') line = unit * 0.6;
+          else if (mode === '40') line = unit * 0.4;
+          else if (mode === 'full') line = unit;
+          else line = 0;
+        }
+        totals[row.appointment_id] = (totals[row.appointment_id] || 0) + line;
+      }
+      return totals;
+    },
+  });
+
   const { data: appointmentResources = {} } = useQuery({
     queryKey: ['appointment-resources', appointmentIds.join('|')],
     enabled: appointmentIds.length > 0,
@@ -350,6 +509,9 @@ export const Agenda: React.FC = () => {
       endTime: normalizeTime(row.end_time),
       date: normalizeDate(row.start_time, row.appointment_date),
       color: row.color || '#3B82F6',
+      totalAmount: Object.prototype.hasOwnProperty.call(appointmentTotals, row.id)
+        ? Number(appointmentTotals[row.id] || 0)
+        : undefined,
       status: (['confirmed', 'pending', 'cancelled'].includes(row.status) ? row.status : 'pending') as any,
     };
   });
@@ -500,8 +662,14 @@ export const Agenda: React.FC = () => {
       try {
         await syncAppointmentItems(created.id, items);
         await queryClient.invalidateQueries({ queryKey: appointmentItemsQueryKey(created.id) });
+        await registerAppointmentHistory(data.customerId ?? null, dateStr, items, created.id);
       } catch (e) {
         console.error('appointment_items sync', e);
+        toast({
+          title: 'Cita creada, pero no se guardaron los ítems/ficha',
+          description: (e as Error)?.message || 'Revisa los ítems y vuelve a guardar.',
+          variant: 'destructive',
+        });
       }
 
       setShowAppointmentForm(false);
@@ -546,8 +714,14 @@ export const Agenda: React.FC = () => {
       try {
         await syncAppointmentItems(updated.id, items);
         await queryClient.invalidateQueries({ queryKey: appointmentItemsQueryKey(updated.id) });
+        await registerAppointmentHistory(updated.customerId ?? null, updated.date, items, updated.id);
       } catch (e) {
         console.error('appointment_items sync', e);
+        toast({
+          title: 'Cita actualizada, pero no se guardaron los ítems/ficha',
+          description: (e as Error)?.message || 'Revisa los ítems y vuelve a guardar.',
+          variant: 'destructive',
+        });
       }
 
       setShowEditForm(false);
@@ -680,7 +854,7 @@ export const Agenda: React.FC = () => {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-[calc(100dvh-9rem)] min-h-[560px]">
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-3">
         <div>

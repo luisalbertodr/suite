@@ -4,9 +4,10 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useCustomerDetail } from '@/hooks/useCustomerDetail';
 import { ClienteProfileHeader } from './cliente/ClienteProfileHeader';
-import { ClienteTimelineTab } from './cliente/ClienteTimelineTab';
+import { ClienteDailyScrollView } from './cliente/ClienteDailyScrollView';
 import { ClienteVouchersTab } from './cliente/ClienteVouchersTab';
 import { ClienteFichaTecnicaTab } from './cliente/ClienteFichaTecnicaTab';
+import { ClienteFacturacionTab } from './cliente/ClienteFacturacionTab';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
@@ -14,10 +15,11 @@ import { useToast } from '@/hooks/use-toast';
 interface Props {
   customerId: string;
   onBack: () => void;
+  initialTab?: 'timeline' | 'vouchers' | 'ficha' | 'facturacion';
 }
 
-export const ClienteDetailView: React.FC<Props> = ({ customerId, onBack }) => {
-  const { customer, vouchers, history, registerSession } = useCustomerDetail(customerId);
+export const ClienteDetailView: React.FC<Props> = ({ customerId, onBack, initialTab = 'timeline' }) => {
+  const { customer, vouchers, registerSession } = useCustomerDetail(customerId);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [editedFields, setEditedFields] = useState<Record<string, any>>({});
@@ -75,8 +77,8 @@ export const ClienteDetailView: React.FC<Props> = ({ customerId, onBack }) => {
       <ClienteProfileHeader customer={mergedCustomer} isLoading={customer.isLoading} />
 
       {/* Tabs */}
-      <Tabs defaultValue="timeline" className="w-full">
-        <TabsList className="w-full grid grid-cols-3 bg-sky-50/50 dark:bg-sky-950/20 border border-sky-100/50 dark:border-sky-900/20 rounded-xl p-1">
+      <Tabs defaultValue={initialTab} className="w-full">
+        <TabsList className="w-full grid grid-cols-4 bg-sky-50/50 dark:bg-sky-950/20 border border-sky-100/50 dark:border-sky-900/20 rounded-xl p-1">
           <TabsTrigger
             value="timeline"
             className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-sky-700 dark:data-[state=active]:bg-gray-800 dark:data-[state=active]:text-sky-300 text-sm"
@@ -95,14 +97,17 @@ export const ClienteDetailView: React.FC<Props> = ({ customerId, onBack }) => {
           >
             Ficha Técnica
           </TabsTrigger>
+          <TabsTrigger
+            value="facturacion"
+            className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-sky-700 dark:data-[state=active]:bg-gray-800 dark:data-[state=active]:text-sky-300 text-sm"
+          >
+            Facturación
+          </TabsTrigger>
         </TabsList>
 
         <div className="mt-5">
           <TabsContent value="timeline" className="mt-0">
-            <ClienteTimelineTab
-              history={history.data || []}
-              isLoading={history.isLoading}
-            />
+            <ClienteDailyScrollView customerId={customerId} className="max-w-full" />
           </TabsContent>
 
           <TabsContent value="vouchers" className="mt-0">
@@ -120,6 +125,10 @@ export const ClienteDetailView: React.FC<Props> = ({ customerId, onBack }) => {
               isLoading={customer.isLoading}
               onUpdate={handleFieldUpdate}
             />
+          </TabsContent>
+
+          <TabsContent value="facturacion" className="mt-0">
+            <ClienteFacturacionTab customerId={customerId} />
           </TabsContent>
         </div>
       </Tabs>

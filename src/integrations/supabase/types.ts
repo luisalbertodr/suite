@@ -498,28 +498,40 @@ export type Database = {
       }
       bono_uso: {
         Row: {
+          article_id: string | null
           bono_id: string
           created_at: string
           empleado_id: string | null
           fecha: string
           id: string
           notas: string | null
+          quantity: number | null
+          source_legacy_key: string | null
+          source_table: string | null
         }
         Insert: {
+          article_id?: string | null
           bono_id: string
           created_at?: string
           empleado_id?: string | null
           fecha?: string
           id?: string
           notas?: string | null
+          quantity?: number | null
+          source_legacy_key?: string | null
+          source_table?: string | null
         }
         Update: {
+          article_id?: string | null
           bono_id?: string
           created_at?: string
           empleado_id?: string | null
           fecha?: string
           id?: string
           notas?: string | null
+          quantity?: number | null
+          source_legacy_key?: string | null
+          source_table?: string | null
         }
         Relationships: [
           {
@@ -536,50 +548,81 @@ export type Database = {
             referencedRelation: "agenda_employees"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "bono_uso_article_id_fkey"
+            columns: ["article_id"]
+            isOneToOne: false
+            referencedRelation: "articles"
+            referencedColumns: ["id"]
+          },
         ]
       }
       bonos: {
         Row: {
+          bonus_definition_id: string | null
           company_id: string
+          coverage_items: Json
           created_at: string
           customer_id: string
+          data_quality: Json | null
           descripcion: string | null
           estado: string
           fecha_compra: string
           fecha_vencimiento: string | null
           id: string
+          legacy_codboncli: string | null
           nombre: string
+          paid_amount: number
+          payment_mode: string
           precio_total: number
+          second_payment_due_at_used_sessions: number | null
+          second_payment_paid: boolean
           sesiones_totales: number
           sesiones_usadas: number
           updated_at: string
         }
         Insert: {
+          bonus_definition_id?: string | null
           company_id: string
+          coverage_items?: Json
           created_at?: string
           customer_id: string
+          data_quality?: Json | null
           descripcion?: string | null
           estado?: string
           fecha_compra?: string
           fecha_vencimiento?: string | null
           id?: string
+          legacy_codboncli?: string | null
           nombre: string
+          paid_amount?: number
+          payment_mode?: string
           precio_total?: number
+          second_payment_due_at_used_sessions?: number | null
+          second_payment_paid?: boolean
           sesiones_totales?: number
           sesiones_usadas?: number
           updated_at?: string
         }
         Update: {
+          bonus_definition_id?: string | null
           company_id?: string
+          coverage_items?: Json
           created_at?: string
           customer_id?: string
+          data_quality?: Json | null
           descripcion?: string | null
           estado?: string
           fecha_compra?: string
           fecha_vencimiento?: string | null
           id?: string
+          legacy_codboncli?: string | null
           nombre?: string
+          paid_amount?: number
+          payment_mode?: string
           precio_total?: number
+          second_payment_due_at_used_sessions?: number | null
+          second_payment_paid?: boolean
           sesiones_totales?: number
           sesiones_usadas?: number
           updated_at?: string
@@ -597,6 +640,108 @@ export type Database = {
             columns: ["customer_id"]
             isOneToOne: false
             referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bonos_bonus_definition_id_fkey"
+            columns: ["bonus_definition_id"]
+            isOneToOne: false
+            referencedRelation: "bonus_definitions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bonus_definition_items: {
+        Row: {
+          article_id: string | null
+          coverage_type: string
+          covered_quantity: number
+          created_at: string
+          definition_id: string
+          family_code: string | null
+          id: string
+          notes: string | null
+        }
+        Insert: {
+          article_id?: string | null
+          coverage_type: string
+          covered_quantity?: number
+          created_at?: string
+          definition_id: string
+          family_code?: string | null
+          id?: string
+          notes?: string | null
+        }
+        Update: {
+          article_id?: string | null
+          coverage_type?: string
+          covered_quantity?: number
+          created_at?: string
+          definition_id?: string
+          family_code?: string | null
+          id?: string
+          notes?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bonus_definition_items_article_id_fkey"
+            columns: ["article_id"]
+            isOneToOne: false
+            referencedRelation: "articles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bonus_definition_items_definition_id_fkey"
+            columns: ["definition_id"]
+            isOneToOne: false
+            referencedRelation: "bonus_definitions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bonus_definitions: {
+        Row: {
+          code: string
+          company_id: string
+          created_at: string
+          default_price: number
+          default_total_sessions: number
+          description: string | null
+          id: string
+          name: string
+          source: string
+          updated_at: string
+        }
+        Insert: {
+          code: string
+          company_id: string
+          created_at?: string
+          default_price?: number
+          default_total_sessions?: number
+          description?: string | null
+          id?: string
+          name: string
+          source?: string
+          updated_at?: string
+        }
+        Update: {
+          code?: string
+          company_id?: string
+          created_at?: string
+          default_price?: number
+          default_total_sessions?: number
+          description?: string | null
+          id?: string
+          name?: string
+          source?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bonus_definitions_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
             referencedColumns: ["id"]
           },
         ]
@@ -927,14 +1072,20 @@ export type Database = {
       customer_vouchers: {
         Row: {
           article_id: string | null
+          bonus_definition_id: string | null
           company_id: string
+          coverage_items: Json
           created_at: string
           customer_id: string
           expiry_date: string | null
           id: string
           is_active: boolean
           notes: string | null
+          paid_amount: number
+          payment_mode: string
           purchase_date: string
+          second_payment_due_at_used_sessions: number | null
+          second_payment_paid: boolean
           total_sessions: number
           updated_at: string
           used_sessions: number
@@ -942,14 +1093,20 @@ export type Database = {
         }
         Insert: {
           article_id?: string | null
+          bonus_definition_id?: string | null
           company_id: string
+          coverage_items?: Json
           created_at?: string
           customer_id: string
           expiry_date?: string | null
           id?: string
           is_active?: boolean
           notes?: string | null
+          paid_amount?: number
+          payment_mode?: string
           purchase_date?: string
+          second_payment_due_at_used_sessions?: number | null
+          second_payment_paid?: boolean
           total_sessions?: number
           updated_at?: string
           used_sessions?: number
@@ -957,14 +1114,20 @@ export type Database = {
         }
         Update: {
           article_id?: string | null
+          bonus_definition_id?: string | null
           company_id?: string
+          coverage_items?: Json
           created_at?: string
           customer_id?: string
           expiry_date?: string | null
           id?: string
           is_active?: boolean
           notes?: string | null
+          paid_amount?: number
+          payment_mode?: string
           purchase_date?: string
+          second_payment_due_at_used_sessions?: number | null
+          second_payment_paid?: boolean
           total_sessions?: number
           updated_at?: string
           used_sessions?: number
@@ -990,6 +1153,13 @@ export type Database = {
             columns: ["customer_id"]
             isOneToOne: false
             referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_vouchers_bonus_definition_id_fkey"
+            columns: ["bonus_definition_id"]
+            isOneToOne: false
+            referencedRelation: "bonus_definitions"
             referencedColumns: ["id"]
           },
         ]
@@ -1082,6 +1252,175 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      daily_customer_log: {
+        Row: {
+          company_id: string
+          created_at: string
+          customer_id: string
+          day_summary: string | null
+          id: string
+          log_date: string
+          source: string
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          customer_id: string
+          day_summary?: string | null
+          id?: string
+          log_date: string
+          source?: string
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          customer_id?: string
+          day_summary?: string | null
+          id?: string
+          log_date?: string
+          source?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "daily_customer_log_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_customer_log_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      daily_customer_log_assets: {
+        Row: {
+          asset_kind: string
+          created_at: string
+          id: string
+          log_id: string
+          ref_id: string | null
+          ref_table: string | null
+          storage_path: string | null
+          title: string | null
+        }
+        Insert: {
+          asset_kind: string
+          created_at?: string
+          id?: string
+          log_id: string
+          ref_id?: string | null
+          ref_table?: string | null
+          storage_path?: string | null
+          title?: string | null
+        }
+        Update: {
+          asset_kind?: string
+          created_at?: string
+          id?: string
+          log_id?: string
+          ref_id?: string | null
+          ref_table?: string | null
+          storage_path?: string | null
+          title?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "daily_customer_log_assets_log_id_fkey"
+            columns: ["log_id"]
+            isOneToOne: false
+            referencedRelation: "daily_customer_log"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      daily_customer_log_items: {
+        Row: {
+          amount_cents: number | null
+          article_id: string | null
+          body: string | null
+          bono_id: string | null
+          bono_uso_id: string | null
+          created_at: string
+          id: string
+          item_kind: string
+          log_id: string
+          metadata: Json
+          ref_id: string | null
+          ref_table: string | null
+          sort_order: number
+          title: string | null
+        }
+        Insert: {
+          amount_cents?: number | null
+          article_id?: string | null
+          body?: string | null
+          bono_id?: string | null
+          bono_uso_id?: string | null
+          created_at?: string
+          id?: string
+          item_kind: string
+          log_id: string
+          metadata?: Json
+          ref_id?: string | null
+          ref_table?: string | null
+          sort_order?: number
+          title?: string | null
+        }
+        Update: {
+          amount_cents?: number | null
+          article_id?: string | null
+          body?: string | null
+          bono_id?: string | null
+          bono_uso_id?: string | null
+          created_at?: string
+          id?: string
+          item_kind?: string
+          log_id?: string
+          metadata?: Json
+          ref_id?: string | null
+          ref_table?: string | null
+          sort_order?: number
+          title?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "daily_customer_log_items_log_id_fkey"
+            columns: ["log_id"]
+            isOneToOne: false
+            referencedRelation: "daily_customer_log"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_customer_log_items_article_id_fkey"
+            columns: ["article_id"]
+            isOneToOne: false
+            referencedRelation: "articles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_customer_log_items_bono_id_fkey"
+            columns: ["bono_id"]
+            isOneToOne: false
+            referencedRelation: "bonos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_customer_log_items_bono_uso_id_fkey"
+            columns: ["bono_uso_id"]
+            isOneToOne: false
+            referencedRelation: "bono_uso"
             referencedColumns: ["id"]
           },
         ]
@@ -1705,6 +2044,266 @@ export type Database = {
             columns: ["original_invoice_id"]
             isOneToOne: false
             referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      marketing_field_config: {
+        Row: {
+          company_id: string
+          created_at: string
+          display_label: string
+          field_key: string
+          field_type: string
+          id: string
+          is_system: boolean
+          sort_order: number
+          updated_at: string
+          visible_in_card: boolean
+          visible_in_detail: boolean
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          display_label: string
+          field_key: string
+          field_type?: string
+          id?: string
+          is_system?: boolean
+          sort_order?: number
+          updated_at?: string
+          visible_in_card?: boolean
+          visible_in_detail?: boolean
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          display_label?: string
+          field_key?: string
+          field_type?: string
+          id?: string
+          is_system?: boolean
+          sort_order?: number
+          updated_at?: string
+          visible_in_card?: boolean
+          visible_in_detail?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "marketing_field_config_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      marketing_lead_notes: {
+        Row: {
+          body: string
+          company_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          kind: string
+          lead_id: string
+          next_action_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          body: string
+          company_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind?: string
+          lead_id: string
+          next_action_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          body?: string
+          company_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind?: string
+          lead_id?: string
+          next_action_at?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "marketing_lead_notes_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketing_lead_notes_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "marketing_leads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      marketing_lead_stages: {
+        Row: {
+          color: string
+          company_id: string
+          created_at: string
+          description: string | null
+          id: string
+          is_default_intake: boolean
+          is_lost: boolean
+          is_won: boolean
+          name: string
+          position: number
+          updated_at: string
+        }
+        Insert: {
+          color?: string
+          company_id: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_default_intake?: boolean
+          is_lost?: boolean
+          is_won?: boolean
+          name: string
+          position?: number
+          updated_at?: string
+        }
+        Update: {
+          color?: string
+          company_id?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_default_intake?: boolean
+          is_lost?: boolean
+          is_won?: boolean
+          name?: string
+          position?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "marketing_lead_stages_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      marketing_leads: {
+        Row: {
+          appointment_at: string | null
+          appointment_label: string | null
+          archived_at: string | null
+          assigned_to: string | null
+          campaign: string | null
+          company_id: string
+          created_at: string
+          customer_id: string | null
+          email: string | null
+          external_created_at: string | null
+          external_id: string | null
+          field_data: Json
+          first_name: string | null
+          form_name: string | null
+          id: string
+          last_contacted_at: string | null
+          last_name: string | null
+          notes: string | null
+          phone: string | null
+          position_in_stage: number
+          source: string
+          stage_id: string | null
+          tags: string[]
+          updated_at: string
+          value: number
+          win_status: string | null
+        }
+        Insert: {
+          appointment_at?: string | null
+          appointment_label?: string | null
+          archived_at?: string | null
+          assigned_to?: string | null
+          campaign?: string | null
+          company_id: string
+          created_at?: string
+          customer_id?: string | null
+          email?: string | null
+          external_created_at?: string | null
+          external_id?: string | null
+          field_data?: Json
+          first_name?: string | null
+          form_name?: string | null
+          id?: string
+          last_contacted_at?: string | null
+          last_name?: string | null
+          notes?: string | null
+          phone?: string | null
+          position_in_stage?: number
+          source?: string
+          stage_id?: string | null
+          tags?: string[]
+          updated_at?: string
+          value?: number
+          win_status?: string | null
+        }
+        Update: {
+          appointment_at?: string | null
+          appointment_label?: string | null
+          archived_at?: string | null
+          assigned_to?: string | null
+          campaign?: string | null
+          company_id?: string
+          created_at?: string
+          customer_id?: string | null
+          email?: string | null
+          external_created_at?: string | null
+          external_id?: string | null
+          field_data?: Json
+          first_name?: string | null
+          form_name?: string | null
+          id?: string
+          last_contacted_at?: string | null
+          last_name?: string | null
+          notes?: string | null
+          phone?: string | null
+          position_in_stage?: number
+          source?: string
+          stage_id?: string | null
+          tags?: string[]
+          updated_at?: string
+          value?: number
+          win_status?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "marketing_leads_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketing_leads_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketing_leads_stage_id_fkey"
+            columns: ["stage_id"]
+            isOneToOne: false
+            referencedRelation: "marketing_lead_stages"
             referencedColumns: ["id"]
           },
         ]

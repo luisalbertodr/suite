@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AlertCircle } from 'lucide-react';
 import { useArticles, ArticleFormData, Article } from '@/hooks/useArticles';
 import { useFamilies } from '@/hooks/useFamilies';
@@ -10,6 +10,8 @@ import { ArticleFormFields } from './ArticleFormFields';
 import { ArticleImageUpload } from './ArticleImageUpload';
 import { ArticleFormButtons } from './ArticleFormButtons';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { ArticleBonoDefinitionBlock, type ArticleBonoDefinitionBlockRef } from './ArticleBonoDefinitionBlock';
 
 interface ArticleFormProps {
   article?: Article | null;
@@ -19,6 +21,8 @@ interface ArticleFormProps {
 
 export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSave }) => {
   const { createArticle, updateArticle, generateCode } = useArticles();
+  const { companyId } = useCompanyFilter();
+  const bonoDefRef = useRef<ArticleBonoDefinitionBlockRef>(null);
   const { families, ensureVariosFamilyExists, loading: familiesLoading, error: familiesError } = useFamilies();
   const { createVariations } = useArticleVariations();
   const [loading, setLoading] = useState(false);
@@ -250,6 +254,14 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
       if (article) {
         console.log('Updating article with ID:', article.id);
         await updateArticle(article.id, formData, imageFile || undefined);
+        if (formData.article_kind === 'bono') {
+          try {
+            await bonoDefRef.current?.persist(article.id);
+          } catch (bonoErr) {
+            console.error('Bono definition persist error:', bonoErr);
+            alert('Artículo guardado, pero no se pudo guardar la composición del bono: ' + (bonoErr instanceof Error ? bonoErr.message : 'Error'));
+          }
+        }
         onSave();
         onClose();
       } else {
@@ -257,6 +269,14 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
         const newArticle = await createArticle(formData, imageFile || undefined);
         
         if (newArticle) {
+          if (formData.article_kind === 'bono') {
+            try {
+              await bonoDefRef.current?.persist(newArticle.id);
+            } catch (bonoErr) {
+              console.error('Bono definition persist error:', bonoErr);
+              alert('Artículo guardado, pero no se pudo guardar la composición del bono: ' + (bonoErr instanceof Error ? bonoErr.message : 'Error'));
+            }
+          }
           setCreatedArticle(newArticle);
           setShowSuccessMessage(true);
           
@@ -421,7 +441,15 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
                       isEditMode={isEditMode}
                       hasCreatedArticle={hasNewlyCreatedArticle}
                     />
-                    
+                    <ArticleBonoDefinitionBlock
+                      ref={bonoDefRef}
+                      companyId={companyId}
+                      articleKind={formData.article_kind}
+                      formData={formData}
+                      bonusDefinitionId={article?.bonus_definition_id}
+                      legacyCodart={article?.legacy_codart}
+                      parentLoading={loading}
+                    />
                     <ArticleImageUpload
                       imagePreview={imagePreview}
                       onImageChange={handleImageChange}
@@ -474,6 +502,15 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
                   onFamiliaChange={handleFamiliaChange}
                   isEditMode={isEditMode}
                   hasCreatedArticle={hasNewlyCreatedArticle}
+                />
+                <ArticleBonoDefinitionBlock
+                  ref={bonoDefRef}
+                  companyId={companyId}
+                  articleKind={formData.article_kind}
+                  formData={formData}
+                  bonusDefinitionId={article?.bonus_definition_id}
+                  legacyCodart={article?.legacy_codart}
+                  parentLoading={loading}
                 />
 
                 {!canManageVariations && (

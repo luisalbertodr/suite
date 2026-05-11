@@ -33,6 +33,13 @@ const eventLabels: Record<string, string> = {
 };
 
 export const ClienteTimelineTab: React.FC<Props> = ({ history, isLoading }) => {
+  const formatEventDate = (value: unknown): string => {
+    const dt = new Date(String(value || ''));
+    if (Number.isNaN(dt.getTime())) return 'Fecha no disponible';
+    if (dt.getFullYear() < 2000) return 'Fecha pendiente';
+    return format(dt, "d MMM yyyy · HH:mm", { locale: es });
+  };
+
   if (isLoading) {
     return (
       <div className="space-y-4">
@@ -103,7 +110,7 @@ export const ClienteTimelineTab: React.FC<Props> = ({ history, isLoading }) => {
                     )}
                   </div>
                   <time className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">
-                    {format(new Date(event.event_date), "d MMM yyyy · HH:mm", { locale: es })}
+                    {formatEventDate(event.event_date)}
                   </time>
                 </div>
               </div>

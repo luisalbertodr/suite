@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Home, Calendar, ShoppingBag, Receipt, Users, Package, Building2, Settings, MapPin } from 'lucide-react';
+import { Home, Calendar, ShoppingBag, Receipt, Users, Package, Building2, Settings, MapPin, Megaphone } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 
@@ -12,6 +12,7 @@ const dockItems = [
   { label: 'Clientes', path: '/clientes', icon: Users, color: 'text-pink-500', permission: { resource: 'customers', action: 'read' } },
   { label: 'Artículos', path: '/articulos', icon: Package, color: 'text-purple-500', permission: { resource: 'articles', action: 'read' } },
   { label: 'Proveedores', path: '/proveedores', icon: Building2, color: 'text-teal-500', permission: { resource: 'suppliers', action: 'read' } },
+  { label: 'Marketing', path: '/marketing', icon: Megaphone, color: 'text-rose-500', permission: { resource: 'marketing', action: 'read' } },
   { label: 'Fichaje', path: '/asistencia', icon: MapPin, color: 'text-emerald-500', permission: { resource: 'settings', action: 'read' } },
   { label: 'Configuración', path: '/configuracion', icon: Settings, color: 'text-gray-500', permission: { resource: 'settings', action: 'read' } },
 ];

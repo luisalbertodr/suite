@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -11,6 +11,7 @@ import { useToast } from '@/hooks/use-toast';
 import { SalesHistory } from './SalesHistory';
 import { BarcodeScanner } from './BarcodeScanner';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { Grid } from 'react-window';
 
 interface CartItem {
   id: string;
@@ -50,12 +51,14 @@ export const TPV: React.FC = () => {
   const navigate = useNavigate();
   const [cart, setCart] = useState<CartItem[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [barcodeInput, setBarcodeInput] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card'>('cash');
   const [amountPaid, setAmountPaid] = useState('');
   const [showHistory, setShowHistory] = useState(false);
   const [showVariations, setShowVariations] = useState<string | null>(null);
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
+  const [productsViewport, setProductsViewport] = useState({ width: 0, height: 0 });
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { companyId, loading: companyLoading } = useCompanyFilter();
@@ -73,6 +76,27 @@ export const TPV: React.FC = () => {
   };
 
   const prefill = (location.state as PrefillState | null)?.prefillFromAppointment;
+  const productsContainerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const el = productsContainerRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      setProductsViewport({
+        width: Math.max(0, Math.floor(entry.contentRect.width)),
+        height: Math.max(0, Math.floor(entry.contentRect.height)),
+      });
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearchTerm(searchTerm), 220);
+    return () => clearTimeout(t);
+  }, [searchTerm]);
 
   useEffect(() => {
     if (!prefill || !prefill.appointmentId) return;
@@ -89,21 +113,20 @@ export const TPV: React.FC = () => {
   }, [prefill, navigate, location.pathname]);
 
   const { data: articles = [], isLoading } = useQuery({
-    queryKey: ['tpv-articles', searchTerm, companyId],
+    queryKey: ['tpv-articles', debouncedSearchTerm, companyId],
     queryFn: async () => {
       if (!companyId) return [];
-      
-      console.log('Searching articles with term:', searchTerm);
-      
+
       let query = supabase
         .from('articles')
         .select('id, descripcion, precio, stock_actual, codigo, foto_url, tipo_producto, codigo_barras')
         .eq('estado', 'activo')
         .eq('company_id', companyId)
-        .order('descripcion');
+        .order('descripcion')
+        .limit(debouncedSearchTerm.trim() ? 300 : 120);
 
-      if (searchTerm.trim()) {
-        const searchPattern = `%${searchTerm.trim()}%`;
+      if (debouncedSearchTerm.trim()) {
+        const searchPattern = `%${debouncedSearchTerm.trim()}%`;
         query = query.or(`descripcion.ilike.${searchPattern},codigo.ilike.${searchPattern}`);
       }
       
@@ -113,8 +136,6 @@ export const TPV: React.FC = () => {
         console.error('Error fetching articles:', error);
         throw error;
       }
-      
-      console.log('Articles found:', data?.length || 0, data);
       return data as Article[];
     },
     enabled: !!companyId
@@ -152,10 +173,6 @@ export const TPV: React.FC = () => {
       notes?: string | null;
       customerName?: string | null;
     }) => {
-      console.log('=== STARTING SALE PROCESSING ===');
-      console.log('Sale data:', JSON.stringify(saleData, null, 2));
-      console.log('Company ID:', companyId);
-      
       if (!companyId) {
         console.error('❌ No company ID available');
         throw new Error('No company ID available');
@@ -176,12 +193,6 @@ export const TPV: React.FC = () => {
       const subtotal = Number((saleData.total / 1.21).toFixed(2));
       const taxAmount = Number((saleData.total - subtotal).toFixed(2));
 
-      console.log('💰 Financial calculations:', {
-        total: saleData.total,
-        subtotal: subtotal,
-        taxAmount: taxAmount
-      });
-
       const saleRecord = {
         company_id: companyId,
         ticket_number: '', // Empty string to trigger auto-generation
@@ -198,8 +209,6 @@ export const TPV: React.FC = () => {
         customer_phone: null,
         notes: saleData.notes ?? null
       };
-
-      console.log('💾 Creating sale record:', JSON.stringify(saleRecord, null, 2));
 
       // Create the sale
       const { data: sale, error: saleError } = await supabase
@@ -224,11 +233,9 @@ export const TPV: React.FC = () => {
         throw new Error('No sale data returned from database');
       }
 
-      console.log('✅ Sale created successfully:', sale);
-
       // Create sale items
       const saleItems = saleData.items.map(item => {
-        const saleItem = {
+        return {
           sale_id: sale.id,
           article_id: item.variationId ? null : item.id,
           variation_id: item.variationId || null,
@@ -237,11 +244,7 @@ export const TPV: React.FC = () => {
           unit_price: item.price,
           total_price: item.total
         };
-        console.log('📦 Creating sale item:', saleItem);
-        return saleItem;
       });
-
-      console.log('📦 Creating sale items:', JSON.stringify(saleItems, null, 2));
 
       const { data: createdItems, error: itemsError } = await supabase
         .from('sale_items')
@@ -259,13 +262,9 @@ export const TPV: React.FC = () => {
         throw new Error(`Error creating sale items: ${itemsError.message}`);
       }
 
-      console.log('✅ Sale items created successfully:', createdItems);
-      console.log('=== SALE PROCESSING COMPLETED ===');
-      
       return sale;
     },
     onSuccess: (sale) => {
-      console.log('🎉 Sale processing successful:', sale);
       setCart([]);
       setAmountPaid('');
       toast({
@@ -287,8 +286,6 @@ export const TPV: React.FC = () => {
   const handleBarcodeSearch = async (barcode: string) => {
     if (!barcode.trim() || !companyId) return;
 
-    console.log('Searching for barcode:', barcode);
-
     try {
       const { data: articleData, error: articleError } = await supabase
         .from('articles')
@@ -303,7 +300,6 @@ export const TPV: React.FC = () => {
       }
 
       if (articleData) {
-        console.log('Found article by barcode:', articleData);
         addToCart(articleData as Article);
         setBarcodeInput('');
         toast({
@@ -341,7 +337,6 @@ export const TPV: React.FC = () => {
       }
 
       if (variationData && variationData.articles) {
-        console.log('Found variation by barcode:', variationData);
         const article = variationData.articles as any;
         const variation = {
           id: variationData.id,
@@ -389,7 +384,6 @@ export const TPV: React.FC = () => {
   };
 
   const handleBarcodeFromCamera = (barcode: string) => {
-    console.log('Código de barras desde cámara:', barcode);
     handleBarcodeSearch(barcode);
   };
 
@@ -483,12 +477,6 @@ export const TPV: React.FC = () => {
   };
 
   const processSale = () => {
-    console.log('🚀 Starting sale process...');
-    console.log('Cart contents:', cart);
-    console.log('Company ID:', companyId);
-    console.log('Payment method:', paymentMethod);
-    console.log('Amount paid:', amountPaid);
-
     if (cart.length === 0) {
       console.warn('⚠️ Cart is empty');
       toast({
@@ -510,11 +498,8 @@ export const TPV: React.FC = () => {
     }
 
     const total = getTotalAmount();
-    console.log('💰 Total amount:', total);
-
     if (paymentMethod === 'cash') {
       const paid = parseFloat(amountPaid) || 0;
-      console.log('💵 Cash payment - Amount paid:', paid);
       if (paid < total) {
         console.warn('⚠️ Insufficient payment');
         toast({
@@ -525,8 +510,6 @@ export const TPV: React.FC = () => {
         return;
       }
     }
-
-    console.log('✅ All validations passed, processing sale...');
 
     processSaleMutation.mutate({
       items: cart,
@@ -552,6 +535,19 @@ export const TPV: React.FC = () => {
         : null,
     });
   };
+
+  const productsGrid = useMemo(() => {
+    const width = productsViewport.width;
+    const height = productsViewport.height;
+    if (!width || !height) return null;
+    const gap = 8;
+    const minColWidth = 180;
+    const columnCount = Math.max(1, Math.floor((width + gap) / (minColWidth + gap)));
+    const columnWidth = Math.floor(width / columnCount);
+    const rowHeight = 138;
+    const rowCount = Math.ceil(articles.length / columnCount);
+    return { width, height, gap, columnCount, columnWidth, rowHeight, rowCount };
+  }, [articles.length, productsViewport.height, productsViewport.width]);
 
   if (companyLoading) {
     return (
@@ -705,67 +701,66 @@ export const TPV: React.FC = () => {
               </div>
             </CardHeader>
             <CardContent className="flex-1 overflow-hidden p-2">
-              <div className="h-full overflow-y-auto">
-                <div className="grid grid-cols-4 gap-2">
-                  {isLoading ? (
-                    <div className="col-span-full text-center py-8 text-gray-500">
-                      Cargando productos...
-                    </div>
-                  ) : articles.length === 0 ? (
-                    <div className="col-span-full text-center py-8 text-gray-500">
-                      {searchTerm ? 'No se encontraron productos' : 'No hay productos disponibles'}
-                    </div>
-                  ) : (
-                    articles.map((article) => (
-                      <div 
-                        key={article.id} 
-                        className={`cursor-pointer hover:shadow-md transition-all duration-200 h-32 bg-white border border-gray-200 hover:border-blue-300 rounded-lg ${
-                          article.stock_actual <= 0 ? 'bg-red-50 opacity-60' : 'hover:bg-blue-50'
-                        }`}
-                        onClick={() => addToCart(article)}
-                      >
-                        <div className="p-3 h-full flex flex-col justify-between">
-                          <div className="flex-shrink-0 h-12 flex items-center justify-center mb-2">
-                            {article.foto_url ? (
-                              <img
-                                src={article.foto_url}
-                                alt={article.descripcion}
-                                className="w-10 h-10 rounded-md object-cover"
-                              />
-                            ) : (
-                              <div className="w-10 h-10 bg-gradient-to-r from-green-500 to-blue-500 rounded-md flex items-center justify-center text-white">
-                                <Package className="w-6 h-6" />
+              <div ref={productsContainerRef} className="h-full overflow-hidden">
+                {isLoading ? (
+                  <div className="h-full text-center py-8 text-gray-500">Cargando productos...</div>
+                ) : articles.length === 0 ? (
+                  <div className="h-full text-center py-8 text-gray-500">
+                    {searchTerm ? 'No se encontraron productos' : 'No hay productos disponibles'}
+                  </div>
+                ) : !productsGrid ? null : (
+                  <Grid
+                    width={productsGrid.width}
+                    height={productsGrid.height}
+                    columnCount={productsGrid.columnCount}
+                    columnWidth={productsGrid.columnWidth}
+                    rowCount={productsGrid.rowCount}
+                    rowHeight={productsGrid.rowHeight}
+                    overscanRowCount={2}
+                  >
+                    {({ columnIndex, rowIndex, style }) => {
+                      const articleIndex = rowIndex * productsGrid.columnCount + columnIndex;
+                      const article = articles[articleIndex];
+                      if (!article) return null;
+                      return (
+                        <div style={{ ...style, padding: productsGrid.gap / 2 }}>
+                          <div
+                            className={`cursor-pointer hover:shadow-md transition-all duration-200 h-32 bg-white border border-gray-200 hover:border-blue-300 rounded-lg ${
+                              article.stock_actual <= 0 ? 'bg-red-50 opacity-60' : 'hover:bg-blue-50'
+                            }`}
+                            onClick={() => addToCart(article)}
+                          >
+                            <div className="p-3 h-full flex flex-col justify-between">
+                              <div className="flex-shrink-0 h-12 flex items-center justify-center mb-2">
+                                {article.foto_url ? (
+                                  <img src={article.foto_url} alt={article.descripcion} className="w-10 h-10 rounded-md object-cover" />
+                                ) : (
+                                  <div className="w-10 h-10 bg-gradient-to-r from-green-500 to-blue-500 rounded-md flex items-center justify-center text-white">
+                                    <Package className="w-6 h-6" />
+                                  </div>
+                                )}
                               </div>
-                            )}
-                          </div>
-                          
-                          <div className="flex-1 flex flex-col justify-center min-h-0 px-1">
-                            <h3 className="font-medium text-xs leading-tight text-center overflow-hidden mb-1">
-                              {article.descripcion.length > 20 
-                                ? `${article.descripcion.substring(0, 20)}...` 
-                                : article.descripcion
-                              }
-                            </h3>
-                            {article.tipo_producto !== 'standard' && (
-                              <p className="text-[10px] text-orange-600 text-center font-semibold">
-                                {article.tipo_producto === 'textil' ? 'TEX' : 'CAL'}
-                              </p>
-                            )}
-                          </div>
-                          
-                          <div className="text-center mt-2">
-                            <p className="text-sm font-bold text-blue-600">
-                              €{(article.precio || 0).toFixed(2)}
-                            </p>
-                            <p className="text-[10px] text-gray-500">
-                              Stock: {article.stock_actual}
-                            </p>
+                              <div className="flex-1 flex flex-col justify-center min-h-0 px-1">
+                                <h3 className="font-medium text-xs leading-tight text-center overflow-hidden mb-1">
+                                  {article.descripcion.length > 20 ? `${article.descripcion.substring(0, 20)}...` : article.descripcion}
+                                </h3>
+                                {article.tipo_producto !== 'standard' && (
+                                  <p className="text-[10px] text-orange-600 text-center font-semibold">
+                                    {article.tipo_producto === 'textil' ? 'TEX' : 'CAL'}
+                                  </p>
+                                )}
+                              </div>
+                              <div className="text-center mt-2">
+                                <p className="text-sm font-bold text-blue-600">€{(article.precio || 0).toFixed(2)}</p>
+                                <p className="text-[10px] text-gray-500">Stock: {article.stock_actual}</p>
+                              </div>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))
-                  )}
-                </div>
+                      );
+                    }}
+                  </Grid>
+                )}
               </div>
             </CardContent>
           </Card>

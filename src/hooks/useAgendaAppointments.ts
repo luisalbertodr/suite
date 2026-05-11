@@ -84,6 +84,82 @@ type CreateAppointmentInput = {
   status?: string;
 };
 
+const nullIfBlank = (value: unknown) => {
+  const s = String(value ?? '').trim();
+  return s ? s : null;
+};
+
+const parseMissingColumnFromPostgrestError = (
+  error: { code?: string; message?: string } | null | undefined
+): string | null => {
+  if (!error) return null;
+  if (error.code !== '42703' && error.code !== 'PGRST204') return null;
+  const msg = String(error.message || '');
+  // Ej: Could not find the 'title' column of 'agenda_appointments' in the schema cache
+  const m = msg.match(/'([^']+)' column of 'agenda_appointments'/i);
+  return m?.[1] ?? null;
+};
+
+async function insertAgendaAppointmentWithFallback(
+  payload: Record<string, unknown>
+) {
+  let candidate = { ...payload };
+  // Evita bucles infinitos si el esquema devuelve varios faltantes.
+  for (let i = 0; i < 8; i += 1) {
+    const result = await supabase
+      .from('agenda_appointments')
+      .insert([candidate])
+      .select()
+      .single();
+    if (!result.error) return result;
+    const missing = parseMissingColumnFromPostgrestError(result.error);
+    if (!missing || !(missing in candidate)) return result;
+    const { [missing]: _drop, ...rest } = candidate;
+    candidate = rest;
+  }
+  return await supabase
+    .from('agenda_appointments')
+    .insert([candidate])
+    .select()
+    .single();
+}
+
+function ymdFromStartTime(value: unknown): string | null {
+  const s = String(value ?? '').trim();
+  if (!s) return null;
+  if (s.includes('T')) {
+    const ymd = s.split('T')[0];
+    return /^\d{4}-\d{2}-\d{2}$/.test(ymd) ? ymd : null;
+  }
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+}
+
+async function updateAgendaAppointmentWithFallback(
+  id: string,
+  payload: Record<string, unknown>
+) {
+  let candidate = { ...payload };
+  for (let i = 0; i < 8; i += 1) {
+    const result = await supabase
+      .from('agenda_appointments')
+      .update(candidate)
+      .eq('id', id)
+      .select()
+      .single();
+    if (!result.error) return result;
+    const missing = parseMissingColumnFromPostgrestError(result.error);
+    if (!missing || !(missing in candidate)) return result;
+    const { [missing]: _drop, ...rest } = candidate;
+    candidate = rest;
+  }
+  return await supabase
+    .from('agenda_appointments')
+    .update(candidate)
+    .eq('id', id)
+    .select()
+    .single();
+}
+
 export const useAgendaAppointments = (date?: string) => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -153,13 +229,21 @@ export const useAgendaAppointments = (date?: string) => {
   const createAppointment = useMutation({
     mutationFn: async (appointment: CreateAppointmentInput) => {
       if (!companyId) throw new Error('No company ID available');
-      
-      const { data, error } = await supabase
-        .from('agenda_appointments')
-        .insert([{ ...appointment, company_id: companyId }])
-        .select()
-        .single();
-
+      const titleValue = String((appointment as Record<string, unknown>).title ?? '').trim();
+      const clientNameValue = String((appointment as Record<string, unknown>).client_name ?? titleValue).trim();
+      const appointmentDate =
+        ymdFromStartTime((appointment as Record<string, unknown>).start_time) ||
+        ymdFromStartTime((appointment as Record<string, unknown>).appointment_date) ||
+        null;
+      const { data, error } = await insertAgendaAppointmentWithFallback({
+        ...appointment,
+        customer_id: nullIfBlank((appointment as Record<string, unknown>).customer_id),
+        employee_id: nullIfBlank((appointment as Record<string, unknown>).employee_id),
+        title: titleValue || clientNameValue || 'Cita',
+        client_name: clientNameValue || titleValue || 'Cita',
+        ...(appointmentDate ? { appointment_date: appointmentDate } : {}),
+        company_id: companyId,
+      });
       if (error) throw error;
       return data;
     },
@@ -182,13 +266,27 @@ export const useAgendaAppointments = (date?: string) => {
 
   const updateAppointment = useMutation({
     mutationFn: async ({ id, ...updates }: Partial<AgendaAppointment> & { id: string }) => {
-      const { data, error } = await supabase
-        .from('agenda_appointments')
-        .update(updates)
-        .eq('id', id)
-        .select()
-        .single();
-
+      const titleValue = String((updates as Record<string, unknown>).title ?? '').trim();
+      const clientNameValue = String((updates as Record<string, unknown>).client_name ?? titleValue).trim();
+      const appointmentDate =
+        ymdFromStartTime((updates as Record<string, unknown>).start_time) ||
+        ymdFromStartTime((updates as Record<string, unknown>).appointment_date) ||
+        null;
+      const { data, error } = await updateAgendaAppointmentWithFallback(
+        id,
+        {
+          ...(updates as Record<string, unknown>),
+          customer_id: nullIfBlank((updates as Record<string, unknown>).customer_id),
+          employee_id: nullIfBlank((updates as Record<string, unknown>).employee_id),
+          ...(titleValue || clientNameValue
+            ? {
+                title: titleValue || clientNameValue,
+                client_name: clientNameValue || titleValue,
+              }
+            : {}),
+          ...(appointmentDate ? { appointment_date: appointmentDate } : {}),
+        }
+      );
       if (error) throw error;
       return data;
     },

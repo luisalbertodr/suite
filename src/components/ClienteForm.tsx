@@ -1,9 +1,8 @@
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
-import { ArrowLeft, Save, User, Heart, Calendar, FileText, Receipt, Gift, StickyNote } from 'lucide-react';
+import { ArrowLeft, Save, User, Heart, Calendar, FileText, Receipt, Gift, StickyNote, ChevronRight } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useForm } from 'react-hook-form';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
@@ -15,6 +14,9 @@ import { ClienteDocumentacionTab } from './cliente/ClienteDocumentacionTab';
 import { ClienteFacturacionTab } from './cliente/ClienteFacturacionTab';
 import { ClienteBonosTab } from './cliente/ClienteBonosTab';
 import { ClienteNotasTab } from './cliente/ClienteNotasTab';
+import { ClienteDailyScrollView } from './cliente/ClienteDailyScrollView';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { cn } from '@/lib/utils';
 
 interface Customer {
   id: string;
@@ -64,6 +66,34 @@ interface FormData {
   intracomunitario: string;
 }
 
+const Section: React.FC<{
+  title: string;
+  icon: React.ComponentType<{ className?: string }>;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  children: React.ReactNode;
+}> = ({ title, icon: Icon, open, onOpenChange, children }) => (
+  <Collapsible open={open} onOpenChange={onOpenChange} className="border border-sky-100/80 dark:border-sky-900/30 rounded-lg overflow-hidden bg-card">
+    <CollapsibleTrigger asChild>
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-sm font-medium hover:bg-sky-50/80 dark:hover:bg-sky-950/30"
+      >
+        <span className="flex items-center gap-2 min-w-0">
+          <Icon className="w-4 h-4 text-sky-600 flex-shrink-0" />
+          {title}
+        </span>
+        <ChevronRight
+          className={cn('w-4 h-4 text-muted-foreground transition-transform flex-shrink-0', open && 'rotate-90')}
+        />
+      </button>
+    </CollapsibleTrigger>
+    <CollapsibleContent>
+      <div className="px-3 pb-3 pt-0 border-t border-sky-100/50 dark:border-sky-900/20">{children}</div>
+    </CollapsibleContent>
+  </Collapsible>
+);
+
 export const ClienteForm: React.FC<ClienteFormProps> = ({ customer, onClose }) => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -71,6 +101,15 @@ export const ClienteForm: React.FC<ClienteFormProps> = ({ customer, onClose }) =
   const { contacts, addresses, saveContacts, saveAddresses } = useCustomerAdvanced(customer?.id);
   const [advancedContacts, setAdvancedContacts] = useState<any[]>([]);
   const [advancedAddresses, setAdvancedAddresses] = useState<any[]>([]);
+
+  const isExisting = !!customer?.id;
+  const [openDatos, setOpenDatos] = useState(!isExisting);
+  const [openNotas, setOpenNotas] = useState(false);
+  const [openHistorial, setOpenHistorial] = useState(false);
+  const [openCitas, setOpenCitas] = useState(false);
+  const [openDoc, setOpenDoc] = useState(false);
+  const [openFact, setOpenFact] = useState(false);
+  const [openBonos, setOpenBonos] = useState(false);
 
   const { register, handleSubmit, setValue, watch, formState: { errors } } = useForm<FormData>({
     defaultValues: {
@@ -122,8 +161,12 @@ export const ClienteForm: React.FC<ClienteFormProps> = ({ customer, onClose }) =
       if (advancedAddresses.length > 0) await saveAddresses(savedCustomerId, advancedAddresses);
       return { customerId: savedCustomerId };
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['customers'] });
+      if (result?.customerId) {
+        queryClient.invalidateQueries({ queryKey: ['customer_day_timeline', result.customerId] });
+        queryClient.invalidateQueries({ queryKey: ['customer_detail', result.customerId] });
+      }
       toast({ title: customer ? 'Cliente actualizado' : 'Cliente creado' });
       onClose();
     },
@@ -144,20 +187,6 @@ export const ClienteForm: React.FC<ClienteFormProps> = ({ customer, onClose }) =
     return <div className="flex justify-center items-center h-64 text-muted-foreground">Cargando...</div>;
   }
 
-  const isExisting = !!customer?.id;
-
-  const tabItems = [
-    { value: 'datos', label: 'Datos', icon: User },
-    ...(isExisting ? [
-      { value: 'historial', label: 'Historial', icon: Heart },
-      { value: 'citas', label: 'Citas', icon: Calendar },
-      { value: 'documentacion', label: 'Documentación', icon: FileText },
-      { value: 'facturacion', label: 'Facturación', icon: Receipt },
-      { value: 'bonos', label: 'Bonos', icon: Gift },
-    ] : []),
-    { value: 'notas', label: 'Notas', icon: StickyNote },
-  ];
-
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -173,59 +202,70 @@ export const ClienteForm: React.FC<ClienteFormProps> = ({ customer, onClose }) =
         </Button>
       </div>
 
-      <Tabs defaultValue="datos" className="w-full">
-        <TabsList className="w-full justify-start overflow-x-auto">
-          {tabItems.map((tab) => (
-            <TabsTrigger key={tab.value} value={tab.value} className="flex items-center gap-1.5">
-              <tab.icon className="w-4 h-4" />
-              <span className="hidden sm:inline">{tab.label}</span>
-            </TabsTrigger>
-          ))}
-        </TabsList>
+      {isExisting && customer?.id && (
+        <section className="space-y-2">
+          <h2 className="text-lg font-semibold">Actividad por día</h2>
+          <ClienteDailyScrollView customerId={customer.id} className="max-w-full" />
+        </section>
+      )}
 
-        <div className="mt-4">
-          <TabsContent value="datos">
-            <ClienteDatosTab
-              register={register}
-              setValue={setValue}
-              watch={watch}
-              errors={errors}
-              customerId={customer?.id}
-              contacts={contacts}
-              addresses={addresses}
-              onContactsChange={setAdvancedContacts}
-              onAddressesChange={setAdvancedAddresses}
-            />
-          </TabsContent>
+      <div className="space-y-2">
+        <Section title="Datos y contacto" icon={User} open={openDatos} onOpenChange={setOpenDatos}>
+          <ClienteDatosTab
+            register={register}
+            setValue={setValue}
+            watch={watch}
+            errors={errors}
+            customerId={customer?.id}
+            contacts={contacts}
+            addresses={addresses}
+            onContactsChange={setAdvancedContacts}
+            onAddressesChange={setAdvancedAddresses}
+          />
+        </Section>
 
-          {isExisting && (
-            <>
-              <TabsContent value="historial">
-                <ClienteHistorialTab customerId={customer!.id} />
-              </TabsContent>
-              <TabsContent value="citas">
-                <ClienteCitasTab customerId={customer!.id} />
-              </TabsContent>
-              <TabsContent value="documentacion">
-                <ClienteDocumentacionTab customerId={customer!.id} />
-              </TabsContent>
-              <TabsContent value="facturacion">
-                <ClienteFacturacionTab customerId={customer!.id} />
-              </TabsContent>
-              <TabsContent value="bonos">
-                <ClienteBonosTab customerId={customer!.id} />
-              </TabsContent>
-            </>
-          )}
+        {isExisting && customer?.id && (
+          <>
+            <Section
+              title="Historial clínico"
+              icon={Heart}
+              open={openHistorial}
+              onOpenChange={setOpenHistorial}
+            >
+              <ClienteHistorialTab customerId={customer.id} />
+            </Section>
+            <Section title="Citas" icon={Calendar} open={openCitas} onOpenChange={setOpenCitas}>
+              <ClienteCitasTab customerId={customer.id} />
+            </Section>
+            <Section
+              title="Documentación"
+              icon={FileText}
+              open={openDoc}
+              onOpenChange={setOpenDoc}
+            >
+              <ClienteDocumentacionTab customerId={customer.id} />
+            </Section>
+            <Section
+              title="Facturación"
+              icon={Receipt}
+              open={openFact}
+              onOpenChange={setOpenFact}
+            >
+              <ClienteFacturacionTab customerId={customer.id} />
+            </Section>
+            <Section title="Bonos" icon={Gift} open={openBonos} onOpenChange={setOpenBonos}>
+              <ClienteBonosTab customerId={customer.id} />
+            </Section>
+          </>
+        )}
 
-          <TabsContent value="notas">
-            <ClienteNotasTab
-              notes={watchedNotes}
-              onChange={(v) => setValue('notes', v)}
-            />
-          </TabsContent>
-        </div>
-      </Tabs>
+        <Section title="Notas" icon={StickyNote} open={openNotas} onOpenChange={setOpenNotas}>
+          <ClienteNotasTab
+            notes={watchedNotes}
+            onChange={(v) => setValue('notes', v)}
+          />
+        </Section>
+      </div>
     </div>
   );
 };

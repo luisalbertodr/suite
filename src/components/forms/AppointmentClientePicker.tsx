@@ -43,7 +43,6 @@ export const AppointmentClientePicker: React.FC<Props> = ({ customers, value, on
 
   return (
     <div>
-      <Label className="text-xs">Cliente *</Label>
       <Popover
         open={open}
         onOpenChange={(o) => {

@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
-import { X, Save, User, Clock, Trash2, CheckCircle, Clock as ClockIcon, XCircle, DoorOpen, Cpu } from 'lucide-react';
+import { X, Save, User, Trash2, DoorOpen, Cpu } from 'lucide-react';
 import { AppointmentItemsEditor } from '@/components/AppointmentItemsEditor';
 import { useAppointmentItems } from '@/hooks/useAppointmentItems';
 import type { AppointmentItemDraft } from '@/types/agenda';
@@ -14,6 +14,10 @@ import { calcEndFromStart, effectiveDurationMinutes, minutesBetweenHHmm } from '
 import { appointmentItemsTotal } from '@/lib/agendaAppointmentPricing';
 import { AppointmentClientePicker, type AppointmentClientPick } from '@/components/forms/AppointmentClientePicker';
 import type { CustomerSearchRow } from '@/lib/customerSearch';
+import { useQuery } from '@tanstack/react-query';
+import { supabase } from '@/lib/supabase';
+import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { ClienteDetailView } from '@/components/ClienteDetailView';
 
 interface Employee { id: string; name: string; color: string; }
 interface Appointment {
@@ -51,6 +55,9 @@ function initialClientPick(apt: Appointment, custs: CustomerSearchRow[]): Appoin
     if (c) return { kind: 'customer', customerId: c.id, displayName: c.name };
     return { kind: 'customer', customerId: apt.customerId, displayName: apt.clientName };
   }
+  // Compatibilidad legacy: si no hay customerId, intenta vincular por nombre exacto.
+  const byName = custs.find((x) => x.name.trim().toLowerCase() === apt.clientName.trim().toLowerCase());
+  if (byName) return { kind: 'customer', customerId: byName.id, displayName: byName.name };
   if (apt.clientName.trim()) return { kind: 'manual', name: apt.clientName };
   return null;
 }
@@ -117,9 +124,12 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
   onDelete,
   onCancel,
 }) => {
+  const { companyId } = useCompanyFilter();
   const [clientPick, setClientPick] = useState<AppointmentClientPick | null>(() =>
     initialClientPick(appointment, customers)
   );
+  const [showCustomerHistory, setShowCustomerHistory] = useState(false);
+  const [customerHistoryTab, setCustomerHistoryTab] = useState<'timeline' | 'vouchers' | 'ficha' | 'facturacion'>('timeline');
 
   const [formData, setFormData] = useState({
     description: appointment.description,
@@ -164,6 +174,54 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
 
   const employee = employees.find(e => e.id === formData.employeeId);
   const total = appointmentItemsTotal(items);
+  const selectedCustomerId = clientPick?.kind === 'customer'
+    ? clientPick.customerId
+    : (appointment.customerId ?? null);
+
+  const { data: selectedCustomer } = useQuery({
+    queryKey: ['edit-appointment-customer-summary', selectedCustomerId],
+    enabled: !!selectedCustomerId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('customers')
+        .select('id,name,tax_id,email,phone,phone_mobile,phone_home,notes')
+        .eq('id', selectedCustomerId)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const { data: activeVouchersCount = 0 } = useQuery({
+    queryKey: ['edit-appointment-active-vouchers-count', companyId, selectedCustomerId],
+    enabled: !!companyId && !!selectedCustomerId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('customer_vouchers')
+        .select('id,total_sessions,used_sessions,is_active')
+        .eq('company_id', companyId)
+        .eq('customer_id', selectedCustomerId)
+        .eq('is_active', true);
+      if (error) throw error;
+      return (data || []).filter((v: any) => Number(v.total_sessions || 0) > Number(v.used_sessions || 0)).length;
+    },
+  });
+
+  const { data: pendingDebt = 0 } = useQuery({
+    queryKey: ['edit-appointment-customer-debt-summary', companyId, selectedCustomerId],
+    enabled: !!companyId && !!selectedCustomerId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('invoices')
+        .select('total_amount,paid_status,status')
+        .eq('company_id', companyId)
+        .eq('customer_id', selectedCustomerId)
+        .eq('status', 'issued')
+        .or('paid_status.is.null,paid_status.eq.false');
+      if (error) throw error;
+      return (data || []).reduce((sum: number, r: any) => sum + Math.max(0, Number(r.total_amount || 0)), 0);
+    },
+  });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -184,40 +242,69 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
     <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-50 px-4 pt-3 pb-24 sm:p-4">
       <Card className="w-full max-w-lg max-h-[calc(100dvh-7rem)] overflow-y-auto">
         <CardHeader className="pb-3">
-          <div className="flex justify-between items-center">
-            <CardTitle className="text-base flex items-center gap-2">
+          <div className="flex items-start gap-2">
+            <CardTitle className="text-base flex items-center gap-2 shrink-0 pt-1">
               <User className="w-4 h-4" /> Editar Cita
             </CardTitle>
-            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onCancel}>
+            <div className="flex-1 min-w-0">
+              <AppointmentClientePicker customers={customers} value={clientPick} onChange={setClientPick} />
+            </div>
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0 mt-0.5" onClick={onCancel}>
               <X className="w-4 h-4" />
             </Button>
           </div>
-          <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
-            <Clock className="w-3 h-3" /> {employee?.name} · {appointment.startTime}
-          </p>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-3">
-            <div className="grid grid-cols-4 gap-2 items-end">
-              <div className="col-span-3">
-                <AppointmentClientePicker customers={customers} value={clientPick} onChange={setClientPick} />
+            {selectedCustomerId && selectedCustomer && (
+              <div className="rounded-md border bg-muted/30 p-2 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-muted-foreground truncate">
+                    {[selectedCustomer.tax_id, selectedCustomer.phone_mobile || selectedCustomer.phone || selectedCustomer.phone_home, selectedCustomer.email]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </div>
+                  <div className="flex flex-col gap-1 shrink-0">
+                    <Button type="button" variant="outline" size="sm" className="h-6 text-[11px] px-2" onClick={() => setShowCustomerHistory(true)}>
+                      Ficha
+                    </Button>
+                    <Select value={formData.status} onValueChange={(v) => setFormData({ ...formData, status: v as Appointment['status'] })}>
+                      <SelectTrigger className="h-6 text-[11px] px-2 min-w-[104px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="confirmed">Confirmada</SelectItem>
+                        <SelectItem value="pending">Pendiente</SelectItem>
+                        <SelectItem value="cancelled">Cancelada</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="flex gap-3 mt-1">
+                  <button type="button" className="hover:underline" onClick={() => { setCustomerHistoryTab('vouchers'); setShowCustomerHistory(true); }}>
+                    Bonos activos: <strong>{activeVouchersCount}</strong>
+                  </button>
+                  <button
+                    type="button"
+                    className="hover:underline text-primary"
+                    onClick={() => { setCustomerHistoryTab('vouchers'); setShowCustomerHistory(true); }}
+                  >
+                    Crear/editar bono
+                  </button>
+                  <button type="button" className="hover:underline" onClick={() => { setCustomerHistoryTab('facturacion'); setShowCustomerHistory(true); }}>
+                    Deuda: <strong>{pendingDebt.toFixed(2)} EUR</strong>
+                  </button>
+                  <button
+                    type="button"
+                    className="hover:underline"
+                    onClick={() => onCharge?.({ ...appointment, ...formData }, items)}
+                  >
+                    Total cita: <strong>{total.toFixed(2)} EUR</strong>
+                  </button>
+                </div>
               </div>
-              <div className="col-span-1">
-                <Label className="text-xs">Empleada</Label>
-                <Select value={formData.employeeId} onValueChange={(v) => setFormData({ ...formData, employeeId: v })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {employees.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div>
-              <Label className="text-xs">Descripción</Label>
-              <Textarea value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} rows={2} />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
+            )}
+            <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
               <div>
                 <Label className="text-xs">Fecha</Label>
                 <Input type="date" value={formData.date} onChange={(e) => setFormData({ ...formData, date: e.target.value })} />
@@ -230,17 +317,28 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                   onChange={(e) => setFormData({ ...formData, startTime: e.target.value })}
                 />
               </div>
+              <div>
+                <Label className="text-xs">Empleada</Label>
+                <Select value={formData.employeeId} onValueChange={(v) => setFormData({ ...formData, employeeId: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {employees.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             {itemsLoading || loadedItems === undefined ? (
               <Skeleton className="h-28 w-full rounded-md" />
             ) : (
-              <AppointmentItemsEditor startTime={formData.startTime} items={items} onChange={setItems} />
+              <AppointmentItemsEditor
+                startTime={formData.startTime}
+                items={items}
+                onChange={setItems}
+                customerId={clientPick?.kind === 'customer' ? clientPick.customerId : null}
+                compactHeader
+              />
             )}
-            <div className="rounded-md border bg-muted/30 px-2 py-1.5 text-xs flex items-center justify-between">
-              <span className="text-muted-foreground">Importe cita</span>
-              <span className="font-semibold tabular-nums">{total.toFixed(2)} EUR</span>
-            </div>
 
             <div className="grid grid-cols-2 gap-3">
               {cabinas.length > 0 && (
@@ -272,23 +370,13 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                 </div>
               )}
             </div>
-
             <div>
-              <Label className="text-xs">Estado</Label>
-              <Select value={formData.status} onValueChange={(v) => setFormData({ ...formData, status: v as Appointment['status'] })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="confirmed">
-                    <span className="flex items-center gap-1"><CheckCircle className="w-3 h-3 text-green-600" /> Confirmada</span>
-                  </SelectItem>
-                  <SelectItem value="pending">
-                    <span className="flex items-center gap-1"><ClockIcon className="w-3 h-3 text-yellow-600" /> Pendiente</span>
-                  </SelectItem>
-                  <SelectItem value="cancelled">
-                    <span className="flex items-center gap-1"><XCircle className="w-3 h-3 text-red-600" /> Cancelada</span>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+              <Label className="text-xs">Observaciones</Label>
+              <Input
+                value={formData.description}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                placeholder="Notas rápidas de la cita"
+              />
             </div>
 
             <div className="flex justify-between pt-2">
@@ -324,7 +412,6 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                     Cobrar
                   </Button>
                 )}
-                <Button type="button" variant="outline" size="sm" onClick={onCancel}>Cancelar</Button>
                 <Button type="submit" size="sm" disabled={!clientPick}><Save className="w-4 h-4 mr-1" /> Guardar</Button>
               </div>
             </div>
@@ -368,6 +455,15 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
           </form>
         </CardContent>
       </Card>
+      {showCustomerHistory && selectedCustomerId && (
+        <div className="fixed inset-0 bg-background z-[70] overflow-auto p-4">
+          <ClienteDetailView
+            customerId={selectedCustomerId}
+            initialTab={customerHistoryTab}
+            onBack={() => setShowCustomerHistory(false)}
+          />
+        </div>
+      )}
     </div>
   );
 };

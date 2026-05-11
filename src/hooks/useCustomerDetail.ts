@@ -46,7 +46,73 @@ export const useCustomerDetail = (customerId: string) => {
         .eq('customer_id', customerId)
         .order('event_date', { ascending: false });
       if (error) throw error;
-      return data;
+      const rows = (data || []) as any[];
+
+      const toTime = (value: unknown): number => {
+        const t = Date.parse(String(value || ''));
+        return Number.isFinite(t) ? t : 0;
+      };
+
+      // Deduplicación: eventos de cita por appointment_id (se conserva el más reciente).
+      const bestByAppointment = new Map<string, any>();
+      const output: any[] = [];
+      for (const row of rows) {
+        const aptId = row?.event_type === 'appointment'
+          ? String(row?.data?.appointment_id || '')
+          : '';
+        if (!aptId) {
+          output.push(row);
+          continue;
+        }
+        const prev = bestByAppointment.get(aptId);
+        if (!prev || toTime(row?.updated_at || row?.event_date) >= toTime(prev?.updated_at || prev?.event_date)) {
+          bestByAppointment.set(aptId, row);
+        }
+      }
+      output.push(...Array.from(bestByAppointment.values()));
+
+      // Deduplicación secundaria para citas legacy sin appointment_id:
+      // misma fecha (día), tipo y tratamiento -> se conserva la más reciente.
+      const bestLegacyKey = new Map<string, any>();
+      const keep: any[] = [];
+      for (const row of output) {
+        if (row?.event_type !== 'appointment') {
+          keep.push(row);
+          continue;
+        }
+        const aptId = String(row?.data?.appointment_id || '');
+        if (aptId) {
+          keep.push(row);
+          continue;
+        }
+        const day = String(row?.event_date || '').slice(0, 10);
+        const items = Array.isArray(row?.data?.items) ? row.data.items : [];
+        const itemsSig = items
+          .map((it: any) => `${String(it?.label || '').trim().toLowerCase()}|${Number(it?.quantity || 0)}|${Number(it?.total || 0)}`)
+          .sort()
+          .join('||');
+        const treatment = String(row?.data?.treatment || '').trim().toLowerCase();
+        const total = String(row?.data?.total_amount ?? '');
+        const k = `legacy|${day}|${treatment}|${total}|${itemsSig}`;
+        const prev = bestLegacyKey.get(k);
+        if (!prev || toTime(row?.created_at || row?.event_date) >= toTime(prev?.created_at || prev?.event_date)) {
+          bestLegacyKey.set(k, row);
+        }
+      }
+      keep.push(...Array.from(bestLegacyKey.values()));
+
+      // Normaliza fechas inválidas/remotas para evitar 1970 en UI.
+      return keep
+        .map((row) => {
+          const raw = String(row?.event_date || '');
+          const t = Date.parse(raw);
+          if (Number.isFinite(t) && t > Date.parse('2000-01-01T00:00:00Z')) return row;
+          return {
+            ...row,
+            event_date: row?.created_at || row?.updated_at || new Date().toISOString(),
+          };
+        })
+        .sort((a, b) => toTime(b.event_date) - toTime(a.event_date));
     },
     enabled: !!customerId,
   });
@@ -89,6 +155,7 @@ export const useCustomerDetail = (customerId: string) => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['customer_vouchers', customerId] });
       queryClient.invalidateQueries({ queryKey: ['customer_aesthetic_history', customerId] });
+      queryClient.invalidateQueries({ queryKey: ['customer_day_timeline', customerId] });
       toast({ title: 'Sesión registrada correctamente' });
     },
     onError: (e) => {

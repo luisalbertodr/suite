@@ -15,6 +15,7 @@ import GestionDocumentalPage from '@/pages/GestionDocumentalPage';
 import ConfiguracionPage from '@/pages/ConfiguracionPage';
 import RecursosCabinasPage from '@/pages/RecursosCabinasPage';
 import AsistenciaPage from '@/pages/AsistenciaPage';
+import MarketingPage from '@/pages/MarketingPage';
 import SuperuserPage from '@/pages/SuperuserPage';
 import SuperuserManagementPage from '@/pages/SuperuserManagementPage';
 
@@ -69,6 +70,9 @@ function App() {
         } />
         <Route path="/asistencia" element={
           <ProtectedLayout><AsistenciaPage /></ProtectedLayout>
+        } />
+        <Route path="/marketing" element={
+          <ProtectedLayout><MarketingPage /></ProtectedLayout>
         } />
         <Route path="/superuser" element={<SuperuserPage />} />
         <Route path="/superuser-management" element={

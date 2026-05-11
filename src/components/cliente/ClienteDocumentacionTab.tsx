@@ -47,6 +47,7 @@ export const ClienteDocumentacionTab: React.FC<Props> = ({ customerId }) => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['consentimientos', customerId] });
+      queryClient.invalidateQueries({ queryKey: ['customer_day_timeline', customerId] });
       setShowForm(false);
       setForm({ tipo: '', titulo: '', contenido: '' });
       toast({ title: 'Consentimiento creado' });

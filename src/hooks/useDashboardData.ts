@@ -2,6 +2,15 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { format } from 'date-fns';
+import type { PostgrestError } from '@supabase/supabase-js';
+
+const isMissingRelation = (error: PostgrestError | null) =>
+  Boolean(
+    error &&
+      (error.code === '42P01' ||
+        (error.message || '').toLowerCase().includes('relation') ||
+        (error.message || '').toLowerCase().includes('does not exist'))
+  );
 
 export const useDashboardData = () => {
   const { companyId, loading: companyLoading } = useCompanyFilter();
@@ -17,7 +26,7 @@ export const useDashboardData = () => {
       if (!companyId) return null;
 
       // Parallel fetches
-      const [customersRes, appointmentsRes, vouchersRes, invoicesRes, bonosRes] = await Promise.all([
+      const [customersRes, appointmentsRes, vouchersRes, invoicesRes] = await Promise.all([
         supabase.from('customers').select('id', { count: 'exact', head: true }).eq('company_id', companyId),
         supabase.from('agenda_appointments').select('id', { count: 'exact', head: true })
           .eq('company_id', companyId)
@@ -29,16 +38,18 @@ export const useDashboardData = () => {
           .eq('company_id', companyId)
           .gte('created_at', firstDayOfMonth.toISOString())
           .lte('created_at', lastDayOfMonth.toISOString()),
-        supabase.from('bonos').select('id', { count: 'exact', head: true })
-          .eq('company_id', companyId).eq('estado', 'activo'),
       ]);
+
+      const bonosRes = await supabase.from('bonos').select('id', { count: 'exact', head: true })
+        .eq('company_id', companyId).eq('estado', 'activo');
+      const bonosCount = isMissingRelation(bonosRes.error) ? 0 : (bonosRes.count || 0);
 
       const monthlyRevenue = invoicesRes.data?.reduce((s, i) => s + (i.total_amount || 0), 0) || 0;
 
       return {
         activeClients: customersRes.count || 0,
         todayAppointments: appointmentsRes.count || 0,
-        activeVouchers: (vouchersRes.count || 0) + (bonosRes.count || 0),
+        activeVouchers: (vouchersRes.count || 0) + bonosCount,
         monthlyRevenue,
       };
     },

@@ -22,6 +22,8 @@ export interface Appointment {
   endTime: string;   // formato HH:mm
   date: string;      // formato YYYY-MM-DD
   color: string;
+  /** Importe total calculado de los ítems de la cita. */
+  totalAmount?: number;
   status: 'confirmed' | 'pending' | 'cancelled';
 }
 

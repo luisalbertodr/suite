@@ -332,13 +332,13 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
     <div ref={scrollRootRef} className="h-full overflow-auto bg-card">
       <div className="min-w-[900px] relative">
         {/* Header con nombres de empleados */}
-        <div ref={stickyHeaderRef} className="sticky top-0 bg-card z-10 border-b-2 border-border">
+        <div ref={stickyHeaderRef} className="sticky top-0 bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/85 z-30 border-b border-border shadow-sm">
           <div className="grid gap-0" style={{ gridTemplateColumns: `${TIME_GUTTER_PX}px repeat(${employees.length}, 1fr)` }}>
-            <div className="p-3 bg-muted border-r border-border font-semibold text-sm text-center">
+            <div className="sticky left-0 z-40 px-2 py-1.5 bg-muted border-r border-border shadow-[2px_0_4px_rgba(0,0,0,0.08)] font-semibold text-xs text-center leading-tight">
               Hora
             </div>
             {employees.map((employee) => (
-              <div key={employee.id} className={`p-3 border-r border-border font-semibold text-sm text-center ${employee.color}`}>
+              <div key={employee.id} className={`px-2 py-1.5 border-r border-border font-semibold text-xs text-center leading-tight ${employee.color}`}>
                 {employee.name}
               </div>
             ))}
@@ -415,6 +415,11 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
                         {appointment.description}
                       </div>
                     )}
+                    {typeof appointment.totalAmount === 'number' && (
+                      <div className="text-xs text-gray-800 font-semibold truncate mt-1">
+                        {appointment.totalAmount.toFixed(2)} EUR
+                      </div>
+                    )}
                     {visibleFields.legacyCodes && (
                       <div className="text-[10px] text-gray-600 truncate mt-1">
                         {appointment.legacyEmployeeCode ? `EMP:${appointment.legacyEmployeeCode}` : ''}
@@ -462,7 +467,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
               <div key={slot.time} className="contents">
                 {/* Columna de tiempo */}
                 <div
-                  className={`p-2 border-r border-gray-300 text-xs text-center font-medium ${
+                  className={`sticky left-0 z-[26] p-2 border-r border-gray-300 shadow-[2px_0_4px_rgba(0,0,0,0.06)] text-xs text-center font-medium ${
                   isHourMark 
                     ? 'border-t-2 border-gray-400 bg-gray-100' 
                     : 'border-t border-gray-200 bg-gray-50'

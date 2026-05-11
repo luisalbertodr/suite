@@ -54,6 +54,7 @@ export const ClienteHistorialTab: React.FC<Props> = ({ customerId }) => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['historial_clinico', customerId] });
+      queryClient.invalidateQueries({ queryKey: ['customer_day_timeline', customerId] });
       setShowForm(false);
       setForm({ tipo: 'consulta', titulo: '', descripcion: '', tratamiento: '', observaciones: '' });
       toast({ title: 'Registro creado' });

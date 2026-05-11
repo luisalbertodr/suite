@@ -23,6 +23,10 @@ export interface Article {
   duration_minutes?: number;
   company_id: string | null;
   iva_percentage: number;
+  /** Código de artículo en el origen (ej. `BONO:<codbon>`) */
+  legacy_codart?: string | null;
+  /** Plantilla de composición (servicios/productos incluidos en el precio) */
+  bonus_definition_id?: string | null;
   created_at: string;
   updated_at: string;
 }

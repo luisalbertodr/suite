@@ -1,0 +1,369 @@
+import { useQuery } from '@tanstack/react-query';
+import { supabase } from '@/lib/supabase';
+
+export type DayTimelineItem = {
+  id: string;
+  kind: string;
+  title: string;
+  subtitle?: string;
+  timeLabel?: string;
+  refTable?: string;
+  refId?: string;
+  imageUrls?: string[];
+  amountLabel?: string;
+  sortKey: number;
+};
+
+export type DayAsset = {
+  id: string;
+  kind: string;
+  title: string | null;
+  storagePath: string | null;
+  refTable?: string | null;
+  refId?: string | null;
+};
+
+export type DayGroup = {
+  date: string;
+  daySummary?: string | null;
+  hasDailyLog: boolean;
+  items: DayTimelineItem[];
+  assets: DayAsset[];
+};
+
+const toYmd = (d: string | null | undefined): string | null => {
+  if (!d) return null;
+  if (/^\d{4}-\d{2}-\d{2}/.test(d)) return d.slice(0, 10);
+  const t = Date.parse(d);
+  if (!Number.isFinite(t)) return null;
+  return new Date(t).toISOString().slice(0, 10);
+};
+
+const timeFromFecha = (d: string | null | undefined): string | undefined => {
+  if (!d) return undefined;
+  if (d.includes('T') || d.length > 10) {
+    const t = new Date(d);
+    if (Number.isFinite(t.getTime())) {
+      return t.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+    }
+  }
+  return undefined;
+};
+
+const refKey = (table?: string | null, id?: string | null): string | null => {
+  if (table && id) return `${table}:${id}`;
+  return null;
+};
+
+type DailyRow = {
+  id: string;
+  log_date: string;
+  day_summary: string | null;
+  daily_customer_log_items?: Array<{
+    id: string;
+    item_kind: string;
+    title: string | null;
+    body: string | null;
+    ref_table: string | null;
+    ref_id: string | null;
+    amount_cents: number | null;
+    sort_order: number;
+  } | null> | null;
+  daily_customer_log_assets?: Array<{
+    id: string;
+    asset_kind: string;
+    title: string | null;
+    storage_path: string | null;
+    ref_table: string | null;
+    ref_id: string | null;
+  } | null> | null;
+};
+
+function mergeByDay(
+  customerId: string,
+  dailyRows: DailyRow[],
+  historial: any[],
+  consent: any[],
+  aesthetic: any[],
+  bonos: any[],
+  bonoUso: any[],
+  bonoNameById: Map<string, string>,
+  appointments: any[],
+): DayGroup[] {
+  const byDay = new Map<string, DayGroup>();
+
+  const getDay = (ymd: string) => {
+    let g = byDay.get(ymd);
+    if (!g) {
+      g = {
+        date: ymd,
+        hasDailyLog: false,
+        daySummary: null,
+        items: [],
+        assets: [],
+      };
+      byDay.set(ymd, g);
+    }
+    return g;
+  };
+
+  for (const log of dailyRows) {
+    const ymd = toYmd(log.log_date) || toYmd(String(log.log_date)) || '1970-01-01';
+    const d = getDay(ymd);
+    d.hasDailyLog = true;
+    d.daySummary = log.day_summary;
+    for (const it of log.daily_customer_log_items || []) {
+      if (!it) continue;
+      d.items.push({
+        id: `daily_item:${it.id}`,
+        kind: it.item_kind,
+        title: (it.title || it.item_kind).trim() || 'Evento',
+        subtitle: it.body || undefined,
+        timeLabel: timeFromFecha(ymd),
+        refTable: it.ref_table || undefined,
+        refId: it.ref_id || undefined,
+        amountLabel:
+          it.amount_cents != null && it.amount_cents !== 0
+            ? (it.amount_cents / 100).toFixed(2) + ' €'
+            : undefined,
+        sortKey: (it.sort_order ?? 0) * 1_000_000,
+      });
+    }
+    for (const a of log.daily_customer_log_assets || []) {
+      if (!a) continue;
+      d.assets.push({
+        id: a.id,
+        kind: a.asset_kind,
+        title: a.title,
+        storagePath: a.storage_path,
+        refTable: a.ref_table,
+        refId: a.ref_id,
+      });
+    }
+  }
+
+  const dailyRefKeys = new Set<string>();
+  for (const log of dailyRows) {
+    for (const it of log.daily_customer_log_items || []) {
+      if (!it) continue;
+      const k = refKey(it.ref_table, it.ref_id);
+      if (k) dailyRefKeys.add(k);
+    }
+  }
+
+  let sortN = 0;
+  for (const h of historial) {
+    const ymd = toYmd(h.fecha);
+    if (!ymd) continue;
+    const k = refKey('historial_clinico', h.id);
+    if (k && dailyRefKeys.has(k)) continue;
+    const d = getDay(ymd);
+    const photos: string[] = [];
+    if (Array.isArray(h.fotos_antes)) photos.push(...h.fotos_antes.filter(Boolean));
+    if (Array.isArray(h.fotos_despues)) photos.push(...h.fotos_despues.filter(Boolean));
+    d.items.push({
+      id: `hc:${h.id}`,
+      kind: 'clinic_note',
+      title: h.titulo || 'Registro clínico',
+      subtitle: [h.tipo, h.descripcion, h.observaciones, h.tratamiento].filter(Boolean).join(' · ') || undefined,
+      timeLabel: timeFromFecha(h.fecha),
+      refTable: 'historial_clinico',
+      refId: h.id,
+      imageUrls: photos.length ? photos : undefined,
+      sortKey: 1_000_000 + sortN++,
+    });
+  }
+
+  for (const c of consent) {
+    const ymd = toYmd(c.fecha_firma) || toYmd(c.created_at);
+    if (!ymd) continue;
+    const k = refKey('consentimientos', c.id);
+    if (k && dailyRefKeys.has(k)) continue;
+    const d = getDay(ymd);
+    d.items.push({
+      id: `consent:${c.id}`,
+      kind: 'consent',
+      title: c.titulo || 'Consentimiento',
+      subtitle: c.tipo,
+      timeLabel: timeFromFecha(c.fecha_firma || c.created_at),
+      refTable: 'consentimientos',
+      refId: c.id,
+      sortKey: 2_000_000 + sortN++,
+    });
+  }
+
+  for (const e of aesthetic) {
+    const ymd = toYmd(e.event_date) || toYmd(e.created_at);
+    if (!ymd) continue;
+    const k = refKey('customer_aesthetic_history', e.id);
+    if (k && dailyRefKeys.has(k)) continue;
+    const d = getDay(ymd);
+    const data = (e.data && typeof e.data === 'object' ? e.data : {}) as Record<string, unknown>;
+    const treatment = (data.treatment as string) || (data.notes as string) || e.event_type;
+    d.items.push({
+      id: `aesthetic:${e.id}`,
+      kind: e.event_type || 'aesthetic',
+      title: (treatment as string) || 'Evento estético',
+      subtitle: typeof data.notes === 'string' ? data.notes : undefined,
+      timeLabel: timeFromFecha(e.event_date || e.created_at),
+      refTable: 'customer_aesthetic_history',
+      refId: e.id,
+      sortKey: 3_000_000 + sortN++,
+    });
+  }
+
+  for (const b of bonos) {
+    const ymd = toYmd(b.fecha_compra);
+    if (!ymd) continue;
+    const k = refKey('bonos', b.id);
+    if (k && dailyRefKeys.has(k)) continue;
+    const d = getDay(ymd);
+    d.items.push({
+      id: `bono_purchase:${b.id}`,
+      kind: 'bono_purchase',
+      title: `Compra: ${b.nombre || 'Bono'}`,
+      subtitle: b.legacy_codboncli ? `Ref. ${b.legacy_codboncli}` : b.descripcion || undefined,
+      timeLabel: timeFromFecha(b.fecha_compra),
+      refTable: 'bonos',
+      refId: b.id,
+      amountLabel:
+        b.precio_total != null ? `${Number(b.precio_total).toFixed(2)} €` : undefined,
+      sortKey: 4_000_000 + sortN++,
+    });
+  }
+
+  for (const u of bonoUso) {
+    const ymd = toYmd(u.fecha);
+    if (!ymd) continue;
+    const k = refKey('bono_uso', u.id);
+    if (k && dailyRefKeys.has(k)) continue;
+    const d = getDay(ymd);
+    const name = bonoNameById.get(u.bono_id) || 'Bono';
+    d.items.push({
+      id: `bono_use:${u.id}`,
+      kind: 'bono_use',
+      title: `Uso bono: ${name}`,
+      subtitle: u.notas || undefined,
+      timeLabel: timeFromFecha(u.fecha),
+      refTable: 'bono_uso',
+      refId: u.id,
+      sortKey: 4_100_000 + sortN++,
+    });
+  }
+
+  for (const a of appointments) {
+    if (!a.customer_id || a.customer_id !== customerId) continue;
+    const ymd = toYmd(a.start_time);
+    if (!ymd) continue;
+    const k = refKey('agenda_appointments', a.id);
+    if (k && dailyRefKeys.has(k)) continue;
+    const d = getDay(ymd);
+    d.items.push({
+      id: `appt:${a.id}`,
+      kind: 'appointment',
+      title: a.title || 'Cita',
+      subtitle: a.description || a.status,
+      timeLabel: timeFromFecha(a.start_time),
+      refTable: 'agenda_appointments',
+      refId: a.id,
+      sortKey: 5_000_000 + sortN++,
+    });
+  }
+
+  for (const g of byDay.values()) {
+    g.items.sort((a, b) => a.sortKey - b.sortKey);
+  }
+
+  return Array.from(byDay.values()).sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+}
+
+export const useCustomerDayTimeline = (customerId: string | undefined) => {
+  return useQuery({
+    queryKey: ['customer_day_timeline', customerId],
+    queryFn: async (): Promise<DayGroup[]> => {
+      if (!customerId) return [];
+
+      const [
+        dailyRes,
+        historialRes,
+        consentRes,
+        aestheticRes,
+        bonosRes,
+        aptRes,
+      ] = await Promise.all([
+        supabase
+          .from('daily_customer_log')
+          .select(
+            `id, log_date, day_summary, daily_customer_log_items (*), daily_customer_log_assets (*)`,
+          )
+          .eq('customer_id', customerId)
+          .order('log_date', { ascending: false }),
+        supabase
+          .from('historial_clinico')
+          .select('*')
+          .eq('customer_id', customerId)
+          .order('fecha', { ascending: false }),
+        supabase
+          .from('consentimientos')
+          .select('*')
+          .eq('customer_id', customerId)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('customer_aesthetic_history')
+          .select('*')
+          .eq('customer_id', customerId)
+          .order('event_date', { ascending: false }),
+        supabase
+          .from('bonos')
+          .select(
+            'id, customer_id, nombre, descripcion, fecha_compra, precio_total, legacy_codboncli',
+          )
+          .eq('customer_id', customerId)
+          .order('fecha_compra', { ascending: false }),
+        supabase
+          .from('agenda_appointments')
+          .select('id, customer_id, title, description, start_time, end_time, status')
+          .eq('customer_id', customerId)
+          .order('start_time', { ascending: false }),
+      ]);
+
+      if (historialRes.error) throw historialRes.error;
+      if (consentRes.error) throw consentRes.error;
+      if (aestheticRes.error) throw aestheticRes.error;
+      if (bonosRes.error) throw bonosRes.error;
+      if (aptRes.error) throw aptRes.error;
+      if (dailyRes.error) {
+        console.warn('daily_customer_log:', dailyRes.error.message);
+      }
+
+      const bonoList = (bonosRes.data || []) as any[];
+      const bonoNameById = new Map(
+        bonoList.map((b) => [b.id, String(b.nombre || 'Bono')]) as [string, string][],
+      );
+      const bonoIds = bonoList.map((b) => b.id);
+      let bonoUsoFiltered: any[] = [];
+      if (bonoIds.length) {
+        const bonoUsoRes = await supabase
+          .from('bono_uso')
+          .select('id, bono_id, fecha, notas, article_id, quantity, source_table, source_legacy_key')
+          .in('bono_id', bonoIds)
+          .order('fecha', { ascending: false });
+        if (bonoUsoRes.error) throw bonoUsoRes.error;
+        bonoUsoFiltered = bonoUsoRes.data || [];
+      }
+
+      return mergeByDay(
+        customerId,
+        (dailyRes.data as DailyRow[]) || [],
+        historialRes.data || [],
+        consentRes.data || [],
+        aestheticRes.data || [],
+        bonoList,
+        bonoUsoFiltered,
+        bonoNameById,
+        aptRes.data || [],
+      );
+    },
+    enabled: !!customerId,
+  });
+};
