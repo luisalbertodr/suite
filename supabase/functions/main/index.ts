@@ -328,8 +328,77 @@ async function updateUser(input: {
   return jsonResponse({ success: true, message: "Usuario actualizado correctamente" }, 200);
 }
 
+// ---------------------------------------------------------------------------
+// Dispatcher: si la URL pide otra función hermana (p.ej. /meta-sync-leads),
+// arrancamos un worker dedicado para esa carpeta. Si no, ejecutamos la lógica
+// de gestión de usuarios histórica de este "main" (action-based).
+// ---------------------------------------------------------------------------
+function extractServiceName(req: Request): string {
+  try {
+    const url = new URL(req.url);
+    const segments = url.pathname.split("/").filter(Boolean);
+    // Kong suele entregar /<name>/... tras strip_path; aceptamos también
+    // /functions/v1/<name>/... por seguridad.
+    if (segments[0] === "functions" && segments[1] === "v1" && segments[2]) {
+      return segments[2];
+    }
+    return segments[0] ?? "";
+  } catch {
+    return "";
+  }
+}
+
+// deno-lint-ignore no-explicit-any
+const edgeRuntime: any =
+  // deno-lint-ignore no-explicit-any
+  (globalThis as any).EdgeRuntime ?? (globalThis as any).Deno?.EdgeRuntime;
+
+async function dispatchToServiceFolder(req: Request, serviceName: string): Promise<Response> {
+  const servicePath = `/home/deno/functions/${serviceName}`;
+  const envVarsObj = Deno.env.toObject();
+  const envVars = Object.entries(envVarsObj);
+  const worker = await edgeRuntime.userWorkers.create({
+    servicePath,
+    memoryLimitMb: 256,
+    workerTimeoutMs: 5 * 60 * 1000,
+    cpuTimeSoftLimitMs: 30_000,
+    cpuTimeHardLimitMs: 60_000,
+    noModuleCache: false,
+    importMapPath: null,
+    envVars,
+    forceCreate: false,
+    netAccessDisabled: false,
+  });
+  return await worker.fetch(req);
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  const serviceName = extractServiceName(req);
+  const isMainCall = !serviceName || serviceName === "main";
+
+  // 1) Delegación a sibling functions: meta-sync-leads, etc.
+  if (!isMainCall && edgeRuntime?.userWorkers?.create) {
+    try {
+      return await dispatchToServiceFolder(req, serviceName);
+    } catch (e) {
+      const err = e as Error & { code?: string };
+      // Si la carpeta no existe, dejamos caer al flujo de acciones (que devolverá error).
+      const notFound =
+        e instanceof Deno.errors.NotFound ||
+        /not\s*found|no such file/i.test(err.message ?? "");
+      if (!notFound) {
+        console.error(`Dispatch a "${serviceName}" falló:`, err);
+        return jsonResponse(
+          { success: false, error: `Function dispatch failed: ${err.message}` },
+          500,
+        );
+      }
+    }
+  }
+
+  // 2) Flujo histórico action-based del main (gestión de usuarios).
   try {
     const body = req.method === "GET" ? {} : await req.json().catch(() => ({}));
     const action = body?.action as MainAction | undefined;

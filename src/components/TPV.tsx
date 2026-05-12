@@ -11,6 +11,7 @@ import { useToast } from '@/hooks/use-toast';
 import { SalesHistory } from './SalesHistory';
 import { BarcodeScanner } from './BarcodeScanner';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { usePermissionGuard } from '@/hooks/usePermissionGuard';
 import { Grid } from 'react-window';
 
 interface CartItem {
@@ -62,6 +63,7 @@ export const TPV: React.FC = () => {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { companyId, loading: companyLoading } = useCompanyFilter();
+  const { requireOrToast: requirePermissionOrToast } = usePermissionGuard();
   const prefilledSourceRef = useRef<string | null>(null);
 
   type PrefillItem = CartItem & { sourceKind?: string; sourceBonusMode?: string | null };
@@ -477,6 +479,10 @@ export const TPV: React.FC = () => {
   };
 
   const processSale = () => {
+    if (!requirePermissionOrToast('sales', 'create', 'No tienes permiso para procesar ventas.')) {
+      return;
+    }
+
     if (cart.length === 0) {
       console.warn('⚠️ Cart is empty');
       toast({

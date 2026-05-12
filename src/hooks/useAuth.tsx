@@ -33,7 +33,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [isSuperuser, setIsSuperuser] = useState(false);
 
-  // Función para verificar si es superusuario
+  // Función para verificar si es superusuario (vía /superuser-login)
   const checkSuperuserStatus = () => {
     const superuserSession = localStorage.getItem('superuser_session');
     const loginTime = localStorage.getItem('superuser_login_time');
@@ -55,6 +55,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }
     return false;
+  };
+
+  /**
+   * Verificación adicional: si el usuario está logueado con Supabase Auth
+   * (login normal) Y su email coincide con un superusuario activo en
+   * public.superusers, lo marcamos como superuser automáticamente.
+   * Esto unifica los dos flujos sin obligar al usuario a pasar por
+   * /superuser-login cada vez.
+   */
+  const detectSupabaseSuperuser = async (): Promise<boolean> => {
+    try {
+      const { data, error } = await supabase.rpc('current_user_is_superuser');
+      if (error) {
+        // Entornos que aún no tienen la RPC desplegada: ignorar silenciosamente.
+        const code = (error as { code?: string }).code;
+        if (code === '42883' || code === 'PGRST202') return false;
+        debugError('current_user_is_superuser error:', error);
+        return false;
+      }
+      if (data === true) {
+        debugLog('✨ Supabase Auth user detectado como superuser por email');
+        setIsSuperuser(true);
+        // Persistir como sesión superuser para evitar consultas repetidas
+        localStorage.setItem('superuser_session', 'true');
+        localStorage.setItem('superuser_login_time', Date.now().toString());
+        return true;
+      }
+      return false;
+    } catch (e) {
+      debugError('detectSupabaseSuperuser failed:', e);
+      return false;
+    }
   };
 
   // Auth methods
@@ -114,6 +146,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
           // Guardar el ID del usuario actual
           sessionStorage.setItem('current_user_id', session.user.id);
+          // Auto-detectar superuser por email (RPC en BD).
+          // Se hace de forma asíncrona sin bloquear el flujo.
+          detectSupabaseSuperuser();
         }
         
         // Si se desloguea, limpiar todo
@@ -148,6 +183,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               sessionStorage.removeItem('current_company_id');
             }
             sessionStorage.setItem('current_user_id', session.user.id);
+            // Si aún no hemos marcado como superuser por localStorage,
+            // intentar autodetectar por la RPC (email coincide con superuser activo).
+            if (!checkSuperuserStatus()) {
+              await detectSupabaseSuperuser();
+            }
           }
         }
       } catch (error) {

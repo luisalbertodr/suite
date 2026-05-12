@@ -1,7 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Search,
-  Upload,
   LayoutGrid,
   Settings2,
   Filter as FilterIcon,
@@ -9,6 +9,7 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
+  Settings as SettingsIcon,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -38,11 +39,11 @@ import { useMarketingLeadNotesIndex } from '@/hooks/useMarketingLeadNotes';
 import { useCustomerLookup, type CustomerLookupRow } from '@/hooks/useCustomerLookup';
 import { MarketingStageColumn } from './marketing/MarketingStageColumn';
 import { MarketingLeadDetailDialog } from './marketing/MarketingLeadDetailDialog';
-import { MarketingImportDialog } from './marketing/MarketingImportDialog';
 import { MarketingStagesManager } from './marketing/MarketingStagesManager';
 import { MarketingFieldsConfigDialog } from './marketing/MarketingFieldsConfigDialog';
 import { MarketingLeadNotesDialog } from './marketing/MarketingLeadNotesDialog';
 import { MarketingPromoteToCustomerDialog } from './marketing/MarketingPromoteToCustomerDialog';
+import { useMetaConfig } from '@/hooks/useMetaConfig';
 
 type SortField =
   | 'created_at'
@@ -121,12 +122,14 @@ const compareLeads = (a: MarketingLead, b: MarketingLead, field: SortField, dir:
 
 export const Marketing: React.FC = () => {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const { companyId, loading: companyLoading } = useCompanyFilter();
   const { leads, isLoading: leadsLoading, refetch, moveLeadToStage } = useMarketingLeads();
   const { stages, isLoading: stagesLoading } = useMarketingStages();
   const { fields, isLoading: fieldsLoading } = useMarketingFieldConfig();
   const { data: notesIndex } = useMarketingLeadNotesIndex();
   const { index: customerIndex } = useCustomerLookup();
+  const { config: metaConfig, forms: metaForms, syncNow } = useMetaConfig();
 
   const [search, setSearch] = useState('');
   const [sortField, setSortField] = useState<SortField>('external_created_at');
@@ -137,14 +140,39 @@ export const Marketing: React.FC = () => {
   const [activeLead, setActiveLead] = useState<MarketingLead | null>(null);
   const [notesLead, setNotesLead] = useState<MarketingLead | null>(null);
   const [promoteLead, setPromoteLead] = useState<MarketingLead | null>(null);
-  const [openImport, setOpenImport] = useState(false);
   const [openStagesManager, setOpenStagesManager] = useState(false);
   const [openFieldsConfig, setOpenFieldsConfig] = useState(false);
+  const autoSyncTriggered = useRef(false);
 
   const visibleCardFields = useMemo(
     () => fields.filter((f) => f.visible_in_card).sort((a, b) => a.sort_order - b.sort_order),
     [fields],
   );
+
+  // Auto-sync con Meta cuando se abre Marketing y ha pasado el intervalo configurado.
+  useEffect(() => {
+    if (autoSyncTriggered.current) return;
+    if (!metaConfig || !metaConfig.enabled || !metaConfig.access_token) return;
+    if (!metaForms.some((f) => f.enabled)) return;
+    const intervalMs = Math.max(5, metaConfig.sync_interval_minutes ?? 60) * 60 * 1000;
+    const last = metaConfig.last_sync_at ? new Date(metaConfig.last_sync_at).getTime() : 0;
+    if (Date.now() - last < intervalMs) return;
+    autoSyncTriggered.current = true;
+    syncNow.mutate(undefined, {
+      onSuccess: (data) => {
+        if (data.inserted > 0) {
+          toast({
+            title: 'Nuevos leads de Meta',
+            description: `${data.inserted} leads añadidos al embudo.`,
+          });
+        }
+      },
+      onError: (e) => {
+        const message = e instanceof Error ? e.message : 'Error sincronizando con Meta';
+        toast({ title: 'Sincronización Meta', description: message, variant: 'destructive' });
+      },
+    });
+  }, [metaConfig, metaForms, syncNow, toast]);
 
   const matchedCustomerByLead = useMemo(() => {
     const map = new Map<string, CustomerLookupRow | null>();
@@ -274,6 +302,27 @@ export const Marketing: React.FC = () => {
 
   const currentSortLabel =
     SORT_OPTIONS.find((s) => s.value === sortField)?.label ?? 'Ordenar';
+  const sortDirLabel = sortDir === 'asc' ? 'Asc' : 'Desc';
+
+  const handleManualRefresh = async () => {
+    await refetch();
+    if (metaConfig?.enabled && metaConfig.access_token && metaForms.some((f) => f.enabled)) {
+      syncNow.mutate(undefined, {
+        onSuccess: (data) => {
+          if (data.inserted > 0) {
+            toast({
+              title: 'Nuevos leads de Meta',
+              description: `${data.inserted} leads añadidos al embudo.`,
+            });
+          }
+        },
+        onError: (e) => {
+          const message = e instanceof Error ? e.message : 'Error sincronizando con Meta';
+          toast({ title: 'Sincronización Meta', description: message, variant: 'destructive' });
+        },
+      });
+    }
+  };
 
   return (
     <Card className="border-none shadow-none bg-transparent">
@@ -304,17 +353,21 @@ export const Marketing: React.FC = () => {
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm" title="Ordenar por…">
                   <ArrowUpDown className="mr-2 h-3.5 w-3.5" />
-                  {currentSortLabel}
-                  {sortDir === 'asc' ? (
-                    <ArrowUp className="ml-1 h-3 w-3" />
-                  ) : (
-                    <ArrowDown className="ml-1 h-3 w-3" />
-                  )}
+                  <span className="hidden sm:inline">{currentSortLabel}</span>
+                  <span className="sm:hidden">Ordenar</span>
+                  <span className="ml-1 inline-flex items-center text-[10px] uppercase tracking-wide text-muted-foreground">
+                    {sortDir === 'asc' ? (
+                      <ArrowUp className="h-3 w-3" />
+                    ) : (
+                      <ArrowDown className="h-3 w-3" />
+                    )}
+                    <span className="ml-0.5 hidden md:inline">{sortDirLabel}</span>
+                  </span>
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-60">
+              <DropdownMenuContent align="end" className="w-64">
                 <DropdownMenuLabel>Ordenar por</DropdownMenuLabel>
                 <DropdownMenuRadioGroup
                   value={sortField}
@@ -349,8 +402,14 @@ export const Marketing: React.FC = () => {
               </DropdownMenuContent>
             </DropdownMenu>
 
-            <Button variant="outline" size="sm" onClick={() => refetch()} title="Refrescar">
-              <RefreshCw className="h-3.5 w-3.5" />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleManualRefresh}
+              title="Refrescar y sincronizar con Meta"
+              disabled={syncNow.isPending}
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${syncNow.isPending ? 'animate-spin' : ''}`} />
             </Button>
             <Button variant="outline" size="sm" onClick={() => setOpenFieldsConfig(true)}>
               <FilterIcon className="mr-2 h-3.5 w-3.5" /> Campos
@@ -358,8 +417,13 @@ export const Marketing: React.FC = () => {
             <Button variant="outline" size="sm" onClick={() => setOpenStagesManager(true)}>
               <Settings2 className="mr-2 h-3.5 w-3.5" /> Etapas
             </Button>
-            <Button size="sm" onClick={() => setOpenImport(true)}>
-              <Upload className="mr-2 h-3.5 w-3.5" /> Importar leads
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate('/configuracion?tab=meta')}
+              title="Configuración de Meta (formularios, token, intervalo, importar)"
+            >
+              <SettingsIcon className="mr-2 h-3.5 w-3.5" /> Meta
             </Button>
           </div>
         </div>
@@ -478,7 +542,6 @@ export const Marketing: React.FC = () => {
           if (!open) setPromoteLead(null);
         }}
       />
-      <MarketingImportDialog open={openImport} onOpenChange={setOpenImport} stages={stages} />
       <MarketingStagesManager open={openStagesManager} onOpenChange={setOpenStagesManager} />
       <MarketingFieldsConfigDialog open={openFieldsConfig} onOpenChange={setOpenFieldsConfig} />
     </Card>

@@ -18,6 +18,8 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { ClienteDetailView } from '@/components/ClienteDetailView';
+import { PermissionButton } from '@/components/PermissionButton';
+import { usePermissionGuard } from '@/hooks/usePermissionGuard';
 
 interface Employee { id: string; name: string; color: string; }
 interface Appointment {
@@ -125,6 +127,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
   onCancel,
 }) => {
   const { companyId } = useCompanyFilter();
+  const { requireOrToast: requirePermissionOrToast } = usePermissionGuard();
   const [clientPick, setClientPick] = useState<AppointmentClientPick | null>(() =>
     initialClientPick(appointment, customers)
   );
@@ -380,11 +383,20 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
             </div>
 
             <div className="flex justify-between pt-2">
-              <Button type="button" variant="destructive" size="sm" onClick={() => {
-                if (window.confirm('¿Eliminar esta cita?')) onDelete(appointment.id);
-              }}>
+              <PermissionButton
+                resource="agenda"
+                action="delete"
+                type="button"
+                variant="destructive"
+                size="sm"
+                forbiddenLabel="No tienes permiso para eliminar citas."
+                onClick={() => {
+                  if (!requirePermissionOrToast('agenda', 'delete', 'No tienes permiso para eliminar citas.')) return;
+                  if (window.confirm('¿Eliminar esta cita?')) onDelete(appointment.id);
+                }}
+              >
                 <Trash2 className="w-4 h-4 mr-1" /> Eliminar
-              </Button>
+              </PermissionButton>
               <div className="flex gap-2">
                 {onNotify && (
                   <Button

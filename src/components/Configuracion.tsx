@@ -1,5 +1,6 @@
 
 import React, { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Settings, Download } from 'lucide-react';
@@ -20,10 +21,45 @@ import { AgendaPreferencesConfig } from './AgendaPreferencesConfig';
 import { AgendaCenterHoursConfig } from './AgendaCenterHoursConfig';
 import { AgendaEmployeeHoursConfig } from './AgendaEmployeeHoursConfig';
 import { UserManagement } from './UserManagement';
+import { MetaConfig } from './MetaConfig';
+
+const VALID_TABS = [
+  'general',
+  'empresa',
+  'empleados',
+  'agenda',
+  'recursos',
+  'apariencia',
+  'email',
+  'meta',
+  'prestashop',
+  'verifactu',
+  'verifactu-xml',
+  'seguridad',
+  'usuarios-permisos',
+] as const;
+
+type ConfigTab = (typeof VALID_TABS)[number];
 
 export const Configuracion: React.FC = () => {
   const { toast } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [isGeneratingBackup, setIsGeneratingBackup] = useState(false);
+
+  const tabParam = searchParams.get('tab') ?? '';
+  const activeTab: ConfigTab = (VALID_TABS as readonly string[]).includes(tabParam)
+    ? (tabParam as ConfigTab)
+    : 'general';
+
+  const handleTabChange = (value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value === 'general') {
+      next.delete('tab');
+    } else {
+      next.set('tab', value);
+    }
+    setSearchParams(next, { replace: true });
+  };
 
   const handleGenerateBackup = async () => {
     try {
@@ -77,7 +113,7 @@ export const Configuracion: React.FC = () => {
         <h1 className="text-2xl font-bold">Configuración</h1>
       </div>
 
-      <Tabs defaultValue="general" className="w-full">
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
         <TabsList className="flex flex-wrap">
           <TabsTrigger value="general">General</TabsTrigger>
           <TabsTrigger value="empresa">Empresa</TabsTrigger>
@@ -86,6 +122,7 @@ export const Configuracion: React.FC = () => {
           <TabsTrigger value="recursos">Recursos y Cabinas</TabsTrigger>
           <TabsTrigger value="apariencia">Apariencia</TabsTrigger>
           <TabsTrigger value="email">Email</TabsTrigger>
+          <TabsTrigger value="meta">Meta</TabsTrigger>
           <TabsTrigger value="prestashop">PrestaShop</TabsTrigger>
           <TabsTrigger value="verifactu">Verifactu</TabsTrigger>
           <TabsTrigger value="verifactu-xml">XML Docs</TabsTrigger>
@@ -138,6 +175,10 @@ export const Configuracion: React.FC = () => {
 
         <TabsContent value="email" className="space-y-4">
           <EmailConfig />
+        </TabsContent>
+
+        <TabsContent value="meta" className="space-y-4">
+          <MetaConfig />
         </TabsContent>
 
         <TabsContent value="prestashop" className="space-y-4">

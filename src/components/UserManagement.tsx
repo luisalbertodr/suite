@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useRoles } from '@/hooks/useRoles';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useUsers } from '@/hooks/useUsers';
@@ -11,10 +11,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { UserPlus, Shield, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { UserListTable } from '@/components/UserListTable';
 import { useAgendaEmployees } from '@/hooks/useAgendaEmployees';
+import { UserPermissionsPanel } from '@/components/UserPermissionsPanel';
 
 export const UserManagement = () => {
   const { roles, permissions, loading: rolesLoading } = useRoles();
@@ -36,6 +38,12 @@ export const UserManagement = () => {
   const [editPermissionIds, setEditPermissionIds] = useState<string[]>([]);
   const [editPermissionsTouched, setEditPermissionsTouched] = useState(false);
   const [updatingUser, setUpdatingUser] = useState(false);
+  const [editRolePermissionIds, setEditRolePermissionIds] = useState<string[]>([]);
+
+  const rolePermissionIdsSet = useMemo(
+    () => new Set(editRolePermissionIds),
+    [editRolePermissionIds],
+  );
 
   // Check if user has permission to manage users
   if (!hasPermission('users', 'read')) {
@@ -58,7 +66,7 @@ export const UserManagement = () => {
     }
   };
 
-  const handleEditUser = (user: any) => {
+  const handleEditUser = async (user: any) => {
     setEditingUser(user);
     const roleName = user?.user_company_roles?.[0]?.role?.name;
     const roleId = roleName ? (roles.find((r) => r.name === roleName)?.id || '') : '';
@@ -67,6 +75,13 @@ export const UserManagement = () => {
     setEditPermissionIds(Array.isArray(user?.permission_ids) ? user.permission_ids : []);
     setEditPermissionsTouched(false);
     setIsEditOpen(true);
+    // Pre-cargar permisos heredados del rol para el panel de overrides
+    if (roleId) {
+      const inherited = await getRoleDefaultPermissionIds(roleId);
+      setEditRolePermissionIds(inherited);
+    } else {
+      setEditRolePermissionIds([]);
+    }
   };
 
   const getRoleDefaultPermissionIds = async (roleId: string): Promise<string[]> => {
@@ -97,6 +112,7 @@ export const UserManagement = () => {
     setEditRoleId(roleId);
     const defaultPerms = await getRoleDefaultPermissionIds(roleId);
     setEditPermissionIds(defaultPerms);
+    setEditRolePermissionIds(defaultPerms);
     setEditPermissionsTouched(true);
   };
 
@@ -285,79 +301,109 @@ export const UserManagement = () => {
       </div>
 
       <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Editar usuario</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">{editingUser?.email}</p>
-            <div className="space-y-1.5">
-              <Label>Rol base</Label>
-              <Select value={editRoleId} onValueChange={handleEditRoleChange}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Seleccionar rol" />
-                </SelectTrigger>
-                <SelectContent>
-                  {roles.map((role) => (
-                    <SelectItem key={role.id} value={role.id}>
-                      {role.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Empleado vinculado (opcional)</Label>
-              <Select value={editEmployeeId} onValueChange={setEditEmployeeId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Sin vincular" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Sin vincular</SelectItem>
-                  {agendaEmployees.map((emp) => (
-                    <SelectItem key={emp.id} value={emp.id}>
-                      {emp.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Permisos granulares</Label>
-              <div className="max-h-52 overflow-auto rounded border p-2 space-y-1">
-                {permissions.map((perm) => {
-                  const checked = editPermissionIds.includes(perm.id);
-                  const label = perm.name || `${perm.resource}:${perm.action}`;
-                  return (
-                    <label key={perm.id} className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={(e) => {
-                          setEditPermissionsTouched(true);
-                          setEditPermissionIds((prev) =>
-                            e.target.checked ? [...prev, perm.id] : prev.filter((id) => id !== perm.id),
-                          );
-                        }}
-                      />
-                      <span>{label}</span>
-                    </label>
-                  );
-                })}
+          <p className="text-sm text-muted-foreground -mt-1">{editingUser?.email}</p>
+
+          <Tabs defaultValue="datos" className="mt-2">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="datos">Datos y rol</TabsTrigger>
+              <TabsTrigger value="excepciones" disabled={!companyId || !editingUser?.id}>
+                Excepciones de permisos
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="datos" className="space-y-3">
+              <div className="space-y-1.5">
+                <Label>Rol base</Label>
+                <Select value={editRoleId} onValueChange={handleEditRoleChange}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Seleccionar rol" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {roles.map((role) => (
+                      <SelectItem key={role.id} value={role.id}>
+                        {role.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Puedes ajustar permisos manualmente además del rol base.
-              </p>
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <Button type="button" variant="outline" onClick={() => setIsEditOpen(false)}>
-                Cancelar
-              </Button>
-              <Button type="button" onClick={handleUpdateUser} disabled={updatingUser || !companyId}>
-                {updatingUser ? 'Guardando...' : 'Guardar cambios'}
-              </Button>
-            </div>
-          </div>
+              <div className="space-y-1.5">
+                <Label>Empleado vinculado (opcional)</Label>
+                <Select value={editEmployeeId} onValueChange={setEditEmployeeId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Sin vincular" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Sin vincular</SelectItem>
+                    {agendaEmployees.map((emp) => (
+                      <SelectItem key={emp.id} value={emp.id}>
+                        {emp.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">
+                  Vincular un usuario con un empleado de agenda permite que reciba notificaciones
+                  personales y aparezca como recurso en sus citas.
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Permisos del rol (ALLOW base)</Label>
+                <div className="max-h-52 overflow-auto rounded border p-2 space-y-1">
+                  {permissions.map((perm) => {
+                    const checked = editPermissionIds.includes(perm.id);
+                    const label = perm.name || `${perm.resource}:${perm.action}`;
+                    return (
+                      <label key={perm.id} className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => {
+                            setEditPermissionsTouched(true);
+                            setEditPermissionIds((prev) =>
+                              e.target.checked ? [...prev, perm.id] : prev.filter((id) => id !== perm.id),
+                            );
+                          }}
+                        />
+                        <span>{label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Estos permisos se guardan junto al rol (compatibilidad). Para excepciones
+                  ALLOW/DENY usa la pestaña <em>Excepciones de permisos</em>.
+                </p>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button type="button" variant="outline" onClick={() => setIsEditOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button type="button" onClick={handleUpdateUser} disabled={updatingUser || !companyId}>
+                  {updatingUser ? 'Guardando...' : 'Guardar cambios'}
+                </Button>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="excepciones">
+              {companyId && editingUser?.id ? (
+                <UserPermissionsPanel
+                  userId={editingUser.id}
+                  companyId={companyId}
+                  permissions={permissions}
+                  rolePermissionIds={rolePermissionIdsSet}
+                />
+              ) : (
+                <div className="p-4 text-center text-sm text-muted-foreground">
+                  Selecciona un usuario y empresa para gestionar sus excepciones.
+                </div>
+              )}
+            </TabsContent>
+          </Tabs>
         </DialogContent>
       </Dialog>
 

@@ -6,6 +6,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
 import { Shield, ShieldCheck, ShieldAlert, RefreshCw, Database, Lock } from 'lucide-react';
+import { AuditEventsLog } from '@/components/AuditEventsLog';
 
 interface SecurityCheck {
   id: string;
@@ -226,6 +227,8 @@ export const SecurityAudit: React.FC = () => {
         ))}
       </div>
 
+      <AuditEventsLog defaultLimit={50} />
+
       <Card>
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
@@ -254,6 +257,14 @@ export const SecurityAudit: React.FC = () => {
             <li className="flex items-center gap-2">
               <span className="w-2 h-2 bg-green-500 rounded-full"></span>
               Limpieza automática de datos sensibles en memoria
+            </li>
+            <li className="flex items-center gap-2">
+              <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+              Permisos efectivos por usuario con overrides allow/deny (deny gana)
+            </li>
+            <li className="flex items-center gap-2">
+              <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+              Auditoría append-only de cambios sobre roles, permisos y vínculos empleado-usuario
             </li>
           </ul>
         </CardContent>

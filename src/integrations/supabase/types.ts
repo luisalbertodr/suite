@@ -2308,6 +2308,138 @@ export type Database = {
           },
         ]
       }
+      meta_config: {
+        Row: {
+          access_token: string | null
+          business_id: string | null
+          company_id: string
+          created_at: string
+          enabled: boolean
+          graph_api_version: string
+          last_sync_at: string | null
+          last_sync_inserted: number
+          last_sync_message: string | null
+          last_sync_skipped: number
+          last_sync_status: string | null
+          sync_interval_minutes: number
+          updated_at: string
+        }
+        Insert: {
+          access_token?: string | null
+          business_id?: string | null
+          company_id: string
+          created_at?: string
+          enabled?: boolean
+          graph_api_version?: string
+          last_sync_at?: string | null
+          last_sync_inserted?: number
+          last_sync_message?: string | null
+          last_sync_skipped?: number
+          last_sync_status?: string | null
+          sync_interval_minutes?: number
+          updated_at?: string
+        }
+        Update: {
+          access_token?: string | null
+          business_id?: string | null
+          company_id?: string
+          created_at?: string
+          enabled?: boolean
+          graph_api_version?: string
+          last_sync_at?: string | null
+          last_sync_inserted?: number
+          last_sync_message?: string | null
+          last_sync_skipped?: number
+          last_sync_status?: string | null
+          sync_interval_minutes?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "meta_config_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      meta_forms: {
+        Row: {
+          appointment_stage_id: string | null
+          company_id: string
+          created_at: string
+          creates_appointment: boolean
+          default_stage_id: string | null
+          enabled: boolean
+          form_id: string
+          form_name: string | null
+          id: string
+          last_lead_created_time: string | null
+          last_lead_external_id: string | null
+          last_sync_at: string | null
+          last_sync_message: string | null
+          last_sync_status: string | null
+          updated_at: string
+        }
+        Insert: {
+          appointment_stage_id?: string | null
+          company_id: string
+          created_at?: string
+          creates_appointment?: boolean
+          default_stage_id?: string | null
+          enabled?: boolean
+          form_id: string
+          form_name?: string | null
+          id?: string
+          last_lead_created_time?: string | null
+          last_lead_external_id?: string | null
+          last_sync_at?: string | null
+          last_sync_message?: string | null
+          last_sync_status?: string | null
+          updated_at?: string
+        }
+        Update: {
+          appointment_stage_id?: string | null
+          company_id?: string
+          created_at?: string
+          creates_appointment?: boolean
+          default_stage_id?: string | null
+          enabled?: boolean
+          form_id?: string
+          form_name?: string | null
+          id?: string
+          last_lead_created_time?: string | null
+          last_lead_external_id?: string | null
+          last_sync_at?: string | null
+          last_sync_message?: string | null
+          last_sync_status?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "meta_forms_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meta_forms_default_stage_id_fkey"
+            columns: ["default_stage_id"]
+            isOneToOne: false
+            referencedRelation: "marketing_lead_stages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meta_forms_appointment_stage_id_fkey"
+            columns: ["appointment_stage_id"]
+            isOneToOne: false
+            referencedRelation: "marketing_lead_stages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       notifications: {
         Row: {
           company_id: string
@@ -3259,6 +3391,63 @@ export type Database = {
           },
         ]
       }
+      user_permission_overrides: {
+        Row: {
+          id: string
+          company_id: string
+          user_id: string
+          permission_id: string | null
+          resource: string | null
+          action: string | null
+          mode: "allow" | "deny"
+          reason: string | null
+          created_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          company_id: string
+          user_id: string
+          permission_id?: string | null
+          resource?: string | null
+          action?: string | null
+          mode: "allow" | "deny"
+          reason?: string | null
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          company_id?: string
+          user_id?: string
+          permission_id?: string | null
+          resource?: string | null
+          action?: string | null
+          mode?: "allow" | "deny"
+          reason?: string | null
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_permission_overrides_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "user_permission_overrides_permission_id_fkey"
+            columns: ["permission_id"]
+            isOneToOne: false
+            referencedRelation: "permissions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_profiles: {
         Row: {
           avatar_url: string | null
@@ -3705,6 +3894,21 @@ export type Database = {
       }
       get_user_company_id: { Args: never; Returns: string }
       get_user_permissions: { Args: { p_user_id: string }; Returns: string[] }
+      get_effective_user_permissions: {
+        Args: { p_user_id: string }
+        Returns: {
+          permission_id: string
+          permission_name: string
+          resource: string
+          action: string
+        }[]
+      }
+      user_has_effective_permission: {
+        Args: { p_user_id: string; p_resource: string; p_action: string }
+        Returns: boolean
+      }
+      is_company_admin: { Args: { p_company_id: string }; Returns: boolean }
+      current_user_is_superuser: { Args: Record<string, never>; Returns: boolean }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
