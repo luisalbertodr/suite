@@ -171,7 +171,17 @@ export const ClienteForm: React.FC<ClienteFormProps> = ({ customer, onClose }) =
       onClose();
     },
     onError: (error) => {
-      toast({ title: 'Error', description: (error as any).message, variant: 'destructive' });
+      const e = error as { code?: string; message?: string };
+      if (e?.code === '23505') {
+        toast({
+          title: 'Teléfono duplicado',
+          description:
+            'Ya existe un cliente con este número (mismos 9 últimos dígitos). Busca la ficha o cambia el teléfono.',
+          variant: 'destructive',
+        });
+        return;
+      }
+      toast({ title: 'Error', description: e?.message || 'Error al guardar', variant: 'destructive' });
     },
   });
 

@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import type { AppointmentItemDraft, AppointmentItemKind, BonusPaymentMode } from '@/types/agenda';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { repairLegacyDunasoftAppointmentItems } from '@/lib/legacyAppointmentItems';
 
 export const appointmentItemsQueryKey = (appointmentId: string) =>
   ['appointment-items', appointmentId] as const;
@@ -179,31 +180,53 @@ export async function fetchAppointmentItems(
     const unit = Number(r.unit_price ?? fallback.unit_price ?? 0);
     return (!r.article_id && unit <= 0 && !!r.label);
   });
+  const needsLegacyRepair = rows.some(
+    (r) => r.kind === 'service' && /^\[\d{1,2}:\d{2}\]\s*\S+/.test(String(r.label || ''))
+  ) && rows.some((r) => r.kind === 'product');
 
   const byCode = new Map<string, number>();
   const byDescription = new Map<string, number>();
-  if (companyId && needsCatalog) {
+  let catalog: Array<{
+    id: string;
+    codigo: string | null;
+    descripcion: string;
+    precio: number;
+    duration_minutes: number;
+    article_kind: string | null;
+  }> = [];
+
+  if (companyId && (needsCatalog || needsLegacyRepair)) {
     const { data: articleRows } = await supabase
       .from('articles')
-      .select('codigo, descripcion, precio')
+      .select('id, codigo, descripcion, precio, duration_minutes, article_kind')
       .eq('company_id', companyId);
-    for (const a of articleRows || []) {
-      const price = Math.max(0, Number(a.precio || 0));
-      if (price <= 0) continue;
-      if (a.codigo) byCode.set(String(a.codigo).toLowerCase(), price);
-      if (a.descripcion) byDescription.set(normalizeText(a.descripcion), price);
+    catalog = (articleRows || []).map((a) => ({
+      id: String(a.id),
+      codigo: a.codigo ? String(a.codigo) : null,
+      descripcion: String(a.descripcion || ''),
+      precio: Math.max(0, Number(a.precio || 0)),
+      duration_minutes: Math.max(0, Number(a.duration_minutes || 0)),
+      article_kind: a.article_kind ? String(a.article_kind) : null,
+    }));
+    for (const a of catalog) {
+      if (a.precio <= 0) continue;
+      if (a.codigo) byCode.set(String(a.codigo).toLowerCase(), a.precio);
+      byDescription.set(normalizeText(a.descripcion), a.precio);
     }
   }
 
-  return rows.map((row) => {
+  const mapped = rows.map((row) => {
     const draft = mapRowToDraft(row);
-    if (row.occupies_time == null) draft.occupies_time = true;
+    if (row.occupies_time == null) draft.occupies_time = draft.kind === 'service';
     if (row.duration_minutes == null) draft.duration_minutes = Math.max(0, Number(draft.duration_minutes || 0));
     if ((draft.unit_price ?? 0) > 0) return draft;
     if (row.article_id) return draft;
     const inferred = inferItemPriceFromLabel(row.label, byCode, byDescription);
     return inferred > 0 ? { ...draft, unit_price: inferred } : draft;
   });
+
+  if (!needsLegacyRepair || !catalog.length) return mapped;
+  return repairLegacyDunasoftAppointmentItems(mapped, catalog);
 }
 
 export async function syncAppointmentItems(

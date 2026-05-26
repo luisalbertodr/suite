@@ -22,6 +22,7 @@ import { AgendaCenterHoursConfig } from './AgendaCenterHoursConfig';
 import { AgendaEmployeeHoursConfig } from './AgendaEmployeeHoursConfig';
 import { UserManagement } from './UserManagement';
 import { MetaConfig } from './MetaConfig';
+import { WhatsappConfig } from './WhatsappConfig';
 
 const VALID_TABS = [
   'general',
@@ -32,6 +33,7 @@ const VALID_TABS = [
   'apariencia',
   'email',
   'meta',
+  'whatsapp',
   'prestashop',
   'verifactu',
   'verifactu-xml',
@@ -123,6 +125,7 @@ export const Configuracion: React.FC = () => {
           <TabsTrigger value="apariencia">Apariencia</TabsTrigger>
           <TabsTrigger value="email">Email</TabsTrigger>
           <TabsTrigger value="meta">Meta</TabsTrigger>
+          <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
           <TabsTrigger value="prestashop">PrestaShop</TabsTrigger>
           <TabsTrigger value="verifactu">Verifactu</TabsTrigger>
           <TabsTrigger value="verifactu-xml">XML Docs</TabsTrigger>
@@ -179,6 +182,10 @@ export const Configuracion: React.FC = () => {
 
         <TabsContent value="meta" className="space-y-4">
           <MetaConfig />
+        </TabsContent>
+
+        <TabsContent value="whatsapp" className="space-y-4">
+          <WhatsappConfig />
         </TabsContent>
 
         <TabsContent value="prestashop" className="space-y-4">

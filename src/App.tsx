@@ -16,6 +16,7 @@ import ConfiguracionPage from '@/pages/ConfiguracionPage';
 import RecursosCabinasPage from '@/pages/RecursosCabinasPage';
 import AsistenciaPage from '@/pages/AsistenciaPage';
 import MarketingPage from '@/pages/MarketingPage';
+import WhatsappPage from '@/pages/WhatsappPage';
 import SuperuserPage from '@/pages/SuperuserPage';
 import SuperuserManagementPage from '@/pages/SuperuserManagementPage';
 
@@ -73,6 +74,9 @@ function App() {
         } />
         <Route path="/marketing" element={
           <ProtectedLayout><MarketingPage /></ProtectedLayout>
+        } />
+        <Route path="/whatsapp" element={
+          <ProtectedLayout><WhatsappPage /></ProtectedLayout>
         } />
         <Route path="/superuser" element={<SuperuserPage />} />
         <Route path="/superuser-management" element={

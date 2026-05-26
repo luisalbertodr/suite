@@ -26,6 +26,7 @@ export const useMarketingFieldConfig = () => {
   const query = useQuery({
     queryKey: ['marketing-field-config', companyId],
     enabled: !!companyId && !companyLoading,
+    staleTime: 60_000,
     queryFn: async (): Promise<MarketingFieldConfig[]> => {
       if (!companyId) return [];
 

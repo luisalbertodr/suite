@@ -3,6 +3,8 @@ import React from 'react';
 import { format } from 'date-fns';
 import { CheckCircle, Clock, XCircle } from 'lucide-react';
 import { Employee, Appointment, TimeSlot } from '@/types/agenda';
+import { slotOverlapsOccupiedTime } from '@/lib/agendaAppointmentItems';
+import { segmentColorClass } from '@/components/AppointmentItemTimeline';
 import {
   loadAgendaViewPersisted,
   mergePersistedScroll,
@@ -121,21 +123,19 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
     };
   }, [isTodayView]);
 
-  // Verificar si este slot está ocupado por una cita para este empleado
+  // Verificar si este slot está ocupado por tramos que reservan tiempo (no solo cobros)
   const isSlotOccupiedByAppointment = (employeeId: string, time: string): boolean => {
-    return appointments.some(apt => {
+    const slotStartMinutes = timeToMinutes(time);
+    const slotEndMinutes = slotStartMinutes + slotMinutes;
+    return appointments.some((apt) => {
       if (apt.employeeId !== employeeId) return false;
-      
-      const [aptStartHour, aptStartMin] = apt.startTime.split(':').map(Number);
-      const [aptEndHour, aptEndMin] = apt.endTime.split(':').map(Number);
-      const [slotHour, slotMin] = time.split(':').map(Number);
-      
-      const aptStartMinutes = aptStartHour * 60 + aptStartMin;
-      const aptEndMinutes = aptEndHour * 60 + aptEndMin;
-      const slotStartMinutes = slotHour * 60 + slotMin;
-      
-      // El slot está ocupado si está dentro del rango de la cita
-      return slotStartMinutes >= aptStartMinutes && slotStartMinutes < aptEndMinutes;
+      return slotOverlapsOccupiedTime(
+        slotStartMinutes,
+        slotEndMinutes,
+        apt.startTime,
+        apt.timeSegments,
+        apt.occupiedEndTime || apt.endTime
+      );
     });
   };
 
@@ -352,13 +352,22 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
             const employeeIndex = employees.findIndex(emp => emp.id === appointment.employeeId);
             if (employeeIndex === -1) return null;
 
+            const segments = appointment.timeSegments ?? [];
             let startMin = timeToMinutes(appointment.startTime);
-            let endMin = timeToMinutes(appointment.endTime);
+            const storedEndMin = timeToMinutes(appointment.endTime);
+            const occupiedEndMin = segments.length
+              ? timeToMinutes(segments[segments.length - 1]!.endTime)
+              : timeToMinutes(appointment.occupiedEndTime || appointment.endTime);
+            let endMin = Math.max(storedEndMin, occupiedEndMin);
+            if (endMin <= startMin && segments.length) {
+              endMin = occupiedEndMin;
+            }
             if (endMin <= startMin) return null;
             if (endMin <= gridStartMin || startMin >= gridEndMin) return null;
             if (startMin < gridStartMin) startMin = gridStartMin;
             if (endMin > gridEndMin) endMin = gridEndMin;
 
+            const displaySpan = Math.max(1, endMin - startMin);
             const topPosition = ((startMin - gridStartMin) / slotMinutes) * cellHeight;
             const height = Math.max(
               ((endMin - startMin) / slotMinutes) * cellHeight,
@@ -388,40 +397,77 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
                 onDrop={(e) => handleDrop(e, appointment.employeeId, appointment.startTime)}
               >
                 <div
-                  className={`h-full p-1 text-[11px] overflow-hidden rounded border-2 border-gray-400 cursor-move ${employees[employeeIndex]?.color}`}
+                  className={`relative h-full p-0.5 text-[11px] overflow-hidden rounded border-2 border-gray-400 cursor-move ${employees[employeeIndex]?.color}`}
                   draggable
                   onDragStart={(e) => handleDragStart(e, appointment)}
                   onDragEnd={handleDragEnd}
                 >
-                  <div className="bg-white/90 rounded px-1.5 py-1 text-gray-800 font-medium h-full leading-tight">
-                    <div className="flex items-center justify-between mb-1 gap-1">
+                  {segments.map((seg) => {
+                    const segStart = timeToMinutes(seg.startTime);
+                    const segEnd = timeToMinutes(seg.endTime);
+                    const topPct = ((segStart - startMin) / displaySpan) * 100;
+                    const heightPct = Math.max(4, ((segEnd - segStart) / displaySpan) * 100);
+                    return (
+                      <div
+                        key={seg.clientKey}
+                        className={`absolute left-0.5 right-0.5 rounded-sm border ${segmentColorClass(seg.kind)} pointer-events-none`}
+                        style={{ top: `${topPct}%`, height: `${heightPct}%` }}
+                        title={`${seg.startTime}–${seg.endTime} · ${seg.label}`}
+                      />
+                    );
+                  })}
+                  {segments.length > 0 && endMin > occupiedEndMin && (
+                    <div
+                      className="absolute left-0.5 right-0.5 rounded-sm border border-dashed border-muted-foreground/25 bg-background/30 pointer-events-none"
+                      style={{
+                        top: `${((occupiedEndMin - startMin) / displaySpan) * 100}%`,
+                        height: `${((endMin - occupiedEndMin) / displaySpan) * 100}%`,
+                      }}
+                      title="Tramo sin reserva de tiempo (solo cobros u holgura)"
+                    />
+                  )}
+                  <div className="relative z-[1] bg-white/92 rounded px-1.5 py-1 text-gray-800 font-medium h-full leading-tight overflow-hidden">
+                    <div className="flex items-center justify-between mb-0.5 gap-1">
                       {visibleFields.clientName && (
                         <div className="font-semibold truncate flex-1">{appointment.clientName}</div>
                       )}
                       {visibleFields.status && getStatusIcon(appointment.status)}
                     </div>
                     {visibleFields.timeRange && (
-                      <div className="text-xs text-gray-600 truncate mt-1">
-                        {appointment.startTime} - {appointment.endTime}
+                      <div className="text-xs text-gray-600 truncate">
+                        {appointment.startTime}
+                        {segments.length
+                          ? ` → ${segments[segments.length - 1]!.endTime} (${segments.map((s) => `${s.startTime}–${s.endTime}`).join(', ')})`
+                          : ` - ${appointment.endTime}`}
                       </div>
                     )}
-                    {visibleFields.service && appointment.serviceName && (
-                      <div className="text-xs text-gray-700 truncate mt-1 font-medium">
+                    {segments.length > 0 && visibleFields.service && (
+                      <div className="text-[10px] text-gray-700 truncate mt-0.5">
+                        {segments.map((s) => s.label).join(' · ')}
+                      </div>
+                    )}
+                    {visibleFields.service && !segments.length && appointment.serviceName && (
+                      <div className="text-xs text-gray-700 truncate mt-0.5 font-medium">
                         {appointment.serviceCode ? `${appointment.serviceCode} - ` : ''}{appointment.serviceName}
                       </div>
                     )}
+                    {(appointment.paymentOnlyLabels?.length ?? 0) > 0 && (
+                      <div className="text-[10px] text-amber-800 truncate mt-0.5" title="Solo cobro, no reservan slot">
+                        + {appointment.paymentOnlyLabels!.join(' · ')}
+                      </div>
+                    )}
                     {visibleFields.description && appointment.description && (
-                      <div className="text-xs text-gray-600 truncate mt-1">
+                      <div className="text-xs text-gray-600 truncate mt-0.5">
                         {appointment.description}
                       </div>
                     )}
                     {typeof appointment.totalAmount === 'number' && (
-                      <div className="text-xs text-gray-800 font-semibold truncate mt-1">
+                      <div className="text-xs text-gray-800 font-semibold truncate mt-0.5">
                         {appointment.totalAmount.toFixed(2)} EUR
                       </div>
                     )}
                     {visibleFields.legacyCodes && (
-                      <div className="text-[10px] text-gray-600 truncate mt-1">
+                      <div className="text-[10px] text-gray-600 truncate mt-0.5">
                         {appointment.legacyEmployeeCode ? `EMP:${appointment.legacyEmployeeCode}` : ''}
                         {appointment.legacyClientCode ? ` · CLI:${appointment.legacyClientCode}` : ''}
                         {appointment.legacyPlanincId ? ` · ID:${appointment.legacyPlanincId}` : ''}

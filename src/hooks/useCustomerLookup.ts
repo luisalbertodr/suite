@@ -44,6 +44,7 @@ export const useCustomerLookup = (): {
   const query = useQuery({
     queryKey: ['customer-lookup', companyId],
     enabled: !!companyId && !companyLoading,
+    staleTime: 60_000,
     queryFn: async (): Promise<CustomerLookupRow[]> => {
       if (!companyId) return [];
       const { data, error } = await supabase

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Card,
   CardContent,
@@ -19,6 +19,16 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
   Eye,
   EyeOff,
   PlusCircle,
@@ -31,12 +41,18 @@ import {
   XCircle,
   AlertTriangle,
   ListChecks,
+  RotateCcw,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   useMetaConfig,
   type MetaFormRow,
   type MetaSyncFormResult,
+  META_FULL_RESYNC_CONFIRM,
+  formatMetaSyncErrorsSummary,
+  stripMetaSyncDetailFromSummary,
+  extractMetaSyncDetailFromMessage,
 } from '@/hooks/useMetaConfig';
 import { useMarketingStages } from '@/hooks/useMarketingStages';
 import { MarketingImportDialog } from './marketing/MarketingImportDialog';
@@ -44,6 +60,8 @@ import { MarketingImportDialog } from './marketing/MarketingImportDialog';
 const NONE_STAGE_VALUE = '__none__';
 
 const INTERVAL_PRESETS: Array<{ value: number; label: string }> = [
+  { value: 5, label: 'Cada 5 minutos' },
+  { value: 10, label: 'Cada 10 minutos' },
   { value: 15, label: 'Cada 15 minutos' },
   { value: 30, label: 'Cada 30 minutos' },
   { value: 60, label: 'Cada hora' },
@@ -96,12 +114,26 @@ export const MetaConfig: React.FC = () => {
   const [apiVersion, setApiVersion] = useState('v23.0');
 
   const [openImport, setOpenImport] = useState(false);
+  const [fullResyncOpen, setFullResyncOpen] = useState(false);
+  const [fullResyncAck, setFullResyncAck] = useState(false);
+  /** Última respuesta de sync en esta sesión (lista por formulario). */
+  const [lastSyncResults, setLastSyncResults] = useState<MetaSyncFormResult[] | null>(null);
+  const prevCompanyId = useRef<string | undefined>(undefined);
   const [newFormId, setNewFormId] = useState('');
   const [newFormName, setNewFormName] = useState('');
   const [newCreatesAppt, setNewCreatesAppt] = useState(false);
 
   useEffect(() => {
     if (!config) return;
+    const cid = config.company_id;
+    if (
+      prevCompanyId.current !== undefined &&
+      prevCompanyId.current !== cid
+    ) {
+      setLastSyncResults(null);
+    }
+    prevCompanyId.current = cid;
+
     setBusinessId(config.business_id ?? '');
     setHasStoredToken(!!config.access_token);
     setSyncInterval(config.sync_interval_minutes ?? 60);
@@ -126,6 +158,38 @@ export const MetaConfig: React.FC = () => {
       ) ?? null,
     [stages],
   );
+
+  const persistedSyncDetail = extractMetaSyncDetailFromMessage(
+    config?.last_sync_message,
+  );
+  const configSyncSummaryLine =
+    stripMetaSyncDetailFromSummary(config?.last_sync_message) ??
+    config?.last_sync_message;
+  const structuredFromLastRun = useMemo(
+    () => lastSyncResults?.filter((r) => r.message || r.errors > 0) ?? [],
+    [lastSyncResults],
+  );
+  const showSyncErrorPanel =
+    structuredFromLastRun.length > 0 ||
+    (!!persistedSyncDetail &&
+      (config?.last_sync_status === 'error' ||
+        config?.last_sync_status === 'partial'));
+
+  const metaSyncErrorTextCombined = useMemo(() => {
+    const bits = structuredFromLastRun
+      .map((r) => r.message ?? '')
+      .filter((s) => s.length > 0);
+    if (persistedSyncDetail) bits.push(persistedSyncDetail);
+    return bits.join(' ');
+  }, [structuredFromLastRun, persistedSyncDetail]);
+
+  /** Respuesta típica de Graph API cuando el token de usuario ya no es válido. */
+  const showMetaInvalidUserSessionHint = useMemo(() => {
+    const t = metaSyncErrorTextCombined.toLowerCase();
+    return (
+      t.includes('session is invalid') || t.includes('user logged out')
+    );
+  }, [metaSyncErrorTextCombined]);
 
   const handleSaveGeneral = async () => {
     try {
@@ -185,25 +249,61 @@ export const MetaConfig: React.FC = () => {
     }
   };
 
+  const handleFullMetaResync = async () => {
+    try {
+      const result = await syncNow.mutateAsync({
+        force: true,
+        full_meta_resync: true,
+        confirm_full_meta_resync: META_FULL_RESYNC_CONFIRM,
+      });
+      setLastSyncResults(result.results);
+      const del = result.deleted_meta_leads ?? 0;
+      if (result.errors > 0) {
+        toast({
+          title: 'Resincronización Meta con errores',
+          description: `${formatMetaSyncErrorsSummary(result)} · Reinsertados ${result.inserted} · eliminados ${del} anteriores.`,
+          variant: 'destructive',
+        });
+      } else {
+        toast({
+          title: 'Resincronización Meta completada',
+          description: `Eliminados ${del} leads Meta previos (y sus notas). Reinsertados ${result.inserted} desde Meta.`,
+        });
+      }
+      setFullResyncOpen(false);
+      setFullResyncAck(false);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Error en resincronización';
+      toast({ title: 'Error', description: message, variant: 'destructive' });
+    }
+  };
+
   const handleSyncNow = async (formId?: string) => {
     try {
       const result = await syncNow.mutateAsync(
         formId ? { form_ids: [formId] } : undefined,
       );
-      const summary = result.results
-        .map(
-          (r: MetaSyncFormResult) =>
-            `${r.form_name ?? r.form_id}: ${r.inserted} nuevos${
-              r.errors ? ` · ${r.errors} con error` : ''
-            }`,
-        )
-        .join(' · ');
-      toast({
-        title: 'Sincronización Meta',
-        description:
-          summary ||
-          `${result.inserted} nuevos · ${result.skipped} ya existían · ${result.errors} con error`,
-      });
+      setLastSyncResults(result.results);
+      if (result.errors > 0) {
+        toast({
+          title: 'Sincronización Meta con errores',
+          description: formatMetaSyncErrorsSummary(result),
+          variant: 'destructive',
+        });
+      } else {
+        const summary = result.results
+          .map(
+            (r: MetaSyncFormResult) =>
+              `${r.form_name ?? r.form_id}: ${r.inserted} nuevos`,
+          )
+          .join(' · ');
+        toast({
+          title: 'Sincronización Meta',
+          description:
+            summary ||
+            `${result.inserted} nuevos · ${result.skipped} ya existían`,
+        });
+      }
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Error en sincronización';
       toast({ title: 'Error', description: message, variant: 'destructive' });
@@ -253,7 +353,7 @@ export const MetaConfig: React.FC = () => {
               </p>
               {form.creates_appointment ? (
                 <Badge variant="secondary" className="gap-1 text-[10px]">
-                  <CalendarCheck className="h-3 w-3" /> Genera cita
+                  <CalendarCheck className="h-3 w-3" /> Con reservas Meta
                 </Badge>
               ) : null}
               {!form.enabled ? (
@@ -361,10 +461,12 @@ export const MetaConfig: React.FC = () => {
           </div>
           <div className="flex items-center justify-between gap-3 rounded-lg border bg-muted/40 px-3 py-2">
             <div>
-              <p className="text-xs font-medium">Tratar todos los leads como cita</p>
+              <p className="text-xs font-medium">Formulario con reservas en Meta</p>
               <p className="text-[11px] text-muted-foreground">
-                Si está activado, todos los leads de este formulario van a la etapa
-                de "Formulario+Agenda ficticia".
+                Actívalo si el formulario usa reservas o instant booking en Meta. Además de
+                detectar fechas por el nombre de la pregunta, se revisan todos los valores
+                del lead por si el slot viene en un campo genérico. Sin esto, sólo se usa la
+                heurística por etiquetas de pregunta.
               </p>
             </div>
             <Switch
@@ -438,6 +540,17 @@ export const MetaConfig: React.FC = () => {
                   className={`mr-2 h-3.5 w-3.5 ${syncNow.isPending ? 'animate-spin' : ''}`}
                 />
                 {syncNow.isPending ? 'Sincronizando…' : 'Sincronizar ahora'}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-destructive/50 text-destructive hover:bg-destructive/10"
+                onClick={() => setFullResyncOpen(true)}
+                disabled={syncNow.isPending || forms.length === 0}
+                title="Borra todos los leads Meta de esta empresa y los vuelve a descargar desde la API"
+              >
+                <RotateCcw className="mr-2 h-3.5 w-3.5" />
+                Resincronización completa
               </Button>
             </div>
           </div>
@@ -542,13 +655,59 @@ export const MetaConfig: React.FC = () => {
                 <p className="text-sm font-medium">Sincronización activa</p>
                 <p className="text-[11px] text-muted-foreground">
                   Última sincronización: {formatRelative(config?.last_sync_at)}
-                  {config?.last_sync_message ? ` · ${config.last_sync_message}` : ''}
+                  {configSyncSummaryLine ? ` · ${configSyncSummaryLine}` : ''}
                 </p>
               </div>
             </div>
             <Button onClick={handleSaveGeneral} disabled={upsertConfig.isPending}>
               {upsertConfig.isPending ? 'Guardando…' : 'Guardar configuración'}
             </Button>
+            {showSyncErrorPanel ? (
+              <Alert
+                variant="destructive"
+                className="mt-1 w-full basis-full border-destructive/40"
+              >
+                <AlertTriangle className="h-4 w-4" />
+                <AlertTitle className="text-sm">Errores de sincronización</AlertTitle>
+                <AlertDescription className="mt-2 space-y-3">
+                  {showMetaInvalidUserSessionHint ? (
+                    <p className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-[11px] leading-snug text-foreground">
+                      Meta ha invalidado el token (sesión de Facebook cerrada, contraseña
+                      cambiada o token de corta duración). Genera un{' '}
+                      <strong>token nuevo</strong> con permisos para leer leads del
+                      formulario, pégalo arriba y guarda. En entornos reales conviene un
+                      token de larga duración o un usuario del sistema en Business
+                      Manager, no un token copiado de una sesión de navegador que caduca
+                      al cerrar sesión.
+                    </p>
+                  ) : null}
+                  {structuredFromLastRun.length > 0 ? (
+                    <ul className="list-none space-y-2 p-0">
+                      {structuredFromLastRun.map((r) => (
+                        <li key={r.form_id} className="text-xs">
+                          <p className="font-medium text-foreground">
+                            {r.form_name ?? r.form_id}
+                          </p>
+                          {r.message ? (
+                            <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-snug">
+                              {r.message}
+                            </pre>
+                          ) : r.errors > 0 ? (
+                            <p className="mt-1 text-[11px] text-destructive/90">
+                              {r.errors} registro(s) no se pudieron insertar.
+                            </p>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : persistedSyncDetail ? (
+                    <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-snug">
+                      {persistedSyncDetail}
+                    </pre>
+                  ) : null}
+                </AlertDescription>
+              </Alert>
+            ) : null}
           </div>
         </CardContent>
       </Card>
@@ -621,6 +780,61 @@ export const MetaConfig: React.FC = () => {
         onOpenChange={setOpenImport}
         stages={stages}
       />
+
+      <AlertDialog
+        open={fullResyncOpen}
+        onOpenChange={(open) => {
+          setFullResyncOpen(open);
+          if (!open) setFullResyncAck(false);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Resincronizar todos los leads desde Meta?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 text-sm text-muted-foreground">
+                <p>
+                  Se eliminarán de Marketing todos los leads con origen Meta / Facebook / Instagram de{' '}
+                  <strong className="text-foreground">esta empresa</strong>, incluidas las{' '}
+                  <strong className="text-foreground">notas</strong> asociadas (se pierden hasta que vuelvas a
+                  importar desde tu app original).
+                </p>
+                <p>
+                  Después se volverán a descargar <strong className="text-foreground">todos</strong> los leads desde la
+                  API de Meta para cada formulario activo, reiniciando cursores de sincronización y rellenando{' '}
+                  <strong className="text-foreground">fecha y texto de cita ficticia</strong> cuando el formulario los
+                  traiga.
+                </p>
+                <p>
+                  Los leads de otras fuentes (p. ej. importación TuPartner) no se borran; si comparten teléfono con un
+                  lead nuevo de Meta, podrás tener duplicados hasta que importes de nuevo y se fusionen.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-border/80 bg-muted/30 p-3 text-sm">
+            <Checkbox
+              checked={fullResyncAck}
+              onCheckedChange={(v) => setFullResyncAck(!!v)}
+              className="mt-0.5"
+            />
+            <span>
+              Entiendo que esta acción es irreversible para los leads Meta actuales y sus notas en esta empresa.
+            </span>
+          </label>
+          <AlertDialogFooter className="gap-2 sm:gap-0">
+            <AlertDialogCancel disabled={syncNow.isPending}>Cancelar</AlertDialogCancel>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={!fullResyncAck || syncNow.isPending}
+              onClick={() => void handleFullMetaResync()}
+            >
+              {syncNow.isPending ? 'Ejecutando…' : 'Borrar y volver a importar desde Meta'}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

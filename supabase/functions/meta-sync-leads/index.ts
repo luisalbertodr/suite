@@ -1,9 +1,9 @@
 // Edge function: meta-sync-leads
 // ---------------------------------------------------------------------------
 // Sincroniza leads desde Meta Lead Ads (Facebook/Instagram) hacia la tabla
-// public.marketing_leads, encolándolos a "Nuevo Formulario" (por defecto) o a
-// "Formulario+Agenda ficticia" si el lead trae una cita/slot en sus respuestas
-// o el formulario está marcado como "creates_appointment" en meta_forms.
+// public.marketing_leads. Etapa "Formulario+Agenda ficticia" sólo si en field_data
+// se detectan datos de fecha/slot de reserva (heurística). El flag meta_forms.creates_appointment
+// ya no fuerza esa columna para todos los leads (evita falsos positivos).
 // ---------------------------------------------------------------------------
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
@@ -43,35 +43,452 @@ type SyncFormResult = {
   message?: string;
 };
 
-// Heurística para detectar si el lead trae una cita agendada en field_data.
-const APPOINTMENT_KEYS = [
-  'appointment',
+// Heurística de cita en field_data (alineada con src/lib/marketingLeadAppointment.ts).
+// Evita falsos positivos: p. ej. "capacitacion" contiene "cita", o "horario" genérico.
+const EXCLUDE_SUBSTRINGS = [
+  'sin_cita',
+  'sin_agendar',
+  'no_agendar',
+  'no_quiero',
+  'no_desear',
+];
+
+const EXCLUDE_DEMOGRAPHIC_SUBSTRINGS = [
+  'nacimiento',
+  'birth',
+  'cumple',
+  'fecha_de_nacimiento',
+  'edad',
+  'años',
+  'anos',
+  'how_old',
+  'date_of_birth',
+  'dob',
+];
+
+const APPOINTMENT_KEY_FRAGMENTS = [
   'appointment_request',
-  'appointment_request_time',
+  'appointment',
   'select_a_date_and_time',
   'select_a_time',
   'preferred_appointment',
-  'preferred_time',
-  'preferred_date',
-  'fecha_de_la_cita',
-  'fecha_cita',
-  'cita',
-  'horario',
-  'hora_preferida',
+  'preferred_day',
   'when_would_you_like_to_book',
   'when_would_you_like_to_come_in',
+  'fecha_de_la_cita',
+  'fecha_cita',
+  'fecha_y_hora',
+  'dia_y_hora',
+  'dia_de_la_cita',
+  'hora_de_la_cita',
+  'solicitar_cita',
+  'pedir_cita',
+  'agendar_visita',
+  'agendar_cita',
+  'reservar_cita',
+  'proxima_cita',
+  'nueva_cita',
+  'primera_cita',
+  'confirmacion_cita',
+  'scheduled_time',
+  'date_and_time',
+  'time_slot',
+  'instant_booking',
+  'booking',
+  'horario_preferido',
+  'dia_preferido',
+  'franja',
+  'turno',
+  'elige_fecha',
+  'elige_la_fecha',
+  'selecciona_fecha',
+  'selecciona_la_fecha',
+  'elegir_fecha',
 ];
 
-function hasAppointmentField(fields: MetaFieldDatum[] | undefined): boolean {
-  if (!fields || fields.length === 0) return false;
-  for (const f of fields) {
-    const key = (f?.name ?? '').toLowerCase().replace(/\s+/g, '_');
-    if (APPOINTMENT_KEYS.some((k) => key.includes(k))) {
-      const value = (f?.values ?? []).find((v) => String(v).trim().length > 0);
-      if (value) return true;
+/** Mes inglés → índice (slots tipo «May 15th, 11:00 am» sin año). */
+const ENGLISH_MONTH_INDEX: Record<string, number> = {
+  january: 0,
+  jan: 0,
+  february: 1,
+  feb: 1,
+  march: 2,
+  mar: 2,
+  april: 3,
+  apr: 3,
+  may: 4,
+  june: 5,
+  jun: 5,
+  july: 6,
+  jul: 6,
+  august: 7,
+  aug: 7,
+  september: 8,
+  sep: 8,
+  sept: 8,
+  october: 9,
+  oct: 9,
+  november: 10,
+  nov: 10,
+  december: 11,
+  dec: 11,
+};
+
+const ES_MONTH_TOKEN: Record<string, number> = {
+  enero: 0,
+  febrero: 1,
+  marzo: 2,
+  abril: 3,
+  mayo: 4,
+  may: 4,
+  junio: 5,
+  julio: 6,
+  agosto: 7,
+  septiembre: 8,
+  sep: 8,
+  octubre: 9,
+  noviembre: 10,
+  diciembre: 11,
+  ene: 0,
+  feb: 1,
+  mar: 2,
+  abr: 3,
+  jun: 5,
+  jul: 6,
+  ago: 7,
+  sept: 8,
+  oct: 9,
+  nov: 10,
+  dic: 11,
+};
+
+function normalizeMetaFieldKey(name: string): string {
+  return String(name ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/\s+/g, '_');
+}
+
+function metaFieldKeyIndicatesAppointment(keyNorm: string): boolean {
+  if (!keyNorm) return false;
+  if (EXCLUDE_SUBSTRINGS.some((ex) => keyNorm.includes(ex))) return false;
+  if (EXCLUDE_DEMOGRAPHIC_SUBSTRINGS.some((ex) => keyNorm.includes(ex))) return false;
+  return APPOINTMENT_KEY_FRAGMENTS.some((frag) => keyNorm.includes(frag));
+}
+
+function metaFieldKeyMightHoldScheduleValue(keyNorm: string): boolean {
+  if (!keyNorm) return false;
+  if (EXCLUDE_SUBSTRINGS.some((ex) => keyNorm.includes(ex))) return false;
+  if (EXCLUDE_DEMOGRAPHIC_SUBSTRINGS.some((ex) => keyNorm.includes(ex))) return false;
+  if (metaFieldKeyIndicatesAppointment(keyNorm)) return true;
+  return /fecha|dia|hora|slot|franja|turno|reserva|visita|schedule|cuando_desead|cuando|preferred|booking|calendario/.test(
+    keyNorm,
+  );
+}
+
+const EXCLUDE_FALLBACK_KEY_SUBSTRINGS = [
+  'postal',
+  'codigo_postal',
+  'zip',
+  'nif',
+  'cif',
+  'dni',
+  'passport',
+  'terminos',
+  'termine',
+  'acepto_',
+  'consent',
+  'privacy',
+  'privacidad',
+  'utm_',
+  'vigencia',
+  'caducidad',
+  'expir',
+  'newsletter',
+  'promo',
+  'cupon',
+  'coupon',
+  'email',
+  'mail',
+  'telefono',
+  'phone',
+  'movil',
+  'mobile',
+  'nombre',
+  'name',
+  'apellido',
+  'first_name',
+  'last_name',
+  'company',
+  'empresa',
+  'city',
+  'ciudad',
+  'address',
+  'direccion',
+  'web',
+  'url',
+];
+
+function shouldSkipFallbackScanKey(keyNorm: string): boolean {
+  return EXCLUDE_FALLBACK_KEY_SUBSTRINGS.some((ex) => keyNorm.includes(ex));
+}
+
+function pickClosestLocalCalendarDate(
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  base: Date,
+): Date | null {
+  const y0 = base.getFullYear();
+  let best: Date | null = null;
+  let bestAbs = Infinity;
+  for (const y of [y0 - 1, y0, y0 + 1]) {
+    const dt = new Date(y, month, day, hour, minute, 0, 0);
+    if (Number.isNaN(dt.getTime()) || dt.getMonth() !== month) continue;
+    const diff = Math.abs(dt.getTime() - base.getTime());
+    if (diff < bestAbs) {
+      bestAbs = diff;
+      best = dt;
     }
   }
+  return best;
+}
+
+function appointmentReferenceFromLead(lead: { created_time?: string }): Date {
+  if (lead.created_time) {
+    const d = new Date(lead.created_time);
+    if (!Number.isNaN(d.getTime())) return d;
+  }
+  return new Date();
+}
+
+function parseEuropeanSlashDate(raw: string, base: Date = new Date()): string | null {
+  const m = raw
+    .trim()
+    .match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})(?:\s+(\d{1,2}):(\d{2}))?$/);
+  if (!m) return null;
+  const d = Number(m[1]);
+  const mo = Number(m[2]) - 1;
+  const yRaw = Number(m[3]);
+  const hh = m[4] != null ? Number(m[4]) : 0;
+  const mm = m[5] != null ? Number(m[5]) : 0;
+  if (yRaw >= 100) {
+    const dt = new Date(yRaw, mo, d, hh, mm, 0, 0);
+    if (Number.isNaN(dt.getTime())) return null;
+    return dt.toISOString();
+  }
+  let best: Date | null = null;
+  let bestAbs = Infinity;
+  for (const century of [1900, 2000, 2100]) {
+    const yy = century + yRaw;
+    const dt = new Date(yy, mo, d, hh, mm, 0, 0);
+    if (Number.isNaN(dt.getTime()) || dt.getMonth() !== mo) continue;
+    const diff = Math.abs(dt.getTime() - base.getTime());
+    if (diff < bestAbs) {
+      bestAbs = diff;
+      best = dt;
+    }
+  }
+  return best ? best.toISOString() : null;
+}
+
+function parseDayMonthNameYear(raw: string): string | null {
+  const cleaned = raw.trim().replace(/,/g, ' ');
+  const re =
+    /^(\d{1,2})\s+([a-záéíóúñ]{3,12})\s+(\d{4})(?:\s+(\d{1,2}):(\d{2}))?$/i;
+  const m = cleaned.match(re);
+  if (!m) return null;
+  const day = Number(m[1]);
+  const monToken = m[2].toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+  const month = ES_MONTH_TOKEN[monToken];
+  if (month == null) return null;
+  const year = Number(m[3]);
+  const hh = m[4] != null ? Number(m[4]) : 12;
+  const min = m[5] != null ? Number(m[5]) : 0;
+  const dt = new Date(year, month, day, hh, min, 0, 0);
+  if (Number.isNaN(dt.getTime())) return null;
+  return dt.toISOString();
+}
+
+function parseEnglishMonthDayTimeIso(
+  raw: string | null | undefined,
+  base: Date = new Date(),
+): string | null {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  const re =
+    /^\s*([a-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,\s*|\s+)(\d{1,2}):(\d{2})\s*(am|pm)?\s*$/i;
+  const m = s.match(re);
+  if (!m) return null;
+  const monToken = m[1].toLowerCase();
+  const month = ENGLISH_MONTH_INDEX[monToken];
+  if (month == null) return null;
+  const day = Number(m[2]);
+  let hour = Number(m[3]);
+  const minute = Number(m[4]);
+  const ampm = (m[5] ?? '').toLowerCase();
+  if (ampm === 'pm' && hour < 12) hour += 12;
+  if (ampm === 'am' && hour === 12) hour = 0;
+  const dt = pickClosestLocalCalendarDate(month, day, hour, minute, base);
+  if (!dt) return null;
+  return dt.toISOString();
+}
+
+function parseLooseMetaDateString(
+  raw: string | null | undefined,
+  base: Date = new Date(),
+): string | null {
+  if (!raw) return null;
+  let s = String(raw).trim();
+  if (!s) return null;
+  const eu = parseEuropeanSlashDate(s, base);
+  if (eu) return eu;
+  const dmy = parseDayMonthNameYear(s);
+  if (dmy) return dmy;
+  s = s.replace(/\s+\([A-Z]{2,5}\)$/, '').trim();
+  const direct = new Date(s);
+  if (!Number.isNaN(direct.getTime())) return direct.toISOString();
+  return null;
+}
+
+function parseAppointmentStyleLabel(
+  label: string | null | undefined,
+  base: Date = new Date(),
+): string | null {
+  if (!label) return null;
+  const cleaned = String(label).trim().replace(/(\d+)(st|nd|rd|th)/gi, '$1');
+  const candidates: Date[] = [];
+  for (const y of [base.getFullYear() - 1, base.getFullYear(), base.getFullYear() + 1]) {
+    const d = new Date(`${cleaned}, ${y}`);
+    if (!Number.isNaN(d.getTime())) candidates.push(d);
+  }
+  if (candidates.length === 0) return null;
+  const best = candidates.reduce((a, b) =>
+    Math.abs(a.getTime() - base.getTime()) <= Math.abs(b.getTime() - base.getTime()) ? a : b,
+  );
+  return best.toISOString();
+}
+
+function parseFlexibleAppointmentIso(
+  raw: string | null | undefined,
+  base: Date = new Date(),
+): string | null {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  return (
+    parseLooseMetaDateString(s, base) ??
+    parseEnglishMonthDayTimeIso(s, base) ??
+    parseAppointmentStyleLabel(s, base)
+  );
+}
+
+function valueLooksLikeScheduleDateTime(raw: string, base: Date = new Date()): boolean {
+  if (!raw || raw.trim().length < 6) return false;
+  const s = raw.trim();
+  if (parseFlexibleAppointmentIso(s, base)) return true;
+  if (parseEuropeanSlashDate(s, base)) return true;
+  if (parseDayMonthNameYear(s)) return true;
+  if (/\d{4}-\d{2}-\d{2}/.test(s)) return true;
+  if (/\d{1,2}\s+[a-záéíóúñ]{3,12}\s+\d{4}/i.test(s)) return true;
+  if (parseEnglishMonthDayTimeIso(s, base)) return true;
   return false;
+}
+
+function scanAllFieldValuesForAppointmentFallback(
+  fields: MetaFieldDatum[] | undefined,
+  base: Date,
+): { label: string | null; atIso: string | null } {
+  if (!fields || fields.length === 0) return { label: null, atIso: null };
+  const hits: Array<{ key: string; value: string }> = [];
+  for (const f of fields) {
+    const key = normalizeMetaFieldKey(f?.name ?? '');
+    if (EXCLUDE_SUBSTRINGS.some((ex) => key.includes(ex))) continue;
+    if (EXCLUDE_DEMOGRAPHIC_SUBSTRINGS.some((ex) => key.includes(ex))) continue;
+    if (shouldSkipFallbackScanKey(key)) continue;
+    const raw = Array.isArray(f.values) ? f.values : [];
+    const v = raw.map((x) => String(x).trim()).find((s) => s.length > 0);
+    if (!v) continue;
+    if (!valueLooksLikeScheduleDateTime(v, base)) continue;
+    hits.push({ key, value: v });
+  }
+  if (hits.length === 0) return { label: null, atIso: null };
+  const label = hits.map((h) => h.value).join(' · ');
+  let atIso: string | null = null;
+  for (const h of hits) {
+    const parsed = parseFlexibleAppointmentIso(h.value, base);
+    if (parsed) {
+      atIso = parsed;
+      break;
+    }
+  }
+  return { label, atIso };
+}
+
+function extractAppointmentFromMetaFieldsCore(
+  fields: MetaFieldDatum[] | undefined,
+  base: Date,
+): { label: string | null; atIso: string | null } {
+  if (!fields || fields.length === 0) return { label: null, atIso: null };
+
+  type Hit = { key: string; value: string };
+  const hits: Hit[] = [];
+
+  for (const f of fields) {
+    const key = normalizeMetaFieldKey(f?.name ?? '');
+    if (!metaFieldKeyIndicatesAppointment(key)) continue;
+    const raw = Array.isArray(f.values) ? f.values : [];
+    const v = raw.map((x) => String(x).trim()).find((s) => s.length > 0);
+    if (v) hits.push({ key, value: v });
+  }
+
+  if (hits.length === 0) {
+    for (const f of fields) {
+      const key = normalizeMetaFieldKey(f?.name ?? '');
+      if (!metaFieldKeyMightHoldScheduleValue(key)) continue;
+      const raw = Array.isArray(f.values) ? f.values : [];
+      const v = raw.map((x) => String(x).trim()).find((s) => s.length > 0);
+      if (!v || !valueLooksLikeScheduleDateTime(v, base)) continue;
+      hits.push({ key, value: v });
+    }
+  }
+
+  if (hits.length === 0) return { label: null, atIso: null };
+
+  const label = hits.map((h) => h.value).join(' · ');
+  let atIso: string | null = null;
+  for (const h of hits) {
+    const parsed = parseFlexibleAppointmentIso(h.value, base);
+    if (parsed) {
+      atIso = parsed;
+      break;
+    }
+  }
+
+  return { label, atIso };
+}
+
+/** Si el formulario tiene "Con reservas Meta", escanea todos los valores (slots sin clave reconocible). */
+function extractAppointmentFromMetaFields(
+  fields: MetaFieldDatum[] | undefined,
+  form?: { creates_appointment?: boolean | null },
+  referenceBase?: Date,
+): { label: string | null; atIso: string | null } {
+  const base =
+    referenceBase && !Number.isNaN(referenceBase.getTime())
+      ? referenceBase
+      : new Date();
+  const core = extractAppointmentFromMetaFieldsCore(fields, base);
+  if (core.atIso || core.label) return core;
+  if (form?.creates_appointment) {
+    const fb = scanAllFieldValuesForAppointmentFallback(fields, base);
+    if (fb.atIso || fb.label) return fb;
+  }
+  return core;
 }
 
 function normalizeFieldName(name: string): string {
@@ -82,6 +499,29 @@ function firstValue(values?: string[]): string | null {
   if (!values || values.length === 0) return null;
   const v = String(values[0] ?? '').trim();
   return v.length === 0 ? null : v;
+}
+
+/** Últimos 9 dígitos para deduplicar leads (alineado con marketing_leads.phone_norm en BD). */
+function phoneDigitsLast9(phone: string | null | undefined): string | null {
+  const d = String(phone ?? '').replace(/\D/g, '');
+  if (d.length >= 9) return d.slice(-9);
+  return null;
+}
+
+function mergeLeadFieldData(
+  a: MetaFieldDatum[] | undefined,
+  b: MetaFieldDatum[] | undefined,
+): MetaFieldDatum[] {
+  const merge = [...(Array.isArray(a) ? a : []), ...(Array.isArray(b) ? b : [])];
+  const seen = new Set<string>();
+  const out: MetaFieldDatum[] = [];
+  for (const f of merge) {
+    const sig = `${normalizeMetaFieldKey(f?.name ?? '')}:${(f.values ?? []).join('\u001f')}`;
+    if (seen.has(sig)) continue;
+    seen.add(sig);
+    out.push({ name: f.name, values: Array.isArray(f.values) ? f.values : [] });
+  }
+  return out;
 }
 
 function parseLeadFields(lead: MetaLead) {
@@ -130,7 +570,8 @@ async function fetchAllLeads(
   apiVersion: string,
   formId: string,
   accessToken: string,
-  since: string | null,
+  /** Unix segundos; Meta exige número para `time_created`, no ISO string. */
+  sinceUnix: number | null,
 ): Promise<{ leads: MetaLead[]; error?: string }> {
   const leads: MetaLead[] = [];
   const baseFields =
@@ -144,11 +585,11 @@ async function fetchAllLeads(
     url.searchParams.set('access_token', accessToken);
     url.searchParams.set('fields', baseFields);
     url.searchParams.set('limit', '100');
-    if (since) {
+    if (sinceUnix != null && Number.isFinite(sinceUnix)) {
       url.searchParams.set(
         'filtering',
         JSON.stringify([
-          { field: 'time_created', operator: 'GREATER_THAN', value: since },
+          { field: 'time_created', operator: 'GREATER_THAN', value: sinceUnix },
         ]),
       );
     }
@@ -236,7 +677,12 @@ serve(async (req) => {
     }
     const companyId: string = profile.company_id;
 
-    let body: { form_ids?: string[]; force?: boolean } = {};
+    let body: {
+      form_ids?: string[];
+      force?: boolean;
+      full_meta_resync?: boolean;
+      confirm_full_meta_resync?: string;
+    } = {};
     try {
       body = await req.json();
     } catch {
@@ -264,6 +710,20 @@ serve(async (req) => {
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
       );
     }
+    const fullResync =
+      body.full_meta_resync === true &&
+      body.confirm_full_meta_resync === 'BORRAR_LEADS_META';
+
+    if (fullResync && body.force !== true) {
+      return new Response(
+        JSON.stringify({
+          error:
+            'La resincronización completa es destructiva: envía force: true junto con full_meta_resync y confirm_full_meta_resync.',
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      );
+    }
+
     if (!config.enabled && !body.force) {
       return new Response(
         JSON.stringify({ error: 'La sincronización con Meta está deshabilitada' }),
@@ -290,6 +750,27 @@ serve(async (req) => {
         }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
       );
+    }
+
+    let deletedMetaLeads = 0;
+    if (fullResync) {
+      const { data: delRows, error: delErr } = await admin
+        .from('marketing_leads')
+        .delete()
+        .eq('company_id', companyId)
+        .in('source', ['meta', 'facebook', 'instagram'])
+        .select('id');
+      if (delErr) throw delErr;
+      deletedMetaLeads = Array.isArray(delRows) ? delRows.length : 0;
+
+      const { error: resetCursorsErr } = await admin
+        .from('meta_forms')
+        .update({
+          last_lead_created_time: null,
+          last_lead_external_id: null,
+        })
+        .eq('company_id', companyId);
+      if (resetCursorsErr) throw resetCursorsErr;
     }
 
     const { data: stages, error: stagesErr } = await admin
@@ -325,15 +806,17 @@ serve(async (req) => {
         (form.creates_appointment ? appointmentStageId : null) ??
         appointmentStageId;
 
-      const since = form.last_lead_created_time
-        ? new Date(form.last_lead_created_time).toISOString()
-        : null;
+      const sinceUnix = fullResync
+        ? null
+        : form.last_lead_created_time
+          ? Math.floor(new Date(form.last_lead_created_time).getTime() / 1000)
+          : null;
 
       const { leads: metaLeads, error: fetchErr } = await fetchAllLeads(
         config.graph_api_version || 'v23.0',
         form.form_id,
         config.access_token,
-        since,
+        sinceUnix,
       );
 
       if (fetchErr) {
@@ -376,7 +859,8 @@ serve(async (req) => {
           const d = row.phone.replace(/\D/g, '');
           if (d.length >= 7) {
             existingByPhoneAll.set(d, row.id);
-            existingByPhone9.set(d.slice(-9), row.id);
+            const n9 = phoneDigitsLast9(row.phone);
+            if (n9) existingByPhone9.set(n9, row.id);
           }
         }
         if (row.email) {
@@ -390,13 +874,17 @@ serve(async (req) => {
         email: string | null,
       ): string | null => {
         if (existingByExternal.has(leadId)) return existingByExternal.get(leadId)!;
+        // Siempre deduplicar por teléfono/email (también tras resync completa: evita duplicar vs TuPartner u otros).
         if (phone) {
           const d = phone.replace(/\D/g, '');
           if (d.length >= 7) {
             const byFull = existingByPhoneAll.get(d);
             if (byFull) return byFull;
-            const byLast9 = existingByPhone9.get(d.slice(-9));
-            if (byLast9) return byLast9;
+            const n9 = phoneDigitsLast9(phone);
+            if (n9) {
+              const byLast9 = existingByPhone9.get(n9);
+              if (byLast9) return byLast9;
+            }
           }
         }
         if (email) {
@@ -412,6 +900,8 @@ serve(async (req) => {
       type BackfillTarget = {
         id: string;
         externalId: string;
+        /** Lead completo de Meta para fusionar datos si ya había otro external_id. */
+        metaLead: MetaLead;
         formName: string | null;
         campaign: string | null;
         externalCreatedAt: string | null;
@@ -419,10 +909,14 @@ serve(async (req) => {
       };
 
       const rows: Record<string, unknown>[] = [];
+      /** field_data fusionados por fila (mismo índice que rows), sólo en memoria. */
+      const rowsMergedFd: MetaFieldDatum[][] = [];
+      /** Dedupe dentro del mismo lote/API: mismo teléfono → una sola fila. */
+      const pendingRowIndexByPhone9 = new Map<string, number>();
       const toBackfill: BackfillTarget[] = [];
       let skipped = 0;
-      let lastCreatedTime: string | null = form.last_lead_created_time ?? null;
-      let lastExternalId: string | null = form.last_lead_external_id ?? null;
+      let lastCreatedTime: string | null = fullResync ? null : form.last_lead_created_time ?? null;
+      let lastExternalId: string | null = fullResync ? null : form.last_lead_external_id ?? null;
 
       for (const lead of metaLeads) {
         if (!lead.id) continue;
@@ -434,8 +928,46 @@ serve(async (req) => {
         else if (platform.includes('facebook')) source = 'facebook';
 
         const matchId = findExistingLeadId(lead.id, phone, email);
+        const n9 = phoneDigitsLast9(phone);
 
-        if (matchId) {
+        let consumedByBatchMerge = false;
+        if (!matchId && n9 && pendingRowIndexByPhone9.has(n9)) {
+          const idx = pendingRowIndexByPhone9.get(n9)!;
+          rowsMergedFd[idx] = mergeLeadFieldData(rowsMergedFd[idx], lead.field_data);
+          const mergedFd = rowsMergedFd[idx];
+          const reparsed = parseLeadFields({ field_data: mergedFd } as MetaLead);
+          const prev = rows[idx] as Record<string, unknown>;
+          const tNew = lead.created_time ? new Date(lead.created_time).getTime() : 0;
+          const tOld = prev.external_created_at
+            ? new Date(String(prev.external_created_at)).getTime()
+            : 0;
+          const newer = tNew >= tOld;
+          const apptExtract = extractAppointmentFromMetaFields(
+            mergedFd,
+            form,
+            appointmentReferenceFromLead(lead),
+          );
+          const hasAppt = !!(apptExtract.atIso || apptExtract.label);
+          rows[idx] = {
+            company_id: companyId,
+            stage_id: hasAppt ? targetAppointment : targetIntake,
+            external_id: newer ? lead.id : prev.external_id,
+            source: newer ? source : prev.source,
+            form_name: form.form_name ?? prev.form_name ?? null,
+            campaign: newer ? (lead.campaign_name ?? null) : prev.campaign,
+            first_name: reparsed.firstName,
+            last_name: reparsed.lastName,
+            phone: reparsed.phone,
+            email: reparsed.email,
+            field_data: reparsed.extras,
+            external_created_at: newer ? lead.created_time : prev.external_created_at,
+            appointment_at: apptExtract.atIso,
+            appointment_label: apptExtract.label,
+          };
+          consumedByBatchMerge = true;
+        }
+
+        if (!consumedByBatchMerge && matchId) {
           // El lead ya existe (importado de CRM antiguo o sync previa). No tocamos
           // su etapa ni datos editados por el usuario; sólo registramos el external_id
           // de Meta para que en futuras syncs sea trivial reconocerlo.
@@ -445,6 +977,7 @@ serve(async (req) => {
             toBackfill.push({
               id: matchId,
               externalId: lead.id,
+              metaLead: lead,
               formName: form.form_name ?? null,
               campaign: lead.campaign_name ?? null,
               externalCreatedAt: lead.created_time ?? null,
@@ -453,9 +986,13 @@ serve(async (req) => {
             // Lo registramos en el índice por si en este mismo run aparece otra vez.
             existingByExternal.set(lead.id, matchId);
           }
-        } else {
-          const hasAppt =
-            form.creates_appointment || hasAppointmentField(lead.field_data);
+        } else if (!consumedByBatchMerge) {
+          const apptExtract = extractAppointmentFromMetaFields(
+            lead.field_data,
+            form,
+            appointmentReferenceFromLead(lead),
+          );
+          const hasAppt = !!(apptExtract.atIso || apptExtract.label);
           const stageId = hasAppt ? targetAppointment : targetIntake;
 
           rows.push({
@@ -471,7 +1008,11 @@ serve(async (req) => {
             email,
             field_data: extras,
             external_created_at: lead.created_time ?? null,
+            appointment_at: apptExtract.atIso,
+            appointment_label: apptExtract.label,
           });
+          rowsMergedFd.push(mergeLeadFieldData([], lead.field_data));
+          if (n9) pendingRowIndexByPhone9.set(n9, rows.length - 1);
         }
 
         if (
@@ -485,6 +1026,7 @@ serve(async (req) => {
 
       let inserted = 0;
       let formErrors = 0;
+      let insertErrDetail: string | null = null;
       const CHUNK = 200;
       for (let i = 0; i < rows.length; i += CHUNK) {
         const slice = rows.slice(i, i + CHUNK);
@@ -495,29 +1037,82 @@ serve(async (req) => {
         if (insErr) {
           console.error('meta-sync insert error', insErr);
           formErrors += slice.length;
+          if (!insertErrDetail) {
+            insertErrDetail =
+              typeof insErr.message === 'string' && insErr.message.length > 0
+                ? insErr.message
+                : JSON.stringify(insErr);
+          }
         } else {
           inserted += ins?.length ?? 0;
         }
       }
 
-      // Backfill external_id (y metadatos suaves) en los leads existentes.
+      // Fusionar envíos Meta en fila existente (mismo teléfono/email u otro CRM).
+      // Antes sólo se actualizaba si external_id era null → los reenvíos con nuevo id de Meta no se veían.
       for (const b of toBackfill) {
-        const { error: bErr } = await admin
+        const { data: row, error: selErr } = await admin
           .from('marketing_leads')
-          .update({
-            external_id: b.externalId,
-            // Sólo sobreescribimos form_name/campaign/external_created_at si están vacíos.
-            ...(b.formName ? { form_name: b.formName } : {}),
-            ...(b.campaign ? { campaign: b.campaign } : {}),
-            ...(b.externalCreatedAt ? { external_created_at: b.externalCreatedAt } : {}),
-            // Marcamos fuente como Meta para que el origen sea trazable.
-            source: b.source,
-          })
+          .select(
+            'external_id, external_created_at, first_name, last_name, phone, email, field_data, appointment_at, appointment_label, stage_id, form_name, campaign',
+          )
           .eq('id', b.id)
-          // Evita pisar external_id si otro proceso ya rellenó uno distinto.
-          .is('external_id', null);
-        if (bErr) {
-          console.warn(`backfill external_id failed for ${b.id}:`, bErr.message);
+          .maybeSingle();
+        if (selErr || !row) {
+          console.warn(`merge meta lead: no fila ${b.id}`, selErr?.message);
+          continue;
+        }
+
+        const parsed = parseLeadFields(b.metaLead);
+        const apptNew = extractAppointmentFromMetaFields(
+          b.metaLead.field_data,
+          form,
+          appointmentReferenceFromLead(b.metaLead),
+        );
+        const hasApptNew = !!(apptNew.atIso || apptNew.label);
+        const tNew = b.externalCreatedAt ? new Date(b.externalCreatedAt).getTime() : 0;
+        const tOld = row.external_created_at ? new Date(String(row.external_created_at)).getTime() : 0;
+        const isNewer = !row.external_created_at || tNew >= tOld;
+        const rowHadAppt = !!(row.appointment_at || row.appointment_label);
+
+        const existingFd = (Array.isArray(row.field_data) ? row.field_data : []) as MetaFieldDatum[];
+        const patch: Record<string, unknown> = {};
+
+        if (isNewer) {
+          patch.external_id = b.externalId;
+          patch.first_name = parsed.firstName;
+          patch.last_name = parsed.lastName;
+          if (parsed.phone) patch.phone = parsed.phone;
+          if (parsed.email) patch.email = parsed.email;
+          patch.form_name = b.formName ?? row.form_name;
+          patch.campaign = b.campaign ?? row.campaign;
+          patch.external_created_at = b.externalCreatedAt;
+          patch.source = b.source;
+          patch.field_data = mergeLeadFieldData(existingFd, parsed.extras as MetaFieldDatum[]);
+          if (hasApptNew) {
+            patch.appointment_at = apptNew.atIso;
+            patch.appointment_label = apptNew.label;
+            patch.stage_id = targetAppointment;
+          }
+        } else if (row.external_id == null) {
+          patch.external_id = b.externalId;
+          patch.source = b.source;
+          if (b.formName) patch.form_name = b.formName;
+          if (b.campaign) patch.campaign = b.campaign;
+          if (b.externalCreatedAt) patch.external_created_at = b.externalCreatedAt;
+        }
+
+        if (!isNewer && hasApptNew && !rowHadAppt) {
+          patch.appointment_at = apptNew.atIso;
+          patch.appointment_label = apptNew.label;
+          patch.stage_id = targetAppointment;
+        }
+
+        if (Object.keys(patch).length === 0) continue;
+
+        const { error: upErr } = await admin.from('marketing_leads').update(patch).eq('id', b.id);
+        if (upErr) {
+          console.warn(`merge meta lead failed for ${b.id}:`, upErr.message);
         }
       }
 
@@ -532,7 +1127,13 @@ serve(async (req) => {
           last_sync_status: formErrors > 0 ? 'partial' : 'ok',
           last_sync_message:
             formErrors > 0
-              ? `${inserted} insertados, ${formErrors} con error`
+              ? `${inserted} insertados, ${formErrors} con error${
+                  insertErrDetail
+                    ? `: ${insertErrDetail.slice(0, 400)}${
+                        insertErrDetail.length > 400 ? '…' : ''
+                      }`
+                    : ''
+                }`
               : `${inserted} insertados, ${skipped} ya existían`,
           last_lead_created_time: lastCreatedTime,
           last_lead_external_id: lastExternalId,
@@ -546,18 +1147,32 @@ serve(async (req) => {
         inserted,
         skipped,
         errors: formErrors,
+        ...(insertErrDetail ? { message: insertErrDetail.slice(0, 2000) } : {}),
       });
     }
 
     const overallStatus: 'ok' | 'partial' | 'error' =
       totalErrors === 0 ? 'ok' : totalInserted > 0 ? 'partial' : 'error';
 
+    const errorDetails = results
+      .filter((r) => r.message)
+      .map((r) => `${r.form_name ?? r.form_id}: ${r.message}`)
+      .join(' · ');
+    const baseConfigMsg =
+      fullResync && deletedMetaLeads > 0
+        ? `Resync: eliminados ${deletedMetaLeads} leads Meta previos; insertados ${totalInserted}, omitidos ${totalSkipped}, errores ${totalErrors}`
+        : `Insertados ${totalInserted}, omitidos ${totalSkipped}, con error ${totalErrors}`;
+    const lastConfigMessage =
+      totalErrors > 0 && errorDetails.length > 0
+        ? `${baseConfigMsg}. Detalle: ${errorDetails}`.slice(0, 4000)
+        : baseConfigMsg;
+
     await admin
       .from('meta_config')
       .update({
         last_sync_at: new Date().toISOString(),
         last_sync_status: overallStatus,
-        last_sync_message: `Insertados ${totalInserted}, omitidos ${totalSkipped}, con error ${totalErrors}`,
+        last_sync_message: lastConfigMessage,
         last_sync_inserted: totalInserted,
         last_sync_skipped: totalSkipped,
       })
@@ -569,6 +1184,8 @@ serve(async (req) => {
         inserted: totalInserted,
         skipped: totalSkipped,
         errors: totalErrors,
+        deleted_meta_leads: deletedMetaLeads,
+        full_meta_resync: fullResync,
         results,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },

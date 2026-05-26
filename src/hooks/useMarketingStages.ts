@@ -24,6 +24,7 @@ export const useMarketingStages = () => {
   const query = useQuery({
     queryKey: ['marketing-stages', companyId],
     enabled: !!companyId && !companyLoading,
+    staleTime: 60_000,
     queryFn: async (): Promise<MarketingLeadStage[]> => {
       if (!companyId) return [];
 

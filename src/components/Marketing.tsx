@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Search,
@@ -43,7 +43,11 @@ import { MarketingStagesManager } from './marketing/MarketingStagesManager';
 import { MarketingFieldsConfigDialog } from './marketing/MarketingFieldsConfigDialog';
 import { MarketingLeadNotesDialog } from './marketing/MarketingLeadNotesDialog';
 import { MarketingPromoteToCustomerDialog } from './marketing/MarketingPromoteToCustomerDialog';
-import { useMetaConfig } from '@/hooks/useMetaConfig';
+import {
+  useMetaConfig,
+  formatMetaSyncErrorsSummary,
+  type MetaSyncResponse,
+} from '@/hooks/useMetaConfig';
 
 type SortField =
   | 'created_at'
@@ -54,6 +58,8 @@ type SortField =
   | 'value'
   | 'form_name';
 type SortDir = 'asc' | 'desc';
+
+const COLLAPSED_STAGES_STORAGE_KEY = 'marketing-kanban-collapsed-stage-ids';
 
 const SORT_OPTIONS: Array<{ value: SortField; label: string }> = [
   { value: 'external_created_at', label: 'Fecha del lead (Meta)' },
@@ -144,6 +150,52 @@ export const Marketing: React.FC = () => {
   const [openFieldsConfig, setOpenFieldsConfig] = useState(false);
   const autoSyncTriggered = useRef(false);
 
+  const toastMetaSyncResult = useCallback(
+    (data: MetaSyncResponse) => {
+      if (data.errors > 0) {
+        toast({
+          title: 'Sincronización Meta con errores',
+          description: formatMetaSyncErrorsSummary(data),
+          variant: 'destructive',
+        });
+        return;
+      }
+      if (data.inserted > 0) {
+        toast({
+          title: 'Nuevos leads de Meta',
+          description: `${data.inserted} leads añadidos al embudo.`,
+        });
+      }
+    },
+    [toast],
+  );
+
+  const [collapsedStageIds, setCollapsedStageIds] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem(COLLAPSED_STAGES_STORAGE_KEY);
+      if (!raw) return new Set();
+      const arr = JSON.parse(raw) as unknown;
+      return new Set(Array.isArray(arr) ? arr.filter((x): x is string => typeof x === 'string') : []);
+    } catch {
+      return new Set();
+    }
+  });
+
+  useEffect(() => {
+    localStorage.setItem(COLLAPSED_STAGES_STORAGE_KEY, JSON.stringify([...collapsedStageIds]));
+  }, [collapsedStageIds]);
+
+  const toggleStageColumnCollapsed = useCallback((stageId: string) => {
+    setCollapsedStageIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(stageId)) next.delete(stageId);
+      else next.add(stageId);
+      return next;
+    });
+  }, []);
+
+  const deferredSearch = useDeferredValue(search);
+
   const visibleCardFields = useMemo(
     () => fields.filter((f) => f.visible_in_card).sort((a, b) => a.sort_order - b.sort_order),
     [fields],
@@ -159,36 +211,32 @@ export const Marketing: React.FC = () => {
     if (Date.now() - last < intervalMs) return;
     autoSyncTriggered.current = true;
     syncNow.mutate(undefined, {
-      onSuccess: (data) => {
-        if (data.inserted > 0) {
-          toast({
-            title: 'Nuevos leads de Meta',
-            description: `${data.inserted} leads añadidos al embudo.`,
-          });
-        }
-      },
+      onSuccess: toastMetaSyncResult,
       onError: (e) => {
         const message = e instanceof Error ? e.message : 'Error sincronizando con Meta';
         toast({ title: 'Sincronización Meta', description: message, variant: 'destructive' });
       },
     });
-  }, [metaConfig, metaForms, syncNow, toast]);
+  }, [metaConfig, metaForms, syncNow, toastMetaSyncResult, toast]);
 
-  const matchedCustomerByLead = useMemo(() => {
+  const { matchedCustomerByLead, linkedCount } = useMemo(() => {
     const map = new Map<string, CustomerLookupRow | null>();
+    let linked = 0;
     for (const lead of leads) {
-      map.set(lead.id, customerIndex.match({ phone: lead.phone, email: lead.email }));
+      const m = customerIndex.match({ phone: lead.phone, email: lead.email });
+      map.set(lead.id, m);
+      if (m) linked++;
     }
-    return map;
+    return { matchedCustomerByLead: map, linkedCount: linked };
   }, [leads, customerIndex]);
 
   const filteredLeads = useMemo(() => {
     return leads.filter((l) => {
-      if (!matchesQuery(l, search)) return false;
+      if (!matchesQuery(l, deferredSearch)) return false;
       if (hideLinked && matchedCustomerByLead.get(l.id)) return false;
       return true;
     });
-  }, [leads, search, hideLinked, matchedCustomerByLead]);
+  }, [leads, deferredSearch, hideLinked, matchedCustomerByLead]);
 
   const leadsByStage = useMemo(() => {
     const map = new Map<string, MarketingLead[]>();
@@ -208,30 +256,27 @@ export const Marketing: React.FC = () => {
     return { map, unassigned };
   }, [filteredLeads, stages, sortField, sortDir]);
 
-  const handleLeadDragStart = (
-    event: React.DragEvent<HTMLDivElement>,
-    lead: MarketingLead,
-  ) => {
-    setDraggedLeadId(lead.id);
-    event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData('text/plain', lead.id);
-  };
+  const handleLeadDragStart = useCallback(
+    (event: React.DragEvent<HTMLDivElement>, lead: MarketingLead) => {
+      setDraggedLeadId(lead.id);
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', lead.id);
+    },
+    [],
+  );
 
-  const handleLeadDragEnd = () => {
+  const handleLeadDragEnd = useCallback(() => {
     setDraggedLeadId(null);
     setDragOverStageId(null);
-  };
+  }, []);
 
-  const handleStageDragOver = (
-    event: React.DragEvent<HTMLDivElement>,
-    stageId: string,
-  ) => {
+  const handleStageDragOver = useCallback((event: React.DragEvent<HTMLDivElement>, stageId: string) => {
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
-    setDragOverStageId(stageId);
-  };
+    setDragOverStageId((prev) => (prev === stageId ? prev : stageId));
+  }, []);
 
-  const handleStageDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+  const handleStageDragLeave = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
     const isInside =
       event.clientX >= rect.left &&
@@ -239,47 +284,55 @@ export const Marketing: React.FC = () => {
       event.clientY >= rect.top &&
       event.clientY <= rect.bottom;
     if (!isInside) setDragOverStageId(null);
-  };
+  }, []);
 
-  const handleStageDrop = async (
-    event: React.DragEvent<HTMLDivElement>,
-    stageId: string,
-  ) => {
-    event.preventDefault();
-    const leadId = event.dataTransfer.getData('text/plain');
-    if (!leadId) return;
-    const lead = leads.find((l) => l.id === leadId);
-    setDraggedLeadId(null);
-    setDragOverStageId(null);
-    if (!lead || lead.stage_id === stageId) return;
-    const targetLeads = leadsByStage.map.get(stageId) ?? [];
-    const newPosition = targetLeads.length;
-    try {
-      await moveLeadToStage.mutateAsync({
-        id: leadId,
-        stage_id: stageId,
-        position_in_stage: newPosition,
-      });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : 'Error al mover lead';
-      toast({ title: 'Error', description: message, variant: 'destructive' });
-    }
-  };
+  const handleStageDrop = useCallback(
+    async (event: React.DragEvent<HTMLDivElement>, stageId: string) => {
+      event.preventDefault();
+      const leadId = event.dataTransfer.getData('text/plain');
+      if (!leadId) return;
+      const lead = leads.find((l) => l.id === leadId);
+      setDraggedLeadId(null);
+      setDragOverStageId(null);
+      if (!lead || lead.stage_id === stageId) return;
+      const targetLeads = leadsByStage.map.get(stageId) ?? [];
+      const newPosition = targetLeads.length;
+      try {
+        await moveLeadToStage.mutateAsync({
+          id: leadId,
+          stage_id: stageId,
+          position_in_stage: newPosition,
+        });
+      } catch (e) {
+        const message = e instanceof Error ? e.message : 'Error al mover lead';
+        toast({ title: 'Error', description: message, variant: 'destructive' });
+      }
+    },
+    [leads, leadsByStage, moveLeadToStage, toast],
+  );
 
-  const handleEditStage = (_stage: MarketingLeadStage) => {
+  const handleEditStage = useCallback((_stage: MarketingLeadStage) => {
     setOpenStagesManager(true);
-  };
+  }, []);
 
-  const handleDeleteStage = (_stage: MarketingLeadStage) => {
+  const handleDeleteStage = useCallback((_stage: MarketingLeadStage) => {
     setOpenStagesManager(true);
-  };
+  }, []);
+
+  const handleLeadClick = useCallback((lead: MarketingLead) => {
+    setActiveLead(lead);
+  }, []);
+
+  const handleLeadOpenNotes = useCallback((lead: MarketingLead) => {
+    setNotesLead(lead);
+  }, []);
+
+  const handleLeadPromote = useCallback((lead: MarketingLead) => {
+    setPromoteLead(lead);
+  }, []);
 
   const totalLeads = filteredLeads.length;
   const totalValue = filteredLeads.reduce((acc, l) => acc + Number(l.value ?? 0), 0);
-  const linkedCount = useMemo(
-    () => leads.filter((l) => matchedCustomerByLead.get(l.id)).length,
-    [leads, matchedCustomerByLead],
-  );
 
   if (companyLoading || stagesLoading || leadsLoading || fieldsLoading) {
     return (
@@ -308,14 +361,7 @@ export const Marketing: React.FC = () => {
     await refetch();
     if (metaConfig?.enabled && metaConfig.access_token && metaForms.some((f) => f.enabled)) {
       syncNow.mutate(undefined, {
-        onSuccess: (data) => {
-          if (data.inserted > 0) {
-            toast({
-              title: 'Nuevos leads de Meta',
-              description: `${data.inserted} leads añadidos al embudo.`,
-            });
-          }
-        },
+        onSuccess: toastMetaSyncResult,
         onError: (e) => {
           const message = e instanceof Error ? e.message : 'Error sincronizando con Meta';
           toast({ title: 'Sincronización Meta', description: message, variant: 'destructive' });
@@ -480,9 +526,11 @@ export const Marketing: React.FC = () => {
                   matchedCustomerByLead={matchedCustomerByLead}
                   noteCountByLead={notesIndex?.counts ?? {}}
                   notePreviewsByLead={notesIndex?.previews ?? {}}
-                  onLeadClick={(lead) => setActiveLead(lead)}
-                  onLeadOpenNotes={(lead) => setNotesLead(lead)}
-                  onLeadPromote={(lead) => setPromoteLead(lead)}
+                  collapsed={collapsedStageIds.has(stage.id)}
+                  onToggleCollapsed={() => toggleStageColumnCollapsed(stage.id)}
+                  onLeadClick={handleLeadClick}
+                  onLeadOpenNotes={handleLeadOpenNotes}
+                  onLeadPromote={handleLeadPromote}
                   onLeadDragStart={handleLeadDragStart}
                   onLeadDragEnd={handleLeadDragEnd}
                   onStageDragOver={handleStageDragOver}
@@ -519,29 +567,35 @@ export const Marketing: React.FC = () => {
         )}
       </CardContent>
 
-      <MarketingLeadDetailDialog
-        lead={activeLead}
-        stages={stages}
-        matchedCustomer={activeLead ? matchedCustomerByLead.get(activeLead.id) ?? null : null}
-        open={!!activeLead}
-        onOpenChange={(open) => {
-          if (!open) setActiveLead(null);
-        }}
-      />
-      <MarketingLeadNotesDialog
-        lead={notesLead}
-        open={!!notesLead}
-        onOpenChange={(open) => {
-          if (!open) setNotesLead(null);
-        }}
-      />
-      <MarketingPromoteToCustomerDialog
-        lead={promoteLead}
-        open={!!promoteLead}
-        onOpenChange={(open) => {
-          if (!open) setPromoteLead(null);
-        }}
-      />
+      {activeLead ? (
+        <MarketingLeadDetailDialog
+          lead={activeLead}
+          stages={stages}
+          matchedCustomer={matchedCustomerByLead.get(activeLead.id) ?? null}
+          open
+          onOpenChange={(open) => {
+            if (!open) setActiveLead(null);
+          }}
+        />
+      ) : null}
+      {notesLead ? (
+        <MarketingLeadNotesDialog
+          lead={notesLead}
+          open
+          onOpenChange={(open) => {
+            if (!open) setNotesLead(null);
+          }}
+        />
+      ) : null}
+      {promoteLead ? (
+        <MarketingPromoteToCustomerDialog
+          lead={promoteLead}
+          open
+          onOpenChange={(open) => {
+            if (!open) setPromoteLead(null);
+          }}
+        />
+      ) : null}
       <MarketingStagesManager open={openStagesManager} onOpenChange={setOpenStagesManager} />
       <MarketingFieldsConfigDialog open={openFieldsConfig} onOpenChange={setOpenFieldsConfig} />
     </Card>

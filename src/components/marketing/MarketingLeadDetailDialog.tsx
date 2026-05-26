@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Phone, Mail, MessageCircle, Trash2, Archive, UserCheck } from 'lucide-react';
+import { Phone, Mail, MessageCircle, Trash2, Archive, UserCheck, CalendarClock } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { usePermissions } from '@/hooks/usePermissions';
 import {
   Dialog,
   DialogContent,
@@ -26,6 +28,7 @@ import type { MarketingLeadStage } from '@/hooks/useMarketingStages';
 import type { CustomerLookupRow } from '@/hooks/useCustomerLookup';
 import { formatLeadFieldValue, humanizeFieldKey } from './marketingFormatters';
 import { MarketingLeadNotesPanel } from './MarketingLeadNotesPanel';
+import { resolveLeadAppointmentParts } from '@/lib/marketingLeadAppointment';
 
 interface MarketingLeadDetailDialogProps {
   lead: MarketingLead | null;
@@ -44,6 +47,9 @@ export const MarketingLeadDetailDialog: React.FC<MarketingLeadDetailDialogProps>
 }) => {
   const { toast } = useToast();
   const { updateLead, deleteLead, archiveLead } = useMarketingLeads();
+  const navigate = useNavigate();
+  const { hasPermission } = usePermissions();
+  const canUseWhatsapp = hasPermission('whatsapp', 'read');
 
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -73,7 +79,33 @@ export const MarketingLeadDetailDialog: React.FC<MarketingLeadDetailDialogProps>
 
   const phoneHref = phone ? `tel:${phone.replace(/\s+/g, '')}` : undefined;
   const emailHref = email ? `mailto:${email}` : undefined;
-  const waHref = phone ? `https://wa.me/${phone.replace(/\D/g, '')}` : undefined;
+  const waExternalHref = phone ? `https://wa.me/${phone.replace(/\D/g, '')}` : undefined;
+  const fullLeadName = [firstName, lastName].filter(Boolean).join(' ').trim();
+
+  const { atIso: resolvedApptIso, label: resolvedApptLabel } = resolveLeadAppointmentParts(lead);
+  const hasFictitiousAppointment = !!(resolvedApptIso || resolvedApptLabel);
+  const fictitiousAppointmentText =
+    resolvedApptIso
+      ? new Intl.DateTimeFormat('es-ES', {
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        }).format(new Date(resolvedApptIso))
+      : resolvedApptLabel ?? '';
+  const handleOpenWhatsapp = () => {
+    if (!phone) return;
+    if (canUseWhatsapp) {
+      const params = new URLSearchParams();
+      params.set('phone', phone);
+      if (fullLeadName) params.set('name', fullLeadName);
+      onOpenChange(false);
+      navigate(`/whatsapp?${params.toString()}`);
+    } else if (waExternalHref) {
+      window.open(waExternalHref, '_blank', 'noreferrer');
+    }
+  };
 
   const handleSave = async () => {
     try {
@@ -133,6 +165,27 @@ export const MarketingLeadDetailDialog: React.FC<MarketingLeadDetailDialogProps>
           </DialogDescription>
         </DialogHeader>
 
+        {hasFictitiousAppointment ? (
+          <div className="mb-3 flex items-center justify-between gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-100">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-sky-600 text-white">
+                <CalendarClock className="h-3.5 w-3.5" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-wide">
+                  Cita marcada en el formulario (ficticia)
+                </p>
+                <p className="truncate text-[11px] font-medium" title={fictitiousAppointmentText}>
+                  {fictitiousAppointmentText || 'Sin texto de franja horaria'}
+                </p>
+              </div>
+            </div>
+            <p className="hidden sm:block text-[10px] text-sky-900/80 dark:text-sky-100/80 max-w-[220px] text-right">
+              Esta cita indica la preferencia del lead en Meta. Las citas reales se gestionan desde la agenda y pueden tener otro horario.
+            </p>
+          </div>
+        ) : null}
+
         {matchedCustomer ? (
           <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300">
             <UserCheck className="h-4 w-4" />
@@ -164,11 +217,17 @@ export const MarketingLeadDetailDialog: React.FC<MarketingLeadDetailDialogProps>
                   </a>
                 </Button>
               ) : null}
-              {waHref ? (
-                <Button asChild variant="outline" size="icon">
-                  <a href={waHref} target="_blank" rel="noreferrer" title="WhatsApp" aria-label="WhatsApp">
-                    <MessageCircle className="h-3.5 w-3.5" />
-                  </a>
+              {phone ? (
+                <Button
+                  variant="outline"
+                  size="icon"
+                  type="button"
+                  title={canUseWhatsapp ? 'Abrir conversación de WhatsApp' : 'WhatsApp (wa.me)'}
+                  aria-label="WhatsApp"
+                  onClick={handleOpenWhatsapp}
+                  className="text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700 dark:hover:bg-emerald-950"
+                >
+                  <MessageCircle className="h-3.5 w-3.5" />
                 </Button>
               ) : null}
             </div>

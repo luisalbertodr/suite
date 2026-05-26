@@ -1,8 +1,8 @@
 """
 Promueve filas de legacy.planinc a public.agenda_appointments.
 
-- Tramos consecutivos (mismo día, mismo cliente y mismo empleado Dunasoft) se fusionan
-  en una sola cita; el bloque horario va del inicio del primero al fin del último (sin solapes).
+- Tramos consecutivos del mismo IDPLAN (mismo día, cliente y empleado Dunasoft) se fusionan
+  en una sola cita. No se fusionan citas con IDPLAN distinto aunque sean consecutivas.
 - PLANINC guarda historial: varias filas comparten IDPLAN (código de seguimiento). Para la agenda
   solo se usa la última versión (mayor FECHORINC / idplaninc como desempate). El resto queda en
   legacy.planinc para auditoría.
@@ -33,7 +33,9 @@ Uso:
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import re
 import sys
 import uuid
 from collections import OrderedDict, defaultdict
@@ -109,6 +111,84 @@ def norm_idplan(value) -> str:
     return str(value or "").strip()
 
 
+def effective_planinc_date(r: dict) -> str | None:
+    """Dunasoft Style guarda la versión vigente en campos *x cuando existen."""
+    return norm_date(r.get("fechax")) or norm_date(r.get("fecha"))
+
+
+def effective_planinc_time(r: dict, field: str, default: str = "09:00") -> str:
+    xval = str(r.get(f"{field}x") or "").strip()
+    base = str(r.get(field) or "").strip()
+    return norm_time(xval or base, default)
+
+
+def effective_planinc_text(r: dict, field: str) -> str:
+    xval = str(r.get(f"{field}x") or "").strip()
+    base = str(r.get(field) or "").strip()
+    return xval or base
+
+
+def is_synthetic_planart_description(text: str) -> bool:
+    """Detecta resúmenes tipo '[10:45] 6666 - Lumbar[11:15] 6668 - Dorsal'."""
+    t = str(text or "").strip()
+    if not t:
+        return False
+    return bool(re.search(r"\[\d{1,2}:\d{2}\]\s*\S+", t))
+
+
+def appointment_description_from_seg(seg: dict) -> str:
+    for key in ("texto", "planart_txt"):
+        value = str(seg.get(key) or "").strip()
+        if value and not is_synthetic_planart_description(value):
+            return value[:1000]
+    return ""
+
+
+def encode_pricing_notes(unit_price: float, quantity: float = 1) -> str:
+    payload = {
+        "quantity": quantity,
+        "unit_price": unit_price,
+        "bonus_payment_mode": "none",
+    }
+    return f"__pricing__{json.dumps(payload, separators=(',', ':'))}"
+
+
+def _safe_float(value) -> float:
+    raw = str(value or "").strip().replace(",", ".")
+    if not raw:
+        return 0.0
+    try:
+        return float(raw)
+    except ValueError:
+        return 0.0
+
+
+def parse_legacy_minutes(value) -> int:
+    raw = str(value or "").strip()
+    if not raw:
+        return 0
+    if raw.isdigit():
+        n = int(raw)
+        return n if 0 < n <= 480 else 0
+    if len(raw) == 4 and raw.isdigit():
+        return 0
+    if len(raw) >= 5 and raw[2] == ":":
+        return 0
+    return 0
+
+
+def infer_item_kind(article_kind: str | None, tipart: str | None) -> str:
+    kind = str(article_kind or "").strip().lower()
+    if kind in ("servicio", "service"):
+        return "service"
+    if kind in ("producto", "product"):
+        return "product"
+    tip = str(tipart or "").strip().upper()
+    if tip in ("S", "SERV", "SERVICIO"):
+        return "service"
+    return "product"
+
+
 def planinc_row_sort_key(r: dict) -> tuple[int, int]:
     """
     Ordenar versiones de la misma cita (IDPLAN): FECHORINC si se puede interpretar,
@@ -175,11 +255,20 @@ def merge_consecutive_segments(
     group = [segments[0]]
     for s in segments[1:]:
         prev = group[-1]
+        prev_idplan = str(prev.get("idplan") or "").strip()
+        curr_idplan = str(s.get("idplan") or "").strip()
+        if prev_idplan and curr_idplan:
+            same_idplan = prev_idplan == curr_idplan
+        elif prev_idplan or curr_idplan:
+            same_idplan = False
+        else:
+            same_idplan = True
         same_session = (
             prev["date"] == s["date"]
             and prev["cli_key"] == s["cli_key"]
             and prev["codemp_raw"] == s["codemp_raw"]
             and prev["employee_id"] == s["employee_id"]
+            and same_idplan
         )
         gap = s["start_min"] - prev["end_min"]
         if same_session and 0 <= gap <= gap_max_minutes:
@@ -199,15 +288,77 @@ def canonical_legacy_planinc_id(group: list[dict]) -> int | None:
     return None
 
 
+def collect_planart_rows_for_group(
+    group: list[dict],
+    planart_by_idplan: dict[str, list[dict]],
+) -> list[dict]:
+    seen: set[tuple[str, str]] = set()
+    rows: list[dict] = []
+    for seg in group:
+        idp = str(seg.get("idplan") or "").strip()
+        if not idp:
+            continue
+        for pa in planart_by_idplan.get(idp, []):
+            cod = str(pa.get("codart") or "").strip()
+            key = (idp, cod)
+            if not cod or key in seen:
+                continue
+            seen.add(key)
+            rows.append(pa)
+    return rows
+
+
 def build_item_templates_for_group(
     group: list[dict],
     planart_by_idplan: dict[str, list[dict]],
     art_des: dict[str, str],
+    article_by_legacy: dict[str, dict],
+    art_legacy_meta: dict[str, dict],
 ) -> list[dict]:
-    rows: list[dict] = []
-    order = 0
-    for seg in group:
+    planart_rows = collect_planart_rows_for_group(group, planart_by_idplan)
+    if planart_rows:
+        rows: list[dict] = []
+        for order, pa in enumerate(planart_rows):
+            cod = str(pa.get("codart") or "").strip()
+            cod_norm = cod.lstrip("0") or "0"
+            pub = article_by_legacy.get(cod) or article_by_legacy.get(cod_norm) or {}
+            legacy = art_legacy_meta.get(cod) or art_legacy_meta.get(cod_norm) or {}
+            des = (
+                str(pub.get("descripcion") or "").strip()
+                or str(legacy.get("desart") or "").strip()
+                or art_des.get(cod)
+                or art_des.get(cod_norm)
+                or cod
+                or "Artículo"
+            )
+            label = f"{cod} - {des}" if cod else des
+            price = float(pub.get("precio") or legacy.get("pvpa") or 0)
+            duration = int(pub.get("duration_minutes") or parse_legacy_minutes(legacy.get("tiempo")) or 0)
+            if duration <= 0:
+                duration = 30
+            kind = infer_item_kind(pub.get("article_kind"), legacy.get("tipart"))
+            occupies = kind == "service"
+            note = encode_pricing_notes(price) if price > 0 else None
+            rows.append(
+                {
+                    "kind": kind,
+                    "label": label[:500],
+                    "duration_minutes": duration,
+                    "occupies_time": occupies,
+                    "sort_order": order,
+                    "notes": note,
+                    "article_id": pub.get("id"),
+                    "unit_price": price,
+                    "quantity": 1,
+                }
+            )
+        return rows
+
+    rows = []
+    for order, seg in enumerate(group):
         dur = segment_duration_minutes(seg["start_time"], seg["end_time"])
+        if dur <= 0:
+            dur = 30
         label = (seg["planart_txt"] or seg["texto"] or "Servicio").strip() or "Servicio"
         note = None
         if seg.get("legacy_planinc_id") is not None:
@@ -216,32 +367,15 @@ def build_item_templates_for_group(
             {
                 "kind": "service",
                 "label": label[:500],
-                "duration_minutes": max(dur, 0),
-                "occupies_time": False,
+                "duration_minutes": dur,
+                "occupies_time": True,
                 "sort_order": order,
                 "notes": note,
                 "article_id": None,
+                "unit_price": 0,
+                "quantity": 1,
             }
         )
-        order += 1
-        idp = str(seg.get("idplan") or "").strip()
-        if not idp:
-            continue
-        for pa in planart_by_idplan.get(idp, []):
-            cod = str(pa.get("codart") or "").strip()
-            lab = (art_des.get(cod) or cod or "Artículo")[:500]
-            rows.append(
-                {
-                    "kind": "product",
-                    "label": lab,
-                    "duration_minutes": 0,
-                    "occupies_time": False,
-                    "sort_order": order,
-                    "notes": None,
-                    "article_id": None,
-                }
-            )
-            order += 1
     return rows
 
 
@@ -338,12 +472,38 @@ def main() -> None:
             planart_by_idplan[idp].append(dict(pr))
 
     art_des: dict[str, str] = {}
-    cur.execute("SELECT codart, desart FROM legacy.articulos")
+    art_legacy_meta: dict[str, dict] = {}
+    cur.execute("SELECT codart, desart, pvpa, tiempo, tipart FROM legacy.articulos")
     for ar in cur.fetchall():
         c = str(ar.get("codart") or "").strip()
         if c:
             art_des[c] = str(ar.get("desart") or "").strip() or c
             art_des[c.lstrip("0") or "0"] = art_des[c]
+            art_legacy_meta[c] = {
+                "desart": art_des[c],
+                "pvpa": _safe_float(ar.get("pvpa")),
+                "tiempo": ar.get("tiempo"),
+                "tipart": ar.get("tipart"),
+            }
+            art_legacy_meta[c.lstrip("0") or "0"] = art_legacy_meta[c]
+
+    article_by_legacy: dict[str, dict] = {}
+    if public_table_exists(cur, "articles"):
+        cur.execute(
+            """
+            SELECT id, legacy_codart, precio, duration_minutes, article_kind, codigo, descripcion
+            FROM public.articles
+            WHERE company_id = %s AND COALESCE(legacy_codart, '') <> ''
+            """,
+            (company_id,),
+        )
+        for ar in cur.fetchall():
+            c = str(ar.get("legacy_codart") or "").strip()
+            if not c:
+                continue
+            row = dict(ar)
+            article_by_legacy[c] = row
+            article_by_legacy[c.lstrip("0") or "0"] = row
 
     cur.execute("SELECT * FROM legacy.planinc")
     source_rows = cur.fetchall()
@@ -354,12 +514,12 @@ def main() -> None:
     by_planinc_only: "OrderedDict[str, dict]" = OrderedDict()
 
     for r in source_rows:
-        date = norm_date(r.get("fecha"))
+        date = effective_planinc_date(r)
         if not date:
             continue
 
-        start_time = norm_time(r.get("horini"))
-        end_time = norm_time(r.get("horfin"))
+        start_time = effective_planinc_time(r, "horini")
+        end_time = effective_planinc_time(r, "horfin", start_time)
         codemp_raw = str(r.get("codemp") or "").strip()
         codemp_norm = codemp_raw.lstrip("0") or "0"
         employee_id = employee_map.get(codemp_norm) or employee_map.get(codemp_raw) or fallback_employee_id
@@ -368,9 +528,9 @@ def main() -> None:
         codcli = str(r.get("codcli") or "").strip()
         client_name = nomcli or codcli or "Cliente"
 
-        planart_txt = str(r.get("planart") or "").strip()
-        texto = str(r.get("texto") or "").strip()
-        description = planart_txt or texto or "Cita importada"
+        planart_txt = effective_planinc_text(r, "planart")
+        texto = effective_planinc_text(r, "texto")
+        description = appointment_description_from_seg({"texto": texto, "planart_txt": planart_txt}) or "Cita importada"
 
         planinc_id = r.get("idplaninc")
         legacy_planinc_id = int(planinc_id) if str(planinc_id or "").strip().isdigit() else None
@@ -472,7 +632,7 @@ def main() -> None:
         canon_id = canonical_legacy_planinc_id(group)
         ids_in_group = [s["legacy_planinc_id"] for s in group if s["legacy_planinc_id"] is not None]
 
-        desc = first["description"]
+        desc = appointment_description_from_seg(first) or first["description"]
         if len(group) > 1:
             tail = ", ".join(str(i) for i in ids_in_group[:12])
             if len(ids_in_group) > 12:
@@ -512,7 +672,13 @@ def main() -> None:
         if "legacy_codcli" in types:
             row_out["legacy_codcli"] = first["codcli"]
 
-        item_templates = build_item_templates_for_group(group, planart_by_idplan, art_des)
+        item_templates = build_item_templates_for_group(
+            group,
+            planart_by_idplan,
+            art_des,
+            article_by_legacy,
+            art_legacy_meta,
+        )
         total_item_templates += len(item_templates)
 
         payload.append(row_out)
@@ -604,6 +770,8 @@ def main() -> None:
                     "sort_order",
                     "notes",
                     "article_id",
+                    "unit_price",
+                    "quantity",
                 )
                 if c in item_types
             ]

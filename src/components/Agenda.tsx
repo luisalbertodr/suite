@@ -7,7 +7,7 @@ import { Calendar as CalendarIcon, Clock, ChevronLeft, ChevronRight, AlertCircle
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { AgendaGrid } from './AgendaGrid';
-import { AppointmentForm } from './AppointmentForm';
+import { AppointmentForm, type AppointmentFormInitialPrefill } from './AppointmentForm';
 import { EditAppointmentForm } from './EditAppointmentForm';
 import { useAgendaEmployees } from '@/hooks/useAgendaEmployees';
 import { useAgendaAppointments } from '@/hooks/useAgendaAppointments';
@@ -19,6 +19,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useAgendaPreferences } from '@/hooks/useAgendaPreferences';
 import { appointmentItemsQueryKey, syncAppointmentItems } from '@/hooks/useAppointmentItems';
 import type { AppointmentItemDraft } from '@/types/agenda';
+import { buildAppointmentTimeSegments, occupiedEndTimeFromItems, hhmmToMinutes } from '@/lib/agendaAppointmentItems';
 import { useAuth } from '@/hooks/useAuth';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import type { CustomerSearchRow } from '@/lib/customerSearch';
@@ -34,6 +35,7 @@ import {
   type AgendaUnavailabilityEntry,
 } from '@/lib/agendaHours';
 import { appointmentItemLineTotal } from '@/lib/agendaAppointmentPricing';
+import { buildAgendaPrefillFromLead } from '@/lib/marketingLeadAgendaPrefill';
 
 interface Employee {
   id: string;
@@ -107,6 +109,9 @@ export const Agenda: React.FC = () => {
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [goToTodayRequestId, setGoToTodayRequestId] = useState(0);
   const [scrollToTimeRequest, setScrollToTimeRequest] = useState<{ requestId: number; time: string } | null>(null);
+  const [appointmentPrefill, setAppointmentPrefill] = useState<AppointmentFormInitialPrefill | null>(null);
+  const [appointmentPrefillLeadId, setAppointmentPrefillLeadId] = useState<string | null>(null);
+  const processedMarketingLeadPrefillRef = useRef<string | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -182,6 +187,28 @@ export const Agenda: React.FC = () => {
       return (data || []) as CustomerSearchRow[];
     },
     enabled: !!companyId && !companyLoading,
+  });
+
+  const fromLeadIdParam = useMemo(
+    () => new URLSearchParams(location.search).get('fromLead'),
+    [location.search],
+  );
+
+  const { data: fromLeadMarketingRow } = useQuery({
+    queryKey: ['agenda-marketing-lead-prefill', companyId, fromLeadIdParam],
+    enabled: !!companyId && !!fromLeadIdParam,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('marketing_leads')
+        .select(
+          'id,first_name,last_name,phone,email,customer_id,form_name,campaign,notes,field_data,appointment_at,appointment_label',
+        )
+        .eq('company_id', companyId!)
+        .eq('id', fromLeadIdParam!)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
   });
 
   const { data: notifyRecipients = [] } = useQuery({
@@ -445,6 +472,35 @@ export const Agenda: React.FC = () => {
     },
   });
 
+  const { data: appointmentItemsByAppt = {} } = useQuery({
+    queryKey: ['appointment-time-segments', companyId, appointmentIds.join('|')],
+    enabled: !!companyId && appointmentIds.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('appointment_items')
+        .select('id,appointment_id,kind,label,duration_minutes,occupies_time,sort_order')
+        .in('appointment_id', appointmentIds)
+        .order('sort_order', { ascending: true });
+      if (error) {
+        if (error.code === '42P01' || error.code === 'PGRST205') return {};
+        throw error;
+      }
+      const grouped: Record<string, AppointmentItemDraft[]> = {};
+      for (const row of data || []) {
+        const apptId = String(row.appointment_id);
+        if (!grouped[apptId]) grouped[apptId] = [];
+        grouped[apptId].push({
+          clientKey: String(row.id),
+          kind: row.kind as AppointmentItemDraft['kind'],
+          label: String(row.label || ''),
+          duration_minutes: Number(row.duration_minutes ?? 0),
+          occupies_time: row.occupies_time !== false,
+        });
+      }
+      return grouped;
+    },
+  });
+
   // Map DB employees to grid employees with proper colors
   const employees: Employee[] = dbEmployees.map((emp, idx) => ({
     id: emp.id,
@@ -491,6 +547,15 @@ export const Agenda: React.FC = () => {
     const description = row.description || '';
     const parsedService = parseServiceFromDescription(description);
     const clientName = row.client_name || row.title || '';
+    const startTime = normalizeTime(row.start_time);
+    const endTime = normalizeTime(row.end_time);
+    const itemDrafts = appointmentItemsByAppt[row.id] || [];
+    const timeSegments = buildAppointmentTimeSegments(startTime, itemDrafts);
+    const occupiedEndTime = occupiedEndTimeFromItems(startTime, itemDrafts);
+    const paymentOnlyLabels = itemDrafts
+      .filter((it) => !it.occupies_time || Number(it.duration_minutes || 0) <= 0)
+      .map((it) => (it.label || '').trim())
+      .filter(Boolean);
     return {
       id: row.id,
       employeeId: row.employee_id || '',
@@ -505,8 +570,11 @@ export const Agenda: React.FC = () => {
       legacyHourInText: parsedService.hourInText || undefined,
       cabina_id: appointmentResources[row.id]?.cabina_id ?? row.cabina_id ?? null,
       recurso_id: appointmentResources[row.id]?.recurso_id ?? row.recurso_id ?? null,
-      startTime: normalizeTime(row.start_time),
-      endTime: normalizeTime(row.end_time),
+      startTime,
+      endTime,
+      timeSegments,
+      occupiedEndTime,
+      paymentOnlyLabels,
       date: normalizeDate(row.start_time, row.appointment_date),
       color: row.color || '#3B82F6',
       totalAmount: Object.prototype.hasOwnProperty.call(appointmentTotals, row.id)
@@ -546,6 +614,86 @@ export const Agenda: React.FC = () => {
   const filteredEmployees = employees.filter((e) => effectiveSelectedIds.includes(e.id));
   const filteredAppointments = appointments.filter((apt) => effectiveSelectedIds.includes(apt.employeeId));
 
+  useEffect(() => {
+    if (!fromLeadIdParam) {
+      processedMarketingLeadPrefillRef.current = null;
+      return;
+    }
+    if (fromLeadMarketingRow === undefined) return;
+    if (fromLeadMarketingRow === null) {
+      toast({
+        title: 'Lead no encontrado',
+        description: 'El enlace de marketing no es válido o el lead ya no existe.',
+        variant: 'destructive',
+      });
+      const params = new URLSearchParams(location.search);
+      params.delete('fromLead');
+      navigate(
+        { pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : '' },
+        { replace: true },
+      );
+      return;
+    }
+    if (employeesLoading || prefsLoading) return;
+    if (filteredEmployees.length === 0) {
+      toast({
+        title: 'Sin empleadas en la agenda',
+        description: 'Activa al menos una empleada en la vista o revisa la configuración.',
+        variant: 'destructive',
+      });
+      const params = new URLSearchParams(location.search);
+      params.delete('fromLead');
+      navigate(
+        { pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : '' },
+        { replace: true },
+      );
+      return;
+    }
+
+    const dedupeKey = `${fromLeadIdParam}:${fromLeadMarketingRow.id}`;
+    if (processedMarketingLeadPrefillRef.current === dedupeKey) return;
+    processedMarketingLeadPrefillRef.current = dedupeKey;
+
+    const base = buildAgendaPrefillFromLead(fromLeadMarketingRow, agendaCustomers);
+    const empId = filteredEmployees[0].id;
+
+    setSelectedDate(parse(base.date, 'yyyy-MM-dd', new Date()));
+    setSelectedSlot({ employeeId: empId, time: base.startTime });
+    setAppointmentPrefill({
+      clientPick: base.clientPick,
+      description: base.description,
+      date: base.date,
+      startTime: base.startTime,
+      employeeId: empId,
+    });
+    setAppointmentPrefillLeadId(fromLeadMarketingRow.id);
+    setShowAppointmentForm(true);
+    setScrollToTimeRequest({ requestId: Date.now(), time: base.startTime });
+
+    toast({
+      title: 'Nueva cita desde Marketing',
+      description: 'Revisa cliente, fecha/hora y servicios antes de guardar.',
+    });
+
+    const params = new URLSearchParams(location.search);
+    params.delete('fromLead');
+    navigate(
+      { pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : '' },
+      { replace: true },
+    );
+  }, [
+    fromLeadIdParam,
+    fromLeadMarketingRow,
+    employeesLoading,
+    prefsLoading,
+    filteredEmployees,
+    agendaCustomers,
+    location.pathname,
+    location.search,
+    navigate,
+    toast,
+  ]);
+
   // Allow overlaps on same employee, but not on same cabina/recurso.
   const checkResourceConflict = (
     date: string,
@@ -556,21 +704,37 @@ export const Agenda: React.FC = () => {
     excludeId?: string
   ): boolean => {
     if (!cabinaId && !recursoId) return false;
+    const probeStart = hhmmToMinutes(startTime);
+    const probeEnd = hhmmToMinutes(endTime);
     return appointments.some((apt) => {
       if (apt.id === excludeId) return false;
       if (apt.date !== date) return false;
+      const sameCabina = !!cabinaId && apt.cabina_id === cabinaId;
+      const sameRecurso = !!recursoId && apt.recurso_id === recursoId;
+      if (!sameCabina && !sameRecurso) return false;
+
+      const segments = apt.timeSegments ?? [];
+      if (segments.length) {
+        const busy = segments.some((seg) => {
+          const segStart = hhmmToMinutes(seg.startTime);
+          const segEnd = hhmmToMinutes(seg.endTime);
+          return probeStart < segEnd && probeEnd > segStart;
+        });
+        if (busy) return true;
+        return false;
+      }
+
       const overlaps =
         (startTime >= apt.startTime && startTime < apt.endTime) ||
         (endTime > apt.startTime && endTime <= apt.endTime) ||
         (startTime <= apt.startTime && endTime >= apt.endTime);
-      if (!overlaps) return false;
-      const sameCabina = !!cabinaId && apt.cabina_id === cabinaId;
-      const sameRecurso = !!recursoId && apt.recurso_id === recursoId;
-      return sameCabina || sameRecurso;
+      return overlaps;
     });
   };
 
   const handleSlotClick = (employeeId: string, time: string) => {
+    setAppointmentPrefill(null);
+    setAppointmentPrefillLeadId(null);
     setSelectedSlot({ employeeId, time });
     setShowAppointmentForm(true);
   };
@@ -662,6 +826,8 @@ export const Agenda: React.FC = () => {
       try {
         await syncAppointmentItems(created.id, items);
         await queryClient.invalidateQueries({ queryKey: appointmentItemsQueryKey(created.id) });
+        await queryClient.invalidateQueries({ queryKey: ['appointment-time-segments'] });
+        await queryClient.invalidateQueries({ queryKey: ['appointment-item-totals'] });
         await registerAppointmentHistory(data.customerId ?? null, dateStr, items, created.id);
       } catch (e) {
         console.error('appointment_items sync', e);
@@ -674,6 +840,8 @@ export const Agenda: React.FC = () => {
 
       setShowAppointmentForm(false);
       setSelectedSlot(null);
+      setAppointmentPrefill(null);
+      setAppointmentPrefillLeadId(null);
     } catch (error) {
       console.error('Error creating appointment:', error);
     }
@@ -714,6 +882,8 @@ export const Agenda: React.FC = () => {
       try {
         await syncAppointmentItems(updated.id, items);
         await queryClient.invalidateQueries({ queryKey: appointmentItemsQueryKey(updated.id) });
+        await queryClient.invalidateQueries({ queryKey: ['appointment-time-segments'] });
+        await queryClient.invalidateQueries({ queryKey: ['appointment-item-totals'] });
         await registerAppointmentHistory(updated.customerId ?? null, updated.date, items, updated.id);
       } catch (e) {
         console.error('appointment_items sync', e);
@@ -956,14 +1126,25 @@ export const Agenda: React.FC = () => {
       {/* Create form */}
       {showAppointmentForm && selectedSlot && (
         <AppointmentForm
+          key={
+            appointmentPrefillLeadId
+              ? `mlead-${appointmentPrefillLeadId}`
+              : `slot-${selectedDateYmd}-${selectedSlot.employeeId}-${selectedSlot.time}`
+          }
           employeeId={selectedSlot.employeeId}
           time={selectedSlot.time}
           employees={employees}
           customers={agendaCustomers}
           cabinas={cabinas.data || []}
           recursos={recursos.data || []}
+          initialPrefill={appointmentPrefill}
           onSave={handleAppointmentSave}
-          onCancel={() => { setShowAppointmentForm(false); setSelectedSlot(null); }}
+          onCancel={() => {
+            setShowAppointmentForm(false);
+            setSelectedSlot(null);
+            setAppointmentPrefill(null);
+            setAppointmentPrefillLeadId(null);
+          }}
         />
       )}
 

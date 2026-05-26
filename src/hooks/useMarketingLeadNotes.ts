@@ -143,6 +143,7 @@ export const useMarketingLeadNotesIndex = () => {
   return useQuery({
     queryKey: ['marketing-lead-notes-index', companyId],
     enabled: !!companyId && !companyLoading,
+    staleTime: 45_000,
     queryFn: async (): Promise<MarketingLeadNotesIndex> => {
       if (!companyId) return { counts: {}, previews: {} };
       const { data, error } = await supabase

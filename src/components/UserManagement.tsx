@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { UserPlus, Shield, RefreshCw } from 'lucide-react';
+import { UserPlus, Shield, RefreshCw, Eye, EyeOff, KeyRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { UserListTable } from '@/components/UserListTable';
 import { useAgendaEmployees } from '@/hooks/useAgendaEmployees';
@@ -39,6 +39,12 @@ export const UserManagement = () => {
   const [editPermissionsTouched, setEditPermissionsTouched] = useState(false);
   const [updatingUser, setUpdatingUser] = useState(false);
   const [editRolePermissionIds, setEditRolePermissionIds] = useState<string[]>([]);
+  const [editNewPassword, setEditNewPassword] = useState('');
+  const [editNewPasswordConfirm, setEditNewPasswordConfirm] = useState('');
+  const [showEditPassword, setShowEditPassword] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
+
+  const canChangePasswords = hasPermission('users', 'update');
 
   const rolePermissionIdsSet = useMemo(
     () => new Set(editRolePermissionIds),
@@ -74,6 +80,9 @@ export const UserManagement = () => {
     setEditEmployeeId(user?.profiles?.employee_id || 'none');
     setEditPermissionIds(Array.isArray(user?.permission_ids) ? user.permission_ids : []);
     setEditPermissionsTouched(false);
+    setEditNewPassword('');
+    setEditNewPasswordConfirm('');
+    setShowEditPassword(false);
     setIsEditOpen(true);
     // Pre-cargar permisos heredados del rol para el panel de overrides
     if (roleId) {
@@ -149,6 +158,38 @@ export const UserManagement = () => {
       setIsCreateOpen(false);
     } finally {
       setCreatingUser(false);
+    }
+  };
+
+  const handleChangePassword = async () => {
+    if (!editingUser?.id) return;
+    if (!canChangePasswords) {
+      toast.error('No tienes permiso para cambiar la contraseña (users:update)');
+      return;
+    }
+    const pwd = editNewPassword.trim();
+    if (pwd.length < 6) {
+      toast.error('La contraseña debe tener al menos 6 caracteres');
+      return;
+    }
+    if (pwd !== editNewPasswordConfirm.trim()) {
+      toast.error('Las contraseñas no coinciden');
+      return;
+    }
+
+    setChangingPassword(true);
+    try {
+      const ok = await updateUser({
+        userId: editingUser.id,
+        password: pwd,
+      });
+      if (ok) {
+        setEditNewPassword('');
+        setEditNewPasswordConfirm('');
+        setShowEditPassword(false);
+      }
+    } finally {
+      setChangingPassword(false);
     }
   };
 
@@ -308,11 +349,16 @@ export const UserManagement = () => {
           <p className="text-sm text-muted-foreground -mt-1">{editingUser?.email}</p>
 
           <Tabs defaultValue="datos" className="mt-2">
-            <TabsList className="grid w-full grid-cols-2">
+            <TabsList className={`grid w-full ${canChangePasswords ? 'grid-cols-3' : 'grid-cols-2'}`}>
               <TabsTrigger value="datos">Datos y rol</TabsTrigger>
               <TabsTrigger value="excepciones" disabled={!companyId || !editingUser?.id}>
                 Excepciones de permisos
               </TabsTrigger>
+              {canChangePasswords && (
+                <TabsTrigger value="password" disabled={!editingUser?.id}>
+                  Contraseña
+                </TabsTrigger>
+              )}
             </TabsList>
 
             <TabsContent value="datos" className="space-y-3">
@@ -403,6 +449,85 @@ export const UserManagement = () => {
                 </div>
               )}
             </TabsContent>
+
+            {canChangePasswords && (
+              <TabsContent value="password" className="space-y-3">
+                <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30 p-3 text-xs text-amber-900 dark:text-amber-200 space-y-1">
+                  <div className="flex items-center gap-2 font-medium">
+                    <KeyRound className="h-3.5 w-3.5" />
+                    Cambiar contraseña
+                  </div>
+                  <p>
+                    Establece una nueva contraseña para <strong>{editingUser?.email}</strong>. El usuario
+                    podrá entrar inmediatamente con la nueva contraseña.
+                  </p>
+                  <p>
+                    Por seguridad, <strong>no es posible recuperar la contraseña actual</strong>: están
+                    cifradas en la base de datos. Solo se pueden sobrescribir.
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-new-password">Nueva contraseña</Label>
+                  <div className="relative">
+                    <Input
+                      id="edit-new-password"
+                      type={showEditPassword ? 'text' : 'password'}
+                      value={editNewPassword}
+                      onChange={(e) => setEditNewPassword(e.target.value)}
+                      placeholder="Mínimo 6 caracteres"
+                      autoComplete="new-password"
+                      className="pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowEditPassword((s) => !s)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      aria-label={showEditPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                    >
+                      {showEditPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-new-password-confirm">Repetir contraseña</Label>
+                  <Input
+                    id="edit-new-password-confirm"
+                    type={showEditPassword ? 'text' : 'password'}
+                    value={editNewPasswordConfirm}
+                    onChange={(e) => setEditNewPasswordConfirm(e.target.value)}
+                    placeholder="Vuelve a escribir la contraseña"
+                    autoComplete="new-password"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setEditNewPassword('');
+                      setEditNewPasswordConfirm('');
+                    }}
+                    disabled={changingPassword || (!editNewPassword && !editNewPasswordConfirm)}
+                  >
+                    Limpiar
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={handleChangePassword}
+                    disabled={
+                      changingPassword ||
+                      editNewPassword.length < 6 ||
+                      editNewPassword !== editNewPasswordConfirm
+                    }
+                  >
+                    {changingPassword ? 'Cambiando...' : 'Cambiar contraseña'}
+                  </Button>
+                </div>
+              </TabsContent>
+            )}
           </Tabs>
         </DialogContent>
       </Dialog>

@@ -101,6 +101,13 @@ const firstValue = (values?: string[]): string | null => {
   return v.length === 0 ? null : v;
 };
 
+/** Últimos 9 dígitos; alineado con marketing_lead_phone_norm en BD y meta-sync. */
+export const marketingLeadPhoneNorm = (phone: string | null | undefined): string | null => {
+  const d = String(phone ?? '').replace(/\D/g, '');
+  if (d.length >= 9) return d.slice(-9);
+  return null;
+};
+
 export type ParsedMetaLead = {
   external_id: string | null;
   created_time: string | null;
@@ -183,6 +190,21 @@ export type ParsedTuPartnerLead = {
   tags: string[];
   notes: Array<{ body: string; created_at: string | null; kind: string }>;
 };
+
+/** En un mismo export, un solo lead por teléfono (gana la última fila del JSON). */
+function dedupeTuPartnerLeadsByPhone(leads: ParsedTuPartnerLead[]): ParsedTuPartnerLead[] {
+  const without9: ParsedTuPartnerLead[] = [];
+  const by9 = new Map<string, ParsedTuPartnerLead>();
+  for (const p of leads) {
+    const n9 = marketingLeadPhoneNorm(p.phone);
+    if (!n9) {
+      without9.push(p);
+      continue;
+    }
+    by9.set(n9, p);
+  }
+  return [...without9, ...by9.values()];
+}
 
 export const parseTuPartnerPayload = (raw: TuPartnerLeadsPayload): ParsedTuPartnerLead[] => {
   const items = Array.isArray(raw?.leads) ? raw.leads : [];
@@ -313,6 +335,7 @@ export const useMarketingLeads = () => {
   const query = useQuery({
     queryKey: ['marketing-leads', companyId],
     enabled: !!companyId && !companyLoading,
+    staleTime: 45_000,
     queryFn: async (): Promise<MarketingLead[]> => {
       if (!companyId) return [];
 
@@ -440,32 +463,38 @@ export const useMarketingLeads = () => {
       if (!companyId) throw new Error('Sin empresa');
       const { parsed, defaultStageId } = input;
 
-      let externalIdsFromPayload = parsed
-        .map((p) => p.external_id)
-        .filter((v): v is string => !!v);
+      const { data: existingLeadRows, error: existingLeadErr } = await supabase
+        .from('marketing_leads')
+        .select('external_id, phone')
+        .eq('company_id', companyId);
+      if (existingLeadErr) throw existingLeadErr;
 
-      let existing = new Set<string>();
-      if (externalIdsFromPayload.length > 0) {
-        const { data: existingRows, error: existingError } = await supabase
-          .from('marketing_leads')
-          .select('external_id')
-          .eq('company_id', companyId)
-          .in('external_id', externalIdsFromPayload);
-        if (existingError) throw existingError;
-        existing = new Set(
-          (existingRows ?? [])
-            .map((r) => r.external_id)
-            .filter((v): v is string => !!v),
-        );
+      const existingExternal = new Set<string>();
+      const existingPhone9 = new Set<string>();
+      for (const r of existingLeadRows ?? []) {
+        if (r.external_id) existingExternal.add(r.external_id);
+        const n9 = marketingLeadPhoneNorm(r.phone);
+        if (n9) existingPhone9.add(n9);
       }
 
       const rows: MarketingLeadInsert[] = [];
       let skipped = 0;
+      const seenPhone9InImport = new Set<string>();
       for (const p of parsed) {
-        if (p.external_id && existing.has(p.external_id)) {
+        if (p.external_id && existingExternal.has(p.external_id)) {
           skipped++;
           continue;
         }
+        const n9 = marketingLeadPhoneNorm(p.phone);
+        if (n9 && existingPhone9.has(n9)) {
+          skipped++;
+          continue;
+        }
+        if (n9 && seenPhone9InImport.has(n9)) {
+          skipped++;
+          continue;
+        }
+        if (n9) seenPhone9InImport.add(n9);
         rows.push({
           company_id: companyId,
           stage_id: defaultStageId,
@@ -518,7 +547,8 @@ export const useMarketingLeads = () => {
       notesInserted: number;
     }> => {
       if (!companyId) throw new Error('Sin empresa');
-      const { parsed, mode = 'upsert' } = input;
+      const { parsed: rawParsed, mode = 'upsert' } = input;
+      const parsed = dedupeTuPartnerLeadsByPhone(rawParsed);
 
       // 1) Asegurar etapas
       const { data: existingStages, error: stagesErr } = await supabase
@@ -571,14 +601,7 @@ export const useMarketingLeads = () => {
         stagesCreated = newStages?.length ?? 0;
       }
 
-      // 2) Localizar leads existentes (por external_id y por teléfono normalizado)
-      const externalIds = parsed
-        .map((p) => p.external_id)
-        .filter((v): v is string => !!v);
-      const phones = parsed
-        .map((p) => (p.phone ?? '').replace(/\D/g, ''))
-        .filter((d) => d.length >= 7);
-
+      // 2) Localizar leads existentes (por external_id y últimos 9 dígitos de teléfono)
       const { data: existingLeads } = await supabase
         .from('marketing_leads')
         .select('id, external_id, phone')
@@ -588,23 +611,16 @@ export const useMarketingLeads = () => {
       const existingByPhone = new Map<string, string>();
       for (const row of existingLeads ?? []) {
         if (row.external_id) existingByExternal.set(row.external_id, row.id);
-        if (row.phone) {
-          const d = row.phone.replace(/\D/g, '');
-          if (d.length >= 7) {
-            existingByPhone.set(d.slice(-9), row.id);
-            existingByPhone.set(d, row.id);
-          }
-        }
+        const n9 = marketingLeadPhoneNorm(row.phone);
+        if (n9) existingByPhone.set(n9, row.id);
       }
 
       const findExistingId = (p: ParsedTuPartnerLead): string | null => {
         if (p.external_id && existingByExternal.has(p.external_id)) {
           return existingByExternal.get(p.external_id)!;
         }
-        const d = (p.phone ?? '').replace(/\D/g, '');
-        if (d.length >= 7) {
-          return existingByPhone.get(d) ?? existingByPhone.get(d.slice(-9)) ?? null;
-        }
+        const n9 = marketingLeadPhoneNorm(p.phone);
+        if (n9) return existingByPhone.get(n9) ?? null;
         return null;
       };
 
@@ -684,10 +700,8 @@ export const useMarketingLeads = () => {
           inserted += insertedRows?.length ?? 0;
           for (const row of insertedRows ?? []) {
             if (row.external_id) insertedIdByExternal.set(row.external_id, row.id);
-            if (row.phone) {
-              const d = row.phone.replace(/\D/g, '');
-              if (d.length >= 7) insertedIdByPhone.set(d.slice(-9), row.id);
-            }
+            const n9 = marketingLeadPhoneNorm(row.phone);
+            if (n9) insertedIdByPhone.set(n9, row.id);
           }
         }
       }
@@ -720,9 +734,9 @@ export const useMarketingLeads = () => {
         if (p.external_id && insertedIdByExternal.has(p.external_id)) {
           return insertedIdByExternal.get(p.external_id)!;
         }
-        const d = (p.phone ?? '').replace(/\D/g, '');
-        if (d.length >= 7) {
-          const hit = insertedIdByPhone.get(d.slice(-9));
+        const n9 = marketingLeadPhoneNorm(p.phone);
+        if (n9) {
+          const hit = insertedIdByPhone.get(n9);
           if (hit) return hit;
         }
         return findExistingId(p);

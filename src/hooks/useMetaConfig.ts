@@ -26,12 +26,61 @@ export type MetaSyncResponse = {
   inserted: number;
   skipped: number;
   errors: number;
+  /** Leads borrados antes de reimportar (solo si full_meta_resync). */
+  deleted_meta_leads?: number;
+  full_meta_resync?: boolean;
   results: MetaSyncFormResult[];
 };
 
-const DEFAULT_CONFIG: Omit<MetaConfigInsert, 'company_id'> = {
+/** Texto para toasts / avisos cuando hay errores por formulario. */
+export function formatMetaSyncErrorsSummary(
+  data: MetaSyncResponse,
+  maxLen = 900,
+): string {
+  const parts = data.results
+    .filter((r) => r.message || r.errors > 0)
+    .map((r) => {
+      const label = r.form_name ?? r.form_id;
+      if (r.message) return `${label}: ${r.message}`;
+      if (r.errors > 0) {
+        return `${label}: ${r.errors} registro(s) no insertados`;
+      }
+      return '';
+    })
+    .filter(Boolean);
+  const s = parts.join(' · ');
+  return s.length > maxLen ? `${s.slice(0, maxLen)}…` : s;
+}
+
+/** Sufijo que añade meta-sync-leads en `meta_config.last_sync_message` con el detalle. */
+export const META_SYNC_DETAIL_MARKER = '. Detalle: ' as const;
+
+export function stripMetaSyncDetailFromSummary(
+  message: string | null | undefined,
+): string | null {
+  if (!message) return null;
+  const idx = message.indexOf(META_SYNC_DETAIL_MARKER);
+  if (idx === -1) return message;
+  const head = message.slice(0, idx).trim();
+  return head.length > 0 ? head : null;
+}
+
+export function extractMetaSyncDetailFromMessage(
+  message: string | null | undefined,
+): string | null {
+  if (!message) return null;
+  const idx = message.indexOf(META_SYNC_DETAIL_MARKER);
+  if (idx === -1) return null;
+  const rest = message.slice(idx + META_SYNC_DETAIL_MARKER.length).trim();
+  return rest.length > 0 ? rest : null;
+}
+
+/** Debe coincidir con la edge function meta-sync-leads (confirm_full_meta_resync). */
+export const META_FULL_RESYNC_CONFIRM = 'BORRAR_LEADS_META' as const;
+
+/** Sin access_token: si lo mezclamos aquí, cada guardado parcial borraría el token en BD. */
+const DEFAULT_CONFIG: Omit<MetaConfigInsert, 'company_id' | 'access_token'> = {
   business_id: null,
-  access_token: null,
   graph_api_version: 'v23.0',
   sync_interval_minutes: 60,
   enabled: true,
@@ -79,11 +128,20 @@ export const useMetaConfig = () => {
   const upsertConfig = useMutation({
     mutationFn: async (values: Omit<MetaConfigUpdate, 'company_id'>) => {
       if (!companyId) throw new Error('Sin empresa');
+      const { data: existing, error: readErr } = await supabase
+        .from('meta_config')
+        .select('*')
+        .eq('company_id', companyId)
+        .maybeSingle();
+      if (readErr) throw readErr;
+
       const row: MetaConfigInsert = {
         ...DEFAULT_CONFIG,
+        ...(existing ?? {}),
         ...values,
         company_id: companyId,
       };
+
       const { data, error } = await supabase
         .from('meta_config')
         .upsert(row, { onConflict: 'company_id' })
@@ -135,7 +193,12 @@ export const useMetaConfig = () => {
   });
 
   const syncNow = useMutation({
-    mutationFn: async (input?: { form_ids?: string[]; force?: boolean }): Promise<MetaSyncResponse> => {
+    mutationFn: async (input?: {
+      form_ids?: string[];
+      force?: boolean;
+      full_meta_resync?: boolean;
+      confirm_full_meta_resync?: string;
+    }): Promise<MetaSyncResponse> => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('No hay sesión activa');
       const response = await supabase.functions.invoke('meta-sync-leads', {
@@ -163,6 +226,8 @@ export const useMetaConfig = () => {
       invalidateConfig();
       invalidateForms();
       queryClient.invalidateQueries({ queryKey: ['marketing-leads', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['marketing-lead-notes-index', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['marketing-lead-notes-counts', companyId] });
     },
   });
 

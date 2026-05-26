@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useLayoutEffect, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,6 +25,14 @@ interface Employee {
   color: string;
 }
 
+export type AppointmentFormInitialPrefill = {
+  clientPick: AppointmentClientPick | null;
+  description?: string;
+  date?: string;
+  startTime?: string;
+  employeeId?: string;
+};
+
 interface AppointmentFormProps {
   employeeId: string;
   time: string;
@@ -34,10 +42,19 @@ interface AppointmentFormProps {
   recursos?: any[];
   onSave: (appointment: any) => void;
   onCancel: () => void;
+  initialPrefill?: AppointmentFormInitialPrefill | null;
 }
 
 export const AppointmentForm: React.FC<AppointmentFormProps> = ({
-  employeeId, time, employees, customers, cabinas = [], recursos = [], onSave, onCancel
+  employeeId,
+  time,
+  employees,
+  customers,
+  cabinas = [],
+  recursos = [],
+  onSave,
+  onCancel,
+  initialPrefill = null,
 }) => {
   const navigate = useNavigate();
   const { companyId } = useCompanyFilter();
@@ -68,8 +85,18 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
     },
   ]);
 
-  const employee = employees.find(e => e.id === employeeId);
-  const total = appointmentItemsTotal(items);
+  useLayoutEffect(() => {
+    if (!initialPrefill) return;
+    setClientPick(initialPrefill.clientPick);
+    setFormData((f) => ({
+      ...f,
+      description: initialPrefill.description ?? f.description,
+      date: initialPrefill.date ?? f.date,
+      startTime: initialPrefill.startTime ?? f.startTime,
+      employeeId: initialPrefill.employeeId ?? f.employeeId,
+    }));
+  }, [initialPrefill]);
+
   const selectedCustomerId = clientPick?.kind === 'customer' ? clientPick.customerId : null;
   const computedEndTime = calcEndFromStart(formData.startTime, effectiveDurationMinutes(items));
 
@@ -158,7 +185,7 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
     const clientName = clientPick.kind === 'customer' ? clientPick.displayName : clientPick.name;
     if (!clientName.trim()) return;
 
-    const selectedEmployee = employees.find(e => e.id === formData.employeeId);
+    const selectedEmployee = employees.find((e) => e.id === formData.employeeId);
     const endTime = calcEndFromStart(formData.startTime, effectiveDurationMinutes(items));
     onSave({
       employeeId: formData.employeeId,

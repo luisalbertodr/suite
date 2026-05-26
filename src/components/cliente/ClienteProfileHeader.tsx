@@ -1,7 +1,9 @@
 import React from 'react';
 import { Phone, MessageCircle, CalendarPlus, User } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { usePermissions } from '@/hooks/usePermissions';
 
 interface Props {
   customer: any;
@@ -9,6 +11,9 @@ interface Props {
 }
 
 export const ClienteProfileHeader: React.FC<Props> = ({ customer, isLoading }) => {
+  const navigate = useNavigate();
+  const { hasPermission } = usePermissions();
+  const canUseWhatsapp = hasPermission('whatsapp', 'read');
   if (isLoading) {
     return (
       <div className="flex items-center gap-6 p-6 rounded-2xl bg-gradient-to-r from-sky-50 to-blue-50 dark:from-sky-950/30 dark:to-blue-950/30 border border-sky-100 dark:border-sky-900/30">
@@ -28,9 +33,18 @@ export const ClienteProfileHeader: React.FC<Props> = ({ customer, isLoading }) =
     if (customer.phone) window.open(`tel:${customer.phone}`);
   };
 
+  const customerPhone =
+    customer.phone || customer.phone_mobile || customer.phone_home || null;
+
   const handleWhatsApp = () => {
-    if (customer.phone) {
-      const cleaned = customer.phone.replace(/\D/g, '');
+    if (!customerPhone) return;
+    if (canUseWhatsapp) {
+      const params = new URLSearchParams();
+      params.set('phone', customerPhone);
+      if (customer.name) params.set('name', customer.name);
+      navigate(`/whatsapp?${params.toString()}`);
+    } else {
+      const cleaned = customerPhone.replace(/\D/g, '');
       window.open(`https://wa.me/${cleaned}`, '_blank');
     }
   };
@@ -66,8 +80,8 @@ export const ClienteProfileHeader: React.FC<Props> = ({ customer, isLoading }) =
           {customer.email && (
             <span className="text-xs text-sky-600 dark:text-sky-400">{customer.email}</span>
           )}
-          {customer.phone && (
-            <span className="text-xs text-muted-foreground">· {customer.phone}</span>
+          {customerPhone && (
+            <span className="text-xs text-muted-foreground">· {customerPhone}</span>
           )}
         </div>
       </div>
@@ -79,7 +93,7 @@ export const ClienteProfileHeader: React.FC<Props> = ({ customer, isLoading }) =
           variant="outline"
           className="gap-1.5 border-sky-200 text-sky-700 hover:bg-sky-50 dark:border-sky-800 dark:text-sky-300"
           onClick={handleCall}
-          disabled={!customer.phone}
+          disabled={!customerPhone}
         >
           <Phone className="w-3.5 h-3.5" />
           <span className="hidden sm:inline">Llamar</span>
@@ -89,7 +103,8 @@ export const ClienteProfileHeader: React.FC<Props> = ({ customer, isLoading }) =
           variant="outline"
           className="gap-1.5 border-emerald-200 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-300"
           onClick={handleWhatsApp}
-          disabled={!customer.phone}
+          disabled={!customerPhone}
+          title={canUseWhatsapp ? 'Abrir conversación de WhatsApp' : 'Abrir en wa.me'}
         >
           <MessageCircle className="w-3.5 h-3.5" />
           <span className="hidden sm:inline">WhatsApp</span>

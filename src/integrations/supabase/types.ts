@@ -1191,6 +1191,7 @@ export type Database = {
           re_percentage: number | null
           tax_id: string | null
           updated_at: string
+          phone_norm: string | null
         }
         Insert: {
           address_city?: string | null
@@ -2220,6 +2221,7 @@ export type Database = {
           last_name: string | null
           notes: string | null
           phone: string | null
+          phone_norm: string | null
           position_in_stage: number
           source: string
           stage_id: string | null
@@ -3867,6 +3869,227 @@ export type Database = {
           },
         ]
       }
+      whatsapp_chats: {
+        Row: {
+          archived: boolean
+          chat_id: string
+          company_id: string
+          created_at: string
+          customer_id: string | null
+          id: string
+          is_group: boolean
+          last_message_at: string | null
+          last_message_from_me: boolean
+          last_message_preview: string | null
+          marketing_lead_id: string | null
+          name: string | null
+          pinned: boolean
+          profile_picture_url: string | null
+          raw: Json | null
+          unread_count: number
+          updated_at: string
+        }
+        Insert: {
+          archived?: boolean
+          chat_id: string
+          company_id: string
+          created_at?: string
+          customer_id?: string | null
+          id?: string
+          is_group?: boolean
+          last_message_at?: string | null
+          last_message_from_me?: boolean
+          last_message_preview?: string | null
+          marketing_lead_id?: string | null
+          name?: string | null
+          pinned?: boolean
+          profile_picture_url?: string | null
+          raw?: Json | null
+          unread_count?: number
+          updated_at?: string
+        }
+        Update: {
+          archived?: boolean
+          chat_id?: string
+          company_id?: string
+          created_at?: string
+          customer_id?: string | null
+          id?: string
+          is_group?: boolean
+          last_message_at?: string | null
+          last_message_from_me?: boolean
+          last_message_preview?: string | null
+          marketing_lead_id?: string | null
+          name?: string | null
+          pinned?: boolean
+          profile_picture_url?: string | null
+          raw?: Json | null
+          unread_count?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whatsapp_chats_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_chats_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_chats_marketing_lead_id_fkey"
+            columns: ["marketing_lead_id"]
+            isOneToOne: false
+            referencedRelation: "marketing_leads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      whatsapp_config: {
+        Row: {
+          api_key: string | null
+          base_url: string | null
+          company_id: string
+          created_at: string
+          default_country_code: string | null
+          enabled: boolean
+          last_status: string | null
+          last_status_at: string | null
+          last_status_message: string | null
+          me_jid: string | null
+          me_pushname: string | null
+          qr_data_url: string | null
+          qr_updated_at: string | null
+          session_name: string
+          updated_at: string
+          webhook_secret: string | null
+        }
+        Insert: {
+          api_key?: string | null
+          base_url?: string | null
+          company_id: string
+          created_at?: string
+          default_country_code?: string | null
+          enabled?: boolean
+          last_status?: string | null
+          last_status_at?: string | null
+          last_status_message?: string | null
+          me_jid?: string | null
+          me_pushname?: string | null
+          qr_data_url?: string | null
+          qr_updated_at?: string | null
+          session_name?: string
+          updated_at?: string
+          webhook_secret?: string | null
+        }
+        Update: {
+          api_key?: string | null
+          base_url?: string | null
+          company_id?: string
+          created_at?: string
+          default_country_code?: string | null
+          enabled?: boolean
+          last_status?: string | null
+          last_status_at?: string | null
+          last_status_message?: string | null
+          me_jid?: string | null
+          me_pushname?: string | null
+          qr_data_url?: string | null
+          qr_updated_at?: string | null
+          session_name?: string
+          updated_at?: string
+          webhook_secret?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whatsapp_config_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      whatsapp_messages: {
+        Row: {
+          ack: number
+          body: string | null
+          caption: string | null
+          chat_id: string
+          company_id: string
+          created_at: string
+          from_jid: string | null
+          from_me: boolean
+          id: string
+          media_filename: string | null
+          media_mime_type: string | null
+          media_size: number | null
+          media_url: string | null
+          quoted_message_id: string | null
+          raw: Json | null
+          timestamp: string
+          type: string
+          updated_at: string
+          waha_message_id: string | null
+        }
+        Insert: {
+          ack?: number
+          body?: string | null
+          caption?: string | null
+          chat_id: string
+          company_id: string
+          created_at?: string
+          from_jid?: string | null
+          from_me?: boolean
+          id?: string
+          media_filename?: string | null
+          media_mime_type?: string | null
+          media_size?: number | null
+          media_url?: string | null
+          quoted_message_id?: string | null
+          raw?: Json | null
+          timestamp?: string
+          type?: string
+          updated_at?: string
+          waha_message_id?: string | null
+        }
+        Update: {
+          ack?: number
+          body?: string | null
+          caption?: string | null
+          chat_id?: string
+          company_id?: string
+          created_at?: string
+          from_jid?: string | null
+          from_me?: boolean
+          id?: string
+          media_filename?: string | null
+          media_mime_type?: string | null
+          media_size?: number | null
+          media_url?: string | null
+          quoted_message_id?: string | null
+          raw?: Json | null
+          timestamp?: string
+          type?: string
+          updated_at?: string
+          waha_message_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whatsapp_messages_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -3917,6 +4140,17 @@ export type Database = {
         Returns: boolean
       }
       is_admin: { Args: never; Returns: boolean }
+      whatsapp_extract_phone_digits: {
+        Args: { p_chat_id: string }
+        Returns: string
+      }
+      whatsapp_auto_link_chat: {
+        Args: { p_company_id: string; p_chat_id: string }
+        Returns: {
+          customer_id: string | null
+          marketing_lead_id: string | null
+        }[]
+      }
     }
     Enums: {
       app_role: "admin" | "user" | "superuser"

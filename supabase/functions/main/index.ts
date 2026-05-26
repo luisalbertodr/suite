@@ -24,6 +24,64 @@ function createAdminClient() {
   return createClient(supabaseUrl, serviceRoleKey);
 }
 
+type CallerContext = {
+  userId: string | null;
+  email: string | null;
+  isSuperuser: boolean;
+};
+
+async function resolveCaller(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  req: Request,
+): Promise<CallerContext> {
+  const authHeader = req.headers.get("authorization");
+  if (!authHeader?.startsWith("Bearer ")) {
+    return { userId: null, email: null, isSuperuser: false };
+  }
+  const token = authHeader.replace("Bearer ", "");
+  const { data: { user } } = await supabaseAdmin.auth.getUser(token);
+  if (!user) return { userId: null, email: null, isSuperuser: false };
+
+  let isSuperuser = false;
+  if (user.email) {
+    const { data: su } = await supabaseAdmin
+      .from("superusers")
+      .select("id")
+      .ilike("email", user.email)
+      .eq("is_active", true)
+      .maybeSingle();
+    isSuperuser = !!su;
+  }
+
+  return { userId: user.id, email: user.email ?? null, isSuperuser };
+}
+
+// Comprueba si el caller tiene el permiso efectivo (resource:action) en su empresa.
+// Superusers siempre pasan.
+async function callerHasPermission(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  caller: CallerContext,
+  resource: string,
+  action: string,
+): Promise<boolean> {
+  if (caller.isSuperuser) return true;
+  if (!caller.userId) return false;
+
+  const { data, error } = await supabaseAdmin.rpc(
+    "user_has_effective_permission",
+    {
+      p_user_id: caller.userId,
+      p_resource: resource,
+      p_action: action,
+    },
+  );
+  if (error) {
+    console.error("user_has_effective_permission failed", error);
+    return false;
+  }
+  return data === true;
+}
+
 async function insertUserCompanyRole(
   supabaseAdmin: ReturnType<typeof createClient>,
   input: { user_id: string; company_id: string; role_id: string },
@@ -67,16 +125,10 @@ async function resolveRolePermissionIds(
 
 async function listUsers(input: { isSuperuser?: boolean }, req: Request) {
   const supabaseAdmin = createAdminClient();
-  const authHeader = req.headers.get("authorization");
-  let currentUserId: string | null = null;
+  const caller = await resolveCaller(supabaseAdmin, req);
+  const currentUserId = caller.userId;
 
-  if (authHeader?.startsWith("Bearer ")) {
-    const token = authHeader.replace("Bearer ", "");
-    const { data: { user } } = await supabaseAdmin.auth.getUser(token);
-    currentUserId = user?.id ?? null;
-  }
-
-  const isSuperuser = !!input.isSuperuser;
+  const isSuperuser = !!input.isSuperuser || caller.isSuperuser;
   const { data: authData, error: authError } = await supabaseAdmin.auth.admin.listUsers();
   if (authError) return jsonResponse({ success: false, error: authError.message, users: [] }, 500);
 
@@ -226,15 +278,52 @@ async function deleteUser(input: { userId?: string }) {
   return jsonResponse({ success: true, message: "Usuario eliminado correctamente" }, 200);
 }
 
-async function updateUser(input: {
-  userId?: string;
-  role_id?: string;
-  company_id?: string;
-  employee_id?: string | null;
-  permission_ids?: string[];
-}) {
+async function updateUser(
+  input: {
+    userId?: string;
+    role_id?: string;
+    company_id?: string;
+    employee_id?: string | null;
+    permission_ids?: string[];
+    password?: string;
+  },
+  req: Request,
+) {
   const supabaseAdmin = createAdminClient();
   if (!input.userId) return jsonResponse({ success: false, error: "userId is required" }, 400);
+
+  const wantsPasswordChange = typeof input.password === "string" && input.password.length > 0;
+
+  if (wantsPasswordChange) {
+    if ((input.password as string).length < 6) {
+      return jsonResponse(
+        { success: false, error: "La contraseña debe tener al menos 6 caracteres", code: "password_too_short" },
+        400,
+      );
+    }
+    const caller = await resolveCaller(supabaseAdmin, req);
+    const allowed = await callerHasPermission(supabaseAdmin, caller, "users", "update");
+    if (!allowed) {
+      return jsonResponse(
+        {
+          success: false,
+          error: "No tienes permiso para cambiar la contraseña de otros usuarios (users:update requerido)",
+          code: "forbidden_password_change",
+        },
+        403,
+      );
+    }
+
+    const { error: pwError } = await supabaseAdmin.auth.admin.updateUserById(input.userId, {
+      password: input.password,
+    });
+    if (pwError) {
+      return jsonResponse(
+        { success: false, error: `password_update_failed: ${pwError.message}`, code: (pwError as any).code },
+        400,
+      );
+    }
+  }
 
   const { data: profile } = await supabaseAdmin
     .from("user_profiles")
@@ -242,7 +331,16 @@ async function updateUser(input: {
     .eq("user_id", input.userId)
     .maybeSingle();
   const companyId = input.company_id || profile?.company_id;
-  if (!companyId) return jsonResponse({ success: false, error: "company_id is required" }, 400);
+  if (!companyId) {
+    // Si solo estábamos cambiando la contraseña, no necesitamos company_id.
+    if (wantsPasswordChange &&
+        !input.role_id &&
+        !Array.isArray(input.permission_ids) &&
+        input.employee_id === undefined) {
+      return jsonResponse({ success: true, message: "Contraseña actualizada correctamente" }, 200);
+    }
+    return jsonResponse({ success: false, error: "company_id is required" }, 400);
+  }
 
   if (input.employee_id !== undefined) {
     const { error: profileError } = await supabaseAdmin
@@ -407,7 +505,7 @@ Deno.serve(async (req) => {
     if (action === "listUsers") return await listUsers(body, req);
     if (action === "createUser") return await createUser(body);
     if (action === "deleteUser") return await deleteUser(body);
-    if (action === "updateUser") return await updateUser(body);
+    if (action === "updateUser") return await updateUser(body, req);
     return jsonResponse({ success: false, error: `Unsupported action: ${action}` }, 400);
   } catch (error) {
     return jsonResponse({ success: false, error: (error as Error).message }, 500);

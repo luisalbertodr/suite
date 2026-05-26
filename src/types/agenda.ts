@@ -5,6 +5,25 @@ export interface Employee {
   color: string;
 }
 
+export interface TimeSlot {
+  time: string;
+  hour: number;
+  minute: number;
+}
+
+export type AppointmentItemKind = 'service' | 'product' | 'bonus' | 'other';
+export type BonusPaymentMode = 'none' | 'full' | '60' | '40';
+
+/** Tramo horario ocupado por un ítem dentro de la cita (solo ítems con occupies_time). */
+export interface AppointmentTimeSegment {
+  clientKey: string;
+  label: string;
+  kind: AppointmentItemKind;
+  startTime: string;
+  endTime: string;
+  durationMinutes: number;
+}
+
 export interface Appointment {
   id: string;
   employeeId: string;
@@ -24,17 +43,16 @@ export interface Appointment {
   color: string;
   /** Importe total calculado de los ítems de la cita. */
   totalAmount?: number;
+  /** Tramos que reservan tiempo (para visualización en agenda). */
+  timeSegments?: AppointmentTimeSegment[];
+  /** Fin calculado según ítems que ocupan tiempo. */
+  occupiedEndTime?: string;
+  /** Etiquetas de ítems solo cobro (sin reserva de tiempo). */
+  paymentOnlyLabels?: string[];
   status: 'confirmed' | 'pending' | 'cancelled';
+  cabina_id?: string | null;
+  recurso_id?: string | null;
 }
-
-export interface TimeSlot {
-  time: string;
-  hour: number;
-  minute: number;
-}
-
-export type AppointmentItemKind = 'service' | 'product' | 'bonus' | 'other';
-export type BonusPaymentMode = 'none' | 'full' | '60' | '40';
 
 /** Borrador de ítem de cita (UI); `clientKey` es estable en el cliente para listas y drag. */
 export interface AppointmentItemDraft {

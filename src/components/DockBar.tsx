@@ -1,7 +1,8 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Home, Calendar, ShoppingBag, Receipt, Users, Package, Building2, Settings, MapPin, Megaphone } from 'lucide-react';
+import { Home, Calendar, ShoppingBag, Receipt, Users, Package, Building2, Settings, MapPin, Megaphone, MessageCircle } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useWhatsappUnread } from '@/hooks/useWhatsappUnread';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 
 const dockItems = [
@@ -13,17 +14,26 @@ const dockItems = [
   { label: 'Artículos', path: '/articulos', icon: Package, color: 'text-purple-500', permission: { resource: 'articles', action: 'read' } },
   { label: 'Proveedores', path: '/proveedores', icon: Building2, color: 'text-teal-500', permission: { resource: 'suppliers', action: 'read' } },
   { label: 'Marketing', path: '/marketing', icon: Megaphone, color: 'text-rose-500', permission: { resource: 'marketing', action: 'read' } },
-  { label: 'Fichaje', path: '/asistencia', icon: MapPin, color: 'text-emerald-500', permission: { resource: 'settings', action: 'read' } },
+  { label: 'WhatsApp', path: '/whatsapp', icon: MessageCircle, color: 'text-emerald-600', permission: { resource: 'whatsapp', action: 'read' } },
+  { label: 'Fichaje', path: '/asistencia', icon: MapPin, color: 'text-emerald-500', permission: { resource: 'attendance', action: 'read' } },
   { label: 'Configuración', path: '/configuracion', icon: Settings, color: 'text-gray-500', permission: { resource: 'settings', action: 'read' } },
 ];
 
 export const DockBar: React.FC = () => {
   const location = useLocation();
   const { hasPermission } = usePermissions();
+  const canSeeWhatsapp = hasPermission('whatsapp', 'read');
+  const { total: whatsappUnread } = useWhatsappUnread();
 
   const visibleItems = dockItems.filter(item =>
     hasPermission(item.permission.resource, item.permission.action)
   );
+
+  // Solo mostramos el badge en WhatsApp y si el usuario tiene permiso.
+  const badgeForItem = (path: string): number => {
+    if (path === '/whatsapp' && canSeeWhatsapp) return whatsappUnread;
+    return 0;
+  };
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -48,7 +58,7 @@ export const DockBar: React.FC = () => {
                     `}
                   >
                     <div className={`
-                      flex items-center justify-center w-12 h-12 rounded-xl
+                      relative flex items-center justify-center w-12 h-12 rounded-xl
                       transition-all duration-300
                       ${isActive 
                         ? 'bg-white dark:bg-gray-800 shadow-lg shadow-black/10' 
@@ -56,6 +66,15 @@ export const DockBar: React.FC = () => {
                       }
                     `}>
                       <item.icon className={`h-6 w-6 transition-all duration-300 ${item.color} ${isActive ? 'scale-110' : 'group-hover:scale-110'}`} />
+                      {(() => {
+                        const badge = badgeForItem(item.path);
+                        if (badge <= 0) return null;
+                        return (
+                          <span className="absolute -top-1 -right-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold leading-none text-white shadow ring-2 ring-white dark:ring-gray-900">
+                            {badge > 99 ? '99+' : badge}
+                          </span>
+                        );
+                      })()}
                     </div>
                     {/* Active indicator dot */}
                     {isActive && (

@@ -20,6 +20,7 @@ import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { ClienteDetailView } from '@/components/ClienteDetailView';
 import { PermissionButton } from '@/components/PermissionButton';
 import { usePermissionGuard } from '@/hooks/usePermissionGuard';
+import { normalizeLegacyAppointmentDescription } from '@/lib/legacyAppointmentItems';
 
 interface Employee { id: string; name: string; color: string; }
 interface Appointment {
@@ -135,7 +136,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
   const [customerHistoryTab, setCustomerHistoryTab] = useState<'timeline' | 'vouchers' | 'ficha' | 'facturacion'>('timeline');
 
   const [formData, setFormData] = useState({
-    description: appointment.description,
+    description: normalizeLegacyAppointmentDescription(appointment.description),
     date: appointment.date,
     startTime: appointment.startTime,
     employeeId: appointment.employeeId,

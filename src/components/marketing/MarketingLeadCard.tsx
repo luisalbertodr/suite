@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import {
   Phone,
   Mail,
@@ -13,6 +13,7 @@ import {
   Trophy,
   XCircle,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import type { MarketingLead } from '@/hooks/useMarketingLeads';
 import type { MarketingFieldConfig } from '@/hooks/useMarketingFieldConfig';
 import type { CustomerLookupRow } from '@/hooks/useCustomerLookup';
@@ -24,17 +25,21 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { usePermissions } from '@/hooks/usePermissions';
 import {
   formatLeadFieldValue,
   getLeadFullName,
   getLeadSubtitle,
   readLeadField,
 } from './marketingFormatters';
+import { resolveLeadAppointmentParts } from '@/lib/marketingLeadAppointment';
 
 interface MarketingLeadCardProps {
   lead: MarketingLead;
   visibleFields: MarketingFieldConfig[];
   stageColor: string;
+  /** Etapa "Formulario+Agenda ficticia": avisar si no hay fecha detectada */
+  expectAgendaContext?: boolean;
   matchedCustomer: CustomerLookupRow | null;
   noteCount: number;
   notePreviews: MarketingLeadNotePreview[];
@@ -89,10 +94,11 @@ const CounterBadge: React.FC<{ count: number; className?: string }> = ({ count, 
   </span>
 );
 
-export const MarketingLeadCard: React.FC<MarketingLeadCardProps> = ({
+export const MarketingLeadCard = memo(function MarketingLeadCard({
   lead,
   visibleFields,
   stageColor,
+  expectAgendaContext = false,
   matchedCustomer,
   noteCount,
   notePreviews,
@@ -102,7 +108,11 @@ export const MarketingLeadCard: React.FC<MarketingLeadCardProps> = ({
   onPromote,
   onDragStart,
   onDragEnd,
-}) => {
+}: MarketingLeadCardProps) {
+  const navigate = useNavigate();
+  const { hasPermission } = usePermissions();
+  const canUseWhatsapp = hasPermission('whatsapp', 'read');
+
   const fullName = getLeadFullName(lead);
   const subtitle = getLeadSubtitle(lead);
   const isLinked = !!matchedCustomer;
@@ -114,14 +124,33 @@ export const MarketingLeadCard: React.FC<MarketingLeadCardProps> = ({
 
   const phoneHref = lead.phone ? `tel:${lead.phone.replace(/\s+/g, '')}` : undefined;
   const emailHref = lead.email ? `mailto:${lead.email}` : undefined;
-  const waHref = lead.phone
+  const waExternalHref = lead.phone
     ? `https://wa.me/${lead.phone.replace(/\D/g, '')}`
     : undefined;
+  const handleWhatsappClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (!lead.phone) return;
+    if (canUseWhatsapp) {
+      const params = new URLSearchParams();
+      params.set('phone', lead.phone);
+      if (fullName) params.set('name', fullName);
+      navigate(`/whatsapp?${params.toString()}`);
+    } else if (waExternalHref) {
+      window.open(waExternalHref, '_blank', 'noreferrer');
+    }
+  };
 
-  const appointmentText = lead.appointment_at
-    ? dateFormatter.format(new Date(lead.appointment_at))
-    : lead.appointment_label;
+  const { atIso: resolvedApptIso, label: resolvedApptLabel } =
+    resolveLeadAppointmentParts(lead);
+  const appointmentText = resolvedApptIso
+    ? dateFormatter.format(new Date(resolvedApptIso))
+    : resolvedApptLabel;
 
+  const showAgendaMissingHint =
+    expectAgendaContext && !appointmentText && ['meta', 'facebook', 'instagram'].includes(
+      String(lead.source ?? '').toLowerCase(),
+    );
   return (
     <TooltipProvider delayDuration={250}>
       <div
@@ -215,12 +244,25 @@ export const MarketingLeadCard: React.FC<MarketingLeadCardProps> = ({
           {appointmentText ? (
             <Tooltip>
               <TooltipTrigger asChild>
-                <div className="mt-2 inline-flex items-center gap-1 rounded-md bg-violet-100/70 px-2 py-0.5 text-[10px] font-medium text-violet-700 dark:bg-violet-950/40 dark:text-violet-300">
-                  <CalendarClock className="h-3 w-3" />
-                  {truncate(appointmentText, 32)}
+                <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-medium text-sky-800 dark:bg-sky-950/50 dark:text-sky-200">
+                  <Calendar className="h-3 w-3" />
+                  {truncate(appointmentText, 36)}
                 </div>
               </TooltipTrigger>
               <TooltipContent>Cita: {appointmentText}</TooltipContent>
+            </Tooltip>
+          ) : showAgendaMissingHint ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="mt-2 inline-flex max-w-full items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                  <CalendarClock className="h-3 w-3 shrink-0 opacity-70" />
+                  <span className="truncate">Sin fecha de cita en el formulario</span>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-[260px]">
+                Este lead está en la columna de agenda ficticia pero no se encontró fecha/slot en los datos de Meta.
+                Puedes moverlo de etapa o revisar el detalle del lead.
+              </TooltipContent>
             </Tooltip>
           ) : null}
 
@@ -240,16 +282,22 @@ export const MarketingLeadCard: React.FC<MarketingLeadCardProps> = ({
                 <TooltipContent>Llamar</TooltipContent>
               </Tooltip>
             ) : null}
-            {waHref ? (
+            {lead.phone ? (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button asChild variant="ghost" size="icon" className="h-7 w-7">
-                    <a href={waHref} target="_blank" rel="noreferrer" aria-label="WhatsApp">
-                      <MessageCircle className="h-3.5 w-3.5" />
-                    </a>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700 dark:hover:bg-emerald-950"
+                    aria-label="WhatsApp"
+                    onClick={handleWhatsappClick}
+                  >
+                    <MessageCircle className="h-3.5 w-3.5" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>WhatsApp</TooltipContent>
+                <TooltipContent>
+                  {canUseWhatsapp ? 'Abrir conversación de WhatsApp' : 'WhatsApp'}
+                </TooltipContent>
               </Tooltip>
             ) : null}
             {emailHref ? (
@@ -262,30 +310,6 @@ export const MarketingLeadCard: React.FC<MarketingLeadCardProps> = ({
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>Email</TooltipContent>
-              </Tooltip>
-            ) : null}
-
-            {appointmentText ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="relative h-7 w-7 text-violet-600"
-                    aria-label="Cita"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onClick();
-                    }}
-                  >
-                    <CalendarClock className="h-3.5 w-3.5" />
-                    <CounterBadge count={1} className="bg-violet-500" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent className="max-w-[260px]">
-                  <p className="text-[11px] font-semibold">Cita programada</p>
-                  <p className="text-[11px]">{appointmentText}</p>
-                </TooltipContent>
               </Tooltip>
             ) : null}
 
@@ -388,20 +412,20 @@ export const MarketingLeadCard: React.FC<MarketingLeadCardProps> = ({
                   variant="ghost"
                   size="icon"
                   className="h-7 w-7"
-                  aria-label="Detalles"
+                  aria-label="Cita"
                   onClick={(e) => {
                     e.stopPropagation();
-                    onClick();
+                    navigate(`/agenda?fromLead=${encodeURIComponent(lead.id)}`);
                   }}
                 >
                   <Calendar className="h-3.5 w-3.5" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Detalles</TooltipContent>
+              <TooltipContent>Cita (abrir agenda)</TooltipContent>
             </Tooltip>
           </div>
         </div>
       </div>
     </TooltipProvider>
   );
-};
+});

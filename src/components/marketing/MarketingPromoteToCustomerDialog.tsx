@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { UserPlus, ExternalLink } from 'lucide-react';
+import { UserPlus, ExternalLink, AlertTriangle } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -67,6 +67,12 @@ export const MarketingPromoteToCustomerDialog: React.FC<MarketingPromoteToCustom
   const [taxId, setTaxId] = useState('');
   const [city, setCity] = useState('');
   const [notes, setNotes] = useState('');
+  const [existingCustomer, setExistingCustomer] = useState<{
+    id: string;
+    name: string;
+    phone: string | null;
+    email: string | null;
+  } | null>(null);
 
   useEffect(() => {
     if (lead && open) {
@@ -77,8 +83,74 @@ export const MarketingPromoteToCustomerDialog: React.FC<MarketingPromoteToCustom
       setTaxId('');
       setCity('');
       setNotes(buildNotes(lead));
+      setExistingCustomer(null);
     }
   }, [lead, open]);
+
+  useEffect(() => {
+    const lookup = async () => {
+      if (!companyId || !open) return;
+      const normalized = phone.trim().replace(/\D/g, '');
+      if (!normalized) {
+        setExistingCustomer(null);
+        return;
+      }
+      const { data, error } = await supabase
+        .from('customers')
+        .select('id,name,phone,phone_mobile,phone_home,email')
+        .eq('company_id', companyId)
+        .or(
+          [
+            'phone',
+            'phone_mobile',
+            'phone_home',
+          ]
+            .map((col) => `${col}.ilike.%${normalized.slice(-7)}%`)
+            .join(','),
+        );
+      if (error) {
+        console.warn('Error buscando cliente por teléfono', error);
+        setExistingCustomer(null);
+        return;
+      }
+      const first = (data ?? [])[0] as
+        | { id: string; name: string; phone?: string | null; phone_mobile?: string | null; phone_home?: string | null; email?: string | null }
+        | undefined;
+      if (!first) {
+        setExistingCustomer(null);
+        return;
+      }
+      setExistingCustomer({
+        id: first.id,
+        name: first.name,
+        phone: first.phone_mobile || first.phone || first.phone_home || null,
+        email: first.email ?? null,
+      });
+    };
+    void lookup();
+  }, [companyId, open, phone]);
+
+  const linkToExistingCustomer = async () => {
+    if (!lead || !existingCustomer) return;
+    try {
+      const { error } = await supabase
+        .from('marketing_leads')
+        .update({ customer_id: existingCustomer.id })
+        .eq('id', lead.id);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      queryClient.invalidateQueries({ queryKey: ['customer-lookup', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['marketing-leads', companyId] });
+      toast({
+        title: 'Lead vinculado a cliente existente',
+        description: existingCustomer.name,
+      });
+      onOpenChange(false);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Error al vincular con cliente existente';
+      toast({ title: 'Error', description: message, variant: 'destructive' });
+    }
+  };
 
   const createCustomerMutation = useMutation({
     mutationFn: async () => {
@@ -122,6 +194,16 @@ export const MarketingPromoteToCustomerDialog: React.FC<MarketingPromoteToCustom
       onOpenChange(false);
     },
     onError: (e) => {
+      const any = e as { code?: string; message?: string };
+      if (any?.code === '23505') {
+        toast({
+          title: 'Ya existe un cliente con este teléfono',
+          description:
+            'Si ves el aviso de arriba, usa «Vincular lead a este cliente». Si no, revisa que el número no esté ya en la base.',
+          variant: 'destructive',
+        });
+        return;
+      }
       const message = e instanceof Error ? e.message : 'Error al crear cliente';
       toast({ title: 'Error', description: message, variant: 'destructive' });
     },
@@ -141,6 +223,36 @@ export const MarketingPromoteToCustomerDialog: React.FC<MarketingPromoteToCustom
             Revisa y completa los datos. Al guardar, el lead quedará vinculado al nuevo cliente.
           </DialogDescription>
         </DialogHeader>
+
+        {existingCustomer ? (
+          <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-500" />
+                <div>
+                  <p className="font-semibold text-[11px] uppercase tracking-wide">
+                    Este teléfono ya está asociado a un cliente
+                  </p>
+                  <p className="text-[11px]">
+                    <strong>{existingCustomer.name}</strong>
+                    {existingCustomer.phone ? ` · ${existingCustomer.phone}` : ''}
+                    {existingCustomer.email ? ` · ${existingCustomer.email}` : ''}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-2 flex gap-2 sm:mt-0 sm:flex-shrink-0">
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="outline"
+                  onClick={linkToExistingCustomer}
+                >
+                  Vincular lead a este cliente
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2 md:col-span-2">

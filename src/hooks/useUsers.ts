@@ -43,6 +43,12 @@ interface UpdateUserPayload {
   company_id?: string;
   employee_id?: string | null;
   permission_ids?: string[];
+  /**
+   * Nueva contraseña para el usuario. Solo se aplica si quien llama tiene el
+   * permiso `users:update` (o es superuser). Se valida también en la Edge
+   * Function `main`. Mínimo 6 caracteres.
+   */
+  password?: string;
 }
 
 export const useUsers = () => {

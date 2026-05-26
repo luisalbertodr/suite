@@ -1,0 +1,71 @@
+---
+description: Cómo desplegar Edge Functions al Supabase self-hosted del proyecto
+globs: supabase/functions/**
+alwaysApply: false
+---
+
+# Despliegue de Edge Functions (Supabase self-hosted)
+
+Este proyecto usa **Supabase self-hosted**, no Supabase Cloud. El CLI
+`supabase functions deploy` NO se usa. El despliegue es manual por SCP +
+reinicio del contenedor.
+
+## Datos del entorno
+
+- **Host SSH**: `root@192.168.99.110`
+- **Volumen de funciones en el host**: `/root/supabase-project/volumes/functions`
+- **Contenedor edge-runtime**: `supabase-edge-functions`
+- **URL pública de funciones**: `https://supabase.lipoout.com/functions/v1/<nombre>`
+- **Working directory en Windows**: `C:\Users\OportoW11\Suite\suite`
+
+## Pasos para desplegar una función `<NAME>`
+
+Tras editar `supabase/functions/<NAME>/index.ts` (u otros archivos de esa
+carpeta), el usuario tiene que ejecutar, **en este orden**:
+
+### 1) En PowerShell de Windows (NO dentro de una sesión SSH)
+
+```powershell
+cd C:\Users\OportoW11\Suite\suite
+scp supabase\functions\<NAME>\index.ts root@192.168.99.110:/root/supabase-project/volumes/functions/<NAME>/index.ts
+```
+
+Si la función tiene varios archivos, mejor copiar la carpeta entera:
+
+```powershell
+scp -r supabase\functions\<NAME> root@192.168.99.110:/root/supabase-project/volumes/functions/
+```
+
+Pedirá la contraseña SSH. Debe mostrar `100%` al terminar; si no, no ha
+subido y no tiene sentido continuar.
+
+### 2) Por SSH al servidor
+
+```bash
+ssh root@192.168.99.110
+docker restart supabase-edge-functions
+docker logs --tail 60 supabase-edge-functions
+```
+
+### 3) Verificación rápida
+
+```bash
+# Confirmar que el archivo del servidor contiene los cambios esperados.
+grep -n "<algún_string_único_del_cambio>" /root/supabase-project/volumes/functions/<NAME>/index.ts
+
+# Smoke test HTTP (debe devolver 400 'action is required' o lo que aplique).
+curl -s -o /dev/null -w "%{http_code}\n" -X POST \
+  https://supabase.lipoout.com/functions/v1/<NAME> \
+  -H 'Content-Type: application/json' -d '{}'
+```
+
+## Errores comunes
+
+- `scp: stat local "...": No such file or directory` con la ruta sin
+  barras: estás ejecutando el `scp` **dentro de la SSH** (bash come las
+  `\`). Sal con `exit` y vuelve a lanzarlo desde PowerShell.
+- Reiniciar el contenedor sin haber subido el archivo no despliega nada;
+  el código sigue siendo el viejo. Siempre confirmar `100%` en el scp
+  antes de `docker restart`.
+- Si `docker logs` muestra `SyntaxError` o `Missing SUPABASE_*`, hay que
+  revisar el código subido y/o las variables de entorno del contenedor.
