@@ -20,6 +20,7 @@ const ARTICLE_KINDS = [
 interface ArticleFormFieldsProps {
   formData: ArticleFormData;
   families: string[];
+  recursos?: Array<{ id: string; nombre: string; activo?: boolean }>;
   onInputChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => void;
   onProductTypeChange: (e: React.ChangeEvent<HTMLSelectElement>) => void;
   onFamiliaChange: (e: React.ChangeEvent<HTMLSelectElement>) => void;
@@ -30,6 +31,7 @@ interface ArticleFormFieldsProps {
 export const ArticleFormFields: React.FC<ArticleFormFieldsProps> = ({
   formData,
   families,
+  recursos = [],
   onInputChange,
   onProductTypeChange,
   onFamiliaChange,
@@ -228,6 +230,29 @@ export const ArticleFormFields: React.FC<ArticleFormFieldsProps> = ({
             disabled={fieldsDisabled || formData.article_kind !== 'servicio'}
           />
         </div>
+        {formData.article_kind === 'servicio' && recursos.length > 0 && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Recurso exclusivo
+            </label>
+            <select
+              name="recurso_id"
+              value={formData.recurso_id || ''}
+              onChange={onInputChange}
+              title="Recurso exclusivo del servicio"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              disabled={fieldsDisabled}
+            >
+              <option value="">Automático (por nombre/familia)</option>
+              {recursos.filter((r) => r.activo !== false).map((r) => (
+                <option key={r.id} value={r.id}>{r.nombre}</option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-500 mt-1">
+              Si se define, se asignará a las citas que incluyan este servicio.
+            </p>
+          </div>
+        )}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
             Stock Actual

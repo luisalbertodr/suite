@@ -37,7 +37,9 @@ function mapRowToDraft(row: {
   notes?: string | null;
   article_id: string | null;
   customer_voucher_id: string | null;
-  articles?: { precio?: number | null } | null;
+  cabina_id?: string | null;
+  recurso_id?: string | null;
+  articles?: { precio?: number | null; familia?: string | null; recurso_id?: string | null } | null;
 }): AppointmentItemDraft {
   const fallbackPricing = parsePricingFromNotes(row.notes ?? null);
   const articlePrice = Number(row.articles?.precio ?? 0);
@@ -58,6 +60,8 @@ function mapRowToDraft(row: {
       'none',
     article_id: row.article_id,
     customer_voucher_id: row.customer_voucher_id,
+    cabina_id: row.cabina_id ?? null,
+    recurso_id: row.recurso_id ?? null,
   };
 }
 
@@ -135,8 +139,10 @@ export async function fetchAppointmentItems(
     'notes',
     'article_id',
     'customer_voucher_id',
+    'cabina_id',
+    'recurso_id',
     'sort_order',
-    'articles(precio)',
+    'articles(precio,familia,recurso_id)',
   ];
   let enabledColumns = [...columns];
   let data: any[] | null = null;
@@ -256,6 +262,8 @@ export async function syncAppointmentItems(
     sort_order,
     article_id: nullIfBlank(it.article_id),
     customer_voucher_id: nullIfBlank(it.customer_voucher_id),
+    cabina_id: nullIfBlank(it.cabina_id),
+    recurso_id: nullIfBlank(it.recurso_id),
   }));
 
   const fallbackRows = rows.map(
@@ -269,6 +277,8 @@ export async function syncAppointmentItems(
       sort_order,
       article_id,
       customer_voucher_id,
+      cabina_id,
+      recurso_id,
     }) => ({
       appointment_id,
       kind,
@@ -279,6 +289,8 @@ export async function syncAppointmentItems(
       sort_order,
       article_id,
       customer_voucher_id,
+      cabina_id,
+      recurso_id,
     })
   );
 

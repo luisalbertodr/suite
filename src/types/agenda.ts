@@ -22,6 +22,11 @@ export interface AppointmentTimeSegment {
   startTime: string;
   endTime: string;
   durationMinutes: number;
+  recursoId?: string | null;
+  recursoName?: string | null;
+  recursoColor?: string | null;
+  cabinaId?: string | null;
+  cabinaName?: string | null;
 }
 
 export interface Appointment {
@@ -66,4 +71,6 @@ export interface AppointmentItemDraft {
   bonus_payment_mode?: BonusPaymentMode;
   article_id?: string | null;
   customer_voucher_id?: string | null;
+  cabina_id?: string | null;
+  recurso_id?: string | null;
 }

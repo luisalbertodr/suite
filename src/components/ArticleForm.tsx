@@ -11,6 +11,7 @@ import { ArticleImageUpload } from './ArticleImageUpload';
 import { ArticleFormButtons } from './ArticleFormButtons';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useRecursos } from '@/hooks/useRecursosCabinas';
 import { ArticleBonoDefinitionBlock, type ArticleBonoDefinitionBlockRef } from './ArticleBonoDefinitionBlock';
 
 interface ArticleFormProps {
@@ -22,6 +23,7 @@ interface ArticleFormProps {
 export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSave }) => {
   const { createArticle, updateArticle, generateCode } = useArticles();
   const { companyId } = useCompanyFilter();
+  const { recursos } = useRecursos();
   const bonoDefRef = useRef<ArticleBonoDefinitionBlockRef>(null);
   const { families, ensureVariosFamilyExists, loading: familiesLoading, error: familiesError } = useFamilies();
   const { createVariations } = useArticleVariations();
@@ -53,7 +55,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
     article_kind: 'producto',
     duration_minutes: 0,
     estado: 'activo',
-    iva_percentage: 21
+    iva_percentage: 21,
+    recurso_id: null as string | null,
   });
 
   // Initialize form - only run once
@@ -85,7 +88,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
         article_kind: article.article_kind || 'producto',
         duration_minutes: article.duration_minutes || 0,
         estado: article.estado,
-        iva_percentage: article.iva_percentage || 21
+        iva_percentage: article.iva_percentage || 21,
+        recurso_id: article.recurso_id ?? null,
       });
       setImagePreview(article.foto_url);
       setImageFile(null);
@@ -249,11 +253,15 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
 
     setLoading(true);
     try {
+      const payload = {
+        ...formData,
+        recurso_id: formData.recurso_id?.trim() ? formData.recurso_id : null,
+      };
       console.log('Submitting form with image file:', imageFile ? imageFile.name : 'none');
       
       if (article) {
         console.log('Updating article with ID:', article.id);
-        await updateArticle(article.id, formData, imageFile || undefined);
+        await updateArticle(article.id, payload, imageFile || undefined);
         if (formData.article_kind === 'bono') {
           try {
             await bonoDefRef.current?.persist(article.id);
@@ -266,7 +274,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
         onClose();
       } else {
         console.log('Creating new article');
-        const newArticle = await createArticle(formData, imageFile || undefined);
+        const newArticle = await createArticle(payload, imageFile || undefined);
         
         if (newArticle) {
           if (formData.article_kind === 'bono') {
@@ -435,6 +443,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
                     <ArticleFormFields
                       formData={formData}
                       families={families}
+                      recursos={recursos.data || []}
                       onInputChange={handleInputChange}
                       onProductTypeChange={handleProductTypeChange}
                       onFamiliaChange={handleFamiliaChange}
@@ -497,6 +506,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
                 <ArticleFormFields
                   formData={formData}
                   families={families}
+                  recursos={recursos.data || []}
                   onInputChange={handleInputChange}
                   onProductTypeChange={handleProductTypeChange}
                   onFamiliaChange={handleFamiliaChange}

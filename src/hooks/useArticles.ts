@@ -27,6 +27,7 @@ export interface Article {
   legacy_codart?: string | null;
   /** Plantilla de composición (servicios/productos incluidos en el precio) */
   bonus_definition_id?: string | null;
+  recurso_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -49,6 +50,7 @@ export interface ArticleFormData {
   article_kind: 'producto' | 'servicio' | 'bono';
   duration_minutes: number;
   iva_percentage: number;
+  recurso_id?: string | null;
   foto_url?: string;
 }
 

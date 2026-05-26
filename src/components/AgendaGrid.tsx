@@ -4,7 +4,7 @@ import { format } from 'date-fns';
 import { CheckCircle, Clock, XCircle } from 'lucide-react';
 import { Employee, Appointment, TimeSlot } from '@/types/agenda';
 import { slotOverlapsOccupiedTime } from '@/lib/agendaAppointmentItems';
-import { segmentColorClass } from '@/components/AppointmentItemTimeline';
+import { segmentAppearance } from '@/lib/agendaResourceColors';
 import {
   loadAgendaViewPersisted,
   mergePersistedScroll,
@@ -407,12 +407,20 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
                     const segEnd = timeToMinutes(seg.endTime);
                     const topPct = ((segStart - startMin) / displaySpan) * 100;
                     const heightPct = Math.max(4, ((segEnd - segStart) / displaySpan) * 100);
+                    const { className: barClass, style } = segmentAppearance(seg.recursoColor, seg.kind);
+                    const title = [
+                      `${seg.startTime}–${seg.endTime}`,
+                      seg.label,
+                      seg.recursoName ? `→ ${seg.recursoName}` : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' · ');
                     return (
                       <div
                         key={seg.clientKey}
-                        className={`absolute left-0.5 right-0.5 rounded-sm border ${segmentColorClass(seg.kind)} pointer-events-none`}
-                        style={{ top: `${topPct}%`, height: `${heightPct}%` }}
-                        title={`${seg.startTime}–${seg.endTime} · ${seg.label}`}
+                        className={`absolute left-0.5 right-0.5 pointer-events-none ${barClass}`}
+                        style={{ top: `${topPct}%`, height: `${heightPct}%`, ...style }}
+                        title={title}
                       />
                     );
                   })}
@@ -443,7 +451,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
                     )}
                     {segments.length > 0 && visibleFields.service && (
                       <div className="text-[10px] text-gray-700 truncate mt-0.5">
-                        {segments.map((s) => s.label).join(' · ')}
+                        {segments.map((s) => (s.recursoName ? `${s.label} [${s.recursoName}]` : s.label)).join(' · ')}
                       </div>
                     )}
                     {visibleFields.service && !segments.length && appointment.serviceName && (

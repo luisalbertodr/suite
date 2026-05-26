@@ -3019,10 +3019,12 @@ export type Database = {
         Row: {
           activo: boolean
           cabina_id: string | null
+          color: string | null
           company_id: string
           created_at: string
           descripcion: string | null
           id: string
+          match_keywords: string | null
           nombre: string
           tipo: string
           updated_at: string
@@ -3030,10 +3032,12 @@ export type Database = {
         Insert: {
           activo?: boolean
           cabina_id?: string | null
+          color?: string | null
           company_id: string
           created_at?: string
           descripcion?: string | null
           id?: string
+          match_keywords?: string | null
           nombre: string
           tipo?: string
           updated_at?: string
@@ -3041,10 +3045,12 @@ export type Database = {
         Update: {
           activo?: boolean
           cabina_id?: string | null
+          color?: string | null
           company_id?: string
           created_at?: string
           descripcion?: string | null
           id?: string
+          match_keywords?: string | null
           nombre?: string
           tipo?: string
           updated_at?: string

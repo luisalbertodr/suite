@@ -18,8 +18,10 @@ import { useToast } from '@/hooks/use-toast';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAgendaPreferences } from '@/hooks/useAgendaPreferences';
 import { appointmentItemsQueryKey, syncAppointmentItems } from '@/hooks/useAppointmentItems';
-import type { AppointmentItemDraft } from '@/types/agenda';
-import { buildAppointmentTimeSegments, occupiedEndTimeFromItems, hhmmToMinutes } from '@/lib/agendaAppointmentItems';
+import type { AppointmentItemDraft, Appointment } from '@/types/agenda';
+import { buildAppointmentTimeSegments, occupiedEndTimeFromItems } from '@/lib/agendaAppointmentItems';
+import { toRecursoCatalogEntries, type ArticleResourceHint } from '@/lib/agendaRecursoMatch';
+import { checkAppointmentItemsResourceConflict } from '@/lib/agendaResourceConflicts';
 import { useAuth } from '@/hooks/useAuth';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import type { CustomerSearchRow } from '@/lib/customerSearch';
@@ -41,27 +43,6 @@ interface Employee {
   id: string;
   name: string;
   color: string;
-}
-
-interface Appointment {
-  id: string;
-  employeeId: string;
-  clientName: string;
-  customerId?: string | null;
-  description: string;
-  serviceCode?: string;
-  serviceName?: string;
-  legacyEmployeeCode?: string;
-  legacyClientCode?: string;
-  legacyPlanincId?: number | null;
-  legacyHourInText?: string;
-  cabina_id?: string | null;
-  recurso_id?: string | null;
-  startTime: string;
-  endTime: string;
-  date: string;
-  color: string;
-  status: 'confirmed' | 'pending' | 'cancelled';
 }
 
 type CreateAppointmentData = {
@@ -289,6 +270,16 @@ export const Agenda: React.FC = () => {
   const { recursos } = useRecursos();
   const { preferences, isLoading: prefsLoading } = useAgendaPreferences();
 
+  const recursoCatalog = useMemo(
+    () => toRecursoCatalogEntries(recursos.data || []),
+    [recursos.data]
+  );
+
+  const cabinaCatalog = useMemo(
+    () => (cabinas.data || []).map((c: { id: string; nombre: string }) => ({ id: c.id, nombre: c.nombre })),
+    [cabinas.data]
+  );
+
   const registerAppointmentHistory = async (
     customerId: string | null | undefined,
     dateYmd: string,
@@ -472,20 +463,23 @@ export const Agenda: React.FC = () => {
     },
   });
 
-  const { data: appointmentItemsByAppt = {} } = useQuery({
+  const { data: appointmentItemsPayload = { grouped: {}, articleHints: new Map<string, ArticleResourceHint>() } } = useQuery({
     queryKey: ['appointment-time-segments', companyId, appointmentIds.join('|')],
     enabled: !!companyId && appointmentIds.length > 0,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('appointment_items')
-        .select('id,appointment_id,kind,label,duration_minutes,occupies_time,sort_order')
+        .select('id,appointment_id,kind,label,duration_minutes,occupies_time,sort_order,cabina_id,recurso_id,article_id,articles(familia,recurso_id)')
         .in('appointment_id', appointmentIds)
         .order('sort_order', { ascending: true });
       if (error) {
-        if (error.code === '42P01' || error.code === 'PGRST205') return {};
+        if (error.code === '42P01' || error.code === 'PGRST205') {
+          return { grouped: {}, articleHints: new Map<string, ArticleResourceHint>() };
+        }
         throw error;
       }
       const grouped: Record<string, AppointmentItemDraft[]> = {};
+      const articleHints = new Map<string, ArticleResourceHint>();
       for (const row of data || []) {
         const apptId = String(row.appointment_id);
         if (!grouped[apptId]) grouped[apptId] = [];
@@ -495,11 +489,24 @@ export const Agenda: React.FC = () => {
           label: String(row.label || ''),
           duration_minutes: Number(row.duration_minutes ?? 0),
           occupies_time: row.occupies_time !== false,
+          cabina_id: row.cabina_id ?? null,
+          recurso_id: row.recurso_id ?? null,
+          article_id: row.article_id ?? null,
         });
+        const art = row.articles as { familia?: string | null; recurso_id?: string | null } | null;
+        if (row.article_id && art) {
+          articleHints.set(String(row.article_id), {
+            familia: art.familia ?? null,
+            recurso_id: art.recurso_id ?? null,
+          });
+        }
       }
-      return grouped;
+      return { grouped, articleHints };
     },
   });
+
+  const appointmentItemsByAppt = appointmentItemsPayload.grouped;
+  const agendaArticleHints = appointmentItemsPayload.articleHints;
 
   // Map DB employees to grid employees with proper colors
   const employees: Employee[] = dbEmployees.map((emp, idx) => ({
@@ -550,7 +557,11 @@ export const Agenda: React.FC = () => {
     const startTime = normalizeTime(row.start_time);
     const endTime = normalizeTime(row.end_time);
     const itemDrafts = appointmentItemsByAppt[row.id] || [];
-    const timeSegments = buildAppointmentTimeSegments(startTime, itemDrafts);
+    const timeSegments = buildAppointmentTimeSegments(startTime, itemDrafts, recursoCatalog, {
+      recursos: recursoCatalog,
+      cabinas: cabinaCatalog,
+      articleHints: agendaArticleHints,
+    });
     const occupiedEndTime = occupiedEndTimeFromItems(startTime, itemDrafts);
     const paymentOnlyLabels = itemDrafts
       .filter((it) => !it.occupies_time || Number(it.duration_minutes || 0) <= 0)
@@ -694,43 +705,21 @@ export const Agenda: React.FC = () => {
     toast,
   ]);
 
-  // Allow overlaps on same employee, but not on same cabina/recurso.
-  const checkResourceConflict = (
+  // Allow overlaps on same employee, but not on same cabina/recurso per servicio.
+  const checkItemsResourceConflict = (
     date: string,
     startTime: string,
-    endTime: string,
-    cabinaId?: string | null,
-    recursoId?: string | null,
+    items: AppointmentItemDraft[],
     excludeId?: string
-  ): boolean => {
-    if (!cabinaId && !recursoId) return false;
-    const probeStart = hhmmToMinutes(startTime);
-    const probeEnd = hhmmToMinutes(endTime);
-    return appointments.some((apt) => {
-      if (apt.id === excludeId) return false;
-      if (apt.date !== date) return false;
-      const sameCabina = !!cabinaId && apt.cabina_id === cabinaId;
-      const sameRecurso = !!recursoId && apt.recurso_id === recursoId;
-      if (!sameCabina && !sameRecurso) return false;
-
-      const segments = apt.timeSegments ?? [];
-      if (segments.length) {
-        const busy = segments.some((seg) => {
-          const segStart = hhmmToMinutes(seg.startTime);
-          const segEnd = hhmmToMinutes(seg.endTime);
-          return probeStart < segEnd && probeEnd > segStart;
-        });
-        if (busy) return true;
-        return false;
-      }
-
-      const overlaps =
-        (startTime >= apt.startTime && startTime < apt.endTime) ||
-        (endTime > apt.startTime && endTime <= apt.endTime) ||
-        (startTime <= apt.startTime && endTime >= apt.endTime);
-      return overlaps;
-    });
-  };
+  ): { hasConflict: boolean; messages: string[] } =>
+    checkAppointmentItemsResourceConflict(
+      date,
+      startTime,
+      items,
+      appointments,
+      { recursos: recursoCatalog, cabinas: cabinaCatalog, articleHints: agendaArticleHints },
+      excludeId
+    );
 
   const handleSlotClick = (employeeId: string, time: string) => {
     setAppointmentPrefill(null);
@@ -757,8 +746,10 @@ export const Agenda: React.FC = () => {
       const newEndMin = newH * 60 + newM + duration;
       const newEndTime = `${Math.floor(newEndMin / 60).toString().padStart(2, '0')}:${(newEndMin % 60).toString().padStart(2, '0')}`;
 
-      if (checkResourceConflict(format(selectedDate, 'yyyy-MM-dd'), newTime, newEndTime, appointment.cabina_id, appointment.recurso_id, appointmentId)) {
-        toast({ title: 'Conflicto de recurso/cabina', description: 'Ese recurso o cabina ya está ocupado en ese tramo.', variant: 'destructive' });
+      const itemDrafts = appointmentItemsByAppt[appointmentId] || [];
+
+      if (checkItemsResourceConflict(format(selectedDate, 'yyyy-MM-dd'), newTime, itemDrafts, appointmentId).hasConflict) {
+        toast({ title: 'Conflicto de recurso/cabina', description: 'Algún servicio de la cita solapa cabina o recurso ya ocupados.', variant: 'destructive' });
         return;
       }
 
@@ -773,17 +764,6 @@ export const Agenda: React.FC = () => {
         color: appointment.color,
         status: appointment.status,
       });
-      try {
-        if (appointment.cabina_id || appointment.recurso_id) {
-          await supabase.from('appointment_resources').upsert({
-            appointment_id: appointmentId,
-            cabina_id: appointment.cabina_id || null,
-            recurso_id: appointment.recurso_id || null,
-          }, { onConflict: 'appointment_id' });
-        }
-      } catch {
-        // noop for environments without appointment_resources
-      }
 
       toast({ title: 'Cita movida' });
     } catch {
@@ -796,8 +776,8 @@ export const Agenda: React.FC = () => {
       const dateStr = data.date || format(selectedDate, 'yyyy-MM-dd');
       const items = data.items ?? [];
 
-      if (checkResourceConflict(dateStr, data.startTime, data.endTime, data.cabina_id, data.recurso_id)) {
-        toast({ title: 'Conflicto de recurso/cabina', description: 'Ese recurso o cabina ya está ocupado en ese tramo.', variant: 'destructive' });
+      if (checkItemsResourceConflict(dateStr, data.startTime, items).hasConflict) {
+        toast({ title: 'Conflicto de recurso/cabina', description: 'Algún servicio solapa cabina o recurso ya ocupados en ese tramo.', variant: 'destructive' });
         return;
       }
 
@@ -811,18 +791,6 @@ export const Agenda: React.FC = () => {
         color: data.color,
         status: data.status,
       });
-      try {
-        if (data.cabina_id || data.recurso_id) {
-          await supabase.from('appointment_resources').upsert({
-            appointment_id: created.id,
-            cabina_id: data.cabina_id || null,
-            recurso_id: data.recurso_id || null,
-          }, { onConflict: 'appointment_id' });
-        }
-      } catch {
-        // noop for environments without appointment_resources
-      }
-
       try {
         await syncAppointmentItems(created.id, items);
         await queryClient.invalidateQueries({ queryKey: appointmentItemsQueryKey(created.id) });
@@ -849,8 +817,13 @@ export const Agenda: React.FC = () => {
 
   const handleAppointmentUpdate = async (updated: Appointment, items: AppointmentItemDraft[]) => {
     try {
-      if (checkResourceConflict(updated.date, updated.startTime, updated.endTime, updated.cabina_id, updated.recurso_id, updated.id)) {
-        toast({ title: 'Conflicto de recurso/cabina', description: 'Ese recurso o cabina ya está ocupado en ese tramo.', variant: 'destructive' });
+      const conflict = checkItemsResourceConflict(updated.date, updated.startTime, items, updated.id);
+      if (conflict.hasConflict) {
+        toast({
+          title: 'Conflicto de recurso/cabina',
+          description: conflict.messages[0] || 'Algún servicio solapa cabina o recurso ya ocupados.',
+          variant: 'destructive',
+        });
         return;
       }
 
@@ -865,20 +838,6 @@ export const Agenda: React.FC = () => {
         color: updated.color,
         status: updated.status,
       });
-      try {
-        if (updated.cabina_id || updated.recurso_id) {
-          await supabase.from('appointment_resources').upsert({
-            appointment_id: updated.id,
-            cabina_id: updated.cabina_id || null,
-            recurso_id: updated.recurso_id || null,
-          }, { onConflict: 'appointment_id' });
-        } else {
-          await supabase.from('appointment_resources').delete().eq('appointment_id', updated.id);
-        }
-      } catch {
-        // noop for environments without appointment_resources
-      }
-
       try {
         await syncAppointmentItems(updated.id, items);
         await queryClient.invalidateQueries({ queryKey: appointmentItemsQueryKey(updated.id) });
@@ -1137,6 +1096,7 @@ export const Agenda: React.FC = () => {
           customers={agendaCustomers}
           cabinas={cabinas.data || []}
           recursos={recursos.data || []}
+          dayAppointments={appointments}
           initialPrefill={appointmentPrefill}
           onSave={handleAppointmentSave}
           onCancel={() => {
@@ -1157,6 +1117,7 @@ export const Agenda: React.FC = () => {
           notifyRecipients={notifyRecipients}
           cabinas={cabinas.data || []}
           recursos={recursos.data || []}
+          dayAppointments={appointments}
           onSave={handleAppointmentUpdate}
           onCharge={handleChargeAppointment}
           onNotify={handleNotifyAppointment}

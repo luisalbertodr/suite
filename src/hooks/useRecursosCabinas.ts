@@ -85,7 +85,14 @@ export const useRecursos = () => {
   });
 
   const create = useMutation({
-    mutationFn: async (values: { nombre: string; descripcion?: string; tipo?: string; cabina_id?: string | null }) => {
+    mutationFn: async (values: {
+      nombre: string;
+      descripcion?: string;
+      tipo?: string;
+      cabina_id?: string | null;
+      color?: string;
+      match_keywords?: string;
+    }) => {
       const { error } = await supabase.from('recursos').insert({ ...values, company_id: companyId! });
       if (error) throw error;
     },

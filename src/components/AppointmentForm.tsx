@@ -1,15 +1,17 @@
-import React, { useLayoutEffect, useState } from 'react';
+import React, { useLayoutEffect, useMemo, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { X, Save, User, DoorOpen, Cpu } from 'lucide-react';
+import { X, Save, User } from 'lucide-react';
 import { format } from 'date-fns';
 import { AppointmentItemsEditor } from '@/components/AppointmentItemsEditor';
-import type { AppointmentItemDraft } from '@/types/agenda';
+import type { Appointment, AppointmentItemDraft } from '@/types/agenda';
 import { calcEndFromStart, effectiveDurationMinutes } from '@/lib/agendaAppointmentItems';
+import { AGENDA_APPOINTMENT_MODAL_Z, AGENDA_APPOINTMENT_OVERLAY_Z } from '@/lib/agendaResourceColors';
+import { toRecursoCatalogEntries } from '@/lib/agendaRecursoMatch';
 import { appointmentItemLineTotal, appointmentItemsTotal } from '@/lib/agendaAppointmentPricing';
 import { AppointmentClientePicker, type AppointmentClientPick } from '@/components/forms/AppointmentClientePicker';
 import type { CustomerSearchRow } from '@/lib/customerSearch';
@@ -40,6 +42,7 @@ interface AppointmentFormProps {
   customers: CustomerSearchRow[];
   cabinas?: any[];
   recursos?: any[];
+  dayAppointments?: Appointment[];
   onSave: (appointment: any) => void;
   onCancel: () => void;
   initialPrefill?: AppointmentFormInitialPrefill | null;
@@ -52,6 +55,7 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
   customers,
   cabinas = [],
   recursos = [],
+  dayAppointments = [],
   onSave,
   onCancel,
   initialPrefill = null,
@@ -68,8 +72,6 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
     employeeId,
     startTime: time,
     status: 'confirmed' as const,
-    cabina_id: null as string | null,
-    recurso_id: null as string | null,
   });
 
   const [items, setItems] = useState<AppointmentItemDraft[]>(() => [
@@ -99,6 +101,7 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
 
   const selectedCustomerId = clientPick?.kind === 'customer' ? clientPick.customerId : null;
   const computedEndTime = calcEndFromStart(formData.startTime, effectiveDurationMinutes(items));
+  const recursosCatalog = useMemo(() => toRecursoCatalogEntries(recursos), [recursos]);
 
   const openTpvWithCurrentItems = () => {
     const prefilledCart = items
@@ -197,14 +200,12 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
       endTime,
       color: selectedEmployee?.color || '',
       status: formData.status,
-      cabina_id: formData.cabina_id,
-      recurso_id: formData.recurso_id,
       items,
     });
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-50 px-4 pt-3 pb-24 sm:p-4">
+    <div className={`fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center ${AGENDA_APPOINTMENT_MODAL_Z} px-4 pt-3 pb-28 sm:pb-24 sm:p-4`}>
       <Card className="w-full max-w-md max-h-[calc(100dvh-7rem)] overflow-y-auto">
         <CardHeader className="pb-3">
           <div className="flex items-start gap-2">
@@ -294,40 +295,13 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
               items={items}
               onChange={setItems}
               customerId={clientPick?.kind === 'customer' ? clientPick.customerId : null}
+              recursosCatalog={recursosCatalog}
+              cabinasCatalog={cabinas}
+              appointmentDate={formData.date}
+              dayAppointments={dayAppointments}
               compactHeader
             />
 
-            {/* Cabina & Recurso */}
-            <div className="grid grid-cols-2 gap-3">
-              {cabinas.length > 0 && (
-                <div>
-                  <Label className="text-xs flex items-center gap-1"><DoorOpen className="w-3 h-3" /> Cabina</Label>
-                  <Select value={formData.cabina_id || 'none'} onValueChange={(v) => setFormData({ ...formData, cabina_id: v === 'none' ? null : v })}>
-                    <SelectTrigger><SelectValue placeholder="Sin asignar" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Sin asignar</SelectItem>
-                      {cabinas.filter((c: any) => c.activa).map((c: any) => (
-                        <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-              {recursos.length > 0 && (
-                <div>
-                  <Label className="text-xs flex items-center gap-1"><Cpu className="w-3 h-3" /> Recurso</Label>
-                  <Select value={formData.recurso_id || 'none'} onValueChange={(v) => setFormData({ ...formData, recurso_id: v === 'none' ? null : v })}>
-                    <SelectTrigger><SelectValue placeholder="Sin asignar" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Sin asignar</SelectItem>
-                      {recursos.filter((r: any) => r.activo).map((r: any) => (
-                        <SelectItem key={r.id} value={r.id}>{r.nombre}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-            </div>
             <div>
               <Label className="text-xs">Observaciones</Label>
               <Input
@@ -346,7 +320,7 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
         </CardContent>
       </Card>
       {showCustomerHistory && selectedCustomerId && (
-        <div className="fixed inset-0 bg-background z-[70] overflow-auto p-4">
+        <div className={`fixed inset-0 bg-background ${AGENDA_APPOINTMENT_OVERLAY_Z} overflow-auto p-4 pb-28`}>
           <ClienteDetailView
             customerId={selectedCustomerId}
             initialTab={customerHistoryTab}

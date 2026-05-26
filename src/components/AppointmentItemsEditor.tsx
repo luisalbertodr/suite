@@ -4,8 +4,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { GripVertical, Plus, Trash2, Clock, CreditCard } from 'lucide-react';
-import type { AppointmentItemDraft, AppointmentItemKind, BonusPaymentMode } from '@/types/agenda';
+import { GripVertical, Plus, Trash2, Clock, CreditCard, AlertTriangle } from 'lucide-react';
+import type { Appointment, AppointmentItemDraft, AppointmentItemKind, BonusPaymentMode } from '@/types/agenda';
 import {
   buildAppointmentTimeSegments,
   calcEndFromStart,
@@ -13,6 +13,13 @@ import {
   effectiveDurationMinutes,
   partitionAppointmentItems,
 } from '@/lib/agendaAppointmentItems';
+import {
+  autoAssignItemRecurso,
+  toRecursoCatalogEntries,
+  type ArticleResourceHint,
+  type RecursoCatalogEntry,
+} from '@/lib/agendaRecursoMatch';
+import { findItemResourceConflicts, segmentsToConflictProbes } from '@/lib/agendaResourceConflicts';
 import { appointmentItemLineTotal, appointmentItemsTotal } from '@/lib/agendaAppointmentPricing';
 import { AppointmentItemTimeline } from '@/components/AppointmentItemTimeline';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
@@ -38,6 +45,11 @@ export interface AppointmentItemsEditorProps {
   items: AppointmentItemDraft[];
   onChange: (items: AppointmentItemDraft[]) => void;
   customerId?: string | null;
+  recursosCatalog?: RecursoCatalogEntry[];
+  cabinasCatalog?: Array<{ id: string; nombre: string; activa?: boolean }>;
+  appointmentDate?: string;
+  dayAppointments?: Appointment[];
+  excludeAppointmentId?: string;
   compactHeader?: boolean;
 }
 
@@ -46,6 +58,11 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
   items,
   onChange,
   customerId = null,
+  recursosCatalog = [],
+  cabinasCatalog = [],
+  appointmentDate,
+  dayAppointments = [],
+  excludeAppointmentId,
   compactHeader = false,
 }) => {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
@@ -57,7 +74,7 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
     queryFn: async () => {
       const { data, error } = await supabase
         .from('articles')
-        .select('id,codigo,descripcion,precio,duration_minutes,article_kind,estado')
+        .select('id,codigo,descripcion,precio,duration_minutes,article_kind,estado,familia,recurso_id')
         .eq('company_id', companyId)
         .eq('estado', 'activo')
         .order('descripcion');
@@ -69,6 +86,8 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
         precio: number | null;
         duration_minutes: number | null;
         article_kind: string | null;
+        familia?: string | null;
+        recurso_id?: string | null;
       }>;
     },
   });
@@ -190,11 +209,33 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
     []
   );
 
+  const articleHints = useMemo(() => {
+    const m = new Map<string, ArticleResourceHint>();
+    for (const a of articles) {
+      m.set(a.id, { familia: a.familia ?? null, recurso_id: a.recurso_id ?? null });
+    }
+    return m;
+  }, [articles]);
+
+  const segmentOptions = useMemo(
+    () => ({
+      recursos: recursosCatalog,
+      cabinas: cabinasCatalog.map((c) => ({ id: c.id, nombre: c.nombre })),
+      articleHints,
+    }),
+    [recursosCatalog, cabinasCatalog, articleHints]
+  );
+
   const endPreview = calcEndFromStart(startTime, effectiveDurationMinutes(items));
   const timeSegments = useMemo(
-    () => buildAppointmentTimeSegments(startTime, items),
-    [startTime, items]
+    () => buildAppointmentTimeSegments(startTime, items, recursosCatalog, segmentOptions),
+    [startTime, items, recursosCatalog, segmentOptions]
   );
+  const itemConflicts = useMemo(() => {
+    if (!appointmentDate) return new Map<string, string[]>();
+    const probes = segmentsToConflictProbes(timeSegments);
+    return findItemResourceConflicts(appointmentDate, probes, dayAppointments, excludeAppointmentId);
+  }, [appointmentDate, dayAppointments, excludeAppointmentId, timeSegments]);
   const timelineEnd = timeSegments.length
     ? timeSegments[timeSegments.length - 1]!.endTime
     : endPreview;
@@ -292,6 +333,17 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
       const nextLabel = `${a.codigo ? `${a.codigo} - ` : ''}${a.descripcion}`.trim();
       const isBonusKind = nextKind === 'bonus';
       const isProductKind = nextKind === 'product';
+      const hint: ArticleResourceHint = { familia: a.familia ?? null, recurso_id: a.recurso_id ?? null };
+      const draftBase = {
+        ...items[index],
+        label: nextLabel,
+        article_id: a.id,
+        kind: nextKind,
+      } as AppointmentItemDraft;
+      const autoRecurso =
+        !isBonusKind && !isProductKind
+          ? autoAssignItemRecurso(draftBase, recursosCatalog, hint)
+          : null;
       updateAt(index, {
         article_id: a.id,
         label: nextLabel,
@@ -301,9 +353,10 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
         duration_minutes: isBonusKind || isProductKind
           ? 0
           : (Math.max(0, Number(a.duration_minutes || 0)) || items[index]?.duration_minutes || 30),
+        recurso_id: a.recurso_id ?? autoRecurso,
       });
     },
-    [articleById, items, updateAt]
+    [articleById, items, updateAt, recursosCatalog]
   );
 
   const useVoucherAt = useCallback(
@@ -576,6 +629,53 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
             <span className="text-[10px] tabular-nums min-w-[55px] text-right">
               {appointmentItemLineTotal(item).toFixed(2)} EUR
             </span>
+            {(cabinasCatalog.length > 0 || recursosCatalog.length > 0) && (
+              <div className="basis-full flex flex-wrap items-center gap-1 pt-0.5">
+                {cabinasCatalog.filter((c) => c.activa !== false).length > 0 && (
+                  <Select
+                    value={item.cabina_id || 'none'}
+                    onValueChange={(v) => updateAt(index, { cabina_id: v === 'none' ? null : v })}
+                  >
+                    <SelectTrigger className="h-7 w-[110px] text-[10px] px-1.5">
+                      <SelectValue placeholder="Cabina" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Sin cabina</SelectItem>
+                      {cabinasCatalog.filter((c) => c.activa !== false).map((c) => (
+                        <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                {recursosCatalog.length > 0 && (
+                  <Select
+                    value={item.recurso_id || 'none'}
+                    onValueChange={(v) => updateAt(index, { recurso_id: v === 'none' ? null : v })}
+                  >
+                    <SelectTrigger className="h-7 w-[110px] text-[10px] px-1.5">
+                      <SelectValue placeholder="Recurso" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">
+                        {seg?.recursoName ? `Auto (${seg.recursoName})` : 'Auto / sin recurso'}
+                      </SelectItem>
+                      {recursosCatalog.map((r) => (
+                        <SelectItem key={r.id} value={r.id}>{r.nombre}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                {seg?.recursoName && !item.recurso_id && (
+                  <span className="text-[10px] text-muted-foreground">Detectado: {seg.recursoName}</span>
+                )}
+                {(itemConflicts.get(item.clientKey) ?? []).map((msg) => (
+                  <span key={msg} className="inline-flex items-center gap-0.5 text-[10px] text-destructive">
+                    <AlertTriangle className="w-3 h-3 shrink-0" />
+                    {msg}
+                  </span>
+                ))}
+              </div>
+            )}
             <Button
               type="button"
               variant="ghost"

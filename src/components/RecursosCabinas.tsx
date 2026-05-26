@@ -9,11 +9,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Plus, Trash2, Edit2, DoorOpen, Cpu, X, Check } from 'lucide-react';
 import { useCabinas, useRecursos } from '@/hooks/useRecursosCabinas';
 import { Skeleton } from '@/components/ui/skeleton';
+import {
+  RECURSO_COLOR_PALETTE,
+  suggestRecursoColor,
+  suggestRecursoKeywords,
+  resolveRecursoColor,
+} from '@/lib/agendaRecursoMatch';
 
-const COLORS = [
-  '#8B5CF6', '#3B82F6', '#10B981', '#F59E0B', '#EF4444',
-  '#EC4899', '#6366F1', '#14B8A6', '#F97316', '#84CC16',
-];
+const CABINA_COLORS = RECURSO_COLOR_PALETTE;
 
 export const RecursosCabinas: React.FC = () => {
   return (
@@ -99,7 +102,7 @@ const CabinasPanel: React.FC = () => {
             <div>
               <Label>Color</Label>
               <div className="flex gap-2 mt-1">
-                {COLORS.map(c => (
+                {CABINA_COLORS.map(c => (
                   <button
                     key={c}
                     className={`w-7 h-7 rounded-full border-2 transition-transform ${form.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
@@ -157,9 +160,42 @@ const RecursosPanel: React.FC = () => {
   const { cabinas } = useCabinas();
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
-  const [form, setForm] = useState({ nombre: '', descripcion: '', tipo: 'equipamiento', cabina_id: '' as string | null });
+  const [form, setForm] = useState({
+    nombre: '',
+    descripcion: '',
+    tipo: 'equipamiento',
+    cabina_id: '' as string | null,
+    color: '#3B82F6',
+    match_keywords: '',
+  });
 
-  const resetForm = () => { setForm({ nombre: '', descripcion: '', tipo: 'equipamiento', cabina_id: null }); setShowForm(false); setEditId(null); };
+  const resetForm = () => {
+    setForm({
+      nombre: '',
+      descripcion: '',
+      tipo: 'equipamiento',
+      cabina_id: null,
+      color: '#3B82F6',
+      match_keywords: '',
+    });
+    setShowForm(false);
+    setEditId(null);
+  };
+
+  const onNombreChange = (nombre: string) => {
+    setForm((prev) => {
+      const next = { ...prev, nombre };
+      if (!editId && nombre.trim()) {
+        if (!prev.match_keywords.trim()) {
+          next.match_keywords = suggestRecursoKeywords(nombre);
+        }
+        if (prev.color === '#3B82F6' || !prev.color) {
+          next.color = suggestRecursoColor(nombre);
+        }
+      }
+      return next;
+    });
+  };
 
   const handleSave = () => {
     const payload = { ...form, cabina_id: form.cabina_id || null };
@@ -171,7 +207,14 @@ const RecursosPanel: React.FC = () => {
   };
 
   const startEdit = (r: any) => {
-    setForm({ nombre: r.nombre, descripcion: r.descripcion || '', tipo: r.tipo, cabina_id: r.cabina_id || null });
+    setForm({
+      nombre: r.nombre,
+      descripcion: r.descripcion || '',
+      tipo: r.tipo,
+      cabina_id: r.cabina_id || null,
+      color: r.color || suggestRecursoColor(r.nombre),
+      match_keywords: r.match_keywords || suggestRecursoKeywords(r.nombre),
+    });
     setEditId(r.id);
     setShowForm(true);
   };
@@ -195,7 +238,7 @@ const RecursosPanel: React.FC = () => {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label>Nombre *</Label>
-                <Input value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} placeholder="Láser diodo" />
+                <Input value={form.nombre} onChange={(e) => onNombreChange(e.target.value)} placeholder="Láser, IPL, LPG…" />
               </div>
               <div>
                 <Label>Tipo</Label>
@@ -208,6 +251,31 @@ const RecursosPanel: React.FC = () => {
                     <SelectItem value="otro">Otro</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+            </div>
+            <div>
+              <Label>Palabras clave en servicios</Label>
+              <Input
+                value={form.match_keywords}
+                onChange={(e) => setForm({ ...form, match_keywords: e.target.value })}
+                placeholder="ipl,laser,lumbar,dorsal"
+              />
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Separadas por coma. Si el nombre del servicio contiene alguna, se asigna este recurso al tramo en la agenda.
+              </p>
+            </div>
+            <div>
+              <Label>Color en agenda</Label>
+              <div className="flex gap-2 mt-1 flex-wrap">
+                {RECURSO_COLOR_PALETTE.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    className={`w-7 h-7 rounded-full border-2 transition-transform ${form.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                    style={{ backgroundColor: c }}
+                    onClick={() => setForm({ ...form, color: c })}
+                  />
+                ))}
               </div>
             </div>
             <div>
@@ -241,15 +309,25 @@ const RecursosPanel: React.FC = () => {
       ) : (
         <div className="space-y-2">
           {recursos.data.map((r) => (
-            <Card key={r.id}>
+            <Card key={r.id} className="overflow-hidden">
+              <div className="h-1.5" style={{ backgroundColor: resolveRecursoColor(r) }} />
               <CardContent className="py-3 flex items-center justify-between">
                 <div className="flex items-center gap-3">
+                  <div
+                    className="w-3 h-3 rounded-full shrink-0 border border-black/10"
+                    style={{ backgroundColor: resolveRecursoColor(r) }}
+                  />
                   <div className={`w-2 h-2 rounded-full ${r.activo ? 'bg-emerald-400' : 'bg-gray-300'}`} />
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="font-medium text-sm">{r.nombre}</span>
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground capitalize">{r.tipo}</span>
                     </div>
+                    {(r as any).match_keywords && (
+                      <p className="text-[10px] text-muted-foreground mt-0.5 truncate max-w-md">
+                        Claves: {(r as any).match_keywords}
+                      </p>
+                    )}
                     {(r as any).cabinas?.nombre && (
                       <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
                         <DoorOpen className="w-3 h-3" /> {(r as any).cabinas.nombre}

@@ -1,13 +1,7 @@
 import React from 'react';
 import type { AppointmentTimeSegment } from '@/types/agenda';
 import { hhmmToMinutes } from '@/lib/agendaAppointmentItems';
-
-const SEGMENT_COLORS: Record<string, string> = {
-  service: 'bg-sky-500/75 border-sky-700/50',
-  bonus: 'bg-violet-500/75 border-violet-700/50',
-  product: 'bg-amber-500/75 border-amber-700/50',
-  other: 'bg-slate-500/75 border-slate-700/50',
-};
+import { segmentAppearance } from '@/lib/agendaResourceColors';
 
 export interface AppointmentItemTimelineProps {
   startTime: string;
@@ -51,13 +45,20 @@ export const AppointmentItemTimeline: React.FC<AppointmentItemTimelineProps> = (
           const segEnd = hhmmToMinutes(seg.endTime);
           const left = ((segStart - rangeStart) / span) * 100;
           const width = Math.max(2, ((segEnd - segStart) / span) * 100);
-          const color = SEGMENT_COLORS[seg.kind] || SEGMENT_COLORS.other;
+          const { className: barClass, style } = segmentAppearance(seg.recursoColor, seg.kind);
+          const title = [
+            `${seg.startTime}–${seg.endTime}`,
+            seg.label,
+            seg.recursoName ? `→ ${seg.recursoName}` : '',
+          ]
+            .filter(Boolean)
+            .join(' · ');
           return (
             <div
               key={seg.clientKey}
-              className={`absolute top-0 bottom-0 border ${color}`}
-              style={{ left: `${left}%`, width: `${width}%` }}
-              title={`${seg.startTime}–${seg.endTime} · ${seg.label}`}
+              className={`absolute top-0 bottom-0 ${barClass}`}
+              style={{ left: `${left}%`, width: `${width}%`, ...style }}
+              title={title}
             />
           );
         })}
@@ -66,10 +67,21 @@ export const AppointmentItemTimeline: React.FC<AppointmentItemTimelineProps> = (
         <div className="space-y-0.5">
           {segments.map((seg) => (
             <div key={`lbl-${seg.clientKey}`} className="flex items-center gap-2 text-[10px] text-muted-foreground">
+              <span
+                className="w-2 h-2 rounded-full shrink-0 border border-black/10"
+                style={
+                  seg.recursoColor && /^#[0-9A-Fa-f]{6}$/.test(seg.recursoColor)
+                    ? { backgroundColor: seg.recursoColor }
+                    : undefined
+                }
+              />
               <span className="tabular-nums shrink-0 font-medium text-foreground">
                 {seg.startTime}–{seg.endTime}
               </span>
-              <span className="truncate">{seg.label}</span>
+              <span className="truncate">
+                {seg.label}
+                {seg.recursoName ? ` (${seg.recursoName})` : ''}
+              </span>
             </div>
           ))}
         </div>
@@ -77,7 +89,3 @@ export const AppointmentItemTimeline: React.FC<AppointmentItemTimelineProps> = (
     </div>
   );
 };
-
-export function segmentColorClass(kind: string): string {
-  return SEGMENT_COLORS[kind] || SEGMENT_COLORS.other;
-}
