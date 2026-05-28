@@ -19,9 +19,10 @@ const DEFAULT_FIELDS: Array<Omit<MarketingFieldConfigInsert, 'company_id'>> = [
   { field_key: 'source',     display_label: 'Origen',                visible_in_card: false, visible_in_detail: true, sort_order: 6, field_type: 'string',   is_system: true },
 ];
 
-export const useMarketingFieldConfig = () => {
+export const useMarketingFieldConfig = (scopeCompanyId?: string | null) => {
   const queryClient = useQueryClient();
-  const { companyId, loading: companyLoading } = useCompanyFilter();
+  const { companyId: hostCompanyId, loading: companyLoading } = useCompanyFilter();
+  const companyId = scopeCompanyId ?? hostCompanyId;
 
   const query = useQuery({
     queryKey: ['marketing-field-config', companyId],

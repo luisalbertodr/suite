@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import { UserCompanyAccessPanel } from '@/components/UserCompanyAccessPanel';
 import { useToast } from '@/hooks/use-toast';
+import { invokeMain } from '@/lib/invokeMain';
 import { supabase } from '@/lib/supabase';
 import { useRoles } from '@/hooks/useRoles';
 
@@ -25,6 +27,7 @@ interface UserWithDetails {
   };
   user_company_roles?: Array<{
     id: string;
+    company_id: string;
     role: {
       name: string;
     };
@@ -38,6 +41,7 @@ interface EditUserModalProps {
   isOpen: boolean;
   onClose: () => void;
   onUserUpdated: () => void;
+  multiCompany?: boolean;
 }
 
 const MENU_PERMISSIONS = [
@@ -65,7 +69,8 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({
   availablePermissions,
   isOpen,
   onClose,
-  onUserUpdated
+  onUserUpdated,
+  multiCompany = false,
 }) => {
   const [email, setEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -146,95 +151,42 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
-    
+
+    const targetCompanyId = companyId || user.profiles?.company_id;
+    if (!targetCompanyId && !newPassword.trim() && email === user.email) {
+      toast({
+        title: 'Datos incompletos',
+        description: 'Selecciona una empresa o indica qué quieres cambiar.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setLoading(true);
     try {
-      console.log('Starting user update process...');
-
-      if (email !== user.email) {
-        console.log('Updating email...');
-        const { error: emailError } = await supabase.auth.admin.updateUserById(
-          user.id,
-          { email }
-        );
-        if (emailError) throw emailError;
-      }
-
-      if (newPassword.trim()) {
-        console.log('Updating password...');
-        const { error: passwordError } = await supabase.auth.admin.updateUserById(
-          user.id,
-          { password: newPassword }
-        );
-        if (passwordError) throw passwordError;
-      }
-
-      if (companyId && companyId !== user.profiles?.company_id) {
-        console.log('Updating company profile...');
-        const { error: profileError } = await supabase
-          .from('user_profiles')
-          .upsert({
-            user_id: user.id,
-            company_id: companyId
-          });
-        if (profileError) throw profileError;
-      }
-
-      if (roleId) {
-        console.log('Updating user roles...');
-        await supabase
-          .from('user_company_roles')
-          .delete()
-          .eq('user_id', user.id);
-
-        const { error: roleError } = await supabase
-          .from('user_company_roles')
-          .insert({
-            user_id: user.id,
-            company_id: companyId,
-            role_id: roleId
-          });
-        if (roleError) throw roleError;
-      }
-
-      console.log('Updating user permissions...', selectedPermissions);
-      const targetCompanyId = companyId || user.profiles?.company_id;
-      
-      if (targetCompanyId) {
-        await supabase
-          .from('user_permissions')
-          .delete()
-          .eq('user_id', user.id)
-          .eq('company_id', targetCompanyId);
-
-        if (selectedPermissions.length > 0) {
-          const permissionsToInsert = selectedPermissions.map(permissionId => ({
-            user_id: user.id,
-            company_id: targetCompanyId,
-            permission_id: permissionId
-          }));
-
-          const { error: permissionsError } = await supabase
-            .from('user_permissions')
-            .insert(permissionsToInsert);
-          
-          if (permissionsError) throw permissionsError;
-        }
-      }
+      await invokeMain({
+        action: 'updateUser',
+        userId: user.id,
+        ...(email !== user.email ? { email } : {}),
+        ...(newPassword.trim() ? { password: newPassword.trim() } : {}),
+        ...(targetCompanyId ? { company_id: targetCompanyId } : {}),
+        ...(roleId ? { role_id: roleId } : {}),
+        permission_ids: selectedPermissions,
+      });
 
       toast({
-        title: "Usuario actualizado",
-        description: "Los datos del usuario han sido actualizados correctamente."
+        title: 'Usuario actualizado',
+        description: 'Los datos del usuario han sido actualizados correctamente.',
       });
-      
+
       onUserUpdated();
       onClose();
     } catch (error) {
       console.error('Error updating user:', error);
       toast({
-        title: "Error",
-        description: "No se pudo actualizar el usuario: " + (error as any).message,
-        variant: "destructive"
+        title: 'Error',
+        description: 'No se pudo actualizar el usuario: ' + (error as Error).message,
+        variant: 'destructive',
       });
     } finally {
       setLoading(false);
@@ -259,6 +211,9 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({
       <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Editar Usuario: {user.email}</DialogTitle>
+          <DialogDescription className="sr-only">
+            Modificar email, contraseña, empresa, rol y permisos del usuario.
+          </DialogDescription>
         </DialogHeader>
         
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -285,7 +240,7 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({
             </div>
           </div>
 
-          {hasCompaniesPermission() && (
+          {(multiCompany || hasCompaniesPermission()) && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="edit-company">Empresa</Label>
@@ -359,6 +314,17 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({
               Permisos seleccionados: {selectedPermissions.length}
             </div>
           </div>
+
+          {multiCompany && user && (
+            <UserCompanyAccessPanel
+              userId={user.id}
+              userEmail={user.email}
+              companies={companies}
+              assignedRoles={user.user_company_roles ?? []}
+              roles={roles}
+              onChanged={onUserUpdated}
+            />
+          )}
 
           <div className="flex justify-end space-x-2 pt-4">
             <Button type="button" variant="outline" onClick={onClose}>

@@ -328,9 +328,10 @@ export const parseMetaLeadPayload = (raw: MetaLeadFormPayload): ParsedMetaLead[]
   });
 };
 
-export const useMarketingLeads = () => {
+export const useMarketingLeads = (scopeCompanyId?: string | null) => {
   const queryClient = useQueryClient();
-  const { companyId, loading: companyLoading } = useCompanyFilter();
+  const { companyId: hostCompanyId, loading: companyLoading } = useCompanyFilter();
+  const companyId = scopeCompanyId ?? hostCompanyId;
 
   const query = useQuery({
     queryKey: ['marketing-leads', companyId],

@@ -11,7 +11,7 @@ Promueve filas de legacy.planinc a public.agenda_appointments.
 
 Variables (.env o entorno):
   SUPABASE_DB_URL
-  PROMOTE_COMPANY_ID   (default UUID en código)
+  PROMOTE_COMPANY_ID / LEGACY_COMPANY_ID  (default: scripts/legacy_company.py)
   PROMOTE_CLEAR        legacy_only | all   (sin --clean-import)
   PROMOTE_STATUS       ej. confirmed
   PROMOTE_MERGE_CONSECUTIVE  1|0   (default 1: fusionar tramos consecutivos)
@@ -44,10 +44,10 @@ from pathlib import Path
 import psycopg2
 from psycopg2.extras import RealDictCursor, execute_values
 
+from legacy_company import get_company_id
+
 ROOT = Path(__file__).resolve().parents[1]
 ENV_PATH = ROOT / ".env"
-
-DEFAULT_COMPANY = "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4"
 
 
 def load_dotenv() -> None:
@@ -398,7 +398,7 @@ def main() -> None:
     url = os.environ.get("SUPABASE_DB_URL", "").strip()
     if not url:
         raise SystemExit("Falta SUPABASE_DB_URL")
-    company_id = os.environ.get("PROMOTE_COMPANY_ID", DEFAULT_COMPANY).strip()
+    company_id = get_company_id("PROMOTE_COMPANY_ID", "LEGACY_COMPANY_ID")
     clear_mode = "all" if args.clean_import else os.environ.get("PROMOTE_CLEAR", "legacy_only").strip().lower()
     if args.clean_import and not args.dry_run:
         print(
@@ -504,6 +504,24 @@ def main() -> None:
             row = dict(ar)
             article_by_legacy[c] = row
             article_by_legacy[c.lstrip("0") or "0"] = row
+
+    customer_by_legacy: dict[str, str] = {}
+    if public_table_exists(cur, "customers"):
+        cur.execute(
+            """
+            SELECT id, legacy_codcli
+            FROM public.customers
+            WHERE company_id = %s AND NULLIF(btrim(legacy_codcli), '') IS NOT NULL
+            """,
+            (company_id,),
+        )
+        for cr in cur.fetchall():
+            code = str(cr.get("legacy_codcli") or "").strip()
+            if not code:
+                continue
+            cid = str(cr["id"])
+            customer_by_legacy[code] = cid
+            customer_by_legacy[code.lstrip("0") or "0"] = cid
 
     cur.execute("SELECT * FROM legacy.planinc")
     source_rows = cur.fetchall()
@@ -671,6 +689,11 @@ def main() -> None:
             row_out["legacy_codemp"] = first["codemp_raw"]
         if "legacy_codcli" in types:
             row_out["legacy_codcli"] = first["codcli"]
+        if "customer_id" in types:
+            cod = str(first.get("codcli") or "").strip()
+            cid = customer_by_legacy.get(cod) or customer_by_legacy.get(norm_cli_key(cod))
+            if cid:
+                row_out["customer_id"] = cid
 
         item_templates = build_item_templates_for_group(
             group,

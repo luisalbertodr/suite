@@ -25,7 +25,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
   const { companyId } = useCompanyFilter();
   const { recursos } = useRecursos();
   const bonoDefRef = useRef<ArticleBonoDefinitionBlockRef>(null);
-  const { families, ensureVariosFamilyExists, loading: familiesLoading, error: familiesError } = useFamilies();
+  const { families, familyNames, ensureVariosFamilyExists, loading: familiesLoading, error: familiesError, updateFamilyBilling } = useFamilies();
   const { createVariations } = useArticleVariations();
   const [loading, setLoading] = useState(false);
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -57,6 +57,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
     estado: 'activo',
     iva_percentage: 21,
     recurso_id: null as string | null,
+    billing_company_id: null as string | null,
   });
 
   // Initialize form - only run once
@@ -90,6 +91,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
         estado: article.estado,
         iva_percentage: article.iva_percentage || 21,
         recurso_id: article.recurso_id ?? null,
+        billing_company_id: article.billing_company_id ?? null,
       });
       setImagePreview(article.foto_url);
       setImageFile(null);
@@ -442,7 +444,11 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
                   <form onSubmit={handleSubmit} className="space-y-6">
                     <ArticleFormFields
                       formData={formData}
-                      families={families}
+                      families={familyNames}
+                      billingCompanyId={formData.billing_company_id ?? null}
+                      onBillingCompanyChange={(id) =>
+                        setFormData((f) => ({ ...f, billing_company_id: id }))
+                      }
                       recursos={recursos.data || []}
                       onInputChange={handleInputChange}
                       onProductTypeChange={handleProductTypeChange}
@@ -505,7 +511,11 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
               <form onSubmit={handleSubmit} className="p-6 space-y-6">
                 <ArticleFormFields
                   formData={formData}
-                  families={families}
+                  families={familyNames}
+                  billingCompanyId={formData.billing_company_id ?? null}
+                  onBillingCompanyChange={(id) =>
+                    setFormData((f) => ({ ...f, billing_company_id: id }))
+                  }
                   recursos={recursos.data || []}
                   onInputChange={handleInputChange}
                   onProductTypeChange={handleProductTypeChange}

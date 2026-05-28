@@ -1,43 +1,56 @@
 import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
-import { X, Save, User, Trash2 } from 'lucide-react';
+import { X, Save, User, Trash2, ArrowLeft } from 'lucide-react';
 import { AppointmentItemsEditor } from '@/components/AppointmentItemsEditor';
+import { AppointmentCustomerSummaryBar } from '@/components/AppointmentCustomerSummaryBar';
+import { AppointmentSelectContent } from '@/components/AppointmentSelectContent';
+import { APPOINTMENT_CUSTOMER_SUMMARY_FIELDS } from '@/lib/appointmentCustomerSummary';
 import { useAppointmentItems } from '@/hooks/useAppointmentItems';
 import type { AppointmentItemDraft } from '@/types/agenda';
 import type { Appointment as AgendaAppointment } from '@/types/agenda';
 import { calcEndFromStart, effectiveDurationMinutes, minutesBetweenHHmm } from '@/lib/agendaAppointmentItems';
-import { AGENDA_APPOINTMENT_MODAL_Z, AGENDA_APPOINTMENT_OVERLAY_Z } from '@/lib/agendaResourceColors';
+import { AGENDA_APPOINTMENT_MODAL_Z } from '@/lib/agendaResourceColors';
 import { toRecursoCatalogEntries } from '@/lib/agendaRecursoMatch';
 import { appointmentItemsTotal } from '@/lib/agendaAppointmentPricing';
+import { appointmentChargeableTotal, canChargeAppointment, summarizeAppointmentChargeState } from '@/lib/appointmentSales';
+import { useAppointmentSales } from '@/hooks/useAppointmentSale';
 import { AppointmentClientePicker, type AppointmentClientPick } from '@/components/forms/AppointmentClientePicker';
 import type { CustomerSearchRow } from '@/lib/customerSearch';
-import { useQuery } from '@tanstack/react-query';
+import { useCustomerActiveBonos } from '@/hooks/useCustomerActiveBonos';
 import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
-import { ClienteDetailView } from '@/components/ClienteDetailView';
+import {
+  filterEmployeesForBillingCompanies,
+  resolveRequiredBillingCompanyIds,
+  buildFamilyBillingMap,
+} from '@/lib/billingCompany';
+import { useFamilies } from '@/hooks/useFamilies';
+import { ClienteDetailOverlay } from '@/components/cliente/ClienteDetailOverlay';
 import { PermissionButton } from '@/components/PermissionButton';
 import { usePermissionGuard } from '@/hooks/usePermissionGuard';
+import { resolveAppointmentClientPick } from '@/lib/appointmentCustomerResolve';
 import { normalizeLegacyAppointmentDescription } from '@/lib/legacyAppointmentItems';
 
-interface Employee { id: string; name: string; color: string; }
+interface Employee { id: string; name: string; color: string; billing_company_id?: string | null; }
 interface Appointment {
   id: string;
   employeeId: string;
   clientName: string;
   customerId?: string | null;
+  legacyClientCode?: string | null;
   description: string;
   startTime: string;
   endTime: string;
   date: string;
   color: string;
-  cabina_id?: string | null;
-  recurso_id?: string | null;
   status: 'confirmed' | 'pending' | 'cancelled';
 }
 
@@ -54,19 +67,16 @@ interface EditAppointmentFormProps {
   onNotify?: (appointment: Appointment, recipientUserId: string, message: string) => Promise<void> | void;
   onDelete: (appointmentId: string) => void;
   onCancel: () => void;
+  returnCustomerId?: string | null;
+  onReturnToCustomerHistory?: () => void;
+  onHistoryAppointmentClick?: (appointmentId: string, dateYmd: string) => void;
 }
 
 function initialClientPick(apt: Appointment, custs: CustomerSearchRow[]): AppointmentClientPick | null {
-  if (apt.customerId) {
-    const c = custs.find((x) => x.id === apt.customerId);
-    if (c) return { kind: 'customer', customerId: c.id, displayName: c.name };
-    return { kind: 'customer', customerId: apt.customerId, displayName: apt.clientName };
-  }
-  // Compatibilidad legacy: si no hay customerId, intenta vincular por nombre exacto.
-  const byName = custs.find((x) => x.name.trim().toLowerCase() === apt.clientName.trim().toLowerCase());
-  if (byName) return { kind: 'customer', customerId: byName.id, displayName: byName.name };
-  if (apt.clientName.trim()) return { kind: 'manual', name: apt.clientName };
-  return null;
+  return resolveAppointmentClientPick(apt.clientName, custs, {
+    customerId: apt.customerId,
+    legacyCodcli: apt.legacyClientCode,
+  });
 }
 
 function defaultLabelFromDescription(description: string): string {
@@ -131,14 +141,24 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
   onNotify,
   onDelete,
   onCancel,
+  returnCustomerId,
+  onReturnToCustomerHistory,
+  onHistoryAppointmentClick,
 }) => {
+  const navigate = useNavigate();
   const { companyId } = useCompanyFilter();
+  const { families: familyRecords } = useFamilies({ scope: 'all' });
+  const familyBillingMap = useMemo(
+    () => buildFamilyBillingMap(familyRecords.map((f) => ({ name: f.name, billing_company_id: f.billing_company_id }))),
+    [familyRecords],
+  );
+
   const { requireOrToast: requirePermissionOrToast } = usePermissionGuard();
   const [clientPick, setClientPick] = useState<AppointmentClientPick | null>(() =>
     initialClientPick(appointment, customers)
   );
   const [showCustomerHistory, setShowCustomerHistory] = useState(false);
-  const [customerHistoryTab, setCustomerHistoryTab] = useState<'timeline' | 'vouchers' | 'ficha' | 'facturacion'>('timeline');
+  const [customerHistoryTab, setCustomerHistoryTab] = useState<'timeline' | 'vouchers' | 'ficha'>('ficha');
 
   const [formData, setFormData] = useState({
     description: normalizeLegacyAppointmentDescription(appointment.description),
@@ -156,22 +176,18 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
 
   useLayoutEffect(() => {
     setClientPick(initialClientPick(appointment, customers));
-  }, [appointment.id]);
+  }, [appointment.id, customers, appointment.customerId, appointment.legacyClientCode, appointment.clientName]);
 
   useEffect(() => {
-    if (!appointment.customerId || customers.length === 0) return;
-    const c = customers.find((x) => x.id === appointment.customerId);
-    if (!c) return;
+    if (customers.length === 0) return;
+    const resolved = initialClientPick(appointment, customers);
+    if (!resolved || resolved.kind !== 'customer') return;
     setClientPick((prev) => {
-      if (prev?.kind === 'customer' && prev.customerId === c.id) {
-        return { kind: 'customer', customerId: c.id, displayName: c.name };
-      }
-      if (!prev && appointment.customerId === c.id) {
-        return { kind: 'customer', customerId: c.id, displayName: c.name };
-      }
+      if (prev?.kind === 'customer' && prev.customerId === resolved.customerId) return prev;
+      if (!prev || prev.kind === 'manual') return resolved;
       return prev;
     });
-  }, [customers, appointment.customerId, appointment.id]);
+  }, [customers, appointment]);
 
   useLayoutEffect(() => {
     if (itemsLoading || loadedItems === undefined) return;
@@ -179,12 +195,83 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
     else setItems(seedItemsFromAppointment(appointment));
   }, [itemsLoading, loadedItems, appointment]);
 
+  const articleIdsForItems = useMemo(
+    () => items.map((it) => it.article_id).filter(Boolean) as string[],
+    [items],
+  );
+
+  const { data: itemArticles = [] } = useQuery({
+    queryKey: ['edit-appointment-item-articles', companyId, articleIdsForItems.join(',')],
+    enabled: !!companyId && articleIdsForItems.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('articles')
+        .select('id, familia, billing_company_id, company_id')
+        .in('id', articleIdsForItems);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const articlesMap = useMemo(
+    () => new Map(itemArticles.map((a) => [a.id, a])),
+    [itemArticles],
+  );
+
+  const requiredBillingIds = useMemo(
+    () =>
+      companyId
+        ? resolveRequiredBillingCompanyIds(articleIdsForItems, articlesMap, familyBillingMap, companyId)
+        : [],
+    [articleIdsForItems, articlesMap, familyBillingMap, companyId],
+  );
+
+  const eligibleEmployees = useMemo(
+    () =>
+      companyId
+        ? filterEmployeesForBillingCompanies(employees, requiredBillingIds, companyId)
+        : employees,
+    [employees, requiredBillingIds, companyId],
+  );
+
+  const hasMixedBillingServices = requiredBillingIds.length > 1;
+
   const employee = employees.find(e => e.id === formData.employeeId);
-  const total = appointmentItemsTotal(items);
+  const chargeableTotal = appointmentChargeableTotal(items);
+  const { data: appointmentSales = [] } = useAppointmentSales(appointment.id);
+  const chargeState = summarizeAppointmentChargeState(appointmentSales, chargeableTotal);
+  const chargeCheck = canChargeAppointment({
+    status: formData.status,
+    chargeableTotal,
+    existingSales: appointmentSales,
+  });
+  const chargedTotal = chargeState.completedTotal;
+  const saleTicketsLabel = appointmentSales
+    .map((s) => s.ticket_number)
+    .filter(Boolean)
+    .join(' · ') || null;
+
+  const { data: linkedInvoice } = useQuery({
+    queryKey: ['appointment-linked-invoice', primarySale?.invoice_id, appointmentSales.map((s) => s.invoice_id).join(',')],
+    enabled: appointmentSales.some((s) => s.invoice_id),
+    queryFn: async () => {
+      const invoiceId = appointmentSales.find((s) => s.invoice_id)?.invoice_id;
+      if (!invoiceId) return null;
+      const { data, error } = await supabase
+        .from('invoices')
+        .select('id, number, total_amount')
+        .eq('id', invoiceId)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+  });
+
   const recursosCatalog = useMemo(() => toRecursoCatalogEntries(recursos), [recursos]);
   const selectedCustomerId = clientPick?.kind === 'customer'
     ? clientPick.customerId
     : (appointment.customerId ?? null);
+  const legacyCodcli = appointment.legacyClientCode?.trim() || null;
 
   const { data: selectedCustomer } = useQuery({
     queryKey: ['edit-appointment-customer-summary', selectedCustomerId],
@@ -192,7 +279,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
     queryFn: async () => {
       const { data, error } = await supabase
         .from('customers')
-        .select('id,name,tax_id,email,phone,phone_mobile,phone_home,notes')
+        .select(APPOINTMENT_CUSTOMER_SUMMARY_FIELDS)
         .eq('id', selectedCustomerId)
         .single();
       if (error) throw error;
@@ -200,30 +287,56 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
     },
   });
 
-  const { data: activeVouchersCount = 0 } = useQuery({
-    queryKey: ['edit-appointment-active-vouchers-count', companyId, selectedCustomerId],
-    enabled: !!companyId && !!selectedCustomerId,
+  const { data: customerByLegacy } = useQuery({
+    queryKey: ['edit-appointment-customer-by-legacy', companyId, legacyCodcli],
+    enabled: !!companyId && !!legacyCodcli && !selectedCustomerId,
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('customer_vouchers')
-        .select('id,total_sessions,used_sessions,is_active')
-        .eq('company_id', companyId)
-        .eq('customer_id', selectedCustomerId)
-        .eq('is_active', true);
+        .from('customers')
+        .select(APPOINTMENT_CUSTOMER_SUMMARY_FIELDS)
+        .eq('company_id', companyId!)
+        .eq('legacy_codcli', legacyCodcli!)
+        .maybeSingle();
       if (error) throw error;
-      return (data || []).filter((v: any) => Number(v.total_sessions || 0) > Number(v.used_sessions || 0)).length;
+      if (data) return data;
+      const norm = legacyCodcli!.replace(/^0+/, '') || '0';
+      const { data: rows, error: err2 } = await supabase
+        .from('customers')
+        .select(APPOINTMENT_CUSTOMER_SUMMARY_FIELDS)
+        .eq('company_id', companyId!)
+        .not('legacy_codcli', 'is', null);
+      if (err2) throw err2;
+      return (rows ?? []).find((c) => {
+        const cCode = String(c.legacy_codcli ?? '').trim();
+        return cCode === legacyCodcli || (cCode.replace(/^0+/, '') || '0') === norm;
+      }) ?? null;
     },
   });
 
+  const summaryCustomer = selectedCustomer ?? customerByLegacy ?? null;
+  const effectiveCustomerId = selectedCustomerId ?? summaryCustomer?.id ?? null;
+
+  useEffect(() => {
+    if (!customerByLegacy || selectedCustomerId) return;
+    setClientPick({
+      kind: 'customer',
+      customerId: customerByLegacy.id,
+      displayName: String(customerByLegacy.name ?? appointment.clientName),
+    });
+  }, [customerByLegacy, selectedCustomerId, appointment.clientName]);
+
+  const { data: activeBonos = [] } = useCustomerActiveBonos(effectiveCustomerId);
+  const activeVouchersCount = activeBonos.length;
+
   const { data: pendingDebt = 0 } = useQuery({
-    queryKey: ['edit-appointment-customer-debt-summary', companyId, selectedCustomerId],
-    enabled: !!companyId && !!selectedCustomerId,
+    queryKey: ['edit-appointment-customer-debt-summary', companyId, effectiveCustomerId],
+    enabled: !!companyId && !!effectiveCustomerId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('invoices')
         .select('total_amount,paid_status,status')
         .eq('company_id', companyId)
-        .eq('customer_id', selectedCustomerId)
+        .eq('customer_id', effectiveCustomerId)
         .eq('status', 'issued')
         .or('paid_status.is.null,paid_status.eq.false');
       if (error) throw error;
@@ -251,66 +364,53 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
       <Card className="w-full max-w-lg max-h-[calc(100dvh-7rem)] overflow-y-auto">
         <CardHeader className="pb-3">
           <div className="flex items-start gap-2">
+            {returnCustomerId && onReturnToCustomerHistory && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 shrink-0 gap-1 text-xs"
+                onClick={onReturnToCustomerHistory}
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                Historial
+              </Button>
+            )}
             <CardTitle className="text-base flex items-center gap-2 shrink-0 pt-1">
               <User className="w-4 h-4" /> Editar Cita
             </CardTitle>
             <div className="flex-1 min-w-0">
               <AppointmentClientePicker customers={customers} value={clientPick} onChange={setClientPick} />
             </div>
-            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0 mt-0.5" onClick={onCancel}>
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0 mt-0.5" onClick={onCancel} title="Cerrar y volver a la agenda">
               <X className="w-4 h-4" />
             </Button>
           </div>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-3">
-            {selectedCustomerId && selectedCustomer && (
-              <div className="rounded-md border bg-muted/30 p-2 text-xs">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-muted-foreground truncate">
-                    {[selectedCustomer.tax_id, selectedCustomer.phone_mobile || selectedCustomer.phone || selectedCustomer.phone_home, selectedCustomer.email]
-                      .filter(Boolean)
-                      .join(' · ')}
-                  </div>
-                  <div className="flex flex-col gap-1 shrink-0">
-                    <Button type="button" variant="outline" size="sm" className="h-6 text-[11px] px-2" onClick={() => setShowCustomerHistory(true)}>
-                      Ficha
-                    </Button>
-                    <Select value={formData.status} onValueChange={(v) => setFormData({ ...formData, status: v as Appointment['status'] })}>
-                      <SelectTrigger className="h-6 text-[11px] px-2 min-w-[104px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="confirmed">Confirmada</SelectItem>
-                        <SelectItem value="pending">Pendiente</SelectItem>
-                        <SelectItem value="cancelled">Cancelada</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <div className="flex gap-3 mt-1">
-                  <button type="button" className="hover:underline" onClick={() => { setCustomerHistoryTab('vouchers'); setShowCustomerHistory(true); }}>
-                    Bonos activos: <strong>{activeVouchersCount}</strong>
-                  </button>
-                  <button
-                    type="button"
-                    className="hover:underline text-primary"
-                    onClick={() => { setCustomerHistoryTab('vouchers'); setShowCustomerHistory(true); }}
-                  >
-                    Crear/editar bono
-                  </button>
-                  <button type="button" className="hover:underline" onClick={() => { setCustomerHistoryTab('facturacion'); setShowCustomerHistory(true); }}>
-                    Deuda: <strong>{pendingDebt.toFixed(2)} EUR</strong>
-                  </button>
-                  <button
-                    type="button"
-                    className="hover:underline"
-                    onClick={() => onCharge?.({ ...appointment, ...formData }, items)}
-                  >
-                    Total cita: <strong>{total.toFixed(2)} EUR</strong>
-                  </button>
-                </div>
-              </div>
+            {summaryCustomer && (
+              <AppointmentCustomerSummaryBar
+                customer={summaryCustomer}
+                status={formData.status}
+                onStatusChange={(status) => setFormData({ ...formData, status })}
+                onOpenFicha={() => { setCustomerHistoryTab('ficha'); setShowCustomerHistory(true); }}
+                activeVouchersCount={activeVouchersCount}
+                pendingDebt={pendingDebt}
+                chargeableTotal={chargeableTotal}
+                chargedTotal={chargedTotal}
+                saleTicket={saleTicketsLabel}
+                invoiceNumber={linkedInvoice?.number ?? null}
+                chargeBlockedReason={!chargeCheck.allowed ? chargeCheck.reason : null}
+                onOpenVouchers={() => { setCustomerHistoryTab('vouchers'); setShowCustomerHistory(true); }}
+                onOpenFacturacion={() => { setCustomerHistoryTab('timeline'); setShowCustomerHistory(true); }}
+                onViewInvoice={linkedInvoice
+                  ? () => navigate(`/facturacion?invoice=${linkedInvoice.id}`)
+                  : undefined}
+                onCharge={chargeCheck.allowed && onCharge
+                  ? () => onCharge({ ...appointment, ...formData }, items)
+                  : undefined}
+              />
             )}
             <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
               <div>
@@ -327,11 +427,16 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
               </div>
               <div>
                 <Label className="text-xs">Empleada</Label>
+                {hasMixedBillingServices && (
+                  <p className="text-[10px] text-amber-600 mb-1">
+                    Servicios de distintas empresas en la misma cita.
+                  </p>
+                )}
                 <Select value={formData.employeeId} onValueChange={(v) => setFormData({ ...formData, employeeId: v })}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {employees.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}
-                  </SelectContent>
+                  <AppointmentSelectContent>
+                    {eligibleEmployees.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}
+                  </AppointmentSelectContent>
                 </Select>
               </div>
             </div>
@@ -343,7 +448,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                 startTime={formData.startTime}
                 items={items}
                 onChange={setItems}
-                customerId={clientPick?.kind === 'customer' ? clientPick.customerId : null}
+                customerId={effectiveCustomerId}
                 recursosCatalog={recursosCatalog}
                 cabinasCatalog={cabinas}
                 appointmentDate={formData.date}
@@ -398,10 +503,15 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                     type="button"
                     variant="secondary"
                     size="sm"
-                    disabled={itemsLoading}
+                    disabled={itemsLoading || !chargeCheck.allowed}
+                    title={chargeCheck.reason}
                     onClick={() => onCharge({ ...appointment, ...formData }, items)}
                   >
-                    Cobrar
+                    {chargeState.allCompleted
+                      ? 'Cobrada'
+                      : chargeCheck.partial
+                        ? 'Cobrar resto en TPV'
+                        : 'Cobrar en TPV'}
                   </Button>
                 )}
                 <Button type="submit" size="sm" disabled={!clientPick}><Save className="w-4 h-4 mr-1" /> Guardar</Button>
@@ -412,11 +522,11 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                 <Label className="text-xs">Enviar aviso a</Label>
                 <Select value={notifyTo} onValueChange={setNotifyTo}>
                   <SelectTrigger><SelectValue placeholder="Selecciona usuario" /></SelectTrigger>
-                  <SelectContent>
+                  <AppointmentSelectContent>
                     {notifyRecipients.map((r) => (
                       <SelectItem key={r.userId} value={r.userId}>{r.label}</SelectItem>
                     ))}
-                  </SelectContent>
+                  </AppointmentSelectContent>
                 </Select>
                 <Textarea
                   rows={2}
@@ -447,15 +557,16 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
           </form>
         </CardContent>
       </Card>
-      {showCustomerHistory && selectedCustomerId && (
-        <div className={`fixed inset-0 bg-background ${AGENDA_APPOINTMENT_OVERLAY_Z} overflow-auto p-4 pb-28`}>
-          <ClienteDetailView
-            customerId={selectedCustomerId}
-            initialTab={customerHistoryTab}
-            onBack={() => setShowCustomerHistory(false)}
-          />
-        </div>
-      )}
+      <ClienteDetailOverlay
+        open={showCustomerHistory && !!effectiveCustomerId}
+        customerId={effectiveCustomerId ?? ''}
+        initialTab={customerHistoryTab}
+        onClose={() => setShowCustomerHistory(false)}
+        onAppointmentClick={(appointmentId, dateYmd) => {
+          setShowCustomerHistory(false);
+          onHistoryAppointmentClick?.(appointmentId, dateYmd);
+        }}
+      />
     </div>
   );
 };

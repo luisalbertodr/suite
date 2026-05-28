@@ -14,26 +14,47 @@ export const useInvoiceOperations = () => {
       console.error('No company ID available for invoice number generation');
       throw new Error('No company ID available');
     }
-    
-    try {
-      console.log('Generating invoice number with company ID:', companyId);
-      
-      // Generate the number using the RPC function with correct parameter name
+
+    const tryNewSignature = async () => {
       const { data, error } = await supabase.rpc('generate_invoice_number', {
         p_company_id: companyId,
-        p_is_corrective: isCorrectiveInvoice
+        p_is_corrective: isCorrectiveInvoice,
       });
+      if (error) throw error;
+      return data as string;
+    };
 
-      if (error) {
-        console.error('Error generating invoice number:', error);
+    const tryLegacySignature = async () => {
+      const prefix = isCorrectiveInvoice ? 'R-FAC' : 'FAC';
+      const { data, error } = await supabase.rpc('generate_invoice_number', {
+        company_id: companyId,
+        prefix,
+      });
+      if (error) throw error;
+      return data as string;
+    };
+
+    try {
+      return await tryNewSignature();
+    } catch (error: unknown) {
+      const err = error as { code?: string; message?: string };
+      const isSignatureMismatch =
+        err?.code === 'PGRST202' ||
+        String(err?.message || '').includes('Could not find the function');
+
+      if (!isSignatureMismatch) {
+        console.error('Failed to generate invoice number:', error);
         throw error;
       }
 
-      console.log('Generated invoice number:', data);
-      return data;
-    } catch (error) {
-      console.error('Failed to generate invoice number:', error);
-      throw error;
+      try {
+        const legacyNumber = await tryLegacySignature();
+        console.log('Generated invoice number (legacy RPC):', legacyNumber);
+        return legacyNumber;
+      } catch (legacyError) {
+        console.error('Failed to generate invoice number:', legacyError);
+        throw legacyError;
+      }
     }
   };
 

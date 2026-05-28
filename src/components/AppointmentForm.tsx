@@ -4,27 +4,39 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { X, Save, User } from 'lucide-react';
 import { format } from 'date-fns';
 import { AppointmentItemsEditor } from '@/components/AppointmentItemsEditor';
+import { AppointmentCustomerSummaryBar } from '@/components/AppointmentCustomerSummaryBar';
+import { AppointmentSelectContent } from '@/components/AppointmentSelectContent';
+import { APPOINTMENT_CUSTOMER_SUMMARY_FIELDS } from '@/lib/appointmentCustomerSummary';
 import type { Appointment, AppointmentItemDraft } from '@/types/agenda';
 import { calcEndFromStart, effectiveDurationMinutes } from '@/lib/agendaAppointmentItems';
-import { AGENDA_APPOINTMENT_MODAL_Z, AGENDA_APPOINTMENT_OVERLAY_Z } from '@/lib/agendaResourceColors';
+import { AGENDA_APPOINTMENT_MODAL_Z } from '@/lib/agendaResourceColors';
 import { toRecursoCatalogEntries } from '@/lib/agendaRecursoMatch';
-import { appointmentItemLineTotal, appointmentItemsTotal } from '@/lib/agendaAppointmentPricing';
+import { appointmentItemLineTotal } from '@/lib/agendaAppointmentPricing';
+import { appointmentChargeableTotal, canChargeAppointment } from '@/lib/appointmentSales';
 import { AppointmentClientePicker, type AppointmentClientPick } from '@/components/forms/AppointmentClientePicker';
 import type { CustomerSearchRow } from '@/lib/customerSearch';
+import { useCustomerActiveBonos } from '@/hooks/useCustomerActiveBonos';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
-import { ClienteDetailView } from '@/components/ClienteDetailView';
+import { ClienteDetailOverlay } from '@/components/cliente/ClienteDetailOverlay';
+import {
+  filterEmployeesForBillingCompanies,
+  resolveRequiredBillingCompanyIds,
+  buildFamilyBillingMap,
+} from '@/lib/billingCompany';
+import { useFamilies } from '@/hooks/useFamilies';
 import { useNavigate } from 'react-router-dom';
 
 interface Employee {
   id: string;
   name: string;
   color: string;
+  billing_company_id?: string | null;
 }
 
 export type AppointmentFormInitialPrefill = {
@@ -62,9 +74,15 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
 }) => {
   const navigate = useNavigate();
   const { companyId } = useCompanyFilter();
+  const { families: familyRecords } = useFamilies({ scope: 'all' });
+  const familyBillingMap = useMemo(
+    () => buildFamilyBillingMap(familyRecords.map((f) => ({ name: f.name, billing_company_id: f.billing_company_id }))),
+    [familyRecords],
+  );
+
   const [clientPick, setClientPick] = useState<AppointmentClientPick | null>(null);
   const [showCustomerHistory, setShowCustomerHistory] = useState(false);
-  const [customerHistoryTab, setCustomerHistoryTab] = useState<'timeline' | 'vouchers' | 'ficha' | 'facturacion'>('timeline');
+  const [customerHistoryTab, setCustomerHistoryTab] = useState<'timeline' | 'vouchers' | 'ficha'>('ficha');
 
   const [formData, setFormData] = useState({
     description: '',
@@ -87,6 +105,52 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
     },
   ]);
 
+  const articleIdsForItems = useMemo(
+    () => items.map((it) => it.article_id).filter(Boolean) as string[],
+    [items],
+  );
+
+  const { data: itemArticles = [] } = useQuery({
+    queryKey: ['appointment-item-articles', companyId, articleIdsForItems.join(',')],
+    enabled: !!companyId && articleIdsForItems.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('articles')
+        .select('id, familia, billing_company_id, company_id')
+        .in('id', articleIdsForItems);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const articlesMap = useMemo(
+    () => new Map(itemArticles.map((a) => [a.id, a])),
+    [itemArticles],
+  );
+
+  const requiredBillingIds = useMemo(
+    () =>
+      companyId
+        ? resolveRequiredBillingCompanyIds(
+            articleIdsForItems,
+            articlesMap,
+            familyBillingMap,
+            companyId,
+          )
+        : [],
+    [articleIdsForItems, articlesMap, familyBillingMap, companyId],
+  );
+
+  const eligibleEmployees = useMemo(
+    () =>
+      companyId
+        ? filterEmployeesForBillingCompanies(employees, requiredBillingIds, companyId)
+        : employees,
+    [employees, requiredBillingIds, companyId],
+  );
+
+  const hasMixedBillingServices = requiredBillingIds.length > 1;
+
   useLayoutEffect(() => {
     if (!initialPrefill) return;
     setClientPick(initialPrefill.clientPick);
@@ -103,7 +167,15 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
   const computedEndTime = calcEndFromStart(formData.startTime, effectiveDurationMinutes(items));
   const recursosCatalog = useMemo(() => toRecursoCatalogEntries(recursos), [recursos]);
 
+  const chargeableTotal = appointmentChargeableTotal(items);
+  const chargeCheck = canChargeAppointment({
+    status: formData.status,
+    chargeableTotal,
+    existingSale: null,
+  });
+
   const openTpvWithCurrentItems = () => {
+    if (!chargeCheck.allowed) return;
     const prefilledCart = items
       .filter((it) => appointmentItemLineTotal(it) > 0)
       .map((it, idx) => {
@@ -131,6 +203,7 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
           customerId: selectedCustomerId ?? null,
           customerName: clientPick?.kind === 'customer' ? clientPick.displayName : (clientPick?.kind === 'manual' ? clientPick.name : null),
           date: formData.date,
+          appointmentStatus: formData.status,
           items: prefilledCart,
         },
       },
@@ -143,7 +216,7 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
     queryFn: async () => {
       const { data, error } = await supabase
         .from('customers')
-        .select('id,name,tax_id,email,phone,phone_mobile,phone_home,notes')
+        .select(APPOINTMENT_CUSTOMER_SUMMARY_FIELDS)
         .eq('id', selectedCustomerId)
         .single();
       if (error) throw error;
@@ -151,20 +224,8 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
     },
   });
 
-  const { data: activeVouchersCount = 0 } = useQuery({
-    queryKey: ['appointment-customer-active-vouchers-count', companyId, selectedCustomerId],
-    enabled: !!companyId && !!selectedCustomerId,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('customer_vouchers')
-        .select('id,total_sessions,used_sessions,is_active')
-        .eq('company_id', companyId)
-        .eq('customer_id', selectedCustomerId)
-        .eq('is_active', true);
-      if (error) throw error;
-      return (data || []).filter((v: any) => Number(v.total_sessions || 0) > Number(v.used_sessions || 0)).length;
-    },
-  });
+  const { data: activeBonos = [] } = useCustomerActiveBonos(selectedCustomerId);
+  const activeVouchersCount = activeBonos.length;
 
   const { data: pendingDebt = 0 } = useQuery({
     queryKey: ['appointment-customer-debt-summary', companyId, selectedCustomerId],
@@ -223,48 +284,19 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-3">
             {selectedCustomerId && selectedCustomer && (
-              <div className="rounded-md border bg-muted/30 p-2 text-xs">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-muted-foreground truncate">
-                    {[selectedCustomer.tax_id, selectedCustomer.phone_mobile || selectedCustomer.phone || selectedCustomer.phone_home, selectedCustomer.email]
-                      .filter(Boolean)
-                      .join(' · ')}
-                  </div>
-                  <div className="flex flex-col gap-1 shrink-0">
-                    <Button type="button" variant="outline" size="sm" className="h-6 text-[11px] px-2" onClick={() => setShowCustomerHistory(true)}>
-                      Ficha
-                    </Button>
-                    <Select value={formData.status} onValueChange={(v) => setFormData({ ...formData, status: v as 'confirmed' | 'pending' | 'cancelled' })}>
-                      <SelectTrigger className="h-6 text-[11px] px-2 min-w-[104px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="confirmed">Confirmada</SelectItem>
-                        <SelectItem value="pending">Pendiente</SelectItem>
-                        <SelectItem value="cancelled">Cancelada</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <div className="flex gap-3 mt-1">
-                  <button type="button" className="hover:underline" onClick={() => { setCustomerHistoryTab('vouchers'); setShowCustomerHistory(true); }}>
-                    Bonos activos: <strong>{activeVouchersCount}</strong>
-                  </button>
-                  <button
-                    type="button"
-                    className="hover:underline text-primary"
-                    onClick={() => { setCustomerHistoryTab('vouchers'); setShowCustomerHistory(true); }}
-                  >
-                    Crear/editar bono
-                  </button>
-                  <button type="button" className="hover:underline" onClick={() => { setCustomerHistoryTab('facturacion'); setShowCustomerHistory(true); }}>
-                    Deuda: <strong>{pendingDebt.toFixed(2)} EUR</strong>
-                  </button>
-                  <button type="button" className="hover:underline" onClick={openTpvWithCurrentItems}>
-                    Total cita: <strong>{total.toFixed(2)} EUR</strong>
-                  </button>
-                </div>
-              </div>
+              <AppointmentCustomerSummaryBar
+                customer={selectedCustomer}
+                status={formData.status}
+                onStatusChange={(status) => setFormData({ ...formData, status })}
+                onOpenFicha={() => { setCustomerHistoryTab('ficha'); setShowCustomerHistory(true); }}
+                activeVouchersCount={activeVouchersCount}
+                pendingDebt={pendingDebt}
+                chargeableTotal={chargeableTotal}
+                chargeBlockedReason={!chargeCheck.allowed ? chargeCheck.reason : null}
+                onOpenVouchers={() => { setCustomerHistoryTab('vouchers'); setShowCustomerHistory(true); }}
+                onOpenFacturacion={() => { setCustomerHistoryTab('timeline'); setShowCustomerHistory(true); }}
+                onCharge={chargeCheck.allowed ? openTpvWithCurrentItems : undefined}
+              />
             )}
             <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
               <div>
@@ -281,11 +313,18 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
               </div>
               <div>
                 <Label className="text-xs">Empleada</Label>
+                {hasMixedBillingServices && (
+                  <p className="text-[10px] text-amber-600 mb-1">
+                    Cita con servicios de distintas empresas: asigna empleada del tenant o divide la cita.
+                  </p>
+                )}
                 <Select value={formData.employeeId} onValueChange={(v) => setFormData({ ...formData, employeeId: v })}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {employees.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}
-                  </SelectContent>
+                  <AppointmentSelectContent>
+                    {eligibleEmployees.map((e) => (
+                      <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>
+                    ))}
+                  </AppointmentSelectContent>
                 </Select>
               </div>
             </div>
@@ -319,15 +358,12 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
           </form>
         </CardContent>
       </Card>
-      {showCustomerHistory && selectedCustomerId && (
-        <div className={`fixed inset-0 bg-background ${AGENDA_APPOINTMENT_OVERLAY_Z} overflow-auto p-4 pb-28`}>
-          <ClienteDetailView
-            customerId={selectedCustomerId}
-            initialTab={customerHistoryTab}
-            onBack={() => setShowCustomerHistory(false)}
-          />
-        </div>
-      )}
+      <ClienteDetailOverlay
+        open={showCustomerHistory && !!selectedCustomerId}
+        customerId={selectedCustomerId ?? ''}
+        initialTab={customerHistoryTab}
+        onClose={() => setShowCustomerHistory(false)}
+      />
     </div>
   );
 };

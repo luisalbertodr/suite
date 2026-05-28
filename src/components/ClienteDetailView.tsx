@@ -1,41 +1,66 @@
 import React, { useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useCustomerDetail } from '@/hooks/useCustomerDetail';
 import { ClienteProfileHeader } from './cliente/ClienteProfileHeader';
+import { ClienteDetailCompactBar } from './cliente/ClienteDetailCompactBar';
 import { ClienteDailyScrollView } from './cliente/ClienteDailyScrollView';
-import { ClienteVouchersTab } from './cliente/ClienteVouchersTab';
+import { ClienteBonosTab } from './cliente/ClienteBonosTab';
 import { ClienteFichaTecnicaTab } from './cliente/ClienteFichaTecnicaTab';
-import { ClienteFacturacionTab } from './cliente/ClienteFacturacionTab';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import { primaryCustomerPhone } from '@/lib/legacyCustomerPhones';
 import { useToast } from '@/hooks/use-toast';
+import { cn } from '@/lib/utils';
+import { buildAgendaAppointmentUrl } from '@/lib/agendaCustomerNavigation';
 
 interface Props {
   customerId: string;
   onBack: () => void;
-  initialTab?: 'timeline' | 'vouchers' | 'ficha' | 'facturacion';
+  initialTab?: 'timeline' | 'vouchers' | 'ficha';
+  backLabel?: string;
+  variant?: 'full' | 'compact';
+  onNewAppointment?: () => void;
+  /** Desde overlay de cita: abrir otra cita sin salir de la agenda. */
+  onAppointmentClick?: (appointmentId: string, dateYmd: string) => void;
 }
 
-export const ClienteDetailView: React.FC<Props> = ({ customerId, onBack, initialTab = 'timeline' }) => {
-  const { customer, vouchers, registerSession } = useCustomerDetail(customerId);
+export const ClienteDetailView: React.FC<Props> = ({
+  customerId,
+  onBack,
+  initialTab,
+  backLabel = 'Clientes',
+  variant = 'full',
+  onNewAppointment,
+  onAppointmentClick,
+}) => {
+  const navigate = useNavigate();
+  const compact = variant === 'compact';
+  const activeTab = initialTab ?? (compact ? 'ficha' : 'timeline');
+  const { customer } = useCustomerDetail(customerId);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [editedFields, setEditedFields] = useState<Record<string, any>>({});
   const [hasChanges, setHasChanges] = useState(false);
 
   const handleFieldUpdate = useCallback((field: string, value: any) => {
-    setEditedFields(prev => ({ ...prev, [field]: value }));
+    setEditedFields((prev) => ({ ...prev, [field]: value }));
     setHasChanges(true);
   }, []);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
       if (Object.keys(editedFields).length === 0) return;
+      const payload = { ...editedFields } as Record<string, unknown>;
+      if ('phone_mobile' in payload || 'phone_home' in payload) {
+        const merged = { ...customer.data, ...editedFields };
+        payload.phone = primaryCustomerPhone(merged) || null;
+      }
       const { error } = await supabase
         .from('customers')
-        .update(editedFields as any)
+        .update(payload as any)
         .eq('id', customerId);
       if (error) throw error;
     },
@@ -49,76 +74,97 @@ export const ClienteDetailView: React.FC<Props> = ({ customerId, onBack, initial
     onError: () => toast({ title: 'Error al guardar', variant: 'destructive' }),
   });
 
-  // Merge fetched data with local edits
   const mergedCustomer = customer.data ? { ...customer.data, ...editedFields } : null;
 
+  const handleAppointmentClick = useCallback(
+    (appointmentId: string, dateYmd: string) => {
+      if (onAppointmentClick) {
+        onAppointmentClick(appointmentId, dateYmd);
+        return;
+      }
+      navigate(buildAgendaAppointmentUrl(dateYmd, appointmentId, customerId));
+    },
+    [customerId, navigate, onAppointmentClick],
+  );
+
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
-      {/* Top bar */}
-      <div className="flex items-center justify-between">
-        <Button variant="ghost" size="sm" onClick={onBack} className="gap-1.5 text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="w-4 h-4" />
-          Clientes
-        </Button>
-        {hasChanges && (
-          <Button
-            size="sm"
-            onClick={() => saveMutation.mutate()}
-            disabled={saveMutation.isPending}
-            className="gap-1.5 bg-sky-500 hover:bg-sky-600 text-white"
-          >
-            <Save className="w-4 h-4" />
-            {saveMutation.isPending ? 'Guardando...' : 'Guardar Cambios'}
-          </Button>
-        )}
-      </div>
+    <div className={cn(compact ? 'space-y-3' : 'max-w-5xl mx-auto space-y-6')}>
+      {compact ? (
+        <ClienteDetailCompactBar
+          customer={mergedCustomer}
+          isLoading={customer.isLoading}
+          onBack={onBack}
+          backLabel={backLabel}
+          onNewAppointment={onNewAppointment}
+          hasChanges={hasChanges}
+          onSave={() => saveMutation.mutate()}
+          saving={saveMutation.isPending}
+        />
+      ) : (
+        <>
+          <div className="flex items-center justify-between">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onBack}
+              className="gap-1.5 text-muted-foreground hover:text-foreground"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              {backLabel}
+            </Button>
+            {hasChanges && (
+              <Button
+                size="sm"
+                onClick={() => saveMutation.mutate()}
+                disabled={saveMutation.isPending}
+                className="gap-1.5 bg-sky-500 hover:bg-sky-600 text-white"
+              >
+                <Save className="w-4 h-4" />
+                {saveMutation.isPending ? 'Guardando...' : 'Guardar Cambios'}
+              </Button>
+            )}
+          </div>
+          <ClienteProfileHeader customer={mergedCustomer} isLoading={customer.isLoading} />
+        </>
+      )}
 
-      {/* Profile header */}
-      <ClienteProfileHeader customer={mergedCustomer} isLoading={customer.isLoading} />
-
-      {/* Tabs */}
-      <Tabs defaultValue={initialTab} className="w-full">
-        <TabsList className="w-full grid grid-cols-4 bg-sky-50/50 dark:bg-sky-950/20 border border-sky-100/50 dark:border-sky-900/20 rounded-xl p-1">
-          <TabsTrigger
-            value="timeline"
-            className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-sky-700 dark:data-[state=active]:bg-gray-800 dark:data-[state=active]:text-sky-300 text-sm"
-          >
-            Cronología
-          </TabsTrigger>
-          <TabsTrigger
-            value="vouchers"
-            className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-sky-700 dark:data-[state=active]:bg-gray-800 dark:data-[state=active]:text-sky-300 text-sm"
-          >
-            Bonos Activos
-          </TabsTrigger>
+      <Tabs defaultValue={activeTab} className="w-full">
+        <TabsList
+          className={cn(
+            'w-full grid grid-cols-3 bg-sky-50/50 dark:bg-sky-950/20 border border-sky-100/50 dark:border-sky-900/20 rounded-lg p-0.5',
+            compact && 'h-8',
+          )}
+        >
           <TabsTrigger
             value="ficha"
-            className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-sky-700 dark:data-[state=active]:bg-gray-800 dark:data-[state=active]:text-sky-300 text-sm"
+            className={cn(
+              'rounded-md data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-sky-700 dark:data-[state=active]:bg-gray-800 dark:data-[state=active]:text-sky-300',
+              compact ? 'text-xs py-1 h-7' : 'text-sm rounded-lg',
+            )}
           >
             Ficha Técnica
           </TabsTrigger>
           <TabsTrigger
-            value="facturacion"
-            className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-sky-700 dark:data-[state=active]:bg-gray-800 dark:data-[state=active]:text-sky-300 text-sm"
+            value="vouchers"
+            className={cn(
+              'rounded-md data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-sky-700 dark:data-[state=active]:bg-gray-800 dark:data-[state=active]:text-sky-300',
+              compact ? 'text-xs py-1 h-7' : 'text-sm rounded-lg',
+            )}
           >
-            Facturación
+            Bonos Activos
+          </TabsTrigger>
+          <TabsTrigger
+            value="timeline"
+            className={cn(
+              'rounded-md data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-sky-700 dark:data-[state=active]:bg-gray-800 dark:data-[state=active]:text-sky-300',
+              compact ? 'text-xs py-1 h-7' : 'text-sm rounded-lg',
+            )}
+          >
+            Historial
           </TabsTrigger>
         </TabsList>
 
-        <div className="mt-5">
-          <TabsContent value="timeline" className="mt-0">
-            <ClienteDailyScrollView customerId={customerId} className="max-w-full" />
-          </TabsContent>
-
-          <TabsContent value="vouchers" className="mt-0">
-            <ClienteVouchersTab
-              vouchers={vouchers.data || []}
-              isLoading={vouchers.isLoading}
-              onRegisterSession={(id) => registerSession.mutate(id)}
-              isRegistering={registerSession.isPending}
-            />
-          </TabsContent>
-
+        <div className={compact ? 'mt-2' : 'mt-5'}>
           <TabsContent value="ficha" className="mt-0">
             <ClienteFichaTecnicaTab
               customer={mergedCustomer}
@@ -127,8 +173,16 @@ export const ClienteDetailView: React.FC<Props> = ({ customerId, onBack, initial
             />
           </TabsContent>
 
-          <TabsContent value="facturacion" className="mt-0">
-            <ClienteFacturacionTab customerId={customerId} />
+          <TabsContent value="vouchers" className="mt-0">
+            <ClienteBonosTab customerId={customerId} />
+          </TabsContent>
+
+          <TabsContent value="timeline" className="mt-0">
+            <ClienteDailyScrollView
+              customerId={customerId}
+              className="max-w-full"
+              onAppointmentClick={handleAppointmentClick}
+            />
           </TabsContent>
         </div>
       </Tabs>

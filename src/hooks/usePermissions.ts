@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/hooks/useAuth';
+import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 
 const debugError = (...args: unknown[]) => {
   if (import.meta.env.DEV) {
@@ -31,6 +32,7 @@ export const usePermissions = () => {
   const [permissions, setPermissions] = useState<UserPermission[]>([]);
   const [loading, setLoading] = useState(true);
   const { user, isSuperuser } = useAuth();
+  const { companyId } = useCompanyFilter();
 
   const fetchEffectiveRpc = async (
     userId: string,
@@ -126,7 +128,7 @@ export const usePermissions = () => {
   useEffect(() => {
     fetchUserPermissions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, isSuperuser]);
+  }, [user, isSuperuser, companyId]);
 
   return {
     permissions,

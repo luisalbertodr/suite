@@ -7,6 +7,7 @@ import { useTheme } from 'next-themes';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { CompanySwitcher } from './CompanySwitcher';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -66,8 +67,9 @@ export const TopBar: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
+          <CompanySwitcher />
+
           <button
-            onClick={toggleTheme}
             className="relative p-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
             aria-label="Cambiar tema"
           >

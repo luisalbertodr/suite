@@ -28,6 +28,7 @@ export interface Article {
   /** Plantilla de composición (servicios/productos incluidos en el precio) */
   bonus_definition_id?: string | null;
   recurso_id?: string | null;
+  billing_company_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -52,6 +53,7 @@ export interface ArticleFormData {
   iva_percentage: number;
   recurso_id?: string | null;
   foto_url?: string;
+  billing_company_id?: string | null;
 }
 
 export const useArticles = () => {

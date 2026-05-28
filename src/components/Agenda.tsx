@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
@@ -17,7 +17,8 @@ import { es } from 'date-fns/locale';
 import { useToast } from '@/hooks/use-toast';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAgendaPreferences } from '@/hooks/useAgendaPreferences';
-import { appointmentItemsQueryKey, syncAppointmentItems } from '@/hooks/useAppointmentItems';
+import { appointmentItemsQueryKey, fetchAppointmentItems, syncAppointmentItems } from '@/hooks/useAppointmentItems';
+import { applyBonoSessionDelta } from '@/lib/consumeBonoSessions';
 import type { AppointmentItemDraft, Appointment } from '@/types/agenda';
 import { buildAppointmentTimeSegments, occupiedEndTimeFromItems } from '@/lib/agendaAppointmentItems';
 import { toRecursoCatalogEntries, type ArticleResourceHint } from '@/lib/agendaRecursoMatch';
@@ -37,7 +38,26 @@ import {
   type AgendaUnavailabilityEntry,
 } from '@/lib/agendaHours';
 import { appointmentItemLineTotal } from '@/lib/agendaAppointmentPricing';
+import { canChargeAppointment, appointmentChargeableTotal, fetchAppointmentSalesMap, summarizeAppointmentChargeState } from '@/lib/appointmentSales';
 import { buildAgendaPrefillFromLead } from '@/lib/marketingLeadAgendaPrefill';
+import { buildCustomerHistoryUrl } from '@/lib/agendaCustomerNavigation';
+import { AgendaBillingViewSelect } from '@/components/AgendaBillingViewSelect';
+import {
+  filterEmployeesForAgendaView,
+  loadAgendaBillingView,
+  saveAgendaBillingView,
+  type AgendaBillingView,
+} from '@/lib/agendaBillingView';
+import { useWorkCenter } from '@/hooks/useWorkCenter';
+import { useFamilies } from '@/hooks/useFamilies';
+import {
+  buildFamilyBillingMap,
+  resolveBillingCompanyId,
+} from '@/lib/billingCompany';
+import {
+  appointmentVisibleInBillingView,
+  resolveAppointmentBillingIds,
+} from '@/lib/workCenterAudit';
 
 interface Employee {
   id: string;
@@ -55,8 +75,6 @@ type CreateAppointmentData = {
   date: string;
   color: string;
   status: 'confirmed' | 'pending' | 'cancelled';
-  cabina_id?: string | null;
-  recurso_id?: string | null;
   items?: AppointmentItemDraft[];
 };
 
@@ -80,7 +98,14 @@ export const Agenda: React.FC = () => {
   const location = useLocation();
   const { user } = useAuth();
   const { companyId, loading: companyLoading } = useCompanyFilter();
+  const { isMultiEntity } = useWorkCenter();
+  const { families: familyRecords } = useFamilies({ scope: 'all' });
+  const familyBillingMap = useMemo(
+    () => buildFamilyBillingMap(familyRecords.map((f) => ({ name: f.name, billing_company_id: f.billing_company_id }))),
+    [familyRecords],
+  );
   const skipPersistDateOnceRef = useRef(false);
+  const [agendaBillingView, setAgendaBillingView] = useState<AgendaBillingView>('all');
 
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [showAppointmentForm, setShowAppointmentForm] = useState(false);
@@ -99,6 +124,22 @@ export const Agenda: React.FC = () => {
   const selectedDateYmd = useMemo(() => format(selectedDate, 'yyyy-MM-dd'), [selectedDate]);
   const pendingOpenAppointmentIdRef = useRef<string | null>(null);
 
+  const selectAgendaDate = useCallback(
+    (d: Date, opts?: { syncUrl?: boolean }) => {
+      setSelectedDate(d);
+      if (opts?.syncUrl === false) return;
+      const params = new URLSearchParams(location.search);
+      if (!params.has('date') && !params.has('appointment')) return;
+      params.set('date', format(d, 'yyyy-MM-dd'));
+      params.delete('appointment');
+      navigate(
+        { pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : '' },
+        { replace: true },
+      );
+    },
+    [location.pathname, location.search, navigate],
+  );
+
   useLayoutEffect(() => {
     if (!user?.id) return;
     const p = loadAgendaViewPersisted(user.id);
@@ -108,6 +149,16 @@ export const Agenda: React.FC = () => {
     setSelectedDate(d);
     skipPersistDateOnceRef.current = true;
   }, [user?.id]);
+
+  useLayoutEffect(() => {
+    if (!user?.id) return;
+    setAgendaBillingView(loadAgendaBillingView(user.id));
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    saveAgendaBillingView(user.id, agendaBillingView);
+  }, [user?.id, agendaBillingView]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -121,9 +172,35 @@ export const Agenda: React.FC = () => {
     if (!dateParam) return;
     const parsedDate = parse(dateParam, 'yyyy-MM-dd', new Date());
     if (!isValid(parsedDate)) return;
-    if (format(parsedDate, 'yyyy-MM-dd') === selectedDateYmd) return;
-    setSelectedDate(parsedDate);
-  }, [location.search, selectedDateYmd]);
+    setSelectedDate((prev) => {
+      const prevYmd = format(prev, 'yyyy-MM-dd');
+      const nextYmd = format(parsedDate, 'yyyy-MM-dd');
+      return prevYmd === nextYmd ? prev : parsedDate;
+    });
+  }, [location.search]);
+
+  const returnCustomerId = useMemo(() => {
+    const id = new URLSearchParams(location.search).get('returnCustomer');
+    return id?.trim() || null;
+  }, [location.search]);
+
+  const clearReturnCustomerParam = useCallback(() => {
+    const params = new URLSearchParams(location.search);
+    if (!params.has('returnCustomer')) return;
+    params.delete('returnCustomer');
+    navigate(
+      { pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : '' },
+      { replace: true },
+    );
+  }, [location.pathname, location.search, navigate]);
+
+  const handleReturnToCustomerHistory = useCallback(() => {
+    if (!returnCustomerId) return;
+    setShowEditForm(false);
+    setSelectedAppointment(null);
+    clearReturnCustomerParam();
+    navigate(buildCustomerHistoryUrl(returnCustomerId));
+  }, [returnCustomerId, clearReturnCustomerParam, navigate]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -161,7 +238,7 @@ export const Agenda: React.FC = () => {
       if (!companyId) return [];
       const { data, error } = await supabase
         .from('customers')
-        .select('id, name, email, tax_id, phone, phone_home, phone_mobile')
+        .select('id, name, email, tax_id, phone, phone_home, phone_mobile, legacy_codcli')
         .eq('company_id', companyId)
         .order('name');
       if (error) throw error;
@@ -439,47 +516,37 @@ export const Agenda: React.FC = () => {
     },
   });
 
-  const { data: appointmentResources = {} } = useQuery({
-    queryKey: ['appointment-resources', appointmentIds.join('|')],
-    enabled: appointmentIds.length > 0,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('appointment_resources')
-        .select('appointment_id,cabina_id,recurso_id')
-        .in('appointment_id', appointmentIds);
-      if (error) {
-        if (
-          error.code === 'PGRST205' ||
-          error.code === '42P01' ||
-          /not found/i.test(error.message || '')
-        ) return {};
-        throw error;
-      }
-      const out: Record<string, { cabina_id: string | null; recurso_id: string | null }> = {};
-      for (const row of data || []) {
-        out[row.appointment_id] = { cabina_id: row.cabina_id, recurso_id: row.recurso_id };
-      }
-      return out;
-    },
+  const { data: appointmentSalesMap = new Map() } = useQuery({
+    queryKey: ['appointment-sales-map', companyId, appointmentIds.join('|')],
+    enabled: !!companyId && appointmentIds.length > 0,
+    queryFn: () => fetchAppointmentSalesMap(appointmentIds),
+    staleTime: 30_000,
   });
 
-  const { data: appointmentItemsPayload = { grouped: {}, articleHints: new Map<string, ArticleResourceHint>() } } = useQuery({
-    queryKey: ['appointment-time-segments', companyId, appointmentIds.join('|')],
+  const { data: appointmentItemsPayload = { grouped: {}, articleHints: new Map<string, ArticleResourceHint>(), billingIdsByAppt: {} as Record<string, string[]> } } = useQuery({
+    queryKey: ['appointment-time-segments', companyId, appointmentIds.join('|'), familyRecords.length],
     enabled: !!companyId && appointmentIds.length > 0,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('appointment_items')
-        .select('id,appointment_id,kind,label,duration_minutes,occupies_time,sort_order,cabina_id,recurso_id,article_id,articles(familia,recurso_id)')
+        .select('id,appointment_id,kind,label,duration_minutes,occupies_time,sort_order,cabina_id,recurso_id,article_id,articles(familia,billing_company_id,company_id,recurso_id)')
         .in('appointment_id', appointmentIds)
         .order('sort_order', { ascending: true });
       if (error) {
         if (error.code === '42P01' || error.code === 'PGRST205') {
-          return { grouped: {}, articleHints: new Map<string, ArticleResourceHint>() };
+          return { grouped: {}, articleHints: new Map<string, ArticleResourceHint>(), billingIdsByAppt: {} };
         }
         throw error;
       }
       const grouped: Record<string, AppointmentItemDraft[]> = {};
       const articleHints = new Map<string, ArticleResourceHint>();
+      const articlesBillingMap = new Map<
+        string,
+        { familia: string; billing_company_id?: string | null; company_id?: string | null }
+      >();
+      const billingIdsByAppt: Record<string, string[]> = {};
+      const familyMap = familyBillingMap;
+
       for (const row of data || []) {
         const apptId = String(row.appointment_id);
         if (!grouped[apptId]) grouped[apptId] = [];
@@ -493,27 +560,59 @@ export const Agenda: React.FC = () => {
           recurso_id: row.recurso_id ?? null,
           article_id: row.article_id ?? null,
         });
-        const art = row.articles as { familia?: string | null; recurso_id?: string | null } | null;
+        const art = row.articles as {
+          familia?: string | null;
+          billing_company_id?: string | null;
+          company_id?: string | null;
+          recurso_id?: string | null;
+        } | null;
         if (row.article_id && art) {
           articleHints.set(String(row.article_id), {
             familia: art.familia ?? null,
             recurso_id: art.recurso_id ?? null,
           });
+          articlesBillingMap.set(String(row.article_id), {
+            familia: art.familia ?? 'Varios',
+            billing_company_id: art.billing_company_id ?? null,
+            company_id: art.company_id ?? null,
+          });
         }
       }
-      return { grouped, articleHints };
+
+      if (companyId) {
+        for (const [apptId, drafts] of Object.entries(grouped)) {
+          billingIdsByAppt[apptId] = resolveAppointmentBillingIds(
+            drafts,
+            articlesBillingMap,
+            familyMap,
+            companyId,
+          );
+        }
+      }
+
+      return { grouped, articleHints, billingIdsByAppt };
     },
   });
 
   const appointmentItemsByAppt = appointmentItemsPayload.grouped;
   const agendaArticleHints = appointmentItemsPayload.articleHints;
+  const billingIdsByAppt = appointmentItemsPayload.billingIdsByAppt;
 
   // Map DB employees to grid employees with proper colors
-  const employees: Employee[] = dbEmployees.map((emp, idx) => ({
+  const allEmployees: Employee[] = dbEmployees.map((emp, idx) => ({
     id: emp.id,
     name: emp.name,
     color: hexToTailwindBg(emp.color || '#3B82F6', idx),
+    billing_company_id: emp.billing_company_id ?? null,
   }));
+
+  const employees = useMemo(
+    () =>
+      isMultiEntity && agendaBillingView !== 'all'
+        ? filterEmployeesForAgendaView(allEmployees, agendaBillingView)
+        : allEmployees,
+    [allEmployees, agendaBillingView, isMultiEntity],
+  );
 
   const parseServiceFromDescription = (
     description: string
@@ -567,6 +666,22 @@ export const Agenda: React.FC = () => {
       .filter((it) => !it.occupies_time || Number(it.duration_minutes || 0) <= 0)
       .map((it) => (it.label || '').trim())
       .filter(Boolean);
+    const chargeTotal = Object.prototype.hasOwnProperty.call(appointmentTotals, row.id)
+      ? Number(appointmentTotals[row.id] || 0)
+      : 0;
+    const sales = appointmentSalesMap.get(row.id) ?? [];
+    const chargeState = summarizeAppointmentChargeState(sales, chargeTotal);
+    const aptStatus = (['confirmed', 'pending', 'cancelled'].includes(row.status) ? row.status : 'pending') as Appointment['status'];
+    let paymentStatus: Appointment['paymentStatus'] = 'none';
+    if (aptStatus !== 'cancelled') {
+      if (chargeState.allCompleted) {
+        paymentStatus = chargeState.allInvoiced ? 'invoiced' : 'paid';
+      } else if (chargeState.completedTotal > 0) {
+        paymentStatus = 'pending_charge';
+      } else if (chargeTotal > 0) {
+        paymentStatus = 'pending_charge';
+      }
+    }
     return {
       id: row.id,
       employeeId: row.employee_id || '',
@@ -579,8 +694,6 @@ export const Agenda: React.FC = () => {
       legacyClientCode: row.legacy_codcli || undefined,
       legacyPlanincId: row.legacy_planinc_id ?? null,
       legacyHourInText: parsedService.hourInText || undefined,
-      cabina_id: appointmentResources[row.id]?.cabina_id ?? row.cabina_id ?? null,
-      recurso_id: appointmentResources[row.id]?.recurso_id ?? row.recurso_id ?? null,
       startTime,
       endTime,
       timeSegments,
@@ -589,11 +702,37 @@ export const Agenda: React.FC = () => {
       date: normalizeDate(row.start_time, row.appointment_date),
       color: row.color || '#3B82F6',
       totalAmount: Object.prototype.hasOwnProperty.call(appointmentTotals, row.id)
-        ? Number(appointmentTotals[row.id] || 0)
+        ? chargeTotal
         : undefined,
-      status: (['confirmed', 'pending', 'cancelled'].includes(row.status) ? row.status : 'pending') as any,
+      paymentStatus,
+      status: aptStatus,
     };
   });
+
+  const openAppointmentById = useCallback(
+    (appointmentId: string, dateYmd: string) => {
+      pendingOpenAppointmentIdRef.current = appointmentId;
+      const parsed = parse(dateYmd, 'yyyy-MM-dd', new Date());
+      const targetYmd = isValid(parsed) ? format(parsed, 'yyyy-MM-dd') : selectedDateYmd;
+      if (isValid(parsed) && targetYmd !== selectedDateYmd) {
+        selectAgendaDate(parsed, { syncUrl: false });
+        setShowEditForm(false);
+        setSelectedAppointment(null);
+        return;
+      }
+      const found = appointments.find((a) => a.id === appointmentId);
+      if (found) {
+        pendingOpenAppointmentIdRef.current = null;
+        setSelectedAppointment(found);
+        setShowEditForm(true);
+        setScrollToTimeRequest({ requestId: Date.now(), time: found.startTime });
+        return;
+      }
+      setShowEditForm(false);
+      setSelectedAppointment(null);
+    },
+    [appointments, selectedDateYmd, selectAgendaDate],
+  );
 
   useEffect(() => {
     const targetId = pendingOpenAppointmentIdRef.current;
@@ -623,7 +762,12 @@ export const Agenda: React.FC = () => {
     ? preferences.visibleEmployeeIds
     : employees.map((e) => e.id);
   const filteredEmployees = employees.filter((e) => effectiveSelectedIds.includes(e.id));
-  const filteredAppointments = appointments.filter((apt) => effectiveSelectedIds.includes(apt.employeeId));
+  const filteredAppointments = appointments.filter((apt) => {
+    if (!effectiveSelectedIds.includes(apt.employeeId)) return false;
+    if (!isMultiEntity || agendaBillingView === 'all') return true;
+    const billingIds = billingIdsByAppt[apt.id] ?? [];
+    return appointmentVisibleInBillingView(billingIds, agendaBillingView);
+  });
 
   useEffect(() => {
     if (!fromLeadIdParam) {
@@ -668,7 +812,7 @@ export const Agenda: React.FC = () => {
     const base = buildAgendaPrefillFromLead(fromLeadMarketingRow, agendaCustomers);
     const empId = filteredEmployees[0].id;
 
-    setSelectedDate(parse(base.date, 'yyyy-MM-dd', new Date()));
+    selectAgendaDate(parse(base.date, 'yyyy-MM-dd', new Date()), { syncUrl: false });
     setSelectedSlot({ employeeId: empId, time: base.startTime });
     setAppointmentPrefill({
       clientPick: base.clientPick,
@@ -792,10 +936,27 @@ export const Agenda: React.FC = () => {
         status: data.status,
       });
       try {
+        const previousItems: AppointmentItemDraft[] = [];
         await syncAppointmentItems(created.id, items);
+        try {
+          await applyBonoSessionDelta(previousItems, items, {
+            appointmentId: created.id,
+            appointmentDate: dateStr,
+            employeeId: data.employeeId,
+          });
+        } catch (bonoErr) {
+          console.error('bono session consume', bonoErr);
+          toast({
+            title: 'Cita guardada, pero no se registró el uso del bono',
+            description: (bonoErr as Error)?.message || 'Revisa el bono del cliente.',
+            variant: 'destructive',
+          });
+        }
         await queryClient.invalidateQueries({ queryKey: appointmentItemsQueryKey(created.id) });
         await queryClient.invalidateQueries({ queryKey: ['appointment-time-segments'] });
         await queryClient.invalidateQueries({ queryKey: ['appointment-item-totals'] });
+        await queryClient.invalidateQueries({ queryKey: ['customer-active-bonos'] });
+        await queryClient.invalidateQueries({ queryKey: ['bonos'] });
         await registerAppointmentHistory(data.customerId ?? null, dateStr, items, created.id);
       } catch (e) {
         console.error('appointment_items sync', e);
@@ -839,10 +1000,27 @@ export const Agenda: React.FC = () => {
         status: updated.status,
       });
       try {
+        const previousItems = await fetchAppointmentItems(updated.id, companyId || undefined);
         await syncAppointmentItems(updated.id, items);
+        try {
+          await applyBonoSessionDelta(previousItems, items, {
+            appointmentId: updated.id,
+            appointmentDate: updated.date,
+            employeeId: updated.employeeId,
+          });
+        } catch (bonoErr) {
+          console.error('bono session consume', bonoErr);
+          toast({
+            title: 'Cita guardada, pero no se registró el uso del bono',
+            description: (bonoErr as Error)?.message || 'Revisa el bono del cliente.',
+            variant: 'destructive',
+          });
+        }
         await queryClient.invalidateQueries({ queryKey: appointmentItemsQueryKey(updated.id) });
         await queryClient.invalidateQueries({ queryKey: ['appointment-time-segments'] });
         await queryClient.invalidateQueries({ queryKey: ['appointment-item-totals'] });
+        await queryClient.invalidateQueries({ queryKey: ['customer-active-bonos'] });
+        await queryClient.invalidateQueries({ queryKey: ['bonos'] });
         await registerAppointmentHistory(updated.customerId ?? null, updated.date, items, updated.id);
       } catch (e) {
         console.error('appointment_items sync', e);
@@ -863,11 +1041,6 @@ export const Agenda: React.FC = () => {
   const handleAppointmentDelete = async (appointmentId: string) => {
     try {
       await deleteAppointment.mutateAsync(appointmentId);
-      try {
-        await supabase.from('appointment_resources').delete().eq('appointment_id', appointmentId);
-      } catch {
-        // noop for environments without appointment_resources
-      }
       setShowEditForm(false);
       setSelectedAppointment(null);
     } catch (error) {
@@ -875,9 +1048,57 @@ export const Agenda: React.FC = () => {
     }
   };
 
-  const handleChargeAppointment = (apt: Appointment, items: AppointmentItemDraft[]) => {
+  const handleChargeAppointment = async (apt: Appointment, items: AppointmentItemDraft[]) => {
+    const chargeableTotal = appointmentChargeableTotal(items);
+    const existingSales = appointmentSalesMap.get(apt.id) ?? [];
+    const chargeCheck = canChargeAppointment({
+      status: apt.status,
+      chargeableTotal,
+      existingSales,
+    });
+    if (!chargeCheck.allowed) {
+      toast({
+        title: 'No se puede cobrar',
+        description: chargeCheck.reason,
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const articleIds = items.map((it) => it.article_id).filter(Boolean) as string[];
+    let articlesMap = new Map<string, { familia: string; billing_company_id?: string | null; company_id?: string | null }>();
+    if (articleIds.length && companyId) {
+      const { data } = await supabase
+        .from('articles')
+        .select('id, familia, billing_company_id, company_id')
+        .in('id', articleIds);
+      articlesMap = new Map((data ?? []).map((a) => [a.id, a]));
+    }
+
+    const paidBillingIds = new Set(
+      existingSales
+        .filter((s) => s.status === 'completed' && s.company_id)
+        .map((s) => String(s.company_id)),
+    );
+
     const prefilledCart = items
       .filter((it) => appointmentItemLineTotal(it) > 0)
+      .filter((it) => {
+        if (!companyId || paidBillingIds.size === 0) return true;
+        const article = it.article_id ? articlesMap.get(it.article_id) : null;
+        const billingId = article
+          ? resolveBillingCompanyId(
+              {
+                billing_company_id: article.billing_company_id,
+                familia: article.familia ?? 'Varios',
+                company_id: article.company_id,
+              },
+              familyBillingMap,
+              companyId,
+            )
+          : companyId;
+        return !paidBillingIds.has(billingId);
+      })
       .map((it, idx) => {
         const bonusMode = it.kind === 'bonus' ? (it.bonus_payment_mode ?? 'none') : null;
         const lineTotal = appointmentItemLineTotal(it);
@@ -887,6 +1108,19 @@ export const Agenda: React.FC = () => {
           it.kind === 'bonus' && bonusMode && bonusMode !== 'none'
             ? ` (Bono ${bonusMode === 'full' ? '100%' : `${bonusMode}%`})`
             : '';
+        const article = it.article_id ? articlesMap.get(it.article_id) : null;
+        const billingCompanyId =
+          article && companyId
+            ? resolveBillingCompanyId(
+                {
+                  billing_company_id: article.billing_company_id,
+                  familia: article.familia ?? 'Varios',
+                  company_id: article.company_id,
+                },
+                familyBillingMap,
+                companyId,
+              )
+            : companyId ?? undefined;
         return {
           id: it.article_id || `apt-${apt.id}-${idx}`,
           name: `${it.label || 'Ítem'}${labelSuffix}`,
@@ -898,8 +1132,18 @@ export const Agenda: React.FC = () => {
           color: undefined as string | undefined,
           sourceKind: it.kind,
           sourceBonusMode: bonusMode,
+          billingCompanyId,
         };
       });
+
+    if (prefilledCart.length === 0) {
+      toast({
+        title: 'No hay importe pendiente',
+        description: 'Todos los conceptos de esta cita ya están cobrados.',
+        variant: 'destructive',
+      });
+      return;
+    }
 
     navigate('/tpv', {
       state: {
@@ -908,6 +1152,7 @@ export const Agenda: React.FC = () => {
           customerId: apt.customerId ?? null,
           customerName: apt.clientName,
           date: apt.date,
+          appointmentStatus: apt.status,
           items: prefilledCart,
         },
       },
@@ -991,12 +1236,20 @@ export const Agenda: React.FC = () => {
             <CalendarIcon className="w-5 h-5 text-sky-500" />
             Agenda
           </h1>
+          <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-[10px] text-muted-foreground">
+            <span className="text-emerald-600">Verde: cobrada TPV</span>
+            <span className="text-sky-600">Azul: facturada</span>
+            <span className="text-amber-600">Ámbar: pendiente cobro</span>
+            {isMultiEntity && agendaBillingView !== 'all' && (
+              <span className="text-violet-600">Las citas mixtas (estética + medicina) solo se ven en «Ambas empresas»</span>
+            )}
+          </div>
         </div>
 
         <div className="flex flex-nowrap items-center gap-1.5 min-w-0">
           <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
             <div className="flex flex-nowrap items-center rounded-md border border-border/60 bg-muted/80 p-0 h-7">
-              <Button variant="ghost" size="sm" className="h-7 w-7 shrink-0 p-0 rounded-none rounded-l-md" onClick={() => setSelectedDate(subDays(selectedDate, 1))}>
+              <Button variant="ghost" size="sm" className="h-7 w-7 shrink-0 p-0 rounded-none rounded-l-md" onClick={() => selectAgendaDate(subDays(selectedDate, 1))}>
                 <ChevronLeft className="w-3.5 h-3.5" />
               </Button>
               <PopoverTrigger asChild>
@@ -1009,7 +1262,7 @@ export const Agenda: React.FC = () => {
                   {format(selectedDate, 'EEE d MMM yyyy', { locale: es })}
                 </Button>
               </PopoverTrigger>
-              <Button variant="ghost" size="sm" className="h-7 w-7 shrink-0 p-0 rounded-none rounded-r-md" onClick={() => setSelectedDate(addDays(selectedDate, 1))}>
+              <Button variant="ghost" size="sm" className="h-7 w-7 shrink-0 p-0 rounded-none rounded-r-md" onClick={() => selectAgendaDate(addDays(selectedDate, 1))}>
                 <ChevronRight className="w-3.5 h-3.5" />
               </Button>
             </div>
@@ -1020,7 +1273,7 @@ export const Agenda: React.FC = () => {
                 selected={selectedDate}
                 onSelect={(d) => {
                   if (d) {
-                    setSelectedDate(d);
+                    selectAgendaDate(d);
                     setDatePickerOpen(false);
                   }
                 }}
@@ -1053,12 +1306,16 @@ export const Agenda: React.FC = () => {
             size="sm"
             className="h-7 px-2 text-xs shrink-0"
             onClick={() => {
-              setSelectedDate(new Date());
+              selectAgendaDate(new Date());
               setGoToTodayRequestId((n) => n + 1);
             }}
           >
             <Clock className="w-3.5 h-3.5 mr-1" /> Hoy
           </Button>
+          <AgendaBillingViewSelect
+            value={agendaBillingView}
+            onChange={setAgendaBillingView}
+          />
         </div>
       </div>
 
@@ -1092,7 +1349,7 @@ export const Agenda: React.FC = () => {
           }
           employeeId={selectedSlot.employeeId}
           time={selectedSlot.time}
-          employees={employees}
+          employees={allEmployees}
           customers={agendaCustomers}
           cabinas={cabinas.data || []}
           recursos={recursos.data || []}
@@ -1112,7 +1369,7 @@ export const Agenda: React.FC = () => {
       {showEditForm && selectedAppointment && (
         <EditAppointmentForm
           appointment={selectedAppointment}
-          employees={employees}
+          employees={allEmployees}
           customers={agendaCustomers}
           notifyRecipients={notifyRecipients}
           cabinas={cabinas.data || []}
@@ -1122,7 +1379,14 @@ export const Agenda: React.FC = () => {
           onCharge={handleChargeAppointment}
           onNotify={handleNotifyAppointment}
           onDelete={handleAppointmentDelete}
-          onCancel={() => { setShowEditForm(false); setSelectedAppointment(null); }}
+          onCancel={() => {
+            setShowEditForm(false);
+            setSelectedAppointment(null);
+            clearReturnCustomerParam();
+          }}
+          returnCustomerId={returnCustomerId}
+          onReturnToCustomerHistory={returnCustomerId ? handleReturnToCustomerHistory : undefined}
+          onHistoryAppointmentClick={openAppointmentById}
         />
       )}
     </div>

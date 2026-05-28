@@ -11,8 +11,10 @@ import {
   CommandSeparator,
 } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { AGENDA_APPOINTMENT_SELECT_Z } from '@/lib/agendaResourceColors';
 import { Check, ChevronsUpDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { formatCustomerPhoneLabels } from '@/lib/legacyCustomerPhones';
 import { filterCustomersBySearch, type CustomerSearchRow } from '@/lib/customerSearch';
 
 export type AppointmentClientPick =
@@ -63,7 +65,7 @@ export const AppointmentClientePicker: React.FC<Props> = ({ customers, value, on
             <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="p-0 w-[var(--radix-popover-trigger-width)] min-w-[280px]" align="start">
+        <PopoverContent className={cn('p-0 w-[var(--radix-popover-trigger-width)] min-w-[280px]', AGENDA_APPOINTMENT_SELECT_Z)} align="start">
           <Command shouldFilter={false}>
             <CommandInput
               placeholder="Nombre, apellidos, DNI, teléfono o email…"
@@ -96,7 +98,13 @@ export const AppointmentClientePicker: React.FC<Props> = ({ customers, value, on
                     <div className="min-w-0 flex-1">
                       <div className="truncate font-medium">{customer.name}</div>
                       <div className="truncate text-xs text-muted-foreground">
-                        {[customer.tax_id, customer.phone, customer.email].filter(Boolean).join(' · ')}
+                        {[
+                          customer.tax_id,
+                          ...formatCustomerPhoneLabels(customer),
+                          customer.email,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ') || 'Sin datos de contacto'}
                       </div>
                     </div>
                   </CommandItem>

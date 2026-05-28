@@ -63,10 +63,18 @@ export const ClienteFichaTecnicaTab: React.FC<Props> = ({ customer, isLoading, o
             />
           </div>
           <div>
-            <Label className="text-xs text-muted-foreground">Teléfono</Label>
+            <Label className="text-xs text-muted-foreground">Móvil (tel. 2 — principal / SMS)</Label>
             <Input
-              value={customer.phone || ''}
-              onChange={(e) => onUpdate('phone', e.target.value)}
+              value={customer.phone_mobile || ''}
+              onChange={(e) => onUpdate('phone_mobile', e.target.value || null)}
+              className="mt-1"
+            />
+          </div>
+          <div>
+            <Label className="text-xs text-muted-foreground">Tel. 1 (fijo o móvil sin SMS)</Label>
+            <Input
+              value={customer.phone_home || ''}
+              onChange={(e) => onUpdate('phone_home', e.target.value || null)}
               className="mt-1"
             />
           </div>

@@ -8,7 +8,8 @@ Requisitos:
   - public.bonos.legacy_codboncli informado (promote_legacy_bonoscli)
   - Migración con columnas bono_uso.source_table, source_legacy_key, article_id, quantity
 
-Variables: SUPABASE_DB_URL, LEGACY_COMPANY_ID, LEGACY_DRY_RUN, opcional ABLIN_CODBONCLI=campo
+Variables: SUPABASE_DB_URL, LEGACY_DRY_RUN, opcional ABLIN_CODBONCLI=campo
+  (company_id: scripts/legacy_company.py por defecto)
 """
 from __future__ import annotations
 
@@ -17,6 +18,8 @@ import sys
 from pathlib import Path
 
 import psycopg2
+
+from legacy_company import get_company_id
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -50,10 +53,10 @@ def table_exists(cur, schema: str, name: str) -> bool:
 def main() -> int:
     load_dotenv()
     db_url = os.environ.get("SUPABASE_DB_URL", "").strip()
-    company_id = os.environ.get("LEGACY_COMPANY_ID", "").strip()
+    company_id = get_company_id()
     dry = os.environ.get("LEGACY_DRY_RUN", "0").lower() in ("1", "true", "si", "yes")
-    if not db_url or not company_id:
-        print("Faltan SUPABASE_DB_URL o LEGACY_COMPANY_ID", file=sys.stderr)
+    if not db_url:
+        print("Falta SUPABASE_DB_URL", file=sys.stderr)
         return 1
 
     conn = psycopg2.connect(db_url)

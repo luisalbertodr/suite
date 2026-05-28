@@ -226,6 +226,12 @@ def main() -> None:
     # CP1252 suele ser el de Visual FoxPro / Windows ES; CP850 era MS-DOS.
     encoding = os.environ.get("LEGACY_DBF_ENCODING", "cp1252")
 
+    only_tables: list[str] = []
+    if len(sys.argv) > 1:
+        for arg in sys.argv[1:]:
+            if arg.startswith("--only="):
+                only_tables = [t.strip().lower() for t in arg.split("=", 1)[1].split(",") if t.strip()]
+
     if not legacy_dir.is_dir():
         raise SystemExit(f"No es directorio: {legacy_dir}")
 
@@ -235,7 +241,9 @@ def main() -> None:
     conn = psycopg2.connect(get_db_url())
     conn.autocommit = False
     cur = conn.cursor()
-    if scope == "wave1":
+    if only_tables:
+        import_pairs = [(t, f"{t.upper()}.DBF") for t in only_tables]
+    elif scope == "wave1":
         import_pairs: list[tuple[str, str]] = list(WAVE1_IMPORT_ORDER)
     else:
         names = legacy_tables_for_import(cur)

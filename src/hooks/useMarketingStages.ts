@@ -17,9 +17,10 @@ const DEFAULT_STAGES: Array<Omit<MarketingLeadStageInsert, 'company_id'>> = [
   { name: 'Cita Confirmada (Sin pago)', position: 6, color: '#10b981', is_default_intake: false, is_won: true  },
 ];
 
-export const useMarketingStages = () => {
+export const useMarketingStages = (scopeCompanyId?: string | null) => {
   const queryClient = useQueryClient();
-  const { companyId, loading: companyLoading } = useCompanyFilter();
+  const { companyId: hostCompanyId, loading: companyLoading } = useCompanyFilter();
+  const companyId = scopeCompanyId ?? hostCompanyId;
 
   const query = useQuery({
     queryKey: ['marketing-stages', companyId],

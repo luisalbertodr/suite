@@ -11,6 +11,7 @@ export interface AgendaEmployee {
   email: string | null;
   phone: string | null;
   company_id: string;
+  billing_company_id?: string | null;
   active: boolean | null;
   /** Orden en la cuadrícula de agenda (menor = más a la izquierda). */
   agenda_sort_order?: number | null;
@@ -76,21 +77,29 @@ export const useAgendaEmployees = (options?: UseAgendaEmployeesOptions) => {
       phone?: string;
       active?: boolean;
       agenda_sort_order?: number;
+      billing_company_id?: string | null;
     }) => {
       if (!companyId) throw new Error('No company ID available');
-      const { active, ...rest } = employee;
+      const { active, billing_company_id, ...rest } = employee;
+      const row: Record<string, unknown> = {
+        ...rest,
+        company_id: companyId,
+        is_active: active,
+      };
+      if (billing_company_id) row.billing_company_id = billing_company_id;
       let data: any = null;
       let error: any = null;
 
       ({ data, error } = await supabase
         .from('agenda_employees')
-        .insert([{ ...rest, is_active: active, company_id: companyId }])
+        .insert([row])
         .select()
         .single());
       if (error?.code === '42703') {
+        const fallback: Record<string, unknown> = { ...rest, active, company_id: companyId };
         ({ data, error } = await supabase
           .from('agenda_employees')
-          .insert([{ ...rest, active, company_id: companyId }])
+          .insert([fallback])
           .select()
           .single());
       }

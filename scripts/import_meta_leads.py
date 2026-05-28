@@ -7,7 +7,7 @@ como un array plano de leads.
 
 Variables de entorno:
     SUPABASE_DB_URL=postgresql://...
-    LEGACY_COMPANY_ID=<uuid de la empresa>
+    LEGACY_COMPANY_ID=<uuid de la empresa>  (default: scripts/legacy_company.py)
     META_LEADS_JSON=<ruta al archivo JSON>            (opcional, default: leads_body.json)
     META_DEFAULT_STAGE=<nombre de etapa a usar>       (opcional, default: 'Nuevo Formulario')
     META_DRY_RUN=0|1                                   (opcional, default: 0)
@@ -27,6 +27,8 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import psycopg2
+
+from legacy_company import get_company_id
 from psycopg2.extras import Json
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -141,16 +143,13 @@ def main() -> int:
     load_dotenv()
 
     db_url = os.environ.get("SUPABASE_DB_URL")
-    company_id = os.environ.get("LEGACY_COMPANY_ID")
+    company_id = get_company_id()
     json_path_str = os.environ.get("META_LEADS_JSON") or "leads_body.json"
     default_stage_name = os.environ.get("META_DEFAULT_STAGE") or "Nuevo Formulario"
     dry_run = os.environ.get("META_DRY_RUN", "0").strip() in {"1", "true", "yes"}
 
     if not db_url:
         print("Falta SUPABASE_DB_URL", file=sys.stderr)
-        return 1
-    if not company_id:
-        print("Falta LEGACY_COMPANY_ID", file=sys.stderr)
         return 1
 
     json_path = Path(json_path_str)

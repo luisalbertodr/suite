@@ -48,6 +48,8 @@ import {
   formatMetaSyncErrorsSummary,
   type MetaSyncResponse,
 } from '@/hooks/useMetaConfig';
+import { useWorkCenter } from '@/hooks/useWorkCenter';
+import { BillingEntityTabs, type BillingEntityTabValue } from '@/components/BillingEntityTabs';
 
 type SortField =
   | 'created_at'
@@ -130,9 +132,21 @@ export const Marketing: React.FC = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
   const { companyId, loading: companyLoading } = useCompanyFilter();
-  const { leads, isLoading: leadsLoading, refetch, moveLeadToStage } = useMarketingLeads();
-  const { stages, isLoading: stagesLoading } = useMarketingStages();
-  const { fields, isLoading: fieldsLoading } = useMarketingFieldConfig();
+  const { isMultiEntity, billingCompanies, hostCompany } = useWorkCenter();
+  const [marketingBillingTab, setMarketingBillingTab] = useState<BillingEntityTabValue>('');
+
+  useEffect(() => {
+    if (marketingBillingTab || !isMultiEntity) return;
+    const defaultId = hostCompany?.id ?? billingCompanies[0]?.id ?? companyId;
+    if (defaultId) setMarketingBillingTab(defaultId);
+  }, [marketingBillingTab, isMultiEntity, hostCompany?.id, billingCompanies, companyId]);
+
+  const scopeCompanyId =
+    isMultiEntity && marketingBillingTab ? marketingBillingTab : companyId;
+
+  const { leads, isLoading: leadsLoading, refetch, moveLeadToStage } = useMarketingLeads(scopeCompanyId);
+  const { stages, isLoading: stagesLoading } = useMarketingStages(scopeCompanyId);
+  const { fields, isLoading: fieldsLoading } = useMarketingFieldConfig(scopeCompanyId);
   const { data: notesIndex } = useMarketingLeadNotesIndex();
   const { index: customerIndex } = useCustomerLookup();
   const { config: metaConfig, forms: metaForms, syncNow } = useMetaConfig();
@@ -383,6 +397,13 @@ export const Marketing: React.FC = () => {
               <p className="text-xs text-muted-foreground">
                 Embudo de clientes potenciales de Meta (Facebook · Instagram)
               </p>
+              {isMultiEntity && marketingBillingTab && (
+                <BillingEntityTabs
+                  value={marketingBillingTab}
+                  onChange={setMarketingBillingTab}
+                  className="mt-2"
+                />
+              )}
             </div>
           </div>
 

@@ -8,13 +8,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Building2, UserPlus, Users, Shield, Mail, Phone, AlertCircle, CheckCircle, LogOut } from 'lucide-react';
+import { Building2, UserPlus, Users, Shield, Mail, Phone, AlertCircle, CheckCircle, LogOut, Network } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useRoles } from '@/hooks/useRoles';
 import { UserListTable } from './UserListTable';
 import { EditUserModal } from './EditUserModal';
 import { ChangePasswordModal } from './ChangePasswordModal';
 import { useNavigate } from 'react-router-dom';
+import { invokeMain } from '@/lib/invokeMain';
+import { WorkCenterPanel } from './WorkCenterPanel';
 
 interface Company {
   id: string;
@@ -28,6 +30,9 @@ interface Company {
   address_postal_code: string | null;
   address_country: string | null;
   created_at: string;
+  work_center_id?: string | null;
+  short_name?: string | null;
+  tpv_ticket_prefix?: string | null;
 }
 
 interface UserWithDetails {
@@ -44,6 +49,7 @@ interface UserWithDetails {
   };
   user_company_roles?: Array<{
     id: string;
+    company_id: string;
     role: {
       name: string;
       description: string;
@@ -76,33 +82,6 @@ const MENU_PERMISSIONS: MenuPermission[] = [
   { resource: 'companies', action: 'read', label: 'Empresas', description: 'Gestionar información de empresas' },
   { resource: 'settings', action: 'read', label: 'Configuración', description: 'Acceso a configuración del sistema' }
 ];
-
-const callEdgeFunction = async (functionName: string, body: any = {}) => {
-  const functionUrl = `https://kztelbnarzrpbjlqastg.supabase.co/functions/v1/${functionName}`;
-  const anonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt6dGVsYm5hcnpycGJqbHFhc3RnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDkwMjcxNjEsImV4cCI6MjA2NDYwMzE2MX0.0jdEKfZgKsAqmZUWhhFqhZMWXYK-R8AABzwEQMgGjvU';
-
-  console.log(`Calling edge function: ${functionName} at ${functionUrl}`);
-  
-  const response = await fetch(functionUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${anonKey}`,
-      'apikey': anonKey,
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    console.error(`Edge function ${functionName} failed:`, response.status, text);
-    throw new Error(`Edge function failed: ${response.status} ${text}`);
-  }
-
-  const result = await response.json();
-  console.log(`Edge function ${functionName} response:`, result);
-  return result;
-};
 
 export const SuperuserManagement: React.FC = () => {
   const navigate = useNavigate();
@@ -183,8 +162,8 @@ export const SuperuserManagement: React.FC = () => {
   const { data: usersResponse, isLoading: usersLoading, error: usersError, refetch: refetchUsers } = useQuery({
     queryKey: ['superuser-users'],
     queryFn: async () => {
-      console.log('Calling list-users function...')
-      return await callEdgeFunction('list-users');
+      console.log('Calling main listUsers...')
+      return await invokeMain({ action: 'listUsers', isSuperuser: true });
     },
     retry: 1,
     retryDelay: 1000
@@ -210,7 +189,7 @@ export const SuperuserManagement: React.FC = () => {
     setTestMessage('Probando conexión...');
     
     try {
-      const result = await callEdgeFunction('list-users');
+      const result = await invokeMain({ action: 'listUsers', isSuperuser: true });
       setTestStatus('success');
       setTestMessage(`Conexión exitosa. Usuarios encontrados: ${result?.users?.length || 0}`);
     } catch (error) {
@@ -257,12 +236,15 @@ export const SuperuserManagement: React.FC = () => {
   const createUserMutation = useMutation({
     mutationFn: async (userData: typeof newUser) => {
       console.log('Creating user via function with data:', userData)
-      return await callEdgeFunction('create-user', {
-        email: userData.email,
-        password: userData.password,
-        company_id: userData.company_id,
-        role_id: userData.role_id,
-        permissions: userData.selectedPermissions
+      return await invokeMain({
+        action: 'createUser',
+        payload: {
+          email: userData.email,
+          password: userData.password,
+          company_id: userData.company_id,
+          role_id: userData.role_id,
+          permissions: userData.selectedPermissions,
+        },
       });
     },
     onSuccess: (data) => {
@@ -296,7 +278,7 @@ export const SuperuserManagement: React.FC = () => {
 
   const deleteUserMutation = useMutation({
     mutationFn: async (userId: string) => {
-      const result = await callEdgeFunction('delete-user', { userId });
+      const result = await invokeMain({ action: 'deleteUser', userId });
       if (!result?.success) throw new Error(result?.error || 'Error al eliminar usuario');
       return result;
     },
@@ -326,13 +308,24 @@ export const SuperuserManagement: React.FC = () => {
     
     if (!newUser.email.trim() || !newUser.password.trim() || !newUser.company_id || !newUser.role_id) {
       toast({
-        title: "Error de validación",
-        description: "Todos los campos obligatorios deben completarse",
-        variant: "destructive"
+        title: 'Campos incompletos',
+        description: 'Email, contraseña, empresa y rol son obligatorios.',
+        variant: 'destructive',
       });
       return;
     }
-    
+
+    const companyExists = companies.some((c) => c.id === newUser.company_id);
+    if (!companyExists) {
+      toast({
+        title: 'Empresa no válida',
+        description:
+          'La empresa seleccionada no está en el listado. Recarga la página o créala en la pestaña Empresas.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     if (newUser.selectedPermissions.length === 0) {
       toast({
         title: "Advertencia",
@@ -467,10 +460,14 @@ export const SuperuserManagement: React.FC = () => {
       </Card>
 
       <Tabs defaultValue="companies" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-2 md:grid-cols-4">
           <TabsTrigger value="companies" className="flex items-center space-x-2">
             <Building2 className="w-4 h-4" />
             <span>Empresas</span>
+          </TabsTrigger>
+          <TabsTrigger value="work-centers" className="flex items-center space-x-2">
+            <Network className="w-4 h-4" />
+            <span>Centros laborales</span>
           </TabsTrigger>
           <TabsTrigger value="users" className="flex items-center space-x-2">
             <Users className="w-4 h-4" />
@@ -624,6 +621,10 @@ export const SuperuserManagement: React.FC = () => {
           </Card>
         </TabsContent>
 
+        <TabsContent value="work-centers" className="space-y-6">
+          <WorkCenterPanel />
+        </TabsContent>
+
         <TabsContent value="users" className="space-y-6">
           <Card>
             <CardHeader>
@@ -670,7 +671,7 @@ export const SuperuserManagement: React.FC = () => {
                       <SelectContent>
                         {companies.map((company) => (
                           <SelectItem key={company.id} value={company.id}>
-                            {company.name}
+                            {company.name} · {company.tax_id}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -790,6 +791,7 @@ export const SuperuserManagement: React.FC = () => {
         companies={companies}
         availablePermissions={availablePermissions}
         isOpen={showEditModal}
+        multiCompany
         onClose={() => {
           setShowEditModal(false);
           setEditingUser(null);

@@ -4,6 +4,9 @@ import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { format } from 'date-fns';
 import type { PostgrestError } from '@supabase/supabase-js';
 
+import { isSchemaColumnError } from '@/lib/appointmentSales';
+import { fetchPeriodRevenue, fetchMonthlyRevenueSeries } from '@/lib/salesRevenue';
+
 const isMissingRelation = (error: PostgrestError | null) =>
   Boolean(
     error &&
@@ -26,7 +29,7 @@ export const useDashboardData = () => {
       if (!companyId) return null;
 
       // Parallel fetches
-      const [customersRes, appointmentsRes, vouchersRes, invoicesRes] = await Promise.all([
+      const [customersRes, appointmentsRes, vouchersRes, revenueRes] = await Promise.all([
         supabase.from('customers').select('id', { count: 'exact', head: true }).eq('company_id', companyId),
         supabase.from('agenda_appointments').select('id', { count: 'exact', head: true })
           .eq('company_id', companyId)
@@ -34,17 +37,18 @@ export const useDashboardData = () => {
           .lte('start_time', `${today}T23:59:59`),
         supabase.from('customer_vouchers').select('id', { count: 'exact', head: true })
           .eq('company_id', companyId).eq('is_active', true),
-        supabase.from('invoices').select('total_amount')
-          .eq('company_id', companyId)
-          .gte('created_at', firstDayOfMonth.toISOString())
-          .lte('created_at', lastDayOfMonth.toISOString()),
+        fetchPeriodRevenue(
+          companyId,
+          firstDayOfMonth.toISOString(),
+          new Date(lastDayOfMonth.getFullYear(), lastDayOfMonth.getMonth(), lastDayOfMonth.getDate(), 23, 59, 59, 999).toISOString(),
+        ),
       ]);
 
       const bonosRes = await supabase.from('bonos').select('id', { count: 'exact', head: true })
         .eq('company_id', companyId).eq('estado', 'activo');
       const bonosCount = isMissingRelation(bonosRes.error) ? 0 : (bonosRes.count || 0);
 
-      const monthlyRevenue = invoicesRes.data?.reduce((s, i) => s + (i.total_amount || 0), 0) || 0;
+      const monthlyRevenue = revenueRes.total;
 
       return {
         activeClients: customersRes.count || 0,
@@ -62,24 +66,16 @@ export const useDashboardData = () => {
     queryKey: ['dashboard-chart-data', companyId],
     queryFn: async () => {
       if (!companyId) return [];
+      const revenueSeries = await fetchMonthlyRevenueSeries(companyId, 5);
       const results = [];
-      for (let i = 5; i >= 0; i--) {
-        const d = new Date();
-        d.setMonth(d.getMonth() - i);
-        const first = new Date(d.getFullYear(), d.getMonth(), 1);
-        const last = new Date(d.getFullYear(), d.getMonth() + 1, 0);
-        const monthName = d.toLocaleDateString('es-ES', { month: 'short' });
-
-        const [inv, quo] = await Promise.all([
-          supabase.from('invoices').select('total_amount').eq('company_id', companyId)
-            .gte('created_at', first.toISOString()).lte('created_at', last.toISOString()),
-          supabase.from('quotes').select('total_amount').eq('company_id', companyId)
-            .gte('created_at', first.toISOString()).lte('created_at', last.toISOString()),
-        ]);
+      for (const { monthStart, monthEnd, total } of revenueSeries) {
+        const monthName = monthStart.toLocaleDateString('es-ES', { month: 'short' });
+        const quo = await supabase.from('quotes').select('total_amount').eq('company_id', companyId)
+          .gte('created_at', monthStart.toISOString()).lte('created_at', monthEnd.toISOString());
 
         results.push({
           name: monthName.charAt(0).toUpperCase() + monthName.slice(1),
-          ventas: inv.data?.reduce((s, x) => s + (x.total_amount || 0), 0) || 0,
+          ventas: total,
           presupuestos: quo.data?.reduce((s, x) => s + (x.total_amount || 0), 0) || 0,
         });
       }
@@ -95,20 +91,35 @@ export const useDashboardData = () => {
       if (!companyId) return [];
       const activities: { type: string; description: string; time: string }[] = [];
 
-      const [invRes, aptRes, cusRes] = await Promise.all([
+      const [invRes, cusRes] = await Promise.all([
         supabase.from('invoices').select('number, created_at').eq('company_id', companyId)
-          .order('created_at', { ascending: false }).limit(3),
-        supabase.from('agenda_appointments').select('title, created_at').eq('company_id', companyId)
           .order('created_at', { ascending: false }).limit(3),
         supabase.from('customers').select('name, created_at').eq('company_id', companyId)
           .order('created_at', { ascending: false }).limit(3),
       ]);
 
+      let aptRows: Array<{ created_at: string; title?: string | null; description?: string | null }> = [];
+      for (const select of ['description, created_at', 'created_at', 'title, created_at'] as const) {
+        const aptRes = await supabase
+          .from('agenda_appointments')
+          .select(select)
+          .eq('company_id', companyId)
+          .order('created_at', { ascending: false })
+          .limit(3);
+        if (!aptRes.error) {
+          aptRows = (aptRes.data || []) as typeof aptRows;
+          break;
+        }
+        if (!isSchemaColumnError(aptRes.error)) break;
+      }
+
       invRes.data?.forEach(i => activities.push({
         type: 'factura', description: `Factura ${i.number} creada`, time: getTimeAgo(i.created_at),
       }));
-      aptRes.data?.forEach(a => activities.push({
-        type: 'cita', description: `Cita: ${a.title}`, time: getTimeAgo(a.created_at),
+      aptRows.forEach((a) => activities.push({
+        type: 'cita',
+        description: `Cita: ${a.title || a.description || 'Nueva cita'}`,
+        time: getTimeAgo(a.created_at),
       }));
       cusRes.data?.forEach(c => activities.push({
         type: 'cliente', description: `Cliente ${c.name} registrado`, time: getTimeAgo(c.created_at),

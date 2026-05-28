@@ -1,184 +1,230 @@
 
-import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useWorkCenter } from '@/hooks/useWorkCenter';
+import { familyBelongsToBillingCompany } from '@/lib/billingCompany';
 
-export const useFamilies = () => {
+export type ArticleFamilyRecord = {
+  id: string;
+  name: string;
+  description: string | null;
+  company_id: string;
+  billing_company_id: string | null;
+};
+
+export type UseFamiliesOptions = {
+  /** visible: solo la empresa activa (UI). all: catálogo completo (mapas de facturación). */
+  scope?: 'visible' | 'all';
+};
+
+export const useFamilies = (options?: UseFamiliesOptions) => {
+  const scope = options?.scope ?? 'visible';
   const { companyId, loading: companyLoading } = useCompanyFilter();
+  const {
+    isMultiEntity,
+    catalogHostCompanyId,
+    siblingBillingCompanyId,
+    companyLabels,
+    loading: wcLoading,
+  } = useWorkCenter();
   const queryClient = useQueryClient();
 
-  console.log('useFamilies: companyId', companyId, 'loading', companyLoading);
+  const catalogCompanyId = catalogHostCompanyId ?? companyId;
+  const billingScopeId = companyId;
 
   const { data: families = [], isLoading: loading, error } = useQuery({
-    queryKey: ['article-families', companyId],
+    queryKey: ['article-families', catalogCompanyId, billingScopeId, isMultiEntity, scope],
     queryFn: async () => {
-      if (!companyId) {
-        console.log('No company ID available, skipping families query');
-        return [];
-      }
-
-      console.log('Fetching article families for company:', companyId);
+      if (!catalogCompanyId) return [];
 
       const { data, error } = await supabase
         .from('article_families')
         .select('*')
-        .eq('company_id', companyId)
+        .eq('company_id', catalogCompanyId)
         .order('name');
 
-      if (error) {
-        console.error('Error fetching article families:', error);
-        throw error;
-      }
+      if (error) throw error;
 
-      console.log('Fetched article families:', data?.length || 0, data);
-      return data?.map(family => family.name) || [];
+      const rows = (data ?? []) as ArticleFamilyRecord[];
+      if (scope === 'all' || !isMultiEntity || !billingScopeId) return rows;
+
+      return rows.filter((f) =>        familyBelongsToBillingCompany(f, billingScopeId, catalogCompanyId),
+      );
     },
-    enabled: !!companyId && !companyLoading,
+    enabled: !!catalogCompanyId && !companyLoading && !wcLoading,
   });
 
-  const createFamilyMutation = useMutation({
-    mutationFn: async (familyName: string) => {
-      if (!companyId) {
-        console.error('No company ID available for creating family');
-        throw new Error('No company ID available');
-      }
+  const familyNames = families.map((f) => f.name);
 
-      console.log('Creating family:', familyName, 'for company:', companyId);
+  const invalidateFamilies = () => {
+    queryClient.invalidateQueries({ queryKey: ['article-families'] });
+  };
+
+  const createFamilyMutation = useMutation({
+    mutationFn: async (input: { name: string; billing_company_id?: string | null }) => {
+      if (!catalogCompanyId) throw new Error('No company ID available');
+
+      const row: Record<string, unknown> = {
+        company_id: catalogCompanyId,
+        name: input.name.trim(),
+        billing_company_id: input.billing_company_id ?? billingScopeId ?? null,
+      };
 
       const { data, error } = await supabase
         .from('article_families')
-        .insert({
-          company_id: companyId,
-          name: familyName.trim(),
-        })
+        .insert(row)
         .select()
         .single();
 
-      if (error) {
-        console.error('Error creating family:', error);
-        throw error;
-      }
-
-      console.log('Family created successfully:', data);
+      if (error) throw error;
       return data;
     },
+    onSuccess: invalidateFamilies,
+  });
+
+  const updateFamilyBillingMutation = useMutation({
+    mutationFn: async ({
+      familyId,
+      billing_company_id,
+    }: {
+      familyId: string;
+      billing_company_id: string | null;
+    }) => {
+      if (!catalogCompanyId) throw new Error('No company ID available');
+      const { data, error } = await supabase
+        .from('article_families')
+        .update({ billing_company_id })
+        .eq('id', familyId)
+        .eq('company_id', catalogCompanyId)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: invalidateFamilies,
+  });
+
+  const releaseFamilyFromBillingMutation = useMutation({
+    mutationFn: async (family: { id: string; name: string }) => {
+      if (!catalogCompanyId || !billingScopeId) {
+        throw new Error('No company ID available');
+      }
+      if (!siblingBillingCompanyId) {
+        throw new Error('No hay otra empresa en el centro laboral');
+      }
+
+      const { error: familyError } = await supabase
+        .from('article_families')
+        .update({ billing_company_id: siblingBillingCompanyId })
+        .eq('id', family.id)
+        .eq('company_id', catalogCompanyId);
+
+      if (familyError) throw familyError;
+
+      const { error: articlesError } = await supabase
+        .from('articles')
+        .update({ billing_company_id: siblingBillingCompanyId })
+        .eq('company_id', catalogCompanyId)
+        .eq('familia', family.name)
+        .eq('billing_company_id', billingScopeId);
+
+      if (articlesError && articlesError.code !== '42703') throw articlesError;
+
+      return { siblingBillingCompanyId };
+    },
     onSuccess: () => {
-      console.log('Invalidating families cache');
-      queryClient.invalidateQueries({ queryKey: ['article-families', companyId] });
+      invalidateFamilies();
+      queryClient.invalidateQueries({ queryKey: ['articles'] });
+      queryClient.invalidateQueries({ queryKey: ['tpv-articles'] });
     },
   });
 
   const updateFamilyMutation = useMutation({
     mutationFn: async ({ oldName, newName }: { oldName: string; newName: string }) => {
-      if (!companyId) throw new Error('No company ID available');
-
-      console.log('Updating family from', oldName, 'to', newName);
+      if (!catalogCompanyId) throw new Error('No company ID available');
 
       const { data, error } = await supabase
         .from('article_families')
         .update({ name: newName.trim() })
-        .eq('company_id', companyId)
+        .eq('company_id', catalogCompanyId)
         .eq('name', oldName)
         .select()
         .single();
 
-      if (error) {
-        console.error('Error updating family:', error);
-        throw error;
-      }
-
-      console.log('Family updated successfully:', data);
+      if (error) throw error;
       return data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['article-families', companyId] });
-    },
+    onSuccess: invalidateFamilies,
   });
 
   const deleteFamilyMutation = useMutation({
     mutationFn: async (familyName: string) => {
-      if (!companyId) throw new Error('No company ID available');
-
-      console.log('Deleting family:', familyName);
+      if (!catalogCompanyId) throw new Error('No company ID available');
 
       const { error } = await supabase
         .from('article_families')
         .delete()
-        .eq('company_id', companyId)
+        .eq('company_id', catalogCompanyId)
         .eq('name', familyName);
 
-      if (error) {
-        console.error('Error deleting family:', error);
-        throw error;
-      }
-
-      console.log('Family deleted successfully');
+      if (error) throw error;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['article-families', companyId] });
-    },
+    onSuccess: invalidateFamilies,
   });
 
   const ensureVariosFamilyExists = async (): Promise<void> => {
-    if (!companyId) {
-      console.error('No company ID available for ensuring Varios family');
-      throw new Error('No company ID available');
-    }
+    if (!catalogCompanyId) throw new Error('No company ID available');
 
-    console.log('Ensuring Varios family exists for company:', companyId);
-
-    // Check if "Varios" family already exists
     const { data: existingFamily, error: checkError } = await supabase
       .from('article_families')
       .select('id')
-      .eq('company_id', companyId)
+      .eq('company_id', catalogCompanyId)
       .eq('name', 'Varios')
-      .single();
+      .maybeSingle();
 
-    if (checkError && checkError.code !== 'PGRST116') {
-      // PGRST116 is "not found" error, which is expected if family doesn't exist
-      console.error('Error checking for Varios family:', checkError);
-      throw checkError;
-    }
+    if (checkError) throw checkError;
 
-    // If family doesn't exist, create it
     if (!existingFamily) {
-      console.log('Varios family does not exist, creating it');
-      const { error: insertError } = await supabase
-        .from('article_families')
-        .insert({
-          company_id: companyId,
-          name: 'Varios',
-          description: 'Familia por defecto para artículos varios'
-        });
-
-      if (insertError) {
-        console.error('Error creating Varios family:', insertError);
-        throw insertError;
+      const row: Record<string, unknown> = {
+        company_id: catalogCompanyId,
+        name: 'Varios',
+        description: 'Familia por defecto para artículos varios',
+      };
+      if (isMultiEntity && billingScopeId) {
+        row.billing_company_id = billingScopeId;
       }
-      
-      console.log('Varios family created successfully');
-      // Invalidate cache to refresh the families list
-      queryClient.invalidateQueries({ queryKey: ['article-families', companyId] });
-    } else {
-      console.log('Varios family already exists');
+      const { error: insertError } = await supabase.from('article_families').insert(row);
+      if (insertError) throw insertError;
+      invalidateFamilies();
     }
   };
 
-  const addFamily = async (familyName: string): Promise<boolean> => {
-    if (!familyName.trim() || families.includes(familyName.trim())) {
-      console.log('Family name is empty or already exists:', familyName);
+  const addFamily = async (
+    familyName: string,
+    billing_company_id?: string | null,
+  ): Promise<boolean> => {
+    if (!familyName.trim() || familyNames.includes(familyName.trim())) {
       return false;
     }
 
     try {
-      await createFamilyMutation.mutateAsync(familyName);
+      await createFamilyMutation.mutateAsync({
+        name: familyName,
+        billing_company_id: billing_company_id ?? (isMultiEntity ? billingScopeId : null),
+      });
       return true;
     } catch (error) {
       console.error('Error adding family:', error);
       throw error;
     }
+  };
+
+  const releaseFamilyFromBilling = async (family: {
+    id: string;
+    name: string;
+  }): Promise<void> => {
+    await releaseFamilyFromBillingMutation.mutateAsync(family);
   };
 
   const removeFamily = async (familyName: string): Promise<void> => {
@@ -191,7 +237,7 @@ export const useFamilies = () => {
   };
 
   const updateFamily = async (oldName: string, newName: string): Promise<boolean> => {
-    if (!newName.trim() || families.includes(newName.trim())) {
+    if (!newName.trim() || familyNames.includes(newName.trim())) {
       return false;
     }
 
@@ -204,29 +250,25 @@ export const useFamilies = () => {
     }
   };
 
-  // Legacy method for compatibility
-  const saveFamilies = async (newFamilies: string[]) => {
-    // This method is kept for backwards compatibility but is not used
+  const saveFamilies = async (_newFamilies: string[]) => {
     console.warn('saveFamilies is deprecated, use addFamily/removeFamily/updateFamily instead');
   };
 
-  // Log current state
-  console.log('useFamilies state:', {
-    families,
-    familiesCount: families.length,
-    loading: companyLoading || loading,
-    error,
-    companyId
-  });
-
   return {
     families,
-    loading: companyLoading || loading,
+    familyNames,
+    loading: companyLoading || wcLoading || loading,
     saveFamilies,
     addFamily,
     removeFamily,
     updateFamily,
+    updateFamilyBilling: updateFamilyBillingMutation.mutateAsync,
+    releaseFamilyFromBilling,
+    siblingBillingCompanyId,
+    siblingBillingLabel: siblingBillingCompanyId
+      ? (companyLabels.get(siblingBillingCompanyId) ?? 'otra empresa')
+      : null,
     ensureVariosFamilyExists,
-    error
+    error,
   };
 };

@@ -1,9 +1,8 @@
 import React from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
+import { fetchAppointmentsForCustomer } from '@/lib/agendaCustomerAppointments';
 import { Calendar, Clock, User } from 'lucide-react';
-import { format } from 'date-fns';
 
 interface Props {
   customerId: string;
@@ -12,15 +11,7 @@ interface Props {
 export const ClienteCitasTab: React.FC<Props> = ({ customerId }) => {
   const { data: appointments, isLoading } = useQuery({
     queryKey: ['customer_appointments', customerId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('agenda_appointments')
-        .select('*, agenda_employees(name)')
-        .eq('customer_id', customerId)
-        .order('start_time', { ascending: false });
-      if (error) throw error;
-      return data;
-    },
+    queryFn: () => fetchAppointmentsForCustomer(customerId),
   });
 
   if (isLoading) return <div className="text-center py-8 text-muted-foreground">Cargando...</div>;
@@ -60,12 +51,12 @@ export const ClienteCitasTab: React.FC<Props> = ({ customerId }) => {
                   <div className="font-medium">{apt.title}</div>
                   <div className="text-sm text-muted-foreground flex items-center gap-2">
                     <Clock className="w-3 h-3" />
-                    {format(new Date(apt.start_time), 'dd/MM/yyyy HH:mm')} - {format(new Date(apt.end_time), 'HH:mm')}
+                    {[apt.ymd, apt.time_range].filter(Boolean).join(' · ')}
                   </div>
-                  {(apt as any).agenda_employees?.name && (
+                  {apt.employee_name && (
                     <div className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
                       <User className="w-3 h-3" />
-                      {(apt as any).agenda_employees.name}
+                      {apt.employee_name}
                     </div>
                   )}
                 </div>

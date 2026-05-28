@@ -3,9 +3,11 @@ from collections import OrderedDict
 
 from supabase import create_client
 
+from legacy_company import DEFAULT_COMPANY_ID
+
 URL = "https://supabase.lipoout.com"
 KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UiLCJpYXQiOjE2Nzg4ODY0MDAsImV4cCI6MTc5OTUzNTYwMH0.T_fOOOaoiFAyTLDkSCoaGwxy7TjlacSHJn2aZyCFP0M"
-COMPANY_ID = "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4"
+COMPANY_ID = DEFAULT_COMPANY_ID
 PLANINC_PATH = r"E:/APP Lipoout/dbf/APP_READY/PLANINC.json"
 
 

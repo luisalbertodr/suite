@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { ArticleFormData } from '@/hooks/useArticles';
 import { BarcodeScanner } from './BarcodeScanner';
 import { Scan } from 'lucide-react';
+import { BillingCompanySelect } from '@/components/forms/BillingCompanySelect';
 
 // Product types
 const PRODUCT_TYPES = [
@@ -20,6 +21,8 @@ const ARTICLE_KINDS = [
 interface ArticleFormFieldsProps {
   formData: ArticleFormData;
   families: string[];
+  billingCompanyId?: string | null;
+  onBillingCompanyChange?: (id: string | null) => void;
   recursos?: Array<{ id: string; nombre: string; activo?: boolean }>;
   onInputChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => void;
   onProductTypeChange: (e: React.ChangeEvent<HTMLSelectElement>) => void;
@@ -31,6 +34,8 @@ interface ArticleFormFieldsProps {
 export const ArticleFormFields: React.FC<ArticleFormFieldsProps> = ({
   formData,
   families,
+  billingCompanyId,
+  onBillingCompanyChange,
   recursos = [],
   onInputChange,
   onProductTypeChange,
@@ -130,6 +135,15 @@ export const ArticleFormFields: React.FC<ArticleFormFieldsProps> = ({
           />
         </div>
       </div>
+
+      {onBillingCompanyChange && (
+        <BillingCompanySelect
+          value={billingCompanyId}
+          onChange={onBillingCompanyChange}
+          inheritLabel="Heredar de la familia / tenant"
+          disabled={fieldsDisabled}
+        />
+      )}
 
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">

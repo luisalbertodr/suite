@@ -11,6 +11,7 @@ export type CustomerSearchRow = {
   phone?: string | null;
   phone_home?: string | null;
   phone_mobile?: string | null;
+  legacy_codcli?: string | null;
 };
 
 function digitsOnly(s: string): string {
@@ -60,4 +61,15 @@ export function filterCustomersBySearch<T extends CustomerSearchRow>(list: T[], 
   const q = rawQuery.trim();
   if (!q) return list;
   return list.filter((c) => customerMatchesSearch(c, q));
+}
+
+/** Mínimo de letras o dígitos antes de lanzar búsqueda en servidor. */
+export const CUSTOMER_SEARCH_MIN_CHARS = 3;
+
+export function isCustomerSearchQueryReady(raw: string): boolean {
+  const q = raw.trim();
+  if (!q) return false;
+  const letters = (q.match(/[\p{L}]/gu) || []).length;
+  const digits = (q.match(/\d/g) || []).length;
+  return letters >= CUSTOMER_SEARCH_MIN_CHARS || digits >= CUSTOMER_SEARCH_MIN_CHARS;
 }

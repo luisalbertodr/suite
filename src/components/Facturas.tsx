@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { useLocation } from 'react-router-dom';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -13,57 +13,141 @@ import { VerifactuStatus } from './VerifactuStatus';
 import { VerifactuCertificates } from './VerifactuCertificates';
 import { VerifactuXMLDocuments } from './VerifactuXMLDocuments';
 import { VerifactuQueueMonitor } from './VerifactuQueueMonitor';
-import { Plus, Search, FileText, Settings, History, File, ListOrdered } from 'lucide-react';
+import { Plus, Search, FileText, Settings, History, File, ListOrdered, ChevronLeft, ChevronRight } from 'lucide-react';
 import { format } from 'date-fns';
+import { TPV_SALE_INVOICE_PREFILL_KEY } from '@/lib/appointmentSales';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useWorkCenter } from '@/hooks/useWorkCenter';
+import { BillingEntityTabs, billingCompanyIdsForTab, type BillingEntityTabValue } from '@/components/BillingEntityTabs';
+
+const PAGE_SIZE = 50;
+
+const INVOICE_LIST_SELECT = `
+  id,
+  number,
+  issue_date,
+  due_date,
+  total_amount,
+  status,
+  paid_status,
+  is_corrective,
+  corrective_reason,
+  verifactu_status,
+  verifactu_csv,
+  verifactu_qr_code,
+  verifactu_sent_at,
+  verifactu_response_message,
+  customer_id,
+  company_id,
+  created_at,
+  customers(name, tax_id)
+`;
 
 export const Facturas: React.FC = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [selectedInvoice, setSelectedInvoice] = useState<any>(null);
   const [showForm, setShowForm] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [page, setPage] = useState(0);
   const [activeTab, setActiveTab] = useState('invoices');
   const [budgetData, setBudgetData] = useState<any>(null);
   const { companyId, loading: companyLoading } = useCompanyFilter();
-  const location = useLocation();
+  const { isMultiEntity, billingCompanies, hostCompany } = useWorkCenter();
+  const [invoiceBillingTab, setInvoiceBillingTab] = useState<BillingEntityTabValue>('');
 
-  const { data: invoices, isLoading } = useQuery({
-    queryKey: ['invoices', searchTerm, companyId],
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(searchTerm.trim()), 350);
+    return () => window.clearTimeout(timer);
+  }, [searchTerm]);
+
+  useEffect(() => {
+    if (invoiceBillingTab || !isMultiEntity) return;
+    const defaultId = hostCompany?.id ?? billingCompanies[0]?.id ?? companyId;
+    if (defaultId) setInvoiceBillingTab(defaultId);
+  }, [invoiceBillingTab, isMultiEntity, hostCompany?.id, billingCompanies, companyId]);
+
+  useEffect(() => {
+    setPage(0);
+  }, [debouncedSearch, companyId, invoiceBillingTab]);
+
+  const billingCompanyIds = billingCompanyIdsForTab(
+    isMultiEntity && invoiceBillingTab ? invoiceBillingTab : 'all',
+    companyId,
+    billingCompanies,
+  );
+
+  const loadInvoiceById = useCallback(async (invoiceId: string) => {
+    if (!companyId) return null;
+    const { data, error } = await supabase
+      .from('invoices')
+      .select(`
+        *,
+        customers(name, tax_id, email, phone),
+        companies(name)
+      `)
+      .eq('id', invoiceId)
+      .eq('company_id', companyId)
+      .maybeSingle();
+    if (error) {
+      console.error('Error loading invoice:', error);
+      return null;
+    }
+    return data;
+  }, [companyId]);
+
+  const { data: listResult, isLoading, isFetching } = useQuery({
+    queryKey: ['invoices', debouncedSearch, companyId, page, billingCompanyIds.join(',')],
     queryFn: async () => {
-      if (!companyId) {
-        console.log('No company ID available, skipping invoices query');
-        return [];
+      if (!companyId || billingCompanyIds.length === 0) {
+        return { rows: [] as any[], total: 0 };
       }
 
-      console.log('Fetching invoices for company:', companyId);
+      const from = page * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+      const st = debouncedSearch.replace(/%/g, '');
+
+      let customerIds: string[] = [];
+      if (st.length >= 2) {
+        const { data: matchedCustomers } = await supabase
+          .from('customers')
+          .select('id')
+          .eq('company_id', companyId)
+          .or(`name.ilike.%${st}%,email.ilike.%${st}%,tax_id.ilike.%${st}%,phone.ilike.%${st}%`)
+          .limit(30);
+        customerIds = (matchedCustomers ?? []).map((c) => c.id);
+      }
 
       let query = supabase
         .from('invoices')
-        .select(`
-          *,
-          customers!inner(name, tax_id, email, phone),
-          companies!inner(name)
-        `)
-        .eq('company_id', companyId)
+        .select(INVOICE_LIST_SELECT, { count: 'exact' })
+        .in('company_id', billingCompanyIds)
         .order('created_at', { ascending: false });
 
-      if (searchTerm) {
-        const st = searchTerm.replace(/%/g, '');
-        query = query.or(
-          `number.ilike.%${st}%,customers.name.ilike.%${st}%,customers.email.ilike.%${st}%,customers.tax_id.ilike.%${st}%,customers.phone.ilike.%${st}%`,
-        );
+      if (st) {
+        if (customerIds.length > 0) {
+          query = query.or(`number.ilike.%${st}%,customer_id.in.(${customerIds.join(',')})`);
+        } else {
+          query = query.ilike('number', `%${st}%`);
+        }
       }
 
-      const { data, error } = await query;
+      const { data, error, count } = await query.range(from, to);
       if (error) {
         console.error('Error fetching invoices:', error);
         throw error;
       }
-      
-      console.log('Fetched invoices:', data?.length || 0);
-      return data;
+
+      return { rows: data ?? [], total: count ?? 0 };
     },
-    enabled: !!companyId && !companyLoading,
+    enabled: !!companyId && !companyLoading && billingCompanyIds.length > 0,
+    placeholderData: (prev) => prev,
   });
+
+  const invoices = listResult?.rows ?? [];
+  const totalCount = listResult?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   const { data: verifactuLogs } = useQuery({
     queryKey: ['verifactu-logs', companyId],
@@ -83,7 +167,7 @@ export const Facturas: React.FC = () => {
       if (error) throw error;
       return data;
     },
-    enabled: !!companyId && !companyLoading,
+    enabled: !!companyId && !companyLoading && activeTab === 'logs',
   });
 
   const getStatusColor = (status: string) => {
@@ -128,6 +212,33 @@ export const Facturas: React.FC = () => {
     }
   }, [location.search]);
 
+  const openTpvPrefill = useCallback(() => {
+    const stored = sessionStorage.getItem(TPV_SALE_INVOICE_PREFILL_KEY);
+    if (!stored) return;
+    try {
+      setBudgetData(JSON.parse(stored));
+      setShowForm(true);
+      sessionStorage.removeItem(TPV_SALE_INVOICE_PREFILL_KEY);
+    } catch (error) {
+      console.error('Error parsing TPV sale invoice prefill:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    openTpvPrefill();
+  }, [openTpvPrefill, location.pathname]);
+
+  useEffect(() => {
+    const invoiceId = new URLSearchParams(location.search).get('invoice');
+    if (!invoiceId || !companyId) return;
+    void loadInvoiceById(invoiceId).then((data) => {
+      if (data) {
+        setSelectedInvoice(data);
+        setShowForm(false);
+      }
+    });
+  }, [location.search, companyId, loadInvoiceById]);
+
   if (companyLoading) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -152,6 +263,13 @@ export const Facturas: React.FC = () => {
     return (
       <FacturaForm 
         onClose={handleFormClose}
+        onCreated={async (created) => {
+          setBudgetData(null);
+          setShowForm(false);
+          const full = await loadInvoiceById(String(created.id));
+          setSelectedInvoice(full ?? created);
+          navigate('/facturacion', { replace: true });
+        }}
         budgetData={budgetData}
       />
     );
@@ -173,6 +291,13 @@ export const Facturas: React.FC = () => {
         <div>
           <h1 className="text-3xl font-bold">Facturas</h1>
           <p className="text-gray-600">Gestiona tus facturas y su integración con Verifactu</p>
+          {isMultiEntity && invoiceBillingTab && (
+            <BillingEntityTabs
+              value={invoiceBillingTab}
+              onChange={setInvoiceBillingTab}
+              className="mt-3"
+            />
+          )}
         </div>
         <Button onClick={() => setShowForm(true)}>
           <Plus className="w-4 h-4 mr-2" />
@@ -218,20 +343,20 @@ export const Facturas: React.FC = () => {
           </div>
 
           <div className="grid gap-4">
-            {isLoading ? (
+            {isLoading && !listResult ? (
               <div className="text-center py-8">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
                 <p className="text-gray-500 mt-2">Cargando facturas...</p>
               </div>
-            ) : invoices?.length === 0 ? (
+            ) : invoices.length === 0 ? (
               <Card>
                 <CardContent className="text-center py-8">
                   <FileText className="w-12 h-12 mx-auto text-gray-400 mb-4" />
                   <h3 className="text-lg font-medium mb-2">No hay facturas</h3>
                   <p className="text-gray-600 mb-4">
-                    {searchTerm ? 'No se encontraron facturas con ese criterio.' : 'Crea tu primera factura para comenzar.'}
+                    {debouncedSearch ? 'No se encontraron facturas con ese criterio.' : 'Crea tu primera factura para comenzar.'}
                   </p>
-                  {!searchTerm && (
+                  {!debouncedSearch && (
                     <Button onClick={() => setShowForm(true)}>
                       <Plus className="w-4 h-4 mr-2" />
                       Nueva Factura
@@ -240,7 +365,11 @@ export const Facturas: React.FC = () => {
                 </CardContent>
               </Card>
             ) : (
-              invoices?.map((invoice) => (
+              <>
+              {isFetching && (
+                <p className="text-xs text-muted-foreground text-center">Actualizando listado…</p>
+              )}
+              {invoices.map((invoice) => (
                 <Card key={invoice.id} className="hover:shadow-md transition-shadow cursor-pointer">
                   <CardHeader>
                     <div className="flex items-center justify-between">
@@ -253,7 +382,7 @@ export const Facturas: React.FC = () => {
                           )}
                         </CardTitle>
                         <CardDescription>
-                          {invoice.customers?.name} • {format(new Date(invoice.issue_date), 'dd/MM/yyyy')}
+                          {invoice.customers?.name || 'Cliente sin ficha'} • {format(new Date(invoice.issue_date), 'dd/MM/yyyy')}
                         </CardDescription>
                       </div>
                       <div className="flex items-center space-x-2">
@@ -288,7 +417,36 @@ export const Facturas: React.FC = () => {
                     </div>
                   </CardContent>
                 </Card>
-              ))
+              ))}
+
+              {totalCount > PAGE_SIZE && (
+                <div className="flex items-center justify-between pt-2 border-t">
+                  <p className="text-sm text-muted-foreground">
+                    {totalCount} factura{totalCount !== 1 ? 's' : ''} · Página {page + 1} de {totalPages}
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={page <= 0 || isFetching}
+                      onClick={() => setPage((p) => Math.max(0, p - 1))}
+                    >
+                      <ChevronLeft className="w-4 h-4 mr-1" />
+                      Anterior
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={page + 1 >= totalPages || isFetching}
+                      onClick={() => setPage((p) => p + 1)}
+                    >
+                      Siguiente
+                      <ChevronRight className="w-4 h-4 ml-1" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+              </>
             )}
           </div>
         </TabsContent>

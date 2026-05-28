@@ -49,7 +49,7 @@ export const Reportes: React.FC = () => {
           title: "Facturas por Cobrar",
           description: "Control de facturas pendientes de cobro con análisis de vencimientos",
           icon: FileText,
-          filters: ["fechas", "cliente", "estado-pago", "rango-importes"],
+          filters: ["fechas", "cliente", "estado-pago", "rango-importes", "empresa-emisora"],
           columns: ["Número", "Cliente", "Fecha Emisión", "Vencimiento", "Importe", "Días Vencido"]
         },
         {
@@ -57,7 +57,7 @@ export const Reportes: React.FC = () => {
           title: "Facturación Mensual",
           description: "Análisis mensual de facturación con comparativas y tendencias",
           icon: Calendar,
-          filters: ["año", "mes", "cliente", "serie-factura"],
+          filters: ["año", "mes", "cliente", "serie-factura", "empresa-emisora"],
           columns: ["Mes", "Total Facturado", "Num. Facturas", "Variación"]
         },
         {
@@ -65,7 +65,7 @@ export const Reportes: React.FC = () => {
           title: "Facturación por Cliente",
           description: "Ranking y análisis de facturación por cliente",
           icon: Users,
-          filters: ["fechas", "cliente", "ranking"],
+          filters: ["fechas", "cliente", "ranking", "empresa-emisora"],
           columns: ["Cliente", "Total Facturado", "Num. Facturas", "Promedio"]
         },
         {
@@ -73,7 +73,7 @@ export const Reportes: React.FC = () => {
           title: "Ventas por Artículo",
           description: "Análisis de ventas por producto con márgenes",
           icon: Package,
-          filters: ["fechas", "familia", "articulo"],
+          filters: ["fechas", "familia", "articulo", "empresa-emisora"],
           columns: ["Artículo", "Cantidad", "Importe", "Margen"]
         }
       ]

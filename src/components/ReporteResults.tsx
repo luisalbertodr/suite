@@ -20,6 +20,9 @@ import { es } from 'date-fns/locale';
 import { Bar, BarChart, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { supabase } from '@/lib/supabase';
 import { useQuery } from '@tanstack/react-query';
+import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useWorkCenter } from '@/hooks/useWorkCenter';
+import { fetchSalesWithoutInvoiceRows } from '@/lib/salesRevenue';
 
 interface Report {
   id: string;
@@ -51,11 +54,32 @@ export const ReporteResults: React.FC<ReporteResultsProps> = ({ report, filters,
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(10);
+  const { companyId, loading: companyLoading } = useCompanyFilter();
+  const { isMultiEntity, billingCompanies, companyLabels } = useWorkCenter();
+
+  const applyBillingCompanyScope = <T extends { eq: (col: string, val: string) => T; or: (filter: string) => T }>(
+    query: T,
+    column = 'company_id',
+  ): T => {
+    const billingFilter = filters.empresaEmisora as string | undefined;
+    if (billingFilter && billingFilter !== 'all') {
+      return query.eq(column, billingFilter);
+    }
+    if (isMultiEntity && billingCompanies.length > 1) {
+      const ids = billingCompanies.map((c) => c.id).join(',');
+      if (column === 'company_id') {
+        return query.or(`host_company_id.eq.${companyId},${column}.in.(${ids})`) as T;
+      }
+      return query.or(`${column}.in.(${ids})`) as T;
+    }
+    return query.eq(column, companyId!);
+  };
 
   // Consulta para obtener datos según el tipo de reporte
   const { data: reportData, isLoading } = useQuery({
-    queryKey: ['report-data', report.id, filters],
+    queryKey: ['report-data', companyId, report.id, filters],
     queryFn: async () => {
+      if (!companyId) return [];
       switch (report.id) {
         case "facturas-cobrar":
           return await fetchFacturasPorCobrar();
@@ -83,6 +107,7 @@ export const ReporteResults: React.FC<ReporteResultsProps> = ({ report, filters,
           return [];
       }
     },
+    enabled: !!companyId && !companyLoading,
   });
 
   const fetchFacturasPorCobrar = async () => {
@@ -100,6 +125,8 @@ export const ReporteResults: React.FC<ReporteResultsProps> = ({ report, filters,
         customers:customer_id (name)
       `)
       .eq('paid_status', false);
+
+    query = applyBillingCompanyScope(query);
 
     // Aplicar filtro por cliente si está seleccionado
     if (filters.cliente && filters.cliente !== "todos") {
@@ -146,6 +173,8 @@ export const ReporteResults: React.FC<ReporteResultsProps> = ({ report, filters,
       `)
       .order('issue_date', { ascending: false });
 
+    query = applyBillingCompanyScope(query);
+
     // Aplicar filtro por cliente si está seleccionado
     if (filters.cliente && filters.cliente !== "todos") {
       console.log('Aplicando filtro por cliente en facturación mensual:', filters.cliente);
@@ -166,15 +195,26 @@ export const ReporteResults: React.FC<ReporteResultsProps> = ({ report, filters,
       throw error;
     }
 
+    const fromIso = filters.fechaDesde
+      ? new Date(format(filters.fechaDesde, 'yyyy-MM-dd')).toISOString()
+      : undefined;
+    const toIso = filters.fechaHasta
+      ? new Date(format(filters.fechaHasta, 'yyyy-MM-dd') + 'T23:59:59').toISOString()
+      : undefined;
+    const customerFilter = filters.cliente && filters.cliente !== 'todos' ? filters.cliente : undefined;
+
+    const tpvRows = await fetchSalesWithoutInvoiceRows(companyId!, fromIso, toIso, customerFilter);
+
     console.log('Datos de facturación mensual obtenidos:', data); // Para debug
 
-    // Agrupar por mes
-    const monthlyData = data?.reduce((acc: any, invoice) => {
+    // Agrupar por mes (facturas + tickets TPV sin factura)
+    const monthlyData = (data ?? []).reduce((acc: Record<string, { totalFacturado: number; numFacturas: number; numTickets: number; cliente: string }>, invoice) => {
       const month = format(new Date(invoice.issue_date), 'MMMM yyyy', { locale: es });
       if (!acc[month]) {
         acc[month] = { 
           totalFacturado: 0, 
           numFacturas: 0,
+          numTickets: 0,
           cliente: invoice.customers?.name || 'N/A'
         };
       }
@@ -183,41 +223,74 @@ export const ReporteResults: React.FC<ReporteResultsProps> = ({ report, filters,
       return acc;
     }, {});
 
-    return Object.entries(monthlyData || {}).map(([mes, data]: [string, any]) => ({
+    tpvRows.forEach((sale) => {
+      const month = format(new Date(sale.created_at), 'MMMM yyyy', { locale: es });
+      if (!monthlyData[month]) {
+        monthlyData[month] = {
+          totalFacturado: 0,
+          numFacturas: 0,
+          numTickets: 0,
+          cliente: sale.customer_name || 'N/A',
+        };
+      }
+      monthlyData[month].totalFacturado += Number(sale.total_amount ?? 0);
+      monthlyData[month].numTickets += 1;
+    });
+
+    return Object.entries(monthlyData).map(([mes, data]) => ({
       mes,
       cliente: data.cliente,
       totalFacturado: data.totalFacturado,
       numFacturas: data.numFacturas,
+      numTickets: data.numTickets,
       variacion: 'N/A' // Se podría calcular comparando con el mes anterior
     }));
   };
 
   const fetchFacturacionPorCliente = async () => {
-    const { data, error } = await supabase
+    let query = supabase
       .from('invoices')
       .select(`
         total_amount,
         customers:customer_id (name)
       `);
 
+    query = applyBillingCompanyScope(query);
+
+    const { data, error } = await query;
+
     if (error) throw error;
 
-    // Agrupar por cliente
-    const clientData = data?.reduce((acc: any, invoice) => {
+    const tpvRows = await fetchSalesWithoutInvoiceRows(companyId!);
+
+    // Agrupar por cliente (facturas + TPV sin factura)
+    const clientData = (data ?? []).reduce((acc: Record<string, { totalFacturado: number; numFacturas: number; numTickets: number }>, invoice) => {
       const clientName = invoice.customers?.name || 'Cliente Desconocido';
       if (!acc[clientName]) {
-        acc[clientName] = { totalFacturado: 0, numFacturas: 0 };
+        acc[clientName] = { totalFacturado: 0, numFacturas: 0, numTickets: 0 };
       }
       acc[clientName].totalFacturado += Number(invoice.total_amount);
       acc[clientName].numFacturas += 1;
       return acc;
     }, {});
 
-    return Object.entries(clientData || {}).map(([cliente, data]: [string, any]) => ({
+    tpvRows.forEach((sale) => {
+      const clientName = sale.customer_name || 'Cliente Desconocido';
+      if (!clientData[clientName]) {
+        clientData[clientName] = { totalFacturado: 0, numFacturas: 0, numTickets: 0 };
+      }
+      clientData[clientName].totalFacturado += Number(sale.total_amount ?? 0);
+      clientData[clientName].numTickets += 1;
+    });
+
+    return Object.entries(clientData).map(([cliente, data]) => ({
       cliente,
       totalFacturado: data.totalFacturado,
       numFacturas: data.numFacturas,
-      promedio: data.totalFacturado / data.numFacturas
+      numTickets: data.numTickets,
+      promedio: data.numFacturas + data.numTickets > 0
+        ? data.totalFacturado / (data.numFacturas + data.numTickets)
+        : 0,
     }));
   };
 
@@ -588,7 +661,7 @@ export const ReporteResults: React.FC<ReporteResultsProps> = ({ report, filters,
     );
   };
 
-  if (isLoading) {
+  if (isLoading || companyLoading) {
     return (
       <Dialog open={true} onOpenChange={onBack}>
         <DialogContent className="max-w-md">

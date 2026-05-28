@@ -6,7 +6,18 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-type MainAction = "listUsers" | "createUser" | "deleteUser" | "updateUser";
+type MainAction =
+  | "listUsers"
+  | "createUser"
+  | "deleteUser"
+  | "updateUser"
+  | "addUserCompany"
+  | "removeUserCompany"
+  | "listWorkCenters"
+  | "createWorkCenter"
+  | "updateWorkCenter"
+  | "assignCompanyToWorkCenter"
+  | "deleteWorkCenter";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -216,6 +227,30 @@ async function createUser(input: {
     );
   }
 
+  const { data: companyRow, error: companyLookupError } = await supabaseAdmin
+    .from("companies")
+    .select("id")
+    .eq("id", p.company_id)
+    .maybeSingle();
+
+  if (companyLookupError) {
+    return jsonResponse(
+      { success: false, error: `Error al verificar empresa: ${companyLookupError.message}` },
+      400,
+    );
+  }
+  if (!companyRow) {
+    return jsonResponse(
+      {
+        success: false,
+        error:
+          `Empresa no encontrada (company_id=${p.company_id}). ` +
+          "Use el id de la tabla companies, no work_centers.",
+      },
+      400,
+    );
+  }
+
   const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.createUser({
     email: p.email,
     password: p.password,
@@ -230,11 +265,12 @@ async function createUser(input: {
 
   const userId = authUser.user.id;
   try {
-    await supabaseAdmin.from("user_profiles").insert({
+    const { error: profileError } = await supabaseAdmin.from("user_profiles").insert({
       user_id: userId,
       company_id: p.company_id,
       employee_id: p.employee_id || null,
     });
+    if (profileError) throw new Error(`Failed to create profile: ${profileError.message}`);
 
     const { error: roleError } = await insertUserCompanyRole(supabaseAdmin, {
       user_id: userId,
@@ -271,6 +307,8 @@ async function deleteUser(input: { userId?: string }) {
   const supabaseAdmin = createAdminClient();
   if (!input.userId) return jsonResponse({ success: false, error: "userId is required" }, 400);
 
+  await supabaseAdmin.from("user_permissions").delete().eq("user_id", input.userId);
+  await supabaseAdmin.from("user_active_company").delete().eq("user_id", input.userId);
   await supabaseAdmin.from("user_company_roles").delete().eq("user_id", input.userId);
   await supabaseAdmin.from("user_profiles").delete().eq("user_id", input.userId);
   const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(input.userId);
@@ -286,13 +324,51 @@ async function updateUser(
     employee_id?: string | null;
     permission_ids?: string[];
     password?: string;
+    email?: string;
+    isSuperuser?: boolean;
   },
   req: Request,
 ) {
   const supabaseAdmin = createAdminClient();
   if (!input.userId) return jsonResponse({ success: false, error: "userId is required" }, 400);
 
+  const caller = await resolveCaller(supabaseAdmin, req);
+  const isSuperuser = !!input.isSuperuser || caller.isSuperuser;
+
   const wantsPasswordChange = typeof input.password === "string" && input.password.length > 0;
+  const wantsEmailChange = typeof input.email === "string" && input.email.trim().length > 0;
+
+  if (wantsEmailChange) {
+    if (!isSuperuser) {
+      const allowed = await callerHasPermission(supabaseAdmin, caller, "users", "update");
+      if (!allowed) {
+        return jsonResponse(
+          {
+            success: false,
+            error: "No tienes permiso para cambiar el email de otros usuarios (users:update requerido)",
+            code: "forbidden_email_change",
+          },
+          403,
+        );
+      }
+    }
+
+    const { data: existingUser } = await supabaseAdmin.auth.admin.getUserById(input.userId);
+    const currentEmail = existingUser?.user?.email?.trim().toLowerCase() ?? "";
+    const nextEmail = input.email!.trim();
+    if (nextEmail.toLowerCase() !== currentEmail) {
+      const { error: emailError } = await supabaseAdmin.auth.admin.updateUserById(input.userId, {
+        email: nextEmail,
+        email_confirm: true,
+      });
+      if (emailError) {
+        return jsonResponse(
+          { success: false, error: `email_update_failed: ${emailError.message}`, code: (emailError as any).code },
+          400,
+        );
+      }
+    }
+  }
 
   if (wantsPasswordChange) {
     if ((input.password as string).length < 6) {
@@ -301,17 +377,18 @@ async function updateUser(
         400,
       );
     }
-    const caller = await resolveCaller(supabaseAdmin, req);
-    const allowed = await callerHasPermission(supabaseAdmin, caller, "users", "update");
-    if (!allowed) {
-      return jsonResponse(
-        {
-          success: false,
-          error: "No tienes permiso para cambiar la contraseña de otros usuarios (users:update requerido)",
-          code: "forbidden_password_change",
-        },
-        403,
-      );
+    if (!isSuperuser) {
+      const allowed = await callerHasPermission(supabaseAdmin, caller, "users", "update");
+      if (!allowed) {
+        return jsonResponse(
+          {
+            success: false,
+            error: "No tienes permiso para cambiar la contraseña de otros usuarios (users:update requerido)",
+            code: "forbidden_password_change",
+          },
+          403,
+        );
+      }
     }
 
     const { error: pwError } = await supabaseAdmin.auth.admin.updateUserById(input.userId, {
@@ -325,31 +402,31 @@ async function updateUser(
     }
   }
 
-  const { data: profile } = await supabaseAdmin
+  const { data: profileRows } = await supabaseAdmin
     .from("user_profiles")
     .select("company_id")
     .eq("user_id", input.userId)
-    .maybeSingle();
-  const companyId = input.company_id || profile?.company_id;
+    .order("updated_at", { ascending: false })
+    .limit(1);
+  const companyId = input.company_id || profileRows?.[0]?.company_id;
   if (!companyId) {
-    // Si solo estábamos cambiando la contraseña, no necesitamos company_id.
-    if (wantsPasswordChange &&
+    if ((wantsPasswordChange || wantsEmailChange) &&
         !input.role_id &&
         !Array.isArray(input.permission_ids) &&
         input.employee_id === undefined) {
-      return jsonResponse({ success: true, message: "Contraseña actualizada correctamente" }, 200);
+      return jsonResponse({ success: true, message: "Usuario actualizado correctamente" }, 200);
     }
     return jsonResponse({ success: false, error: "company_id is required" }, 400);
   }
 
-  if (input.employee_id !== undefined) {
+  if (input.company_id || input.employee_id !== undefined) {
     const { error: profileError } = await supabaseAdmin
       .from("user_profiles")
       .upsert({
         user_id: input.userId,
         company_id: companyId,
-        employee_id: input.employee_id,
-      }, { onConflict: "user_id" });
+        employee_id: input.employee_id ?? null,
+      }, { onConflict: "company_id,user_id" });
     if (profileError) {
       return jsonResponse(
         { success: false, error: `profile_update_failed: ${profileError.message}`, code: profileError.code },
@@ -362,7 +439,9 @@ async function updateUser(
   const hasExplicitPermissionSet = Array.isArray(input.permission_ids);
 
   if (shouldUpdateRole) {
-    await supabaseAdmin.from("user_company_roles").delete().eq("user_id", input.userId);
+    await supabaseAdmin.from("user_company_roles").delete()
+      .eq("user_id", input.userId)
+      .eq("company_id", companyId);
     const { error: roleError } = await insertUserCompanyRole(supabaseAdmin, {
       user_id: input.userId,
       company_id: companyId,
@@ -424,6 +503,362 @@ async function updateUser(
   }
 
   return jsonResponse({ success: true, message: "Usuario actualizado correctamente" }, 200);
+}
+
+async function addUserCompany(input: {
+  payload?: {
+    userId: string;
+    company_id: string;
+    role_id: string;
+    employee_id?: string | null;
+    permissions?: string[];
+  };
+}) {
+  const supabaseAdmin = createAdminClient();
+  const p = input.payload;
+  if (!p?.userId || !p.company_id || !p.role_id) {
+    return jsonResponse(
+      { success: false, error: "Missing required fields: userId, company_id, role_id" },
+      400,
+    );
+  }
+
+  const { data: companyRow, error: companyLookupError } = await supabaseAdmin
+    .from("companies")
+    .select("id")
+    .eq("id", p.company_id)
+    .maybeSingle();
+  if (companyLookupError) {
+    return jsonResponse(
+      { success: false, error: `Error al verificar empresa: ${companyLookupError.message}` },
+      400,
+    );
+  }
+  if (!companyRow) {
+    return jsonResponse({ success: false, error: `Empresa no encontrada (${p.company_id})` }, 400);
+  }
+
+  const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.getUserById(p.userId);
+  if (authError || !authUser?.user) {
+    return jsonResponse({ success: false, error: "Usuario de auth no encontrado" }, 404);
+  }
+
+  const { data: existingRole } = await supabaseAdmin
+    .from("user_company_roles")
+    .select("id")
+    .eq("user_id", p.userId)
+    .eq("company_id", p.company_id)
+    .maybeSingle();
+  if (existingRole) {
+    return jsonResponse(
+      { success: false, error: "El usuario ya tiene acceso a esta empresa" },
+      400,
+    );
+  }
+
+  const { data: existingProfile } = await supabaseAdmin
+    .from("user_profiles")
+    .select("company_id")
+    .eq("user_id", p.userId)
+    .eq("company_id", p.company_id)
+    .maybeSingle();
+
+  if (!existingProfile) {
+    const { error: profileError } = await supabaseAdmin.from("user_profiles").insert({
+      user_id: p.userId,
+      company_id: p.company_id,
+      employee_id: p.employee_id || null,
+    });
+    if (profileError) {
+      // Compat: BD antigua con UNIQUE(user_id) — el acceso multi-empresa va por user_company_roles.
+      const isSingleProfileSchema = profileError.code === "23505"
+        && /user_profiles_user_id_key|user_id/i.test(profileError.message ?? "");
+      if (!isSingleProfileSchema) {
+        return jsonResponse(
+          { success: false, error: `Failed to create profile: ${profileError.message}` },
+          400,
+        );
+      }
+    }
+  }
+
+  await supabaseAdmin.from("user_company_roles").delete()
+    .eq("user_id", p.userId)
+    .eq("company_id", p.company_id);
+
+  const { error: roleError } = await insertUserCompanyRole(supabaseAdmin, {
+    user_id: p.userId,
+    company_id: p.company_id,
+    role_id: p.role_id,
+  });
+  if (roleError) {
+    return jsonResponse(
+      { success: false, error: `Failed to assign role: ${roleError.message}` },
+      400,
+    );
+  }
+
+  let effectivePermissionIds: string[] = [];
+  if (p.permissions?.length) {
+    effectivePermissionIds = p.permissions;
+  } else {
+    effectivePermissionIds = await resolveRolePermissionIds(supabaseAdmin, p.role_id);
+  }
+
+  await supabaseAdmin.from("user_permissions").delete()
+    .eq("user_id", p.userId)
+    .eq("company_id", p.company_id);
+
+  if (effectivePermissionIds.length) {
+    const permissionInserts = effectivePermissionIds.map((permission_id) => ({
+      user_id: p.userId,
+      company_id: p.company_id,
+      permission_id,
+    }));
+    const { error: permInsertError } = await supabaseAdmin.from("user_permissions").insert(permissionInserts);
+    if (permInsertError) {
+      return jsonResponse(
+        { success: false, error: `Failed to assign permissions: ${permInsertError.message}` },
+        400,
+      );
+    }
+  }
+
+  return jsonResponse({ success: true, message: "Acceso a empresa añadido correctamente" }, 200);
+}
+
+async function removeUserCompany(input: { userId?: string; company_id?: string }) {
+  const supabaseAdmin = createAdminClient();
+  if (!input.userId || !input.company_id) {
+    return jsonResponse({ success: false, error: "userId and company_id are required" }, 400);
+  }
+
+  const { data: assigned } = await supabaseAdmin
+    .from("user_company_roles")
+    .select("company_id")
+    .eq("user_id", input.userId);
+
+  if ((assigned?.length ?? 0) <= 1) {
+    return jsonResponse(
+      { success: false, error: "No se puede quitar la última empresa del usuario" },
+      400,
+    );
+  }
+
+  const { data: profileBefore } = await supabaseAdmin
+    .from("user_profiles")
+    .select("company_id")
+    .eq("user_id", input.userId)
+    .maybeSingle();
+
+  if (profileBefore?.company_id === input.company_id) {
+    const nextCompanyId = (assigned ?? [])
+      .map((row) => row.company_id)
+      .find((id) => id && id !== input.company_id);
+    if (nextCompanyId) {
+      await supabaseAdmin.from("user_profiles")
+        .update({ company_id: nextCompanyId })
+        .eq("user_id", input.userId);
+    }
+  }
+
+  await supabaseAdmin.from("user_permissions").delete()
+    .eq("user_id", input.userId)
+    .eq("company_id", input.company_id);
+  await supabaseAdmin.from("user_company_roles").delete()
+    .eq("user_id", input.userId)
+    .eq("company_id", input.company_id);
+
+  await supabaseAdmin.from("user_profiles").delete()
+    .eq("user_id", input.userId)
+    .eq("company_id", input.company_id);
+
+  await supabaseAdmin.from("user_active_company").delete()
+    .eq("user_id", input.userId)
+    .eq("company_id", input.company_id);
+
+  return jsonResponse({ success: true, message: "Acceso a empresa eliminado" }, 200);
+}
+
+async function isSuperuserRequest(
+  input: { isSuperuser?: boolean },
+  req: Request,
+): Promise<boolean> {
+  if (input.isSuperuser) return true;
+  const supabaseAdmin = createAdminClient();
+  const caller = await resolveCaller(supabaseAdmin, req);
+  return caller.isSuperuser;
+}
+
+async function listWorkCenters(input: { isSuperuser?: boolean }, req: Request) {
+  if (!await isSuperuserRequest(input, req)) {
+    return jsonResponse({ success: false, error: "Superuser access required" }, 403);
+  }
+  const supabaseAdmin = createAdminClient();
+
+  const { data: workCenters, error: wcError } = await supabaseAdmin
+    .from("work_centers")
+    .select("id, name, created_at, updated_at")
+    .order("name");
+  if (wcError) {
+    return jsonResponse({ success: false, error: wcError.message }, 500);
+  }
+
+  const { data: companies, error: coError } = await supabaseAdmin
+    .from("companies")
+    .select("id, name, tax_id, short_name, tpv_ticket_prefix, work_center_id")
+    .order("name");
+  if (coError) {
+    return jsonResponse({ success: false, error: coError.message }, 500);
+  }
+
+  return jsonResponse({
+    success: true,
+    work_centers: workCenters ?? [],
+    companies: companies ?? [],
+  }, 200);
+}
+
+async function createWorkCenter(input: { name?: string; isSuperuser?: boolean }, req: Request) {
+  if (!await isSuperuserRequest(input, req)) {
+    return jsonResponse({ success: false, error: "Superuser access required" }, 403);
+  }
+  const name = input.name?.trim();
+  if (!name) {
+    return jsonResponse({ success: false, error: "name is required" }, 400);
+  }
+
+  const supabaseAdmin = createAdminClient();
+  const { data, error } = await supabaseAdmin
+    .from("work_centers")
+    .insert({ name })
+    .select("id, name, created_at, updated_at")
+    .single();
+  if (error) {
+    return jsonResponse({ success: false, error: error.message }, 400);
+  }
+
+  return jsonResponse({ success: true, work_center: data, message: "Centro laboral creado" }, 200);
+}
+
+async function updateWorkCenter(
+  input: { id?: string; name?: string; isSuperuser?: boolean },
+  req: Request,
+) {
+  if (!await isSuperuserRequest(input, req)) {
+    return jsonResponse({ success: false, error: "Superuser access required" }, 403);
+  }
+  if (!input.id) {
+    return jsonResponse({ success: false, error: "id is required" }, 400);
+  }
+  const name = input.name?.trim();
+  if (!name) {
+    return jsonResponse({ success: false, error: "name is required" }, 400);
+  }
+
+  const supabaseAdmin = createAdminClient();
+  const { data, error } = await supabaseAdmin
+    .from("work_centers")
+    .update({ name })
+    .eq("id", input.id)
+    .select("id, name, created_at, updated_at")
+    .single();
+  if (error) {
+    return jsonResponse({ success: false, error: error.message }, 400);
+  }
+
+  return jsonResponse({ success: true, work_center: data, message: "Centro laboral actualizado" }, 200);
+}
+
+async function assignCompanyToWorkCenter(input: {
+  company_id?: string;
+  work_center_id?: string | null;
+  short_name?: string | null;
+  tpv_ticket_prefix?: string | null;
+  isSuperuser?: boolean;
+}, req: Request) {
+  if (!await isSuperuserRequest(input, req)) {
+    return jsonResponse({ success: false, error: "Superuser access required" }, 403);
+  }
+  if (!input.company_id) {
+    return jsonResponse({ success: false, error: "company_id is required" }, 400);
+  }
+
+  const supabaseAdmin = createAdminClient();
+
+  const { data: companyRow, error: companyError } = await supabaseAdmin
+    .from("companies")
+    .select("id, name")
+    .eq("id", input.company_id)
+    .maybeSingle();
+  if (companyError) {
+    return jsonResponse({ success: false, error: companyError.message }, 400);
+  }
+  if (!companyRow) {
+    return jsonResponse({ success: false, error: "Empresa no encontrada" }, 404);
+  }
+
+  if (input.work_center_id) {
+    const { data: wcRow, error: wcError } = await supabaseAdmin
+      .from("work_centers")
+      .select("id")
+      .eq("id", input.work_center_id)
+      .maybeSingle();
+    if (wcError) {
+      return jsonResponse({ success: false, error: wcError.message }, 400);
+    }
+    if (!wcRow) {
+      return jsonResponse({ success: false, error: "Centro laboral no encontrado" }, 404);
+    }
+  }
+
+  const patch: Record<string, unknown> = {
+    work_center_id: input.work_center_id ?? null,
+  };
+  if (input.short_name !== undefined) {
+    patch.short_name = input.short_name?.trim() || null;
+  }
+  if (input.tpv_ticket_prefix !== undefined) {
+    patch.tpv_ticket_prefix = input.tpv_ticket_prefix?.trim() || null;
+  }
+
+  const { data: updated, error: updateError } = await supabaseAdmin
+    .from("companies")
+    .update(patch)
+    .eq("id", input.company_id)
+    .select("id, name, tax_id, short_name, tpv_ticket_prefix, work_center_id")
+    .single();
+  if (updateError) {
+    return jsonResponse({ success: false, error: updateError.message }, 400);
+  }
+
+  return jsonResponse({
+    success: true,
+    company: updated,
+    message: input.work_center_id
+      ? "Empresa vinculada al centro laboral"
+      : "Empresa desvinculada del centro laboral",
+  }, 200);
+}
+
+async function deleteWorkCenter(input: { id?: string; isSuperuser?: boolean }, req: Request) {
+  if (!await isSuperuserRequest(input, req)) {
+    return jsonResponse({ success: false, error: "Superuser access required" }, 403);
+  }
+  if (!input.id) {
+    return jsonResponse({ success: false, error: "id is required" }, 400);
+  }
+
+  const supabaseAdmin = createAdminClient();
+  const { error } = await supabaseAdmin
+    .from("work_centers")
+    .delete()
+    .eq("id", input.id);
+  if (error) {
+    return jsonResponse({ success: false, error: error.message }, 400);
+  }
+
+  return jsonResponse({ success: true, message: "Centro laboral eliminado" }, 200);
 }
 
 // ---------------------------------------------------------------------------
@@ -506,6 +941,13 @@ Deno.serve(async (req) => {
     if (action === "createUser") return await createUser(body);
     if (action === "deleteUser") return await deleteUser(body);
     if (action === "updateUser") return await updateUser(body, req);
+    if (action === "addUserCompany") return await addUserCompany(body);
+    if (action === "removeUserCompany") return await removeUserCompany(body);
+    if (action === "listWorkCenters") return await listWorkCenters(body, req);
+    if (action === "createWorkCenter") return await createWorkCenter(body, req);
+    if (action === "updateWorkCenter") return await updateWorkCenter(body, req);
+    if (action === "assignCompanyToWorkCenter") return await assignCompanyToWorkCenter(body, req);
+    if (action === "deleteWorkCenter") return await deleteWorkCenter(body, req);
     return jsonResponse({ success: false, error: `Unsupported action: ${action}` }, 400);
   } catch (error) {
     return jsonResponse({ success: false, error: (error as Error).message }, 500);

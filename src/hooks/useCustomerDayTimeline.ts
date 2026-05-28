@@ -1,5 +1,20 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import { fetchAppointmentsForCustomer, type CustomerAppointmentRow } from '@/lib/agendaCustomerAppointments';
+import { parseDescriptionServiceLines, appointmentStatusLabel, normalizeHm } from '@/lib/agendaAppointmentDisplay';
+import { buildAppointmentChargedTotals } from '@/lib/appointmentChargeTotals';
+
+export type AppointmentTimelineDetails = {
+  appointmentId: string;
+  date: string;
+  timeRange: string;
+  employeeName?: string;
+  statusLabel: string;
+  description?: string;
+  services: string[];
+  items: CustomerAppointmentRow['items'];
+  chargedAmount?: number | null;
+};
 
 export type DayTimelineItem = {
   id: string;
@@ -12,6 +27,7 @@ export type DayTimelineItem = {
   imageUrls?: string[];
   amountLabel?: string;
   sortKey: number;
+  appointmentDetails?: AppointmentTimelineDetails;
 };
 
 export type DayAsset = {
@@ -89,6 +105,9 @@ function mergeByDay(
   bonoUso: any[],
   bonoNameById: Map<string, string>,
   appointments: any[],
+  invoices: any[],
+  quotes: any[],
+  chargedByAppointment: Map<string, number>,
 ): DayGroup[] {
   const byDay = new Map<string, DayGroup>();
 
@@ -193,6 +212,7 @@ function mergeByDay(
   }
 
   for (const e of aesthetic) {
+    if (String(e.event_type || '').toUpperCase() === 'CITA_HISTORICA') continue;
     const ymd = toYmd(e.event_date) || toYmd(e.created_at);
     if (!ymd) continue;
     const k = refKey('customer_aesthetic_history', e.id);
@@ -252,21 +272,89 @@ function mergeByDay(
   }
 
   for (const a of appointments) {
-    if (!a.customer_id || a.customer_id !== customerId) continue;
-    const ymd = toYmd(a.start_time);
+    const ymd = a.ymd || toYmd(a.start_time);
     if (!ymd) continue;
     const k = refKey('agenda_appointments', a.id);
     if (k && dailyRefKeys.has(k)) continue;
     const d = getDay(ymd);
+    const services =
+      a.service_lines.length > 0
+        ? a.service_lines
+        : parseDescriptionServiceLines(a.description);
+    const subtitleParts = [
+      a.time_range,
+      a.employee_name,
+      services[0],
+    ].filter(Boolean);
+    const hm = normalizeHm(a.start_time);
+    const timeSort = hm ? Number(hm.slice(0, 2)) * 60 + Number(hm.slice(3, 5)) : sortN++;
+    const chargedAmount = chargedByAppointment.get(String(a.id)) ?? null;
     d.items.push({
       id: `appt:${a.id}`,
       kind: 'appointment',
       title: a.title || 'Cita',
-      subtitle: a.description || a.status,
-      timeLabel: timeFromFecha(a.start_time),
+      subtitle: subtitleParts.join(' · ') || undefined,
+      timeLabel: a.time_range || undefined,
       refTable: 'agenda_appointments',
       refId: a.id,
-      sortKey: 5_000_000 + sortN++,
+      amountLabel:
+        chargedAmount != null && chargedAmount > 0
+          ? `${chargedAmount.toFixed(2)} €`
+          : undefined,
+      sortKey: 5_000_000 + timeSort,
+      appointmentDetails: {
+        appointmentId: a.id,
+        date: ymd,
+        timeRange: a.time_range,
+        employeeName: a.employee_name ?? undefined,
+        statusLabel: appointmentStatusLabel(a.status),
+        description: a.description ?? undefined,
+        services,
+        items: a.items,
+        chargedAmount,
+      },
+    });
+  }
+
+  for (const inv of invoices) {
+    const ymd = toYmd(inv.issue_date) || toYmd(inv.created_at);
+    if (!ymd) continue;
+    const k = refKey('invoices', inv.id);
+    if (k && dailyRefKeys.has(k)) continue;
+    const d = getDay(ymd);
+    const status =
+      inv.status === 'paid' ? 'Pagada' : inv.status === 'pending' ? 'Pendiente' : String(inv.status || '');
+    d.items.push({
+      id: `invoice:${inv.id}`,
+      kind: 'invoice',
+      title: `Factura ${inv.number || ''}`.trim(),
+      subtitle: status || undefined,
+      timeLabel: timeFromFecha(inv.issue_date || inv.created_at),
+      refTable: 'invoices',
+      refId: inv.id,
+      amountLabel:
+        inv.total_amount != null ? `${Number(inv.total_amount).toFixed(2)} €` : undefined,
+      sortKey: 6_000_000 + sortN++,
+    });
+  }
+
+  for (const q of quotes) {
+    const ymd = toYmd(q.issue_date) || toYmd(q.created_at);
+    if (!ymd) continue;
+    const k = refKey('quotes', q.id);
+    if (k && dailyRefKeys.has(k)) continue;
+    const d = getDay(ymd);
+    d.items.push({
+      id: `quote:${q.id}`,
+      kind: 'quote',
+      title: `Presupuesto ${q.number || ''}`.trim(),
+      subtitle: q.status ? String(q.status) : undefined,
+      timeLabel: timeFromFecha(q.issue_date || q.created_at),
+      refTable: 'quotes',
+      refId: q.id,
+      amountLabel:
+        q.total_amount != null ? `${Number(q.total_amount).toFixed(2)} €` : undefined,
+      sortKey: 6_100_000 + sortN++,
     });
   }
 
@@ -289,7 +377,10 @@ export const useCustomerDayTimeline = (customerId: string | undefined) => {
         consentRes,
         aestheticRes,
         bonosRes,
-        aptRes,
+        appointments,
+        invoicesRes,
+        quotesRes,
+        customerRes,
       ] = await Promise.all([
         supabase
           .from('daily_customer_log')
@@ -320,18 +411,26 @@ export const useCustomerDayTimeline = (customerId: string | undefined) => {
           )
           .eq('customer_id', customerId)
           .order('fecha_compra', { ascending: false }),
+        fetchAppointmentsForCustomer(customerId),
         supabase
-          .from('agenda_appointments')
-          .select('id, customer_id, title, description, start_time, end_time, status')
+          .from('invoices')
+          .select('id, number, issue_date, created_at, total_amount, status')
           .eq('customer_id', customerId)
-          .order('start_time', { ascending: false }),
+          .order('issue_date', { ascending: false }),
+        supabase
+          .from('quotes')
+          .select('id, number, issue_date, created_at, total_amount, status')
+          .eq('customer_id', customerId)
+          .order('issue_date', { ascending: false }),
+        supabase.from('customers').select('company_id').eq('id', customerId).maybeSingle(),
       ]);
 
       if (historialRes.error) throw historialRes.error;
       if (consentRes.error) throw consentRes.error;
       if (aestheticRes.error) throw aestheticRes.error;
       if (bonosRes.error) throw bonosRes.error;
-      if (aptRes.error) throw aptRes.error;
+      if (invoicesRes.error) throw invoicesRes.error;
+      if (quotesRes.error) throw quotesRes.error;
       if (dailyRes.error) {
         console.warn('daily_customer_log:', dailyRes.error.message);
       }
@@ -352,6 +451,18 @@ export const useCustomerDayTimeline = (customerId: string | undefined) => {
         bonoUsoFiltered = bonoUsoRes.data || [];
       }
 
+      const appointmentIds = appointments.map((a) => String(a.id));
+      const companyId = (customerRes.data as { company_id?: string } | null)?.company_id ?? null;
+      let chargedByAppointment = new Map<string, number>();
+      try {
+        chargedByAppointment = await buildAppointmentChargedTotals(appointmentIds, {
+          companyId,
+          customerId,
+        });
+      } catch (err) {
+        console.warn('buildAppointmentChargedTotals:', err);
+      }
+
       return mergeByDay(
         customerId,
         (dailyRes.data as DailyRow[]) || [],
@@ -361,7 +472,10 @@ export const useCustomerDayTimeline = (customerId: string | undefined) => {
         bonoList,
         bonoUsoFiltered,
         bonoNameById,
-        aptRes.data || [],
+        appointments,
+        invoicesRes.data || [],
+        quotesRes.data || [],
+        chargedByAppointment,
       );
     },
     enabled: !!customerId,

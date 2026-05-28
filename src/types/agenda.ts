@@ -55,8 +55,8 @@ export interface Appointment {
   /** Etiquetas de ítems solo cobro (sin reserva de tiempo). */
   paymentOnlyLabels?: string[];
   status: 'confirmed' | 'pending' | 'cancelled';
-  cabina_id?: string | null;
-  recurso_id?: string | null;
+  /** Cobro TPV / factura asociada a la cita. */
+  paymentStatus?: 'paid' | 'invoiced' | 'pending_charge' | 'none';
 }
 
 /** Borrador de ítem de cita (UI); `clientKey` es estable en el cliente para listas y drag. */
@@ -71,6 +71,10 @@ export interface AppointmentItemDraft {
   bonus_payment_mode?: BonusPaymentMode;
   article_id?: string | null;
   customer_voucher_id?: string | null;
+  /** Bono prepagado (`public.bonos`) del que se consume una sesión en la cita. */
+  bono_id?: string | null;
+  /** Índice en `bonos.coverage_items` cuando la sesión cubre una línea concreta. */
+  bono_coverage_index?: number | null;
   cabina_id?: string | null;
   recurso_id?: string | null;
 }

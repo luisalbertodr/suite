@@ -36,6 +36,37 @@ serve(async (req) => {
       )
     }
 
+    // Validate company exists (must be companies.id, NOT work_centers.id)
+    const { data: companyRow, error: companyLookupError } = await supabaseAdmin
+      .from('companies')
+      .select('id, name, tax_id')
+      .eq('id', company_id)
+      .maybeSingle()
+
+    if (companyLookupError) {
+      console.error('Company lookup failed:', companyLookupError)
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: `Error al verificar empresa: ${companyLookupError.message}`,
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      )
+    }
+
+    if (!companyRow) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error:
+            `Empresa no encontrada (company_id=${company_id}). ` +
+            'Usa un UUID de la tabla companies, no de work_centers. ' +
+            'Comprueba que la edge function apunta al mismo proyecto Supabase que la app.',
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      )
+    }
+
     // Create user in auth.users
     const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email,
@@ -85,9 +116,7 @@ serve(async (req) => {
 
       if (profileError) {
         console.error('Profile creation failed:', profileError)
-        // Don't fail completely, but log the error
-      } else {
-        console.log('User profile created successfully')
+        throw new Error(`Failed to create profile: ${profileError.message}`)
       }
 
       // Assign role to user

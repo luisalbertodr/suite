@@ -11,8 +11,26 @@ import { useToast } from '@/hooks/use-toast';
 import { SalesHistory } from './SalesHistory';
 import { BarcodeScanner } from './BarcodeScanner';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useWorkCenter } from '@/hooks/useWorkCenter';
 import { usePermissionGuard } from '@/hooks/usePermissionGuard';
-import { Grid } from 'react-window';
+import { SplitPaymentDialog } from '@/components/SplitPaymentDialog';
+import {
+  buildFamilyBillingMap,
+  groupCartByBillingCompany,
+  hasSplitBilling,
+  resolveBillingCompanyId,
+  type CartItemWithBilling,
+} from '@/lib/billingCompany';
+import { processSplitPayment } from '@/lib/splitSale';
+import {
+  buildAgendaSaleNotes,
+  isUuid,
+  persistSaleAppointmentLink,
+  buildInvoicePrefillFromSale,
+  TPV_SALE_INVOICE_PREFILL_KEY,
+  type AppointmentStatus,
+} from '@/lib/appointmentSales';
+import { Grid, type CellComponentProps } from 'react-window';
 
 interface CartItem {
   id: string;
@@ -23,6 +41,8 @@ interface CartItem {
   variationId?: string;
   size?: string;
   color?: string;
+  billingCompanyId?: string;
+  familia?: string;
 }
 
 interface Article {
@@ -34,6 +54,9 @@ interface Article {
   foto_url: string | null;
   tipo_producto: 'textil' | 'calzado' | 'standard';
   codigo_barras?: string;
+  familia?: string;
+  billing_company_id?: string | null;
+  company_id?: string | null;
 }
 
 interface ArticleVariation {
@@ -45,6 +68,64 @@ interface ArticleVariation {
   precio: number;
   codigo_barras?: string;
   estado: 'activo' | 'inactivo';
+}
+
+type ProductCellProps = {
+  articles: Article[];
+  columnCount: number;
+  gap: number;
+  onAddToCart: (article: Article) => void;
+};
+
+function ProductGridCell({
+  columnIndex,
+  rowIndex,
+  style,
+  articles,
+  columnCount,
+  gap,
+  onAddToCart,
+}: CellComponentProps<ProductCellProps>) {
+  const articleIndex = rowIndex * columnCount + columnIndex;
+  const article = articles[articleIndex];
+  if (!article) return null;
+
+  return (
+    <div style={{ ...style, padding: gap / 2 }}>
+      <div
+        className={`cursor-pointer hover:shadow-md transition-all duration-200 h-32 bg-white border border-gray-200 hover:border-blue-300 rounded-lg ${
+          article.stock_actual <= 0 ? 'bg-red-50 opacity-60' : 'hover:bg-blue-50'
+        }`}
+        onClick={() => onAddToCart(article)}
+      >
+        <div className="p-3 h-full flex flex-col justify-between">
+          <div className="flex-shrink-0 h-12 flex items-center justify-center mb-2">
+            {article.foto_url ? (
+              <img src={article.foto_url} alt={article.descripcion} className="w-10 h-10 rounded-md object-cover" />
+            ) : (
+              <div className="w-10 h-10 bg-gradient-to-r from-green-500 to-blue-500 rounded-md flex items-center justify-center text-white">
+                <Package className="w-6 h-6" />
+              </div>
+            )}
+          </div>
+          <div className="flex-1 flex flex-col justify-center min-h-0 px-1">
+            <h3 className="font-medium text-xs leading-tight text-center overflow-hidden mb-1">
+              {article.descripcion.length > 20 ? `${article.descripcion.substring(0, 20)}...` : article.descripcion}
+            </h3>
+            {article.tipo_producto !== 'standard' && (
+              <p className="text-[10px] text-orange-600 text-center font-semibold">
+                {article.tipo_producto === 'textil' ? 'TEX' : 'CAL'}
+              </p>
+            )}
+          </div>
+          <div className="text-center mt-2">
+            <p className="text-sm font-bold text-blue-600">€{(article.precio || 0).toFixed(2)}</p>
+            <p className="text-[10px] text-gray-500">Stock: {article.stock_actual}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export const TPV: React.FC = () => {
@@ -63,8 +144,11 @@ export const TPV: React.FC = () => {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { companyId, loading: companyLoading } = useCompanyFilter();
+  const { isMultiEntity, companyLabels, billingCompanies } = useWorkCenter();
   const { requireOrToast: requirePermissionOrToast } = usePermissionGuard();
   const prefilledSourceRef = useRef<string | null>(null);
+  const [showSplitPayment, setShowSplitPayment] = useState(false);
+  const [splitProcessing, setSplitProcessing] = useState(false);
 
   type PrefillItem = CartItem & { sourceKind?: string; sourceBonusMode?: string | null };
   type PrefillState = {
@@ -73,11 +157,23 @@ export const TPV: React.FC = () => {
       customerId?: string | null;
       customerName?: string | null;
       date?: string;
+      appointmentStatus?: AppointmentStatus;
       items: PrefillItem[];
     };
   };
 
   const prefill = (location.state as PrefillState | null)?.prefillFromAppointment;
+  const [appointmentChargeContext, setAppointmentChargeContext] = useState<{
+    appointmentId: string;
+    customerId: string | null;
+    customerName: string | null;
+    date: string;
+    appointmentStatus: AppointmentStatus | null;
+  } | null>(null);
+  const [lastCompletedSale, setLastCompletedSale] = useState<{
+    sale: { id: string; ticket_number: string; total_amount: number };
+    appointmentId: string | null;
+  } | null>(null);
   const productsContainerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -106,13 +202,99 @@ export const TPV: React.FC = () => {
     prefilledSourceRef.current = prefill.appointmentId;
     if (prefill.items?.length) {
       setCart(prefill.items.map((it) => ({ ...it })));
+      setAppointmentChargeContext({
+        appointmentId: prefill.appointmentId,
+        customerId: prefill.customerId ?? null,
+        customerName: prefill.customerName ?? null,
+        date: prefill.date ?? '',
+        appointmentStatus: prefill.appointmentStatus ?? null,
+      });
       toast({
-        title: 'Carrito precargado',
-        description: `Cita ${prefill.appointmentId.slice(0, 8)} preparada para cobro.`,
+        title: 'Carrito precargado desde agenda',
+        description: `${prefill.customerName || 'Cliente'} · cita del ${prefill.date || 'día seleccionado'}`,
       });
     }
     navigate(location.pathname, { replace: true, state: {} });
   }, [prefill, navigate, location.pathname]);
+
+  const { data: familyBillingRows = [] } = useQuery({
+    queryKey: ['tpv-family-billing', companyId],
+    queryFn: async () => {
+      if (!companyId) return [];
+      const { data, error } = await supabase
+        .from('article_families')
+        .select('name, billing_company_id')
+        .eq('company_id', companyId);
+      if (error) {
+        if (error.code === '42703') return [];
+        throw error;
+      }
+      return data ?? [];
+    },
+    enabled: !!companyId,
+  });
+
+  const familyBillingMap = useMemo(
+    () => buildFamilyBillingMap(familyBillingRows),
+    [familyBillingRows],
+  );
+
+  const resolveItemBilling = (article: Article): string => {
+    if (!companyId) return '';
+    return resolveBillingCompanyId(
+      {
+        billing_company_id: article.billing_company_id,
+        familia: article.familia ?? 'Varios',
+        company_id: article.company_id,
+      },
+      familyBillingMap,
+      companyId,
+    );
+  };
+
+  const cartArticleIds = useMemo(
+    () =>
+      [...new Set(
+        cart
+          .map((item) => item.id)
+          .filter((id) => id && !String(id).startsWith('apt-') && !String(id).startsWith('draft-')),
+      )],
+    [cart],
+  );
+
+  const { data: cartArticlesBilling = [] } = useQuery({
+    queryKey: ['tpv-cart-articles-billing', companyId, cartArticleIds.join(',')],
+    queryFn: async () => {
+      if (!companyId || cartArticleIds.length === 0) return [];
+      const { data, error } = await supabase
+        .from('articles')
+        .select('id, familia, billing_company_id, company_id')
+        .in('id', cartArticleIds);
+      if (error) throw error;
+      return (data ?? []) as Article[];
+    },
+    enabled: !!companyId && cartArticleIds.length > 0,
+  });
+
+  const cartWithBilling: CartItemWithBilling[] = useMemo(
+    () =>
+      cart.map((item) => {
+        if (item.billingCompanyId && companyId) {
+          return { ...item, billingCompanyId: item.billingCompanyId };
+        }
+        const article = cartArticlesBilling.find((a) => a.id === item.id);
+        if (article && companyId) {
+          return { ...item, billingCompanyId: resolveItemBilling(article) };
+        }
+        return { ...item, billingCompanyId: companyId ?? '' };
+      }),
+    [cart, companyId, cartArticlesBilling, familyBillingMap],
+  );
+
+  const paymentGroups = useMemo(
+    () => groupCartByBillingCompany(cartWithBilling, companyLabels),
+    [cartWithBilling, companyLabels],
+  );
 
   const { data: articles = [], isLoading } = useQuery({
     queryKey: ['tpv-articles', debouncedSearchTerm, companyId],
@@ -121,7 +303,7 @@ export const TPV: React.FC = () => {
 
       let query = supabase
         .from('articles')
-        .select('id, descripcion, precio, stock_actual, codigo, foto_url, tipo_producto, codigo_barras')
+        .select('id, descripcion, precio, stock_actual, codigo, foto_url, tipo_producto, codigo_barras, familia, billing_company_id, company_id')
         .eq('estado', 'activo')
         .eq('company_id', companyId)
         .order('descripcion')
@@ -165,6 +347,104 @@ export const TPV: React.FC = () => {
     enabled: !!showVariations
   });
 
+  const buildSaleNotes = () =>
+    appointmentChargeContext?.appointmentId || prefill?.appointmentId
+      ? buildAgendaSaleNotes({
+          source: 'agenda_appointment',
+          appointment_id: appointmentChargeContext?.appointmentId ?? prefill!.appointmentId,
+          customer_id: appointmentChargeContext?.customerId ?? prefill?.customerId ?? null,
+          customer_name: appointmentChargeContext?.customerName ?? prefill?.customerName ?? null,
+          appointment_date: appointmentChargeContext?.date ?? prefill?.date ?? null,
+          appointment_status: appointmentChargeContext?.appointmentStatus ?? prefill?.appointmentStatus ?? null,
+          items: cart.map((it) => ({
+            name: it.name,
+            total: it.total,
+            source_kind: (it as PrefillItem).sourceKind ?? null,
+            source_bonus_mode: (it as PrefillItem).sourceBonusMode ?? null,
+          })),
+        })
+      : null;
+
+  const saleContext = () => ({
+    hostCompanyId: companyId!,
+    customerId: appointmentChargeContext?.customerId ?? prefill?.customerId ?? null,
+    customerName: appointmentChargeContext?.customerName || prefill?.customerName || null,
+    appointmentId: appointmentChargeContext?.appointmentId ?? prefill?.appointmentId ?? null,
+    notes: buildSaleNotes(),
+  });
+
+  const finalizeSaleSuccess = async (
+    sale: { id: string; ticket_number: string; total_amount: number },
+    saleItems: Array<{ description: string; quantity: number; unit_price: number; total_price: number }>,
+    extraTickets?: Array<{ ticket_number: string; total: number; label: string }>,
+  ) => {
+    const ctx = appointmentChargeContext;
+    if (ctx?.appointmentId) {
+      try {
+        await persistSaleAppointmentLink(sale.id, {
+          appointmentId: ctx.appointmentId,
+          customerId: ctx.customerId,
+          appointmentStatus: ctx.appointmentStatus ?? undefined,
+        });
+      } catch (e) {
+        console.error('link sale to appointment', e);
+      }
+    }
+
+    setCart([]);
+    setAmountPaid('');
+    setAppointmentChargeContext(null);
+    setShowSplitPayment(false);
+
+    const ticketsLabel = extraTickets?.length
+      ? extraTickets.map((t) => `${t.label}: ${t.ticket_number}`).join(' · ')
+      : sale.ticket_number;
+
+    setLastCompletedSale({
+      sale: {
+        id: sale.id,
+        ticket_number: ticketsLabel,
+        total_amount: extraTickets?.length
+          ? extraTickets.reduce((s, t) => s + t.total, 0)
+          : Number(sale.total_amount ?? 0),
+      },
+      appointmentId: ctx?.appointmentId ?? null,
+    });
+
+    toast({
+      title: 'Venta procesada',
+      description: ctx?.appointmentId
+        ? `Ticket(s) ${ticketsLabel} · cita cobrada`
+        : `Ticket(s) ${ticketsLabel} creado(s) correctamente.`,
+    });
+
+    queryClient.invalidateQueries({ queryKey: ['sales'] });
+    queryClient.invalidateQueries({ queryKey: ['sales-history'] });
+    queryClient.invalidateQueries({ queryKey: ['appointment-sale'] });
+    queryClient.invalidateQueries({ queryKey: ['appointment-charged-totals'] });
+    queryClient.invalidateQueries({ queryKey: ['agenda-appointments'] });
+
+    if (ctx?.appointmentId && saleItems?.length) {
+      const prefillInvoice = buildInvoicePrefillFromSale(
+        {
+          id: sale.id,
+          ticket_number: sale.ticket_number,
+          total_amount: Number(sale.total_amount ?? 0),
+          status: 'completed',
+          created_at: new Date().toISOString(),
+          customer_id: ctx.customerId,
+          appointment_id: ctx.appointmentId,
+          invoice_id: null,
+          notes: buildSaleNotes(),
+        },
+        saleItems,
+        ctx.customerId,
+        ctx.appointmentId,
+      );
+      sessionStorage.setItem(TPV_SALE_INVOICE_PREFILL_KEY, JSON.stringify(prefillInvoice));
+    }
+  };
+
   const processSaleMutation = useMutation({
     mutationFn: async (saleData: {
       items: CartItem[];
@@ -174,6 +454,8 @@ export const TPV: React.FC = () => {
       change: number;
       notes?: string | null;
       customerName?: string | null;
+      customerId?: string | null;
+      appointmentId?: string | null;
     }) => {
       if (!companyId) {
         console.error('❌ No company ID available');
@@ -195,9 +477,9 @@ export const TPV: React.FC = () => {
       const subtotal = Number((saleData.total / 1.21).toFixed(2));
       const taxAmount = Number((saleData.total - subtotal).toFixed(2));
 
-      const saleRecord = {
+      const saleRecord: Record<string, unknown> = {
         company_id: companyId,
-        ticket_number: '', // Empty string to trigger auto-generation
+        ticket_number: '',
         total_amount: saleData.total,
         subtotal: subtotal,
         tax_amount: taxAmount,
@@ -209,15 +491,20 @@ export const TPV: React.FC = () => {
         customer_name: saleData.customerName || null,
         customer_email: null,
         customer_phone: null,
-        notes: saleData.notes ?? null
+        customer_id: saleData.customerId ?? null,
+        appointment_id: saleData.appointmentId ?? null,
+        notes: saleData.notes ?? null,
       };
 
-      // Create the sale
-      const { data: sale, error: saleError } = await supabase
-        .from('sales')
-        .insert(saleRecord)
-        .select()
-        .single();
+      let sale: any = null;
+      let saleError: any = null;
+      for (const attempt of [saleRecord, { ...saleRecord, appointment_id: undefined }, { ...saleRecord, appointment_id: undefined, customer_id: undefined }]) {
+        const res = await supabase.from('sales').insert(attempt).select().single();
+        sale = res.data;
+        saleError = res.error;
+        if (!saleError) break;
+        if (saleError.code !== '42703' && saleError.code !== 'PGRST204') break;
+      }
 
       if (saleError) {
         console.error('❌ Error creating sale:', saleError);
@@ -236,17 +523,15 @@ export const TPV: React.FC = () => {
       }
 
       // Create sale items
-      const saleItems = saleData.items.map(item => {
-        return {
-          sale_id: sale.id,
-          article_id: item.variationId ? null : item.id,
-          variation_id: item.variationId || null,
-          description: item.name,
-          quantity: item.quantity,
-          unit_price: item.price,
-          total_price: item.total
-        };
-      });
+      const saleItems = saleData.items.map((item) => ({
+        sale_id: sale.id,
+        article_id: item.variationId ? null : (isUuid(item.id) ? item.id : null),
+        variation_id: item.variationId || null,
+        description: item.name,
+        quantity: item.quantity,
+        unit_price: item.price,
+        total_price: item.total,
+      }));
 
       const { data: createdItems, error: itemsError } = await supabase
         .from('sale_items')
@@ -264,16 +549,10 @@ export const TPV: React.FC = () => {
         throw new Error(`Error creating sale items: ${itemsError.message}`);
       }
 
-      return sale;
+      return { sale, saleItems: createdItems ?? saleItems };
     },
-    onSuccess: (sale) => {
-      setCart([]);
-      setAmountPaid('');
-      toast({
-        title: "✅ Venta procesada",
-        description: `Ticket ${sale.ticket_number} creado correctamente.`,
-      });
-      queryClient.invalidateQueries({ queryKey: ['sales'] });
+    onSuccess: async ({ sale, saleItems }) => {
+      await finalizeSaleSuccess(sale, saleItems as Array<{ description: string; quantity: number; unit_price: number; total_price: number }>);
     },
     onError: (error) => {
       console.error('💥 Sale processing failed:', error);
@@ -417,7 +696,9 @@ export const TPV: React.FC = () => {
         name: article.descripcion,
         price: article.precio || 0,
         quantity: 1,
-        total: article.precio || 0
+        total: article.precio || 0,
+        billingCompanyId: resolveItemBilling(article),
+        familia: article.familia,
       }]);
     }
   };
@@ -449,7 +730,9 @@ export const TPV: React.FC = () => {
         quantity: 1,
         total: variation.precio,
         size: variation.talla,
-        color: variation.color
+        color: variation.color,
+        billingCompanyId: resolveItemBilling(article),
+        familia: article.familia,
       }]);
     }
     
@@ -484,22 +767,25 @@ export const TPV: React.FC = () => {
     }
 
     if (cart.length === 0) {
-      console.warn('⚠️ Cart is empty');
       toast({
-        title: "Carrito vacío",
-        description: "Agrega productos al carrito antes de procesar la venta.",
-        variant: "destructive"
+        title: 'Carrito vacío',
+        description: 'Agrega productos al carrito antes de procesar la venta.',
+        variant: 'destructive',
       });
       return;
     }
 
     if (!companyId) {
-      console.error('❌ No company ID');
       toast({
-        title: "Error",
-        description: "No se pudo obtener la información de la empresa.",
-        variant: "destructive"
+        title: 'Error',
+        description: 'No se pudo obtener la información de la empresa.',
+        variant: 'destructive',
       });
+      return;
+    }
+
+    if (isMultiEntity && hasSplitBilling(paymentGroups)) {
+      setShowSplitPayment(true);
       return;
     }
 
@@ -507,39 +793,89 @@ export const TPV: React.FC = () => {
     if (paymentMethod === 'cash') {
       const paid = parseFloat(amountPaid) || 0;
       if (paid < total) {
-        console.warn('⚠️ Insufficient payment');
         toast({
-          title: "Pago insuficiente",
-          description: "El monto pagado es menor al total de la venta.",
-          variant: "destructive"
+          title: 'Pago insuficiente',
+          description: 'El monto pagado es menor al total de la venta.',
+          variant: 'destructive',
         });
         return;
       }
     }
 
+    const billingId = paymentGroups[0]?.billingCompanyId ?? companyId;
+
     processSaleMutation.mutate({
       items: cart,
-      total: total,
+      total,
       paymentMethod,
       amountPaid: parseFloat(amountPaid) || 0,
       change: getChange(),
-      customerName: prefill?.customerName || null,
-      notes: prefill
-        ? JSON.stringify({
-            source: 'agenda_appointment',
-            appointment_id: prefill.appointmentId,
-            customer_id: prefill.customerId ?? null,
-            customer_name: prefill.customerName ?? null,
-            appointment_date: prefill.date ?? null,
-            items: prefill.items.map((it) => ({
-              name: it.name,
-              total: it.total,
-              source_kind: it.sourceKind ?? null,
-              source_bonus_mode: it.sourceBonusMode ?? null,
-            })),
-          })
-        : null,
+      customerName: appointmentChargeContext?.customerName || prefill?.customerName || null,
+      customerId: appointmentChargeContext?.customerId ?? prefill?.customerId ?? null,
+      appointmentId: appointmentChargeContext?.appointmentId ?? prefill?.appointmentId ?? null,
+      notes: buildSaleNotes(),
+      billingCompanyId: billingId,
     });
+  };
+
+  const handleSplitPayGroup = async (params: {
+    group: typeof paymentGroups[0];
+    paymentMethod: 'cash' | 'card';
+    amountPaid: number;
+    change: number;
+    saleGroupId: string | null;
+    paidCount: number;
+    isLastPayment: boolean;
+  }) => {
+    if (!companyId) throw new Error('Sin empresa');
+    setSplitProcessing(true);
+    try {
+      const result = await processSplitPayment(
+        {
+          group: params.group.items,
+          total: params.group.total,
+          paymentMethod: params.paymentMethod,
+          amountPaid: params.amountPaid,
+          change: params.change,
+          billingCompanyId: params.group.billingCompanyId,
+          context: saleContext(),
+          saleGroupId: params.saleGroupId,
+          isLastPayment: params.isLastPayment,
+          globalTotal: getTotalAmount(),
+        },
+        params.paidCount,
+        paymentGroups.length,
+      );
+      return {
+        saleGroupId: result.saleGroupId,
+        ticket_number: result.sale.ticket_number,
+        total: Number(result.sale.total_amount),
+      };
+    } finally {
+      setSplitProcessing(false);
+    }
+  };
+
+  const handleSplitComplete = async (state: {
+    completedSales: Array<{ billingCompanyId: string; ticket_number: string; total: number }>;
+  }) => {
+    const first = state.completedSales[0];
+    if (!first) return;
+    const saleItems = cartWithBilling.map((it) => ({
+      description: it.name,
+      quantity: it.quantity,
+      unit_price: it.price,
+      total_price: it.total,
+    }));
+    await finalizeSaleSuccess(
+      { id: '', ticket_number: first.ticket_number, total_amount: first.total },
+      saleItems,
+      state.completedSales.map((s) => ({
+        ticket_number: s.ticket_number,
+        total: s.total,
+        label: companyLabels.get(s.billingCompanyId) ?? 'Empresa',
+      })),
+    );
   };
 
   const productsGrid = useMemo(() => {
@@ -600,6 +936,44 @@ export const TPV: React.FC = () => {
         </Button>
       </div>
 
+      {appointmentChargeContext && (
+        <div className="mx-4 mt-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900 flex flex-wrap items-center gap-2">
+          <span>
+            Cobro de cita · <strong>{appointmentChargeContext.customerName || 'Cliente'}</strong>
+            {appointmentChargeContext.date ? ` · ${appointmentChargeContext.date}` : ''}
+          </span>
+        </div>
+      )}
+
+      {lastCompletedSale && (
+        <div className="mx-4 mt-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 flex flex-wrap items-center gap-2">
+          <span>
+            Ticket <strong>{lastCompletedSale.sale.ticket_number}</strong> · {lastCompletedSale.sale.total_amount.toFixed(2)} €
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7"
+            onClick={() => navigate('/facturacion')}
+          >
+            Generar factura
+          </Button>
+          {lastCompletedSale.appointmentId && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7"
+              onClick={() => navigate(`/agenda?appointment=${lastCompletedSale.appointmentId}`)}
+            >
+              Volver a agenda
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" className="h-7 ml-auto" onClick={() => setLastCompletedSale(null)}>
+            Cerrar
+          </Button>
+        </div>
+      )}
+
       <div className="bg-white border-b p-4">
         <div className="max-w-md">
           <Label htmlFor="barcode-input" className="text-sm font-medium flex items-center mb-2">
@@ -637,6 +1011,16 @@ export const TPV: React.FC = () => {
         onClose={() => setShowBarcodeScanner(false)}
         onBarcodeDetected={handleBarcodeFromCamera}
       />
+
+      {showSplitPayment && (
+        <SplitPaymentDialog
+          groups={paymentGroups}
+          onClose={() => setShowSplitPayment(false)}
+          onComplete={handleSplitComplete}
+          onPayGroup={handleSplitPayGroup}
+          processing={splitProcessing}
+        />
+      )}
 
       {showVariations && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -688,7 +1072,7 @@ export const TPV: React.FC = () => {
         </div>
       )}
 
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-4 p-4 overflow-hidden pb-32">
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-4 p-4 overflow-hidden pb-52">
         <div className="lg:col-span-2 flex flex-col">
           <Card className="flex-1 flex flex-col">
             <CardHeader className="pb-3">
@@ -716,56 +1100,20 @@ export const TPV: React.FC = () => {
                   </div>
                 ) : !productsGrid ? null : (
                   <Grid
-                    width={productsGrid.width}
-                    height={productsGrid.height}
+                    cellComponent={ProductGridCell}
+                    cellProps={{
+                      articles,
+                      columnCount: productsGrid.columnCount,
+                      gap: productsGrid.gap,
+                      onAddToCart: addToCart,
+                    }}
                     columnCount={productsGrid.columnCount}
                     columnWidth={productsGrid.columnWidth}
                     rowCount={productsGrid.rowCount}
                     rowHeight={productsGrid.rowHeight}
-                    overscanRowCount={2}
-                  >
-                    {({ columnIndex, rowIndex, style }) => {
-                      const articleIndex = rowIndex * productsGrid.columnCount + columnIndex;
-                      const article = articles[articleIndex];
-                      if (!article) return null;
-                      return (
-                        <div style={{ ...style, padding: productsGrid.gap / 2 }}>
-                          <div
-                            className={`cursor-pointer hover:shadow-md transition-all duration-200 h-32 bg-white border border-gray-200 hover:border-blue-300 rounded-lg ${
-                              article.stock_actual <= 0 ? 'bg-red-50 opacity-60' : 'hover:bg-blue-50'
-                            }`}
-                            onClick={() => addToCart(article)}
-                          >
-                            <div className="p-3 h-full flex flex-col justify-between">
-                              <div className="flex-shrink-0 h-12 flex items-center justify-center mb-2">
-                                {article.foto_url ? (
-                                  <img src={article.foto_url} alt={article.descripcion} className="w-10 h-10 rounded-md object-cover" />
-                                ) : (
-                                  <div className="w-10 h-10 bg-gradient-to-r from-green-500 to-blue-500 rounded-md flex items-center justify-center text-white">
-                                    <Package className="w-6 h-6" />
-                                  </div>
-                                )}
-                              </div>
-                              <div className="flex-1 flex flex-col justify-center min-h-0 px-1">
-                                <h3 className="font-medium text-xs leading-tight text-center overflow-hidden mb-1">
-                                  {article.descripcion.length > 20 ? `${article.descripcion.substring(0, 20)}...` : article.descripcion}
-                                </h3>
-                                {article.tipo_producto !== 'standard' && (
-                                  <p className="text-[10px] text-orange-600 text-center font-semibold">
-                                    {article.tipo_producto === 'textil' ? 'TEX' : 'CAL'}
-                                  </p>
-                                )}
-                              </div>
-                              <div className="text-center mt-2">
-                                <p className="text-sm font-bold text-blue-600">€{(article.precio || 0).toFixed(2)}</p>
-                                <p className="text-[10px] text-gray-500">Stock: {article.stock_actual}</p>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    }}
-                  </Grid>
+                    style={{ height: productsGrid.height, width: productsGrid.width }}
+                    overscanCount={2}
+                  />
                 )}
               </div>
             </CardContent>
@@ -787,6 +1135,11 @@ export const TPV: React.FC = () => {
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{item.name}</p>
                       <p className="text-xs text-gray-500">€{item.price.toFixed(2)} c/u</p>
+                      {isMultiEntity && item.billingCompanyId && (
+                        <p className="text-[10px] text-violet-600 font-medium">
+                          {companyLabels.get(item.billingCompanyId) ?? 'Empresa'}
+                        </p>
+                      )}
                       {item.variationId && (
                         <div className="flex space-x-1 mt-1">
                           <span className="inline-flex px-1 py-0.5 text-xs rounded bg-purple-100 text-purple-800">
@@ -835,7 +1188,8 @@ export const TPV: React.FC = () => {
         </div>
       </div>
 
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg p-4 z-10">
+      {/* Elevado sobre el dock fijo (bottom-4, z-50) sin modificar DockBar */}
+      <div className="fixed bottom-28 left-0 right-0 bg-white border-t shadow-lg p-4 z-40">
         <div className="flex items-center justify-between max-w-7xl mx-auto">
           <div className="flex items-center space-x-4">
             <div className="flex space-x-2">
@@ -875,12 +1229,16 @@ export const TPV: React.FC = () => {
 
             <Button
               onClick={processSale}
-              disabled={processSaleMutation.isPending || cart.length === 0}
+              disabled={processSaleMutation.isPending || splitProcessing || cart.length === 0}
               className="bg-green-600 hover:bg-green-700"
               size="lg"
             >
               <Receipt className="w-4 h-4 mr-2" />
-              {processSaleMutation.isPending ? 'Procesando...' : 'Procesar Venta'}
+              {processSaleMutation.isPending || splitProcessing
+                ? 'Procesando...'
+                : isMultiEntity && hasSplitBilling(paymentGroups)
+                  ? 'Cobrar (dividido)'
+                  : 'Procesar Venta'}
             </Button>
           </div>
 

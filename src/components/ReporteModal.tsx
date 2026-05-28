@@ -16,6 +16,7 @@ import { ReporteResults } from './ReporteResults';
 import { supabase } from '@/lib/supabase';
 import { useQuery } from '@tanstack/react-query';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useWorkCenter } from '@/hooks/useWorkCenter';
 import { CustomerSelector } from '@/components/forms/CustomerSelector';
 
 interface Report {
@@ -42,6 +43,7 @@ interface FilterValues {
   articulo?: string;
   importeDesde?: number;
   importeHasta?: number;
+  empresaEmisora?: string;
   [key: string]: any;
 }
 
@@ -51,6 +53,7 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
   const [filters, setFilters] = useState<FilterValues>({});
   const [loading, setLoading] = useState(false);
   const { companyId, loading: companyLoading } = useCompanyFilter();
+  const { isMultiEntity, billingCompanies, companyLabels } = useWorkCenter();
 
   // Consultas para obtener datos reales para los filtros
   const { data: customers } = useQuery({
@@ -326,6 +329,30 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
                 {suppliers?.map((supplier) => (
                   <SelectItem key={supplier.id} value={supplier.id}>
                     {supplier.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        );
+
+      case "empresa-emisora":
+        if (!isMultiEntity || billingCompanies.length <= 1) return null;
+        return (
+          <div className="space-y-2">
+            <Label>Empresa emisora</Label>
+            <Select
+              value={filters.empresaEmisora ?? 'all'}
+              onValueChange={(value) => setFilters((prev) => ({ ...prev, empresaEmisora: value }))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Todas las empresas" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas (centro laboral)</SelectItem>
+                {billingCompanies.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {companyLabels.get(c.id) ?? c.name}
                   </SelectItem>
                 ))}
               </SelectContent>

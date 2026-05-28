@@ -60,6 +60,8 @@ function mapRowToDraft(row: {
       'none',
     article_id: row.article_id,
     customer_voucher_id: row.customer_voucher_id,
+    bono_id: fallbackPricing.bono_id ?? null,
+    bono_coverage_index: fallbackPricing.bono_coverage_index ?? null,
     cabina_id: row.cabina_id ?? null,
     recurso_id: row.recurso_id ?? null,
   };
@@ -69,6 +71,8 @@ type PricingPayload = {
   quantity: number;
   unit_price: number;
   bonus_payment_mode: BonusPaymentMode;
+  bono_id?: string | null;
+  bono_coverage_index?: number | null;
 };
 
 function encodePricingInNotes(payload: PricingPayload): string {
@@ -83,6 +87,9 @@ function parsePricingFromNotes(notes: string | null): Partial<PricingPayload> {
       quantity: Number(parsed.quantity ?? 1),
       unit_price: Number(parsed.unit_price ?? 0),
       bonus_payment_mode: (parsed.bonus_payment_mode ?? 'none') as BonusPaymentMode,
+      bono_id: parsed.bono_id ?? null,
+      bono_coverage_index:
+        parsed.bono_coverage_index == null ? null : Number(parsed.bono_coverage_index),
     };
   } catch {
     return {};
@@ -258,6 +265,8 @@ export async function syncAppointmentItems(
       quantity: Math.max(0, Number(it.quantity ?? 1)),
       unit_price: Math.max(0, Number(it.unit_price ?? 0)),
       bonus_payment_mode: it.bonus_payment_mode ?? 'none',
+      bono_id: nullIfBlank(it.bono_id),
+      bono_coverage_index: it.bono_coverage_index ?? null,
     }),
     sort_order,
     article_id: nullIfBlank(it.article_id),

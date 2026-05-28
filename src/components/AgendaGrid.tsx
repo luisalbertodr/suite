@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { format } from 'date-fns';
-import { CheckCircle, Clock, XCircle } from 'lucide-react';
+import { CheckCircle, Clock, XCircle, Receipt, Banknote, FileText } from 'lucide-react';
 import { Employee, Appointment, TimeSlot } from '@/types/agenda';
 import { slotOverlapsOccupiedTime } from '@/lib/agendaAppointmentItems';
 import { segmentAppearance } from '@/lib/agendaResourceColors';
@@ -149,6 +149,31 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
         return <XCircle className="w-4 h-4 text-red-600" />;
       default:
         return <CheckCircle className="w-4 h-4 text-green-600" />;
+    }
+  };
+
+  const getPaymentIcon = (paymentStatus?: Appointment['paymentStatus']) => {
+    switch (paymentStatus) {
+      case 'invoiced':
+        return (
+          <span title="Cobrada y facturada">
+            <FileText className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+          </span>
+        );
+      case 'paid':
+        return (
+          <span title="Cobrada (TPV)">
+            <Banknote className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+          </span>
+        );
+      case 'pending_charge':
+        return (
+          <span title="Pendiente de cobro">
+            <Receipt className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+          </span>
+        );
+      default:
+        return null;
     }
   };
 
@@ -439,7 +464,10 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
                       {visibleFields.clientName && (
                         <div className="font-semibold truncate flex-1">{appointment.clientName}</div>
                       )}
-                      {visibleFields.status && getStatusIcon(appointment.status)}
+                      <div className="flex items-center gap-0.5 shrink-0">
+                        {getPaymentIcon(appointment.paymentStatus)}
+                        {visibleFields.status && getStatusIcon(appointment.status)}
+                      </div>
                     </div>
                     {visibleFields.timeRange && (
                       <div className="text-xs text-gray-600 truncate">

@@ -23,6 +23,8 @@ import { AgendaEmployeeHoursConfig } from './AgendaEmployeeHoursConfig';
 import { UserManagement } from './UserManagement';
 import { MetaConfig } from './MetaConfig';
 import { WhatsappConfig } from './WhatsappConfig';
+import { WorkCenterAuditPanel } from './WorkCenterAuditPanel';
+import { useWorkCenter } from '@/hooks/useWorkCenter';
 
 const VALID_TABS = [
   'general',
@@ -39,6 +41,7 @@ const VALID_TABS = [
   'verifactu-xml',
   'seguridad',
   'usuarios-permisos',
+  'centro-laboral',
 ] as const;
 
 type ConfigTab = (typeof VALID_TABS)[number];
@@ -47,6 +50,7 @@ export const Configuracion: React.FC = () => {
   const { toast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const [isGeneratingBackup, setIsGeneratingBackup] = useState(false);
+  const { isMultiEntity } = useWorkCenter();
 
   const tabParam = searchParams.get('tab') ?? '';
   const activeTab: ConfigTab = (VALID_TABS as readonly string[]).includes(tabParam)
@@ -131,6 +135,9 @@ export const Configuracion: React.FC = () => {
           <TabsTrigger value="verifactu-xml">XML Docs</TabsTrigger>
           <TabsTrigger value="seguridad">Seguridad</TabsTrigger>
           <TabsTrigger value="usuarios-permisos">Usuarios y permisos</TabsTrigger>
+          {isMultiEntity && (
+            <TabsTrigger value="centro-laboral">Centro laboral</TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="general" className="space-y-4">
@@ -210,6 +217,12 @@ export const Configuracion: React.FC = () => {
         <TabsContent value="usuarios-permisos" className="space-y-4">
           <UserManagement />
         </TabsContent>
+
+        {isMultiEntity && (
+          <TabsContent value="centro-laboral" className="space-y-4">
+            <WorkCenterAuditPanel />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

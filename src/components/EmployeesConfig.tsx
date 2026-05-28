@@ -9,6 +9,8 @@ import { useAgendaEmployees } from '@/hooks/useAgendaEmployees';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { Skeleton } from '@/components/ui/skeleton';
 import { DeactivateAgendaEmployeeDialog } from '@/components/DeactivateAgendaEmployeeDialog';
+import { BillingCompanySelect } from '@/components/forms/BillingCompanySelect';
+import { useWorkCenter } from '@/hooks/useWorkCenter';
 
 const COLORS = [
   '#3B82F6', '#8B5CF6', '#10B981', '#F59E0B', '#EF4444',
@@ -19,14 +21,21 @@ interface EmployeeFormData {
   name: string;
   color: string;
   active: boolean;
-  /** Orden en la agenda (menor = más a la izquierda). */
   agenda_sort_order: number;
+  billing_company_id: string | null;
 }
 
-const emptyForm: EmployeeFormData = { name: '', color: COLORS[0], active: true, agenda_sort_order: 0 };
+const emptyForm: EmployeeFormData = {
+  name: '',
+  color: COLORS[0],
+  active: true,
+  agenda_sort_order: 0,
+  billing_company_id: null,
+};
 
 export const EmployeesConfig: React.FC = () => {
   const { companyId } = useCompanyFilter();
+  const { isMultiEntity, companyLabels } = useWorkCenter();
   const { employees, isLoading, createEmployee, updateEmployee } = useAgendaEmployees({ agendaOnly: false });
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -48,13 +57,20 @@ export const EmployeesConfig: React.FC = () => {
     setShowForm(true);
   };
 
-  const handleEdit = (emp: { name: string; color?: string | null; active?: boolean | null; agenda_sort_order?: number | null }) => {
+  const handleEdit = (emp: {
+    name: string;
+    color?: string | null;
+    active?: boolean | null;
+    agenda_sort_order?: number | null;
+    billing_company_id?: string | null;
+  }) => {
     const ord = emp.agenda_sort_order;
     setForm({
       name: emp.name,
       color: emp.color || COLORS[0],
       active: emp.active ?? true,
       agenda_sort_order: typeof ord === 'number' && Number.isFinite(ord) ? ord : 0,
+      billing_company_id: emp.billing_company_id ?? null,
     });
     setEditingId(emp.id);
     setShowForm(true);
@@ -87,6 +103,7 @@ export const EmployeesConfig: React.FC = () => {
         color: form.color,
         active: form.active,
         agenda_sort_order: Math.max(0, Math.floor(Number(form.agenda_sort_order)) || 0),
+        billing_company_id: form.billing_company_id,
       });
     } else {
       const nextOrder =
@@ -101,6 +118,7 @@ export const EmployeesConfig: React.FC = () => {
         color: form.color,
         active: form.active,
         agenda_sort_order,
+        billing_company_id: form.billing_company_id,
       });
     }
     setShowForm(false);
@@ -220,6 +238,14 @@ export const EmployeesConfig: React.FC = () => {
                   />
                   <p className="text-xs text-muted-foreground mt-1">0 = primera columna. En creación, si dejas 0 se asigna el siguiente hueco libre.</p>
                 </div>
+                {isMultiEntity && (
+                  <BillingCompanySelect
+                    value={form.billing_company_id}
+                    onChange={(id) => setForm({ ...form, billing_company_id: id })}
+                    label="Empresa contratante"
+                    inheritLabel="Tenant por defecto"
+                  />
+                )}
               </div>
               <div className="flex gap-2">
                 <Button size="sm" onClick={handleSave} disabled={!form.name.trim()} className="gap-1">
@@ -252,7 +278,12 @@ export const EmployeesConfig: React.FC = () => {
                   <div className="w-4 h-4 rounded-full shrink-0" style={{ backgroundColor: emp.color || COLORS[0] }} />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium break-words">{emp.name}</p>
-                    <p className="text-xs text-muted-foreground">Agenda pos. {emp.agenda_sort_order ?? 0}</p>
+                    <p className="text-xs text-muted-foreground">
+                      Agenda pos. {emp.agenda_sort_order ?? 0}
+                      {isMultiEntity && emp.billing_company_id && (
+                        <> · {companyLabels.get(emp.billing_company_id) ?? 'Empresa'}</>
+                      )}
+                    </p>
                   </div>
                   <span className={`text-xs px-2 py-0.5 rounded-full ${emp.active !== false ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400' : 'bg-muted text-muted-foreground'}`}>
                     {emp.active !== false ? 'Activo' : 'Inactivo'}

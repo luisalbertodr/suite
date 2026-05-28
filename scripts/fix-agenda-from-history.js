@@ -1,9 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
+import { getCompanyId } from "./legacy_company.js";
 
 const url = "https://supabase.lipoout.com";
 const key =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UiLCJpYXQiOjE2Nzg4ODY0MDAsImV4cCI6MTc5OTUzNTYwMH0.T_fOOOaoiFAyTLDkSCoaGwxy7TjlacSHJn2aZyCFP0M";
-const company = "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4";
+const company = getCompanyId();
 
 const s = createClient(url, key);
 const FETCH_BATCH = 1000;

@@ -44,5 +44,9 @@ export function segmentAppearance(
 /** z-index por encima del DockBar (z-50). */
 export const AGENDA_APPOINTMENT_MODAL_Z = 'z-[80]';
 export const AGENDA_APPOINTMENT_OVERLAY_Z = 'z-[90]';
+/** Ficha de cliente superpuesta a la cita (portal en document.body). */
+export const AGENDA_CUSTOMER_DETAIL_OVERLAY_Z = 'z-[95]';
+/** Desplegables dentro del modal de cita. */
+export const AGENDA_APPOINTMENT_SELECT_Z = 'z-[100]';
 
 export { resolveRecursoColor };

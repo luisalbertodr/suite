@@ -61,10 +61,11 @@ interface Invoice {
 interface FacturaFormProps {
   invoice?: Invoice | null;
   onClose: () => void;
+  onCreated?: (invoice: Record<string, unknown>) => void;
   budgetData?: any | null;
 }
 
-export const FacturaForm: React.FC<FacturaFormProps> = ({ invoice, onClose, budgetData }) => {
+export const FacturaForm: React.FC<FacturaFormProps> = ({ invoice, onClose, onCreated, budgetData }) => {
   const [formData, setFormData] = useState({
     number: '',
     customer_id: '',
@@ -129,17 +130,20 @@ export const FacturaForm: React.FC<FacturaFormProps> = ({ invoice, onClose, budg
   // Load existing invoice items if editing or from budget
   useEffect(() => {
     if (budgetData) {
+      const fromTpv = budgetData.source === 'tpv_sale';
+      const today = new Date().toISOString().split('T')[0];
+      const customerId = String(budgetData.customer_id || '').trim();
       // Pre-populate form with budget data
       setFormData({
         number: '',
-        customer_id: budgetData.customer_id,
-        issue_date: new Date().toISOString().split('T')[0],
+        customer_id: customerId,
+        issue_date: today,
         due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         notes: budgetData.notes || '',
-        status: 'draft' as 'draft' | 'sent' | 'paid' | 'overdue' | 'cancelled',
+        status: fromTpv ? 'paid' : 'draft',
         currency: 'EUR',
-        paid_status: false,
-        paid_date: '',
+        paid_status: fromTpv,
+        paid_date: fromTpv ? today : '',
         is_intracomunitario: false,
       });
 
@@ -427,8 +431,31 @@ export const FacturaForm: React.FC<FacturaFormProps> = ({ invoice, onClose, budg
 
           if (budgetUpdateError) {
             console.error('Error updating budget status:', budgetUpdateError);
-            // Don't throw error here, invoice creation was successful
           }
+        }
+
+        if (budgetData?.sale_id) {
+          const { error: saleLinkError } = await supabase
+            .from('sales')
+            .update({ invoice_id: newInvoice.id })
+            .eq('id', budgetData.sale_id);
+          if (saleLinkError && saleLinkError.code !== '42703' && saleLinkError.code !== 'PGRST204') {
+            console.error('Error linking sale to invoice:', saleLinkError);
+          }
+          const { error: invSaleError } = await supabase
+            .from('invoices')
+            .update({ sale_id: budgetData.sale_id })
+            .eq('id', newInvoice.id);
+          if (invSaleError && invSaleError.code !== '42703' && invSaleError.code !== 'PGRST204') {
+            console.error('Error linking invoice to sale:', invSaleError);
+          }
+        }
+
+        queryClient.invalidateQueries({ queryKey: ['invoices'] });
+        queryClient.invalidateQueries({ queryKey: ['appointment-sale'] });
+        if (onCreated) {
+          onCreated(newInvoice);
+          return;
         }
       }
 

@@ -34,28 +34,15 @@ export function collectResourceSlotsFromAppointments(
   for (const apt of appointments) {
     if (excludeId && apt.id === excludeId) continue;
     const segs = apt.timeSegments ?? [];
-    if (segs.length) {
-      for (const seg of segs) {
-        if (!seg.cabinaId && !seg.recursoId) continue;
-        slots.push({
-          appointmentId: apt.id,
-          clientName: apt.clientName,
-          startTime: seg.startTime,
-          endTime: seg.endTime,
-          cabina_id: seg.cabinaId,
-          recurso_id: seg.recursoId,
-        });
-      }
-      continue;
-    }
-    if (apt.cabina_id || apt.recurso_id) {
+    for (const seg of segs) {
+      if (!seg.cabinaId && !seg.recursoId) continue;
       slots.push({
         appointmentId: apt.id,
         clientName: apt.clientName,
-        startTime: apt.startTime,
-        endTime: apt.occupiedEndTime ?? apt.endTime,
-        cabina_id: apt.cabina_id,
-        recurso_id: apt.recurso_id,
+        startTime: seg.startTime,
+        endTime: seg.endTime,
+        cabina_id: seg.cabinaId,
+        recurso_id: seg.recursoId,
       });
     }
   }

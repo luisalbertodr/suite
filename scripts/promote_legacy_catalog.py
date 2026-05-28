@@ -6,7 +6,7 @@ usando anclas conocidas de legacy.articulos.
 
 Variables (o .env):
   SUPABASE_DB_URL=postgresql://...
-  LEGACY_COMPANY_ID=<uuid empresa destino>
+  LEGACY_COMPANY_ID=<uuid empresa destino>  (default: scripts/legacy_company.py)
   LEGACY_PRICE_ANCHORS=10600:43.71:85.90,5013:25.83:54.40
   LEGACY_PRICE_SCALE=1               # opcional: fuerza escala y salta autodetección
   LEGACY_INCLUDE_BONOS=1             # 1 por defecto
@@ -24,6 +24,8 @@ from pathlib import Path
 from typing import Iterable
 
 import psycopg2
+
+from legacy_company import get_company_id
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -201,16 +203,70 @@ def normalize_iva(value: object) -> Decimal:
     return Decimal("21")
 
 
+def normalize_family_code(code: str) -> str:
+    c = (code or "").strip()
+    if not c:
+        return ""
+    if c.isdigit():
+        return str(int(c))
+    return c
+
+
+def build_family_map(cur) -> dict[str, str]:
+    """Mapa código familia Dunasoft -> nombre legible (desfam1)."""
+    cur.execute("SELECT codfam1, desfam1, obsoleto FROM legacy.familia1")
+    fam_map: dict[str, str] = {}
+    for cod, des, obsoleto in cur.fetchall():
+        if parse_bool(obsoleto):
+            continue
+        code = str(cod or "").strip()
+        name = (str(des).strip() if des is not None else "") or code
+        if not code:
+            continue
+        fam_map[code] = name
+        norm = normalize_family_code(code)
+        if norm and norm not in fam_map:
+            fam_map[norm] = name
+    return fam_map
+
+
+def resolve_familia(fam_code: str, fam_map: dict[str, str]) -> str:
+    code = str(fam_code or "").strip()
+    if not code:
+        return "Varios"
+    if code in fam_map:
+        return fam_map[code]
+    norm = normalize_family_code(code)
+    if norm and norm in fam_map:
+        return fam_map[norm]
+    # Si no hay tabla familia1 cargada, conservar el código como nombre provisional.
+    return code
+
+
+def sync_article_families(cur, company_id: str, names: Iterable[str], dry_run: bool) -> int:
+    unique = sorted({str(n).strip() for n in names if str(n).strip()})
+    if dry_run:
+        return len(unique)
+    for name in unique:
+        cur.execute(
+            """
+            INSERT INTO public.article_families (company_id, name)
+            VALUES (%s, %s)
+            ON CONFLICT (company_id, name) DO NOTHING
+            """,
+            (company_id, name),
+        )
+    return len(unique)
+
+
 def main() -> None:
     load_dotenv()
     db_url = os.environ.get("SUPABASE_DB_URL", "").strip()
-    company_id = os.environ.get("LEGACY_COMPANY_ID", "").strip()
+    company_id = get_company_id()
     include_bonos = os.environ.get("LEGACY_INCLUDE_BONOS", "1").strip() not in ("0", "false", "no")
     dry_run = os.environ.get("LEGACY_DRY_RUN", "0").strip() in ("1", "true", "yes", "si")
     if not db_url:
         raise SystemExit("Falta SUPABASE_DB_URL")
-    if not company_id:
-        raise SystemExit("Falta LEGACY_COMPANY_ID")
 
     conn = psycopg2.connect(db_url)
     conn.autocommit = False
@@ -218,9 +274,10 @@ def main() -> None:
     try:
         scale = detect_scale(cur, parse_anchors())
         print(f"Escala monetaria detectada: {scale}")
+        print(f"Company ID: {company_id}")
 
-        cur.execute("SELECT codfam1, desfam1 FROM legacy.familia1")
-        fam_map = {str(c).strip(): (str(d).strip() if d is not None else "") for c, d in cur.fetchall()}
+        fam_map = build_family_map(cur)
+        print(f"Familias Dunasoft cargadas: {len(fam_map)}")
 
         cur.execute(
             """
@@ -230,6 +287,7 @@ def main() -> None:
             """
         )
         rows = cur.fetchall()
+        used_families: set[str] = {"Varios", "Bonos"}
         n_articles = 0
         for row in rows:
             codart = str(row[0]).strip()
@@ -250,7 +308,8 @@ def main() -> None:
             obsolete = parse_bool(row[8])
             tiempo = str(row[9]).strip() if row[9] is not None else ""
             photo = str(row[10]).strip() if row[10] is not None else ""
-            familia = fam_map.get(fam_code) or fam_code or "Varios"
+            familia = resolve_familia(fam_code, fam_map)
+            used_families.add(familia)
             article_kind = infer_kind(tipart, tiempo)
             tipo_producto = "servicio" if article_kind == "servicio" else "producto"
             duration = parse_int(tiempo)
@@ -366,6 +425,13 @@ def main() -> None:
                     )
                 n_bonos += 1
 
+        n_families = sync_article_families(
+            cur,
+            company_id,
+            set(fam_map.values()) | used_families,
+            dry_run,
+        )
+
         if dry_run:
             conn.rollback()
             print("DRY RUN: sin cambios persistidos.")
@@ -373,6 +439,7 @@ def main() -> None:
             conn.commit()
         print(f"Artículos procesados: {n_articles}")
         print(f"Bonos procesados: {n_bonos}")
+        print(f"Familias sincronizadas en article_families: {n_families}")
     finally:
         cur.close()
         conn.close()

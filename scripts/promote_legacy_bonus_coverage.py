@@ -11,7 +11,7 @@ Lee:
 
 Variables:
   SUPABASE_DB_URL=postgresql://...
-  LEGACY_COMPANY_ID=<uuid empresa destino>
+  LEGACY_COMPANY_ID=<uuid empresa destino>  (default: scripts/legacy_company.py)
   LEGACY_DRY_RUN=0|1
   LEGACY_SKIP_OBSOLETE_BONOS=0|1  (default 0: importa también obsoletos, necesario para clientes)
 """
@@ -22,6 +22,8 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import psycopg2
+
+from legacy_company import get_company_id
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -79,7 +81,7 @@ def _first_col(cols: set[str], candidates: tuple[str, ...]) -> str | None:
 def main() -> None:
     load_dotenv()
     db_url = os.environ.get("SUPABASE_DB_URL", "").strip()
-    company_id = os.environ.get("LEGACY_COMPANY_ID", "").strip()
+    company_id = get_company_id()
     dry_run = os.environ.get("LEGACY_DRY_RUN", "0").strip().lower() in ("1", "true", "yes", "si")
     skip_obsolete = os.environ.get("LEGACY_SKIP_OBSOLETE_BONOS", "0").strip().lower() in (
         "1",
@@ -90,8 +92,6 @@ def main() -> None:
 
     if not db_url:
         raise SystemExit("Falta SUPABASE_DB_URL")
-    if not company_id:
-        raise SystemExit("Falta LEGACY_COMPANY_ID")
 
     conn = psycopg2.connect(db_url)
     conn.autocommit = False
@@ -120,14 +120,27 @@ def main() -> None:
 
         cur.execute(
             """
-            SELECT legacy_codart, id
+            SELECT id, codigo, descripcion, legacy_codart
             FROM public.articles
             WHERE company_id = %s
-              AND COALESCE(legacy_codart, '') <> ''
             """,
             (company_id,),
         )
-        article_by_legacy_code = {str(legacy_codart).strip(): str(article_id) for legacy_codart, article_id in cur.fetchall()}
+        article_by_legacy_code: dict[str, str] = {}
+        for article_id, codigo, _descripcion, legacy_codart in cur.fetchall():
+            for key in {str(k).strip() for k in (legacy_codart, codigo) if k and str(k).strip()}:
+                article_by_legacy_code.setdefault(key, str(article_id))
+
+        cur.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'bonus_definition_items'
+            """
+        )
+        bdi_cols = {str(r[0]).lower() for r in cur.fetchall()}
+        has_max_unpaid = "max_covered_if_unpaid" in bdi_cols
+        has_commission = "commission_pvp" in bdi_cols
 
         bcols = _legacy_table_columns(cur, "bonosart")
         col_cant = _first_col(
@@ -247,16 +260,27 @@ def main() -> None:
                     max_un_f = float(max_un) if max_un and max_un > 0 else None
                     com_f = float(com) if com and com > 0 else None
 
-                    cur.execute(
-                        """
-                        INSERT INTO public.bonus_definition_items (
-                          definition_id, coverage_type, article_id, covered_quantity,
-                          max_covered_if_unpaid, commission_pvp, notes
+                    if has_max_unpaid and has_commission:
+                        cur.execute(
+                            """
+                            INSERT INTO public.bonus_definition_items (
+                              definition_id, coverage_type, article_id, covered_quantity,
+                              max_covered_if_unpaid, commission_pvp, notes
+                            )
+                            VALUES (%s, 'service', %s, %s, %s, %s, 'legacy-bonosart')
+                            """,
+                            (definition_id, article_id, qty_f, max_un_f, com_f),
                         )
-                        VALUES (%s, 'service', %s, %s, %s, %s, 'legacy-bonosart')
-                        """,
-                        (definition_id, article_id, qty_f, max_un_f, com_f),
-                    )
+                    else:
+                        cur.execute(
+                            """
+                            INSERT INTO public.bonus_definition_items (
+                              definition_id, coverage_type, article_id, covered_quantity, notes
+                            )
+                            VALUES (%s, 'service', %s, %s, 'legacy-bonosart')
+                            """,
+                            (definition_id, article_id, qty_f),
+                        )
                     items_upserted += 1
 
                 cur.execute(

@@ -7,6 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Check, ChevronsUpDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { filterCustomersBySearch, type CustomerSearchRow } from '@/lib/customerSearch';
+import { formatCustomerPhoneLabels } from '@/lib/legacyCustomerPhones';
 
 export type { CustomerSearchRow };
 
@@ -135,7 +136,9 @@ export const CustomerSelector: React.FC<CustomerSelectorProps> = ({
                     <div className="min-w-0 flex-1">
                       <div className="truncate font-medium">{customer.name}</div>
                       <div className="truncate text-xs text-muted-foreground">
-                        {[customer.tax_id, customer.phone, customer.email].filter(Boolean).join(' · ')}
+                        {[customer.tax_id, ...formatCustomerPhoneLabels(customer), customer.email]
+                          .filter(Boolean)
+                          .join(' · ')}
                       </div>
                     </div>
                   </CommandItem>

@@ -11,7 +11,7 @@ relleno; promocionar antes bonus_definitions (promote_legacy_bonus_coverage).
 
 Variables de entorno:
   SUPABASE_DB_URL=postgresql://...
-  LEGACY_COMPANY_ID=<uuid empresa>
+  LEGACY_COMPANY_ID=<uuid empresa>  (default: scripts/legacy_company.py)
   LEGACY_DRY_RUN=0|1
 """
 from __future__ import annotations
@@ -24,6 +24,8 @@ from pathlib import Path
 from typing import Any
 
 import psycopg2
+
+from legacy_company import get_company_id
 from psycopg2.extras import Json
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -159,16 +161,178 @@ def _definition_coverage(cur, company_id: str, definition_id: str) -> list[dict[
     return out
 
 
+def _legacy_table_columns(cur, rel: str) -> set[str]:
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'legacy' AND table_name = %s
+        """,
+        (rel,),
+    )
+    return {str(r[0]).lower() for r in cur.fetchall()}
+
+
+def _first_col(cols: set[str], candidates: tuple[str, ...]) -> str | None:
+    for c in candidates:
+        if c in cols:
+            return c
+    return None
+
+
+def _article_by_legacy_map(cur, company_id: str) -> dict[str, tuple[str, str | None, str | None]]:
+    cur.execute(
+        """
+        SELECT id, codigo, descripcion, legacy_codart
+        FROM public.articles
+        WHERE company_id = %s
+        """,
+        (company_id,),
+    )
+    article_by_legacy: dict[str, tuple[str, str | None, str | None]] = {}
+    for aid, codigo, descripcion, legacy_codart in cur.fetchall():
+        keys = {str(k).strip() for k in (legacy_codart, codigo) if k and str(k).strip()}
+        for k in keys:
+            article_by_legacy.setdefault(k, (str(aid), codigo, descripcion))
+    return article_by_legacy
+
+
+def _rows_to_coverage_items(
+    article_by_legacy: dict[str, tuple[str, str | None, str | None]],
+    rows: list[tuple],
+    *,
+    with_used: bool = False,
+) -> list[dict[str, Any]]:
+    """rows: (codart, cant, cantmax, pvp[, cantgas])"""
+    by_codart: dict[str, list[tuple]] = {}
+    for row in rows:
+        c = str(row[0]).strip() if row[0] is not None else ""
+        if c:
+            by_codart.setdefault(c, []).append(row)
+
+    out: list[dict[str, Any]] = []
+    for legacy_code, art_rows in by_codart.items():
+        hit = article_by_legacy.get(legacy_code)
+        if not hit:
+            continue
+        article_id, codigo, descripcion = hit
+        qty = Decimal("0")
+        max_un: Decimal | None = None
+        com: Decimal | None = None
+        used = Decimal("0")
+        for r in art_rows:
+            qv = r[1] if len(r) > 1 else None
+            mx = r[2] if len(r) > 2 else None
+            pv = r[3] if len(r) > 3 else None
+            ug = r[4] if len(r) > 4 and with_used else None
+            if qv is not None and str(qv).strip() != "":
+                qty += parse_decimal(qv, Decimal("0"))
+            if mx is not None and str(mx).strip() != "":
+                mxd = parse_decimal(mx, Decimal("0"))
+                if mxd > 0:
+                    max_un = mxd
+            if pv is not None and str(pv).strip() != "":
+                com = parse_decimal(pv, Decimal("0"))
+            if ug is not None and str(ug).strip() != "":
+                used += parse_decimal(ug, Decimal("0"))
+        if qty <= 0:
+            qty = Decimal("1")
+        item: dict[str, Any] = {
+            "coverage_type": "service",
+            "article_id": article_id,
+            "family_code": None,
+            "covered_quantity": float(qty),
+            "label": f"{(codigo or '') + ' - ' if codigo else ''}{descripcion or legacy_code}"[:200],
+        }
+        if max_un and max_un > 0:
+            item["max_covered_if_unpaid"] = float(max_un)
+        if com and com > 0:
+            item["commission_pvp"] = float(com)
+        if with_used and used > 0:
+            item["used_quantity"] = float(used)
+        out.append(item)
+    return out
+
+
+def _bonosart_coverage(cur, company_id: str, codbon: str) -> list[dict[str, Any]]:
+    """Cobertura plantilla desde legacy.bonosart (BONOSART1)."""
+    bcols = _legacy_table_columns(cur, "bonosart")
+    if not bcols:
+        return []
+    col_cant = _first_col(bcols, ("cant", "cantidad", "cantic", "nucant", "cante"))
+    col_cantmax = _first_col(bcols, ("cantmax", "maxcant", "canmaxi", "ticmax", "cant_m", "cmaxim"))
+    col_pvp = _first_col(bcols, ("pvpcom", "pvp_com", "comision", "compvp", "pvp", "pcom"))
+    bonoart_select = (
+        f"TRIM(COALESCE(codart, '')) AS codart, "
+        f"{(col_cant + '::text') if col_cant else 'NULL::text'} AS cant, "
+        f"{(col_cantmax + '::text') if col_cantmax else 'NULL::text'} AS cantmax, "
+        f"{(col_pvp + '::text') if col_pvp else 'NULL::text'} AS pvpcom"
+    )
+    cur.execute(
+        f"""
+        SELECT {bonoart_select}
+        FROM legacy.bonosart
+        WHERE TRIM(COALESCE(codbon, '')) = %s
+          AND TRIM(COALESCE(codart, '')) <> ''
+        """,
+        (codbon,),
+    )
+    rows = cur.fetchall()
+    if not rows:
+        return []
+    return _rows_to_coverage_items(_article_by_legacy_map(cur, company_id), rows)
+
+
+def _bonosart2_coverage(cur, company_id: str, codboncli: str) -> list[dict[str, Any]]:
+    """Cobertura por instancia desde legacy.bonosart2 (BONOSART2)."""
+    if not _legacy_table_columns(cur, "bonosart2"):
+        return []
+    cur.execute(
+        """
+        SELECT
+          TRIM(COALESCE(codart, '')) AS codart,
+          cant::text,
+          cantmax::text,
+          pvp::text,
+          cantgas::text
+        FROM legacy.bonosart2
+        WHERE TRIM(COALESCE(codboncli, '')) = %s
+          AND TRIM(COALESCE(codart, '')) <> ''
+        """,
+        (codboncli,),
+    )
+    rows = cur.fetchall()
+    if not rows:
+        return []
+    return _rows_to_coverage_items(_article_by_legacy_map(cur, company_id), rows, with_used=True)
+
+
+def _resolve_bono_coverage(
+    cur,
+    company_id: str,
+    definition_id: str,
+    codbon: str,
+    codboncli: str | None = None,
+) -> list[dict[str, Any]]:
+    lkey = str(codboncli or "").strip()
+    if lkey:
+        inst = _bonosart2_coverage(cur, company_id, lkey)
+        if inst:
+            return inst
+    coverage = _definition_coverage(cur, company_id, definition_id)
+    if coverage:
+        return coverage
+    return _bonosart_coverage(cur, company_id, codbon)
+
+
 def main() -> None:
     load_dotenv()
     db_url = os.environ.get("SUPABASE_DB_URL", "").strip()
-    company_id = os.environ.get("LEGACY_COMPANY_ID", "").strip()
+    company_id = get_company_id()
     dry_run = os.environ.get("LEGACY_DRY_RUN", "0").strip().lower() in ("1", "true", "yes", "si")
 
     if not db_url:
         raise SystemExit("Falta SUPABASE_DB_URL")
-    if not company_id:
-        raise SystemExit("Falta LEGACY_COMPANY_ID")
 
     conn = psycopg2.connect(db_url)
     conn.autocommit = False
@@ -283,22 +447,23 @@ def main() -> None:
                 sesiones_totales = max(sesiones_totales, nti)
             sesiones_usadas = min(tgas, sesiones_totales) if tgas >= 0 else 0
             fin = _truthy(str(finalizado)) if finalizado is not None else False
-            if fin:
+            # En Dunasoft, FINALIZADO puede cerrar el bono (caducado/admin) sin haber agotado sesiones.
+            if fin and (tgas0 > 0 or nti0 > 0):
                 sesiones_usadas = sesiones_totales
             estado = "completado" if fin or sesiones_usadas >= sesiones_totales else "activo"
 
-            coverage = _definition_coverage(cur, company_id, str(def_id))
+            lkey = str(codboncli).strip() if codboncli is not None else ""
+            if not lkey:
+                n_skip += 1
+                continue
+
+            coverage = _resolve_bono_coverage(cur, company_id, str(def_id), cbon, lkey)
             if not coverage:
                 coverage = []
 
             fc = parse_sql_date(str(fecha) if fecha is not None else None)
             fv = parse_sql_date(str(fecven) if fecven is not None else None)
             fcompra = (fc or date.today()).isoformat()
-
-            lkey = str(codboncli).strip() if codboncli is not None else ""
-            if not lkey:
-                n_skip += 1
-                continue
 
             imp_d = (
                 parse_decimal(impgas, Decimal("0"))

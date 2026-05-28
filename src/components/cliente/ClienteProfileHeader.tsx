@@ -3,6 +3,7 @@ import { Phone, MessageCircle, CalendarPlus, User } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { primaryCustomerPhone, formatCustomerPhoneLabels } from '@/lib/legacyCustomerPhones';
 import { usePermissions } from '@/hooks/usePermissions';
 
 interface Props {
@@ -30,11 +31,12 @@ export const ClienteProfileHeader: React.FC<Props> = ({ customer, isLoading }) =
   if (!customer) return null;
 
   const handleCall = () => {
-    if (customer.phone) window.open(`tel:${customer.phone}`);
+    const tel = primaryCustomerPhone(customer);
+    if (tel) window.open(`tel:${tel}`);
   };
 
-  const customerPhone =
-    customer.phone || customer.phone_mobile || customer.phone_home || null;
+  const customerPhone = primaryCustomerPhone(customer);
+  const phoneLabels = formatCustomerPhoneLabels(customer);
 
   const handleWhatsApp = () => {
     if (!customerPhone) return;
@@ -76,12 +78,17 @@ export const ClienteProfileHeader: React.FC<Props> = ({ customer, isLoading }) =
         {customer.tax_id && (
           <p className="text-sm text-muted-foreground mt-0.5">DNI/CIF: {customer.tax_id}</p>
         )}
-        <div className="flex flex-wrap gap-2 mt-1">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1 text-xs">
           {customer.email && (
-            <span className="text-xs text-sky-600 dark:text-sky-400">{customer.email}</span>
+            <span className="text-sky-600 dark:text-sky-400">{customer.email}</span>
           )}
-          {customerPhone && (
-            <span className="text-xs text-muted-foreground">· {customerPhone}</span>
+          {phoneLabels.map((label, i) => (
+            <span key={label} className="text-muted-foreground">
+              {(customer.email || i > 0) && '· '}{label}
+            </span>
+          ))}
+          {!phoneLabels.length && customerPhone && (
+            <span className="text-muted-foreground">{customer.email ? '· ' : ''}{customerPhone}</span>
           )}
         </div>
       </div>
