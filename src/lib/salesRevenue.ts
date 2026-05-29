@@ -15,7 +15,7 @@ function toDateOnly(iso: string): string {
   return iso.slice(0, 10);
 }
 
-/** Ingresos del periodo: facturas (por fecha de emisión) + tickets TPV no facturados. */
+/** Ingresos cobrados del periodo: facturas pagadas (issue_date) + tickets TPV no facturados completados. */
 export async function fetchPeriodRevenue(
   companyId: string,
   fromIso: string,
@@ -24,18 +24,31 @@ export async function fetchPeriodRevenue(
   const fromDate = toDateOnly(fromIso);
   const toDate = toDateOnly(toIso);
 
-  const invRes = await supabase
+  let invRes = await supabase
     .from('invoices')
-    .select('total_amount, status')
+    .select('total_amount, status, paid_status')
     .eq('company_id', companyId)
     .gte('issue_date', fromDate)
     .lte('issue_date', toDate);
 
+  if (invRes.error && isSchemaColumnError(invRes.error)) {
+    invRes = await supabase
+      .from('invoices')
+      .select('total_amount, status')
+      .eq('company_id', companyId)
+      .gte('issue_date', fromDate)
+      .lte('issue_date', toDate);
+  }
+
   if (invRes.error) throw invRes.error;
 
-  const invoiceRows = (invRes.data ?? []).filter(
-    (row) => !['cancelled', 'void', 'anulada'].includes(String(row.status ?? '').toLowerCase()),
-  );
+  const invoiceRows = (invRes.data ?? []).filter((row) => {
+    const status = String(row.status ?? '').toLowerCase();
+    if (['cancelled', 'void', 'anulada', 'pending'].includes(status)) return false;
+    const paid = (row as { paid_status?: boolean | null }).paid_status;
+    if (paid === false) return false;
+    return status === 'paid' || paid === true || status === '';
+  });
 
   let salesRes = await supabase
     .from('sales')

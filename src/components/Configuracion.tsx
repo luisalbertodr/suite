@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Settings, Download } from 'lucide-react';
+import { Settings, Download, Database } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
@@ -24,6 +24,7 @@ import { UserManagement } from './UserManagement';
 import { MetaConfig } from './MetaConfig';
 import { WhatsappConfig } from './WhatsappConfig';
 import { WorkCenterAuditPanel } from './WorkCenterAuditPanel';
+import { LegacyImportPanel } from './LegacyImportPanel';
 import { useWorkCenter } from '@/hooks/useWorkCenter';
 
 const VALID_TABS = [
@@ -141,24 +142,40 @@ export const Configuracion: React.FC = () => {
         </TabsList>
 
         <TabsContent value="general" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Configuración General</CardTitle>
-              <CardDescription>Configuraciones básicas del sistema</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <h3 className="text-lg font-medium mb-2">Copia de Seguridad</h3>
-                <p className="text-sm text-muted-foreground mb-4">
-                  Genera y descarga una copia de seguridad de todos los datos de tu empresa en formato SQL.
-                </p>
-                <Button onClick={handleGenerateBackup} disabled={isGeneratingBackup} className="gap-2">
-                  <Download className="h-4 w-4" />
-                  {isGeneratingBackup ? 'Generando...' : 'Descargar Copia de Seguridad'}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+          <Tabs defaultValue="general-resumen" className="w-full">
+            <TabsList>
+              <TabsTrigger value="general-resumen">Resumen</TabsTrigger>
+              <TabsTrigger value="general-importar" className="gap-1.5">
+                <Database className="h-3.5 w-3.5" />
+                Importar
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="general-resumen" className="space-y-4 mt-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Configuración General</CardTitle>
+                  <CardDescription>Configuraciones básicas del sistema</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div>
+                    <h3 className="text-lg font-medium mb-2">Copia de Seguridad</h3>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      Genera y descarga una copia de seguridad de todos los datos de tu empresa en formato SQL.
+                    </p>
+                    <Button onClick={handleGenerateBackup} disabled={isGeneratingBackup} className="gap-2">
+                      <Download className="h-4 w-4" />
+                      {isGeneratingBackup ? 'Generando...' : 'Descargar Copia de Seguridad'}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="general-importar" className="mt-4">
+              <LegacyImportPanel />
+            </TabsContent>
+          </Tabs>
         </TabsContent>
 
         <TabsContent value="empresa" className="space-y-4">

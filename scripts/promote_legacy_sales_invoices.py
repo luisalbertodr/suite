@@ -71,6 +71,17 @@ def parse_sale_notes_items(notes: str | None) -> list[dict]:
         return []
 
 
+def parse_legacy_revenue(notes: str | None) -> dict | None:
+    if not notes:
+        return None
+    try:
+        parsed = json.loads(notes)
+        rev = parsed.get("legacy_revenue")
+        return rev if isinstance(rev, dict) else None
+    except Exception:
+        return None
+
+
 def table_columns(cur, schema: str, table: str) -> set[str]:
     cur.execute(
         """
@@ -232,8 +243,15 @@ def process_one_sale(
         ]
 
     inv_number = number_seq.next()
+    legacy_rev = parse_legacy_revenue(sale.get("notes"))
+    paid_in_full = bool(legacy_rev.get("paid_in_full", True)) if legacy_rev else True
+    inv_status = "paid" if paid_in_full else "pending"
+
     if dry_run:
-        print(f"[dry-run] {inv_number} sale={sale_id[:8]} total={total_amount}")
+        print(
+            f"[dry-run] {inv_number} sale={sale_id[:8]} total={total_amount} "
+            f"status={inv_status} paid_in_full={paid_in_full}"
+        )
         return True, None
 
     invoice_id = str(uuid.uuid4())
@@ -248,9 +266,9 @@ def process_one_sale(
         "tax_amount": float(tax_amount),
         "total_amount": float(total_amount),
         "re_total": 0,
-        "status": "paid",
-        "paid_status": True,
-        "paid_date": issue_iso,
+        "status": inv_status,
+        "paid_status": paid_in_full,
+        "paid_date": issue_iso if paid_in_full else None,
         "currency": "EUR",
         "created_at": issue_date if isinstance(issue_date, datetime) else f"{issue_iso}T12:00:00",
         "notes": f"Factura legacy automática · ticket {sale.get('ticket_number') or sale_id[:8]}",

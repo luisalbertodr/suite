@@ -1,13 +1,16 @@
 """
-Crea tickets TPV (public.sales) para citas legacy ya cobradas en Dunasoft.
+Crea tickets TPV (public.sales) para citas legacy con cobro verificado en Dunasoft.
 
-Criterios de cobro legacy (cualquiera vale):
-  - legacy.agenda.facturado activo para el mismo idplan
-  - legacy.faccab con mismo cliente/fecha (fecfac = appointment_date)
-  - legacy.albcab con mismo cliente/fecha, no anulado, total > 0
-  - Cita confirmada pasada con importe en appointment_items > 0 (--include-fallback)
+Criterios de cobro (importe = lo efectivamente cobrado):
+  - legacy.albcab: impcob (o total si no hay impcob), no anulado
+  - legacy.faccab serie A: impcob1 + impcob2 (no totfac)
+  - legacy.agenda.facturado solo cuenta si hay además cobro en faccab/albcab
+
+No crea ticket si hay factura serie A pero impcob = 0 (pendiente de cobro).
+Opcional: --include-fallback para citas pasadas con precio en ítems sin señal legacy.
 
 Idempotente: no inserta si ya existe sale con appointment_id.
+Antes de reimportar ventas: python scripts/reset_legacy_public_data.py --scope sales
 
 Requisitos: SUPABASE_DB_URL, empresa en legacy_company / PROMOTE_COMPANY_ID
 
@@ -33,6 +36,16 @@ except ImportError:
     raise
 
 from legacy_company import get_company_id
+from legacy_cobro import (
+    cli_lookup_keys,
+    faccab_impcob,
+    is_faccab_serie_a,
+    norm_cli_key,
+    norm_date,
+    paid_in_full,
+    parse_decimal,
+    truthy_legacy,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -49,35 +62,6 @@ def load_dotenv() -> None:
         k, v = k.strip(), v.strip().strip('"')
         if k and k not in os.environ:
             os.environ[k] = v
-
-
-def truthy_legacy(value) -> bool:
-    s = str(value or "").strip().upper()
-    return s in {"S", "SI", "1", "T", "TRUE", "Y", "YES", "X"}
-
-
-def parse_decimal(value) -> Decimal:
-    s = str(value or "").strip().replace(",", ".")
-    if not s:
-        return Decimal("0")
-    try:
-        return Decimal(s)
-    except Exception:
-        return Decimal("0")
-
-
-def norm_date(value) -> str | None:
-    v = str(value or "").strip()
-    if len(v) == 8 and v.isdigit():
-        return f"{v[:4]}-{v[4:6]}-{v[6:8]}"
-    if len(v) >= 10 and v[4] == "-":
-        return v[:10]
-    return None
-
-
-def norm_cli_key(codcli: str) -> str:
-    c = str(codcli or "").strip()
-    return c.lstrip("0") or "0"
 
 
 def resolve_apt_date(apt: dict, has_appointment_date: bool) -> str | None:
@@ -114,16 +98,6 @@ def resolve_created_at(apt: dict, apt_date: str | None):
         except ValueError:
             pass
     return datetime.now()
-
-
-def cli_lookup_keys(codcli: str) -> list[str]:
-    raw = str(codcli or "").strip()
-    if not raw:
-        return []
-    keys = [norm_cli_key(raw)]
-    if raw not in keys:
-        keys.append(raw)
-    return keys
 
 
 def table_columns(cur, schema: str, table: str) -> set[str]:
@@ -177,6 +151,7 @@ def build_sale_notes(
     status: str | None,
     legacy_idplan: str | None,
     items: list[dict],
+    revenue: dict | None = None,
 ) -> str:
     payload = {
         "source": "agenda_appointment",
@@ -187,6 +162,7 @@ def build_sale_notes(
         "appointment_date": appointment_date,
         "appointment_status": status,
         "legacy_idplan": legacy_idplan,
+        "legacy_revenue": revenue,
         "items": [
             {
                 "name": it.get("label") or "Servicio",
@@ -287,23 +263,28 @@ def main() -> None:
     if cur.fetchone()["t"]:
         cur.execute(
             """
-            SELECT codcli, fecfac, numfac, totfac
+            SELECT codcli, fecfac, numfac, totfac, impcob1, impcob2, serfac
             FROM legacy.faccab
             WHERE NULLIF(btrim(codcli::text), '') IS NOT NULL
             """
         )
         for row in cur.fetchall():
+            if not is_faccab_serie_a(row):
+                continue
             d = norm_date(row.get("fecfac"))
             if not d:
                 continue
             cod = str(row.get("codcli") or "").strip()
-            amount = parse_decimal(row.get("totfac"))
+            cobrado = faccab_impcob(row)
+            facturado = parse_decimal(row.get("totfac"))
             ticket = f"FAC-{row.get('numfac') or '0'}".replace(" ", "")
             for key in cli_lookup_keys(cod):
-                faccab_by_cli_date.setdefault(
+                slot = faccab_by_cli_date.setdefault(
                     (key, d),
-                    {"amount": amount, "ticket": ticket},
+                    {"impcob": Decimal("0"), "totfac": Decimal("0"), "ticket": ticket},
                 )
+                slot["impcob"] += cobrado
+                slot["totfac"] += facturado
 
     existing_sales: set[str] = set()
     if has_appointment_id:
@@ -404,7 +385,7 @@ def main() -> None:
             (faccab_by_cli_date[(k, apt_date)] for k in cli_keys if (k, apt_date) in faccab_by_cli_date),
             None,
         )
-        paid_faccab = faccab is not None
+        paid_faccab = faccab is not None and faccab.get("totfac", Decimal("0")) > 0
 
         is_past = apt_date < today
         fallback_paid = (
@@ -414,17 +395,44 @@ def main() -> None:
             and items_total > 0
         )
 
-        if not (paid_agenda or paid_albcab or paid_faccab or fallback_paid):
+        revenue_source = None
+        cobrado = Decimal("0")
+        facturado = Decimal("0")
+
+        if albcab and albcab.get("amount", Decimal("0")) > 0:
+            cobrado = albcab["amount"]
+            revenue_source = "albcab_impcob"
+        elif faccab and faccab.get("impcob", Decimal("0")) > 0:
+            cobrado = faccab["impcob"]
+            facturado = faccab.get("totfac", Decimal("0"))
+            revenue_source = "faccab_impcob"
+        elif fallback_paid:
+            cobrado = items_total
+            revenue_source = "fallback_items"
+        elif paid_agenda and not albcab and (not faccab or faccab.get("impcob", Decimal("0")) <= 0):
+            skipped += 1
+            continue
+        elif faccab and faccab.get("impcob", Decimal("0")) <= 0:
+            skipped += 1
+            continue
+        elif not (paid_agenda or paid_albcab or paid_faccab or fallback_paid):
+            skipped += 1
+            continue
+        else:
             skipped += 1
             continue
 
-        if items_total <= 0 and albcab:
-            items_total = albcab["amount"]
-        elif items_total <= 0 and faccab and faccab.get("amount", 0) > 0:
-            items_total = faccab["amount"]
+        items_total = cobrado
         if items_total <= 0:
             skipped += 1
             continue
+
+        revenue_meta = {
+            "source": revenue_source,
+            "cobrado": float(cobrado),
+            "facturado": float(facturado) if facturado > 0 else float(cobrado),
+            "paid_in_full": paid_in_full(cobrado, facturado) if facturado > 0 else True,
+        }
 
         ticket = f"LEG-{legacy_idplan or apt.get('legacy_planinc_id') or apt_id[:8]}"
         customer_id = str(apt["customer_id"]) if apt.get("customer_id") else next(
@@ -456,6 +464,7 @@ def main() -> None:
                 status,
                 legacy_idplan or None,
                 priced_items,
+                revenue_meta,
             )
 
         cols = list(sale_row.keys())
@@ -465,7 +474,8 @@ def main() -> None:
         if args.dry_run:
             print(
                 f"[dry-run] sale {ticket} apt={apt_id[:8]} total={items_total} "
-                f"agenda={paid_agenda} faccab={paid_faccab} albcab={paid_albcab} fallback={fallback_paid}"
+                f"source={revenue_source} agenda={paid_agenda} faccab={paid_faccab} "
+                f"albcab={paid_albcab} fallback={fallback_paid}"
             )
             created += 1
             continue
