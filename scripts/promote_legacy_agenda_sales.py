@@ -25,7 +25,8 @@ import json
 import os
 import sys
 from datetime import date, datetime
-from decimal import Decimal
+from collections import defaultdict
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 try:
@@ -175,6 +176,55 @@ def build_sale_notes(
     return json.dumps(payload, ensure_ascii=False)
 
 
+def resolve_pool_slot(
+    cli_keys: list[str],
+    apt_date: str,
+    pool: dict[tuple[str, str], dict],
+) -> tuple[str, str] | None:
+    for key in cli_keys:
+        slot = (key, apt_date)
+        if slot in pool:
+            return slot
+    return None
+
+
+def allocate_shared_cobro(
+    groups: dict[tuple[str, str], list[dict]],
+    pool: dict[tuple[str, str], dict],
+    *,
+    amount_field: str,
+) -> dict[str, tuple[Decimal, dict, tuple[str, str]]]:
+    """Reparte un único cobro legacy entre varias citas del mismo cliente/día."""
+    allocation: dict[str, tuple[Decimal, dict, tuple[str, str]]] = {}
+    for slot, members in groups.items():
+        slot_data = pool.get(slot)
+        if not slot_data:
+            continue
+        total_cobrado = Decimal(str(slot_data.get(amount_field) or 0))
+        if total_cobrado <= 0 or not members:
+            continue
+
+        weights = [max(Decimal(str(m.get("items_total") or 0)), Decimal("0")) for m in members]
+        weight_sum = sum(weights)
+        if weight_sum <= 0:
+            weights = [Decimal("1")] * len(members)
+            weight_sum = Decimal(len(members))
+
+        assigned = Decimal("0")
+        for idx, member in enumerate(members):
+            apt_id = str(member["apt_id"])
+            if idx == len(members) - 1:
+                share = (total_cobrado - assigned).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            else:
+                share = (total_cobrado * weights[idx] / weight_sum).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP
+                )
+                assigned += share
+            if share > 0:
+                allocation[apt_id] = (share, slot_data, slot)
+    return allocation
+
+
 def main() -> None:
     load_dotenv()
     ap = argparse.ArgumentParser()
@@ -254,6 +304,7 @@ def main() -> None:
                 continue
             albcab_by_cli_date[key] = {
                 "amount": amount,
+                "totfac": total if total > 0 else amount,
                 "ticket": f"LEG-{row.get('seralb') or 'A'}-{row.get('numalb') or '0'}".replace(" ", ""),
                 "facturado": truthy_legacy(row.get("facturado")),
             }
@@ -339,26 +390,21 @@ def main() -> None:
     for it in cur.fetchall():
         items_by_apt.setdefault(str(it["appointment_id"]), []).append(dict(it))
 
-    created = 0
-    skipped = 0
-    errors = 0
-    batch_size = 500
+    apt_contexts: list[dict] = []
+    albcab_groups: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    faccab_groups: dict[tuple[str, str], list[dict]] = defaultdict(list)
 
     for apt in appointments:
         apt_id = str(apt["id"])
         if apt_id in existing_sales:
-            skipped += 1
             continue
 
         status = str(apt.get("status") or "confirmed").lower()
         if status == "cancelled":
-            skipped += 1
             continue
 
-        start = apt.get("start_time")
         apt_date = resolve_apt_date(apt, has_appointment_date)
         if not apt_date:
-            skipped += 1
             continue
 
         legacy_idplan = str(apt.get("legacy_idplan") or "").strip() if has_legacy_idplan else ""
@@ -375,16 +421,64 @@ def main() -> None:
             priced_items.append(priced)
             items_total += lt
 
-        paid_agenda = bool(legacy_idplan and agenda_facturado.get(legacy_idplan))
-        albcab = next(
-            (albcab_by_cli_date[(k, apt_date)] for k in cli_keys if (k, apt_date) in albcab_by_cli_date),
-            None,
-        )
+        ctx = {
+            "apt": apt,
+            "apt_id": apt_id,
+            "status": status,
+            "apt_date": apt_date,
+            "legacy_idplan": legacy_idplan,
+            "legacy_codcli": legacy_codcli,
+            "cli_keys": cli_keys,
+            "priced_items": priced_items,
+            "items_total": items_total,
+            "paid_agenda": bool(legacy_idplan and agenda_facturado.get(legacy_idplan)),
+        }
+        apt_contexts.append(ctx)
+
+        albcab_slot = resolve_pool_slot(cli_keys, apt_date, albcab_by_cli_date)
+        if albcab_slot and albcab_by_cli_date[albcab_slot].get("amount", Decimal("0")) > 0:
+            albcab_groups[albcab_slot].append(ctx)
+            continue
+
+        faccab_slot = resolve_pool_slot(cli_keys, apt_date, faccab_by_cli_date)
+        if faccab_slot and faccab_by_cli_date[faccab_slot].get("impcob", Decimal("0")) > 0:
+            faccab_groups[faccab_slot].append(ctx)
+
+    albcab_allocation = allocate_shared_cobro(albcab_groups, albcab_by_cli_date, amount_field="amount")
+    albcab_billed_allocation = allocate_shared_cobro(albcab_groups, albcab_by_cli_date, amount_field="totfac")
+    faccab_allocation = allocate_shared_cobro(faccab_groups, faccab_by_cli_date, amount_field="impcob")
+    faccab_billed_allocation = allocate_shared_cobro(faccab_groups, faccab_by_cli_date, amount_field="totfac")
+
+    created = 0
+    skipped = 0
+    errors = 0
+    batch_size = 500
+
+    for ctx in apt_contexts:
+        apt = ctx["apt"]
+        apt_id = ctx["apt_id"]
+        if apt_id in existing_sales:
+            skipped += 1
+            continue
+
+        status = ctx["status"]
+        apt_date = ctx["apt_date"]
+        legacy_idplan = ctx["legacy_idplan"]
+        cli_keys = ctx["cli_keys"]
+        priced_items = ctx["priced_items"]
+        items_total = ctx["items_total"]
+        paid_agenda = ctx["paid_agenda"]
+
+        albcab = None
+        faccab = None
+        albcab_slot = resolve_pool_slot(cli_keys, apt_date, albcab_by_cli_date)
+        if albcab_slot:
+            albcab = albcab_by_cli_date[albcab_slot]
+        faccab_slot = resolve_pool_slot(cli_keys, apt_date, faccab_by_cli_date)
+        if faccab_slot:
+            faccab = faccab_by_cli_date[faccab_slot]
+
         paid_albcab = albcab is not None
-        faccab = next(
-            (faccab_by_cli_date[(k, apt_date)] for k in cli_keys if (k, apt_date) in faccab_by_cli_date),
-            None,
-        )
         paid_faccab = faccab is not None and faccab.get("totfac", Decimal("0")) > 0
 
         is_past = apt_date < today
@@ -399,15 +493,17 @@ def main() -> None:
         cobrado = Decimal("0")
         facturado = Decimal("0")
 
-        if albcab and albcab.get("amount", Decimal("0")) > 0:
-            cobrado = albcab["amount"]
+        if apt_id in albcab_allocation:
+            cobrado, albcab, _slot = albcab_allocation[apt_id]
+            facturado = albcab_billed_allocation.get(apt_id, (cobrado, albcab, _slot))[0]
             revenue_source = "albcab_impcob"
-        elif faccab and faccab.get("impcob", Decimal("0")) > 0:
-            cobrado = faccab["impcob"]
-            facturado = faccab.get("totfac", Decimal("0"))
+        elif apt_id in faccab_allocation:
+            cobrado, faccab, _slot = faccab_allocation[apt_id]
+            facturado = faccab_billed_allocation.get(apt_id, (cobrado, faccab, _slot))[0]
             revenue_source = "faccab_impcob"
         elif fallback_paid:
             cobrado = items_total
+            facturado = items_total
             revenue_source = "fallback_items"
         elif paid_agenda and not albcab and (not faccab or faccab.get("impcob", Decimal("0")) <= 0):
             skipped += 1
@@ -432,6 +528,7 @@ def main() -> None:
             "cobrado": float(cobrado),
             "facturado": float(facturado) if facturado > 0 else float(cobrado),
             "paid_in_full": paid_in_full(cobrado, facturado) if facturado > 0 else True,
+            "shared_cobro": revenue_source in {"albcab_impcob", "faccab_impcob"},
         }
 
         ticket = f"LEG-{legacy_idplan or apt.get('legacy_planinc_id') or apt_id[:8]}"

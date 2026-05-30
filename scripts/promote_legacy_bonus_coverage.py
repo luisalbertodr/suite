@@ -172,7 +172,12 @@ def main() -> None:
 
         defs_upserted = 0
         items_upserted = 0
-        for codbon, desbon, obsbon, importe, servicios, productos, obsoleto in bonus_rows:
+        total_bonos = len(bonus_rows)
+        for idx, (codbon, desbon, obsbon, importe, servicios, productos, obsoleto) in enumerate(
+            bonus_rows, start=1
+        ):
+            if idx == 1 or idx % 10 == 0 or idx == total_bonos:
+                print(f"  bonos {idx}/{total_bonos} …", flush=True)
             code = str(codbon).strip()
             if not code:
                 continue

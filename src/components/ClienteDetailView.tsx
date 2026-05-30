@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -39,6 +39,7 @@ export const ClienteDetailView: React.FC<Props> = ({
   const navigate = useNavigate();
   const compact = variant === 'compact';
   const activeTab = initialTab ?? (compact ? 'ficha' : 'timeline');
+  const [tab, setTab] = useState(activeTab);
   const { customer } = useCustomerDetail(customerId);
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -75,6 +76,10 @@ export const ClienteDetailView: React.FC<Props> = ({
   });
 
   const mergedCustomer = customer.data ? { ...customer.data, ...editedFields } : null;
+
+  useEffect(() => {
+    setTab(activeTab);
+  }, [activeTab, customerId]);
 
   const handleAppointmentClick = useCallback(
     (appointmentId: string, dateYmd: string) => {
@@ -128,7 +133,7 @@ export const ClienteDetailView: React.FC<Props> = ({
         </>
       )}
 
-      <Tabs defaultValue={activeTab} className="w-full">
+      <Tabs value={tab} onValueChange={setTab} className="w-full">
         <TabsList
           className={cn(
             'w-full grid grid-cols-3 bg-sky-50/50 dark:bg-sky-950/20 border border-sky-100/50 dark:border-sky-900/20 rounded-lg p-0.5',
@@ -174,15 +179,17 @@ export const ClienteDetailView: React.FC<Props> = ({
           </TabsContent>
 
           <TabsContent value="vouchers" className="mt-0">
-            <ClienteBonosTab customerId={customerId} />
+            {tab === 'vouchers' ? <ClienteBonosTab customerId={customerId} /> : null}
           </TabsContent>
 
           <TabsContent value="timeline" className="mt-0">
-            <ClienteDailyScrollView
-              customerId={customerId}
-              className="max-w-full"
-              onAppointmentClick={handleAppointmentClick}
-            />
+            {tab === 'timeline' ? (
+              <ClienteDailyScrollView
+                customerId={customerId}
+                className="max-w-full"
+                onAppointmentClick={handleAppointmentClick}
+              />
+            ) : null}
           </TabsContent>
         </div>
       </Tabs>

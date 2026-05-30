@@ -32,6 +32,7 @@ import { useAuth } from '@/hooks/useAuth';
 import {
   LEGACY_IMPORT_MODE_LABELS,
   LEGACY_IMPORT_STEPS,
+  legacyImportWorkerCommand,
   type LegacyImportMode,
   type LegacyImportStepKind,
 } from '@/lib/legacyImportSteps';
@@ -432,6 +433,27 @@ export const LegacyImportPanel: React.FC = () => {
                     >
                       {formatDate(run.created_at)} · {run.mode} · {run.status}
                     </button>
+                    {(run.status === 'failed' || run.status === 'running') && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="h-6 text-[10px] px-2"
+                        onClick={() => {
+                          const cmd = `${legacyImportWorkerCommand(run.id)} --force`;
+                          setWorkerCommand(cmd);
+                          setActiveRun(run);
+                          copyText(cmd, toast);
+                          toast({
+                            title: 'Reanudar importación',
+                            description:
+                              'Ejecute el comando con --force en el servidor si el run quedó en running.',
+                          });
+                        }}
+                      >
+                        {run.status === 'failed' ? 'Reanudar' : 'Forzar reanuda'}
+                      </Button>
+                    )}
                   </li>
                 ))}
               </ul>

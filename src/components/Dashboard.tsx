@@ -105,7 +105,7 @@ export const Dashboard: React.FC = () => {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-card rounded-xl shadow-lg p-6 border">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-base font-semibold text-foreground">Evolución de Ventas</h3>
+                <h3 className="text-base font-semibold text-foreground">Evolución de Facturación</h3>
                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
                   <DollarSign className="w-3.5 h-3.5" /> 6 meses
                 </div>
@@ -117,7 +117,7 @@ export const Dashboard: React.FC = () => {
                   <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
                   <Tooltip
                     contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px' }}
-                    formatter={(v: number) => [`€${v.toLocaleString('es-ES')}`, 'Ventas']}
+                    formatter={(v: number) => [`€${v.toLocaleString('es-ES')}`, 'Facturación']}
                   />
                   <Line type="monotone" dataKey="ventas" stroke="hsl(var(--primary))" strokeWidth={2.5} dot={{ r: 3 }} />
                 </LineChart>
@@ -126,7 +126,7 @@ export const Dashboard: React.FC = () => {
 
             <div className="bg-card rounded-xl shadow-lg p-6 border">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-base font-semibold text-foreground">Presupuestos vs Ventas</h3>
+                <h3 className="text-base font-semibold text-foreground">Presupuestos vs Facturación</h3>
                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
                   <Activity className="w-3.5 h-3.5" /> Comparativa
                 </div>
@@ -138,7 +138,7 @@ export const Dashboard: React.FC = () => {
                   <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
                   <Tooltip
                     contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px' }}
-                    formatter={(v: number, n: string) => [`€${v.toLocaleString('es-ES')}`, n === 'presupuestos' ? 'Presupuestos' : 'Ventas']}
+                    formatter={(v: number, n: string) => [`€${v.toLocaleString('es-ES')}`, n === 'presupuestos' ? 'Presupuestos' : 'Facturación']}
                   />
                   <Bar dataKey="presupuestos" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
                   <Bar dataKey="ventas" fill="#10b981" radius={[4, 4, 0, 0]} />

@@ -30,6 +30,8 @@ import {
   TPV_SALE_INVOICE_PREFILL_KEY,
   type AppointmentStatus,
 } from '@/lib/appointmentSales';
+import { issueInvoiceFromSale } from '@/lib/tpvSaleOperations';
+import { useTpvSettings } from '@/hooks/useTpvSettings';
 import { Grid, type CellComponentProps } from 'react-window';
 
 interface CartItem {
@@ -173,7 +175,10 @@ export const TPV: React.FC = () => {
   const [lastCompletedSale, setLastCompletedSale] = useState<{
     sale: { id: string; ticket_number: string; total_amount: number };
     appointmentId: string | null;
+    invoiceId?: string | null;
   } | null>(null);
+  const [issuingInvoice, setIssuingInvoice] = useState(false);
+  const { settings: tpvSettings } = useTpvSettings();
   const productsContainerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -409,6 +414,7 @@ export const TPV: React.FC = () => {
           : Number(sale.total_amount ?? 0),
       },
       appointmentId: ctx?.appointmentId ?? null,
+      invoiceId: null,
     });
 
     toast({
@@ -424,7 +430,46 @@ export const TPV: React.FC = () => {
     queryClient.invalidateQueries({ queryKey: ['appointment-charged-totals'] });
     queryClient.invalidateQueries({ queryKey: ['agenda-appointments'] });
 
-    if (ctx?.appointmentId && saleItems?.length) {
+    let autoInvoiceDone = false;
+
+    if (
+      tpvSettings.autoInvoiceOnAppointmentCharge &&
+      ctx?.appointmentId &&
+      companyId &&
+      sale.id
+    ) {
+      try {
+        const result = await issueInvoiceFromSale(sale.id, companyId);
+        if (result.mode === 'created') {
+          autoInvoiceDone = true;
+          setLastCompletedSale((prev) =>
+            prev ? { ...prev, invoiceId: result.invoiceId } : prev,
+          );
+          queryClient.invalidateQueries({ queryKey: ['invoices'] });
+          toast({
+            title: 'Factura emitida automáticamente',
+            description: result.invoiceNumber
+              ? `Factura ${result.invoiceNumber} vinculada al ticket.`
+              : 'Factura creada y vinculada al ticket.',
+          });
+        } else {
+          sessionStorage.setItem(TPV_SALE_INVOICE_PREFILL_KEY, JSON.stringify(result.prefill));
+          toast({
+            title: 'Factura no automática',
+            description: result.reason,
+          });
+        }
+      } catch (e) {
+        console.error('auto invoice after appointment charge', e);
+        toast({
+          title: 'No se pudo facturar automáticamente',
+          description: e instanceof Error ? e.message : 'Puedes facturar manualmente desde el ticket.',
+          variant: 'destructive',
+        });
+      }
+    }
+
+    if (ctx?.appointmentId && saleItems?.length && !autoInvoiceDone) {
       const prefillInvoice = buildInvoicePrefillFromSale(
         {
           id: sale.id,
@@ -525,6 +570,7 @@ export const TPV: React.FC = () => {
       // Create sale items
       const saleItems = saleData.items.map((item) => ({
         sale_id: sale.id,
+        company_id: companyId,
         article_id: item.variationId ? null : (isUuid(item.id) ? item.id : null),
         variation_id: item.variationId || null,
         description: item.name,
@@ -533,10 +579,15 @@ export const TPV: React.FC = () => {
         total_price: item.total,
       }));
 
-      const { data: createdItems, error: itemsError } = await supabase
-        .from('sale_items')
-        .insert(saleItems)
-        .select();
+      let createdItems: typeof saleItems | null = null;
+      let itemsError: any = null;
+      for (const attempt of [saleItems, saleItems.map(({ company_id: _c, ...rest }) => rest)]) {
+        const res = await supabase.from('sale_items').insert(attempt).select();
+        createdItems = res.data;
+        itemsError = res.error;
+        if (!itemsError) break;
+        if (itemsError.code !== '42703' && itemsError.code !== 'PGRST204') break;
+      }
 
       if (itemsError) {
         console.error('❌ Error creating sale items:', itemsError);
@@ -949,14 +1000,54 @@ export const TPV: React.FC = () => {
         <div className="mx-4 mt-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 flex flex-wrap items-center gap-2">
           <span>
             Ticket <strong>{lastCompletedSale.sale.ticket_number}</strong> · {lastCompletedSale.sale.total_amount.toFixed(2)} €
+            <span className="text-emerald-800/80"> · El ticket acredita el cobro; la factura es el documento fiscal.</span>
           </span>
           <Button
             size="sm"
             variant="outline"
             className="h-7"
-            onClick={() => navigate('/facturacion')}
+            disabled={issuingInvoice || !companyId || !lastCompletedSale.sale.id}
+            onClick={async () => {
+              if (!companyId || !lastCompletedSale.sale.id) return;
+              if (lastCompletedSale.invoiceId) {
+                navigate(`/facturacion?invoice=${lastCompletedSale.invoiceId}`);
+                return;
+              }
+              setIssuingInvoice(true);
+              try {
+                const result = await issueInvoiceFromSale(lastCompletedSale.sale.id, companyId);
+                if (result.mode === 'created') {
+                  setLastCompletedSale((prev) =>
+                    prev ? { ...prev, invoiceId: result.invoiceId } : prev,
+                  );
+                  toast({
+                    title: 'Factura emitida',
+                    description: result.invoiceNumber
+                      ? `Factura ${result.invoiceNumber} creada desde el ticket.`
+                      : 'Factura vinculada al ticket.',
+                  });
+                  navigate(`/facturacion?invoice=${result.invoiceId}`);
+                  return;
+                }
+                sessionStorage.setItem(TPV_SALE_INVOICE_PREFILL_KEY, JSON.stringify(result.prefill));
+                toast({ title: 'Completa la factura', description: result.reason });
+                navigate('/facturacion');
+              } catch (e) {
+                toast({
+                  title: 'Error al facturar',
+                  description: e instanceof Error ? e.message : 'Error desconocido',
+                  variant: 'destructive',
+                });
+              } finally {
+                setIssuingInvoice(false);
+              }
+            }}
           >
-            Generar factura
+            {lastCompletedSale.invoiceId
+              ? 'Ver factura'
+              : issuingInvoice
+                ? 'Facturando…'
+                : 'Facturar ahora'}
           </Button>
           {lastCompletedSale.appointmentId && (
             <Button

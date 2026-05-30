@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
-import { fetchAppointmentsForCustomer, type CustomerAppointmentRow } from '@/lib/agendaCustomerAppointments';
+import { fetchAppointmentsForCustomer, CUSTOMER_APPOINTMENTS_TIMELINE_LIMIT, type CustomerAppointmentRow } from '@/lib/agendaCustomerAppointments';
 import { parseDescriptionServiceLines, appointmentStatusLabel, normalizeHm } from '@/lib/agendaAppointmentDisplay';
 import { buildAppointmentChargedTotals } from '@/lib/appointmentChargeTotals';
 
@@ -365,11 +365,21 @@ function mergeByDay(
   return Array.from(byDay.values()).sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 }
 
-export const useCustomerDayTimeline = (customerId: string | undefined) => {
+export type CustomerDayTimelineResult = {
+  days: DayGroup[];
+  hasMoreAppointments: boolean;
+};
+
+export const useCustomerDayTimeline = (
+  customerId: string | undefined,
+  options?: { appointmentLimit?: number },
+) => {
+  const appointmentLimit = options?.appointmentLimit ?? CUSTOMER_APPOINTMENTS_TIMELINE_LIMIT;
+
   return useQuery({
-    queryKey: ['customer_day_timeline', customerId],
-    queryFn: async (): Promise<DayGroup[]> => {
-      if (!customerId) return [];
+    queryKey: ['customer_day_timeline', customerId, appointmentLimit],
+    queryFn: async (): Promise<CustomerDayTimelineResult> => {
+      if (!customerId) return { days: [], hasMoreAppointments: false };
 
       const [
         dailyRes,
@@ -377,7 +387,7 @@ export const useCustomerDayTimeline = (customerId: string | undefined) => {
         consentRes,
         aestheticRes,
         bonosRes,
-        appointments,
+        appointmentsPage,
         invoicesRes,
         quotesRes,
         customerRes,
@@ -411,7 +421,10 @@ export const useCustomerDayTimeline = (customerId: string | undefined) => {
           )
           .eq('customer_id', customerId)
           .order('fecha_compra', { ascending: false }),
-        fetchAppointmentsForCustomer(customerId),
+        fetchAppointmentsForCustomer(customerId, {
+          limit: appointmentLimit,
+          includeItems: false,
+        }),
         supabase
           .from('invoices')
           .select('id, number, issue_date, created_at, total_amount, status')
@@ -451,32 +464,36 @@ export const useCustomerDayTimeline = (customerId: string | undefined) => {
         bonoUsoFiltered = bonoUsoRes.data || [];
       }
 
-      const appointmentIds = appointments.map((a) => String(a.id));
+      const appointmentIds = appointmentsPage.rows.map((a) => String(a.id));
       const companyId = (customerRes.data as { company_id?: string } | null)?.company_id ?? null;
       let chargedByAppointment = new Map<string, number>();
       try {
         chargedByAppointment = await buildAppointmentChargedTotals(appointmentIds, {
           companyId,
           customerId,
+          salesOnly: true,
         });
       } catch (err) {
         console.warn('buildAppointmentChargedTotals:', err);
       }
 
-      return mergeByDay(
-        customerId,
-        (dailyRes.data as DailyRow[]) || [],
-        historialRes.data || [],
-        consentRes.data || [],
-        aestheticRes.data || [],
-        bonoList,
-        bonoUsoFiltered,
-        bonoNameById,
-        appointments,
-        invoicesRes.data || [],
-        quotesRes.data || [],
-        chargedByAppointment,
-      );
+      return {
+        days: mergeByDay(
+          customerId,
+          (dailyRes.data as DailyRow[]) || [],
+          historialRes.data || [],
+          consentRes.data || [],
+          aestheticRes.data || [],
+          bonoList,
+          bonoUsoFiltered,
+          bonoNameById,
+          appointmentsPage.rows,
+          invoicesRes.data || [],
+          quotesRes.data || [],
+          chargedByAppointment,
+        ),
+        hasMoreAppointments: appointmentsPage.hasMore,
+      };
     },
     enabled: !!customerId,
   });

@@ -46,7 +46,7 @@ export const LEGACY_IMPORT_STEPS: LegacyImportStep[] = [
     id: 'queue-run',
     title: '5. Encolar importación y ejecutar worker',
     description:
-      'Cree una ejecución desde la UI. Luego ejecute el comando del worker en el servidor (requiere acceso a DBF y red a Postgres). La UI mostrará el progreso.',
+      'Cree una ejecución desde la UI y ejecute el worker en el servidor. Si una ejecución falla, puede reanudarla con el mismo run-id: el worker omitirá los pasos ya completados.',
     kind: 'semi',
     actionId: 'create-run',
     command: 'python scripts/legacy_import_worker.py --run-id <UUID>',
@@ -98,9 +98,13 @@ export type LegacyImportRun = {
   mode: LegacyImportMode;
   status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
   current_step: string | null;
-  steps_log: Array<{ step: string; at: string; detail?: string }>;
+  steps_log: Array<{ step: string; at: string; detail?: string; status?: string }>;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
   error_message: string | null;
 };
+
+export function legacyImportWorkerCommand(runId: string): string {
+  return `python scripts/legacy_import_worker.py --run-id ${runId}`;
+}

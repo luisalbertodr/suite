@@ -6,6 +6,23 @@ import {
   parseDescriptionServiceLines,
 } from '@/lib/agendaAppointmentDisplay';
 import { queryAppointmentItemsInChunks } from '@/lib/appointmentItemsSelect';
+
+/** Citas por página en listados de ficha de cliente. */
+export const CUSTOMER_APPOINTMENTS_PAGE_SIZE = 50;
+/** Citas recientes incluidas en el timeline unificado (resto vía «Cargar más»). */
+export const CUSTOMER_APPOINTMENTS_TIMELINE_LIMIT = 150;
+
+export type FetchCustomerAppointmentsOptions = {
+  limit?: number;
+  offset?: number;
+  /** false = más rápido; usa descripción para líneas de servicio. */
+  includeItems?: boolean;
+};
+
+export type CustomerAppointmentsPage = {
+  rows: CustomerAppointmentRow[];
+  hasMore: boolean;
+};
 export type CustomerAppointmentItem = {
   label: string;
   kind?: string | null;
@@ -158,7 +175,12 @@ async function loadItemsByAppointment(ids: string[]): Promise<Map<string, Custom
 /** Citas del cliente con ítems; compatible esquema legacy (client_name, appointment_date). */
 export async function fetchAppointmentsForCustomer(
   customerId: string,
-): Promise<CustomerAppointmentRow[]> {
+  options?: FetchCustomerAppointmentsOptions,
+): Promise<CustomerAppointmentsPage> {
+  const includeItems = options?.includeItems !== false;
+  const limit = options?.limit;
+  const offset = options?.offset ?? 0;
+  const rangeEnd = limit != null ? offset + limit : null;
   const { data: customer } = await supabase
     .from('customers')
     .select('legacy_codcli, name, company_id')
@@ -192,14 +214,22 @@ export async function fetchAppointmentsForCustomer(
   let rows: Record<string, unknown>[] = [];
 
   for (const attempt of attempts) {
-    let res = await attempt
+    let q = attempt
       .applyFilter(supabase.from('agenda_appointments').select(baseSelect))
       .order('appointment_date', { ascending: false, nullsFirst: false })
       .order('start_time', { ascending: false });
+    if (rangeEnd != null) {
+      q = q.range(offset, rangeEnd);
+    }
+    let res = await q;
     if (res.error && isSchemaColumnError(res.error)) {
-      res = await attempt
+      q = attempt
         .applyFilter(supabase.from('agenda_appointments').select(baseSelect))
         .order('start_time', { ascending: false });
+      if (rangeEnd != null) {
+        q = q.range(offset, rangeEnd);
+      }
+      res = await q;
     }
 
     if (!res.error) {
@@ -216,10 +246,21 @@ export async function fetchAppointmentsForCustomer(
     console.warn('fetchAppointmentsForCustomer:', res.error.message);
   }
 
-  if (!rows.length) return [];
+  if (!rows.length) return { rows: [], hasMore: false };
 
-  const itemsByAppt = await loadItemsByAppointment(rows.map((r) => String(r.id)));
-  return rows.map((row) =>
-    normalizeRow(row, customerId, itemsByAppt.get(String(row.id)) ?? [], employeeMaps),
-  );
+  let hasMore = false;
+  if (limit != null && rows.length > limit) {
+    hasMore = true;
+    rows = rows.slice(0, limit);
+  }
+
+  const itemsByAppt = includeItems
+    ? await loadItemsByAppointment(rows.map((r) => String(r.id)))
+    : new Map<string, CustomerAppointmentItem[]>();
+  return {
+    rows: rows.map((row) =>
+      normalizeRow(row, customerId, itemsByAppt.get(String(row.id)) ?? [], employeeMaps),
+    ),
+    hasMore,
+  };
 }

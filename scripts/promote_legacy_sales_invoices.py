@@ -205,11 +205,17 @@ def process_one_sale(
     number_seq: InvoiceNumberSeq,
 ) -> tuple[bool, str | None]:
     sale_id = str(sale["id"])
-    total = money(sale["total_amount"])
-    if total <= 0:
+    cobrado = money(sale["total_amount"])
+    if cobrado <= 0:
         return False, "zero_total"
 
-    subtotal, tax_amount, total_amount = split_tax_included(total)
+    legacy_rev = parse_legacy_revenue(sale.get("notes"))
+    paid_in_full = bool(legacy_rev.get("paid_in_full", True)) if legacy_rev else True
+    facturado = money(legacy_rev.get("facturado")) if legacy_rev and legacy_rev.get("facturado") else cobrado
+    if facturado <= 0:
+        facturado = cobrado
+
+    subtotal, tax_amount, total_amount = split_tax_included(facturado)
     issue_date = sale["created_at"]
     if isinstance(issue_date, datetime):
         issue_iso = issue_date.date().isoformat()
@@ -236,16 +242,22 @@ def process_one_sale(
             {
                 "description": f"Ticket {sale.get('ticket_number') or sale_id[:8]}",
                 "quantity": Decimal("1"),
-                "unit_price": total,
-                "total_price": total,
+                "unit_price": facturado,
+                "total_price": facturado,
                 "article_id": None,
             }
         ]
+    elif facturado != cobrado and cobrado > 0:
+        lines_sum = sum(money(it.get("total_price") or 0) for it in line_rows)
+        if lines_sum > 0:
+            ratio = facturado / lines_sum
+            for it in line_rows:
+                lt = (money(it.get("total_price") or 0) * ratio).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                it["total_price"] = lt
+                it["unit_price"] = lt
 
     inv_number = number_seq.next()
-    legacy_rev = parse_legacy_revenue(sale.get("notes"))
-    paid_in_full = bool(legacy_rev.get("paid_in_full", True)) if legacy_rev else True
-    inv_status = "paid" if paid_in_full else "pending"
+    inv_status = "paid" if paid_in_full else "sent"
 
     if dry_run:
         print(

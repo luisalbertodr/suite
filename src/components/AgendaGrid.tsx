@@ -52,13 +52,14 @@ interface AgendaGridProps {
 }
 
 /** Ancho de la columna «Hora» (px); debe coincidir con gridTemplateColumns. */
-const TIME_GUTTER_PX = 80;
+const TIME_GUTTER_PX = 96;
 
 /** Franjas fuera de horario / no disponibles: contraste alto + rayas diagonales. */
 const UNAVAILABLE_TIME_GUTTER =
   'bg-neutral-300/95 text-neutral-700 dark:bg-neutral-800/95 dark:text-neutral-300 [background-image:repeating-linear-gradient(-45deg,transparent,transparent_5px,rgba(0,0,0,0.07)_5px,rgba(0,0,0,0.07)_10px)]';
 const UNAVAILABLE_CELL =
-  'bg-neutral-200/95 dark:bg-neutral-900/90 cursor-not-allowed [background-image:repeating-linear-gradient(-45deg,transparent,transparent_5px,rgba(0,0,0,0.055)_5px,rgba(0,0,0,0.055)_10px)] dark:[background-image:repeating-linear-gradient(-45deg,transparent,transparent_5px,rgba(255,255,255,0.04)_5px,rgba(255,255,255,0.04)_10px)]';
+  'bg-neutral-200/95 dark:bg-neutral-900/90 [background-image:repeating-linear-gradient(-45deg,transparent,transparent_5px,rgba(0,0,0,0.055)_5px,rgba(0,0,0,0.055)_10px)] dark:[background-image:repeating-linear-gradient(-45deg,transparent,transparent_5px,rgba(255,255,255,0.04)_5px,rgba(255,255,255,0.04)_10px)]';
+const UNAVAILABLE_CELL_BLOCKED = `${UNAVAILABLE_CELL} cursor-not-allowed`;
 
 const timeToMinutes = (hhmm: string): number => hhmmToMinutes(hhmm);
 
@@ -359,7 +360,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
         {/* Header con nombres de empleados */}
         <div ref={stickyHeaderRef} className="sticky top-0 bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/85 z-30 border-b border-border shadow-sm">
           <div className="grid gap-0" style={{ gridTemplateColumns: `${TIME_GUTTER_PX}px repeat(${employees.length}, 1fr)` }}>
-            <div className="sticky left-0 z-40 px-2 py-1.5 bg-muted border-r border-border shadow-[2px_0_4px_rgba(0,0,0,0.08)] font-semibold text-xs text-center leading-tight">
+            <div className="sticky left-0 z-40 px-3 py-1.5 bg-muted border-r border-border shadow-[2px_0_4px_rgba(0,0,0,0.08)] font-semibold text-xs text-center leading-tight">
               Hora
             </div>
             {employees.map((employee) => (
@@ -547,18 +548,30 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
 
             return (
               <div key={slot.time} className="contents">
-                {/* Columna de tiempo */}
+                {/* Columna de tiempo — etiqueta sobre la línea del slot */}
                 <div
-                  className={`sticky left-0 z-[26] p-2 border-r border-gray-300 shadow-[2px_0_4px_rgba(0,0,0,0.06)] text-xs text-center font-medium ${
-                  isHourMark 
-                    ? 'border-t-2 border-gray-400 bg-gray-100' 
-                    : 'border-t border-gray-200 bg-gray-50'
-                } ${timeShade ? UNAVAILABLE_TIME_GUTTER : ''}`}
+                  className={`sticky left-0 z-[26] relative border-r border-gray-300 shadow-[2px_0_4px_rgba(0,0,0,0.06)] ${
+                    isHourMark
+                      ? 'border-t-2 border-gray-400 bg-gray-100'
+                      : 'border-t border-gray-200 bg-gray-50'
+                  } ${timeShade ? UNAVAILABLE_TIME_GUTTER : ''}`}
                   style={{ height: `${cellHeight}px`, minHeight: `${cellHeight}px` }}
                 >
-                  <div className={`${isHourMark ? 'text-gray-700 font-semibold' : 'text-gray-600'} ${timeShade ? '!text-neutral-700 dark:!text-neutral-300' : ''}`}>
-                    {slot.time}
-                  </div>
+                  <span
+                    className={`absolute left-0 right-0 top-0 z-[1] -translate-y-1/2 text-center leading-none px-2.5 ${
+                      isHourMark
+                        ? 'text-sm font-semibold text-gray-700 tabular-nums'
+                        : 'text-xs font-medium text-gray-500 tabular-nums'
+                    } ${timeShade ? '!text-neutral-700 dark:!text-neutral-300' : ''}`}
+                  >
+                    <span
+                      className={`inline-block px-1.5 ${
+                        isHourMark ? 'bg-gray-100' : 'bg-gray-50'
+                      } ${timeShade ? 'bg-neutral-300/95 dark:bg-neutral-800/95' : ''}`}
+                    >
+                      {slot.time}
+                    </span>
+                  </span>
                 </div>
 
                 {/* Columnas de empleados - siempre renderizar todas las celdas */}
@@ -566,7 +579,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
                   const isOccupied = isSlotOccupiedByAppointment(employee.id, slot.time);
                   const isHighlighted = isSlotHighlighted(employee.id, slot.time);
                   const meta = employeeAgendaById[employee.id] ?? { weekly: null, blocks: [] };
-                  const { bookable } = slotBookableForAgenda(
+                  const { bookable, blocked, schedulingAllowed } = slotBookableForAgenda(
                     dateKey,
                     slotS,
                     slotE,
@@ -575,20 +588,34 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
                     meta.blocks,
                   );
                   const shade = !bookable && !isOccupied;
+                  const canSchedule = !isOccupied && schedulingAllowed;
                   
                   return (
                     <div
                       key={`${employee.id}-${slot.time}`}
                       className={`relative border-r border-gray-300 transition-colors ${
                         isHourMark ? 'border-t-2 border-gray-400' : 'border-t border-gray-200'
-                      } ${isOccupied ? 'bg-gray-50' : shade ? UNAVAILABLE_CELL : 'bg-white cursor-pointer hover:bg-blue-50'} ${
-                        isHighlighted ? 'bg-blue-100 border-blue-300' : ''
-                      }`}
+                      } ${
+                        isOccupied
+                          ? 'bg-gray-50'
+                          : shade
+                            ? blocked
+                              ? UNAVAILABLE_CELL_BLOCKED
+                              : `${UNAVAILABLE_CELL} cursor-pointer hover:bg-blue-50/70 dark:hover:bg-blue-950/30`
+                            : 'bg-white cursor-pointer hover:bg-blue-50'
+                      } ${isHighlighted ? 'bg-blue-100 border-blue-300' : ''}`}
                       style={{ height: `${cellHeight}px` }}
-                      onClick={() => !isOccupied && bookable && onSlotClick(employee.id, slot.time)}
-                      onDragOver={(e) => bookable && handleDragOver(e, employee.id, slot.time)}
+                      title={
+                        shade && canSchedule
+                          ? 'Fuera del horario habitual — clic para cita excepcional'
+                          : blocked
+                            ? 'No disponible (bloqueo de agenda)'
+                            : undefined
+                      }
+                      onClick={() => canSchedule && onSlotClick(employee.id, slot.time)}
+                      onDragOver={(e) => canSchedule && handleDragOver(e, employee.id, slot.time)}
                       onDragLeave={handleDragLeave}
-                      onDrop={(e) => bookable && handleDrop(e, employee.id, slot.time)}
+                      onDrop={(e) => canSchedule && handleDrop(e, employee.id, slot.time)}
                     />
                   );
                 })}

@@ -100,21 +100,25 @@ async function loadSalesByAppointmentIds(
   totals: Map<string, number>,
 ): Promise<void> {
   if (!appointmentIds.length) return;
-  let res = await supabase
-    .from('sales')
-    .select('appointment_id,total_amount,status,notes')
-    .in('appointment_id', appointmentIds)
-    .neq('status', 'cancelled');
-  if (res.error && isSchemaColumnError(res.error)) {
-    return;
-  }
-  if (res.error) return;
-  for (const sale of res.data || []) {
-    const aptId = (sale as any).appointment_id
-      ? String((sale as any).appointment_id)
-      : parseAppointmentIdFromSaleNotes((sale as any).notes ?? null);
-    if (aptId && sale.total_amount != null && !totals.has(aptId)) {
-      totals.set(aptId, Number(sale.total_amount));
+  const chunkSize = 100;
+  for (let i = 0; i < appointmentIds.length; i += chunkSize) {
+    const chunk = appointmentIds.slice(i, i + chunkSize);
+    let res = await supabase
+      .from('sales')
+      .select('appointment_id,total_amount,status,notes')
+      .in('appointment_id', chunk)
+      .neq('status', 'cancelled');
+    if (res.error && isSchemaColumnError(res.error)) {
+      return;
+    }
+    if (res.error) return;
+    for (const sale of res.data || []) {
+      const aptId = (sale as any).appointment_id
+        ? String((sale as any).appointment_id)
+        : parseAppointmentIdFromSaleNotes((sale as any).notes ?? null);
+      if (aptId && sale.total_amount != null && !totals.has(aptId)) {
+        totals.set(aptId, Number(sale.total_amount));
+      }
     }
   }
 }
@@ -195,7 +199,12 @@ async function loadSalesByCompanyId(
 
 export async function buildAppointmentChargedTotals(
   appointmentIds: string[],
-  opts?: { companyId?: string | null; customerId?: string | null },
+  opts?: {
+    companyId?: string | null;
+    customerId?: string | null;
+    /** Solo ventas vinculadas; omite barrido de company e inferencia de precios (listados). */
+    salesOnly?: boolean;
+  },
 ): Promise<Map<string, number>> {
   const totals = new Map<string, number>();
   if (!appointmentIds.length) return totals;
@@ -206,6 +215,10 @@ export async function buildAppointmentChargedTotals(
 
   if (opts?.customerId) {
     await loadSalesByCustomerId(opts.customerId, aptSet, totals);
+  }
+
+  if (opts?.salesOnly) {
+    return totals;
   }
 
   const needsCompanySales = appointmentIds.some((id) => !totals.has(id));

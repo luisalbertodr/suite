@@ -199,11 +199,12 @@ export const useMetaConfig = () => {
       full_meta_resync?: boolean;
       confirm_full_meta_resync?: string;
     }): Promise<MetaSyncResponse> => {
+      if (!companyId) throw new Error('Sin empresa activa');
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('No hay sesión activa');
       const response = await supabase.functions.invoke('meta-sync-leads', {
         headers: { Authorization: `Bearer ${session.access_token}` },
-        body: input ?? {},
+        body: { ...input, company_id: companyId },
       });
       if (response.error) {
         type FunctionError = { context?: { json?: () => Promise<unknown> } };

@@ -44,7 +44,7 @@ from pathlib import Path
 import psycopg2
 from psycopg2.extras import RealDictCursor, execute_values
 
-from legacy_company import get_company_id
+from legacy_company import DEFAULT_COMPANY_ID, get_company_id
 
 ROOT = Path(__file__).resolve().parents[1]
 ENV_PATH = ROOT / ".env"
@@ -393,12 +393,17 @@ def main() -> None:
         action="store_true",
         help="Desactiva la fusión de tramos consecutivos (una cita por id planinc).",
     )
+    ap.add_argument(
+        "--company-id",
+        default="",
+        help=f"UUID empresa (default: env PROMOTE_COMPANY_ID / {DEFAULT_COMPANY_ID})",
+    )
     args = ap.parse_args()
 
     url = os.environ.get("SUPABASE_DB_URL", "").strip()
     if not url:
         raise SystemExit("Falta SUPABASE_DB_URL")
-    company_id = get_company_id("PROMOTE_COMPANY_ID", "LEGACY_COMPANY_ID")
+    company_id = (args.company_id or "").strip() or get_company_id("PROMOTE_COMPANY_ID", "LEGACY_COMPANY_ID")
     clear_mode = "all" if args.clean_import else os.environ.get("PROMOTE_CLEAR", "legacy_only").strip().lower()
     if args.clean_import and not args.dry_run:
         print(
@@ -692,8 +697,7 @@ def main() -> None:
         if "customer_id" in types:
             cod = str(first.get("codcli") or "").strip()
             cid = customer_by_legacy.get(cod) or customer_by_legacy.get(norm_cli_key(cod))
-            if cid:
-                row_out["customer_id"] = cid
+            row_out["customer_id"] = cid
 
         item_templates = build_item_templates_for_group(
             group,
@@ -758,10 +762,16 @@ def main() -> None:
         conn.close()
         return
 
-    insert_cols = [c for c in payload[0].keys()]
+    insert_cols: list[str] = []
+    seen_cols: set[str] = set()
+    for row in payload:
+        for k in row.keys():
+            if k not in seen_cols:
+                seen_cols.add(k)
+                insert_cols.append(k)
     col_list = ", ".join(insert_cols)
     template = "(" + ", ".join(["%s"] * len(insert_cols)) + ")"
-    values = [[row[c] for c in insert_cols] for row in payload]
+    values = [[row.get(c) for c in insert_cols] for row in payload]
 
     cur2 = conn.cursor()
     batch = 500

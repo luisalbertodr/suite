@@ -5,7 +5,7 @@ import { format } from 'date-fns';
 import type { PostgrestError } from '@supabase/supabase-js';
 
 import { isSchemaColumnError } from '@/lib/appointmentSales';
-import { fetchPeriodRevenue, fetchMonthlyRevenueSeries } from '@/lib/salesRevenue';
+import { fetchDashboardBilling, monthKey } from '@/lib/salesRevenue';
 
 const isMissingRelation = (error: PostgrestError | null) =>
   Boolean(
@@ -19,17 +19,14 @@ export const useDashboardData = () => {
   const { companyId, loading: companyLoading } = useCompanyFilter();
 
   const today = format(new Date(), 'yyyy-MM-dd');
-  const now = new Date();
-  const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
 
-  const { data: stats, isLoading: statsLoading } = useQuery({
-    queryKey: ['dashboard-stats', companyId],
+  const { data: main, isLoading: mainLoading } = useQuery({
+    queryKey: ['dashboard-main', companyId],
     queryFn: async () => {
       if (!companyId) return null;
 
-      // Parallel fetches
-      const [customersRes, appointmentsRes, vouchersRes, revenueRes] = await Promise.all([
+      const billingPromise = fetchDashboardBilling(companyId, 5);
+      const countsPromise = Promise.all([
         supabase.from('customers').select('id', { count: 'exact', head: true }).eq('company_id', companyId),
         supabase.from('agenda_appointments').select('id', { count: 'exact', head: true })
           .eq('company_id', companyId)
@@ -37,52 +34,53 @@ export const useDashboardData = () => {
           .lte('start_time', `${today}T23:59:59`),
         supabase.from('customer_vouchers').select('id', { count: 'exact', head: true })
           .eq('company_id', companyId).eq('is_active', true),
-        fetchPeriodRevenue(
-          companyId,
-          firstDayOfMonth.toISOString(),
-          new Date(lastDayOfMonth.getFullYear(), lastDayOfMonth.getMonth(), lastDayOfMonth.getDate(), 23, 59, 59, 999).toISOString(),
-        ),
+        supabase.from('bonos').select('id', { count: 'exact', head: true })
+          .eq('company_id', companyId).eq('estado', 'activo'),
       ]);
 
-      const bonosRes = await supabase.from('bonos').select('id', { count: 'exact', head: true })
-        .eq('company_id', companyId).eq('estado', 'activo');
+      const [billing, [customersRes, appointmentsRes, vouchersRes, bonosRes]] = await Promise.all([
+        billingPromise,
+        countsPromise,
+      ]);
+
       const bonosCount = isMissingRelation(bonosRes.error) ? 0 : (bonosRes.count || 0);
 
-      const monthlyRevenue = revenueRes.total;
+      const rangeStart = billing.series[0]?.monthStart;
+      const rangeEnd = billing.series[billing.series.length - 1]?.monthEnd;
+      const quoRes = rangeStart && rangeEnd
+        ? await supabase.from('quotes').select('total_amount, created_at').eq('company_id', companyId)
+            .gte('created_at', rangeStart.toISOString()).lte('created_at', rangeEnd.toISOString())
+        : { data: [] as { total_amount: number | null; created_at: string }[] };
+
+      const quoteBuckets = new Map<string, number>();
+      for (const q of quoRes.data ?? []) {
+        const key = monthKey(q.created_at);
+        quoteBuckets.set(key, (quoteBuckets.get(key) ?? 0) + Number(q.total_amount ?? 0));
+      }
+
+      const chartData = billing.series.map(({ monthStart, total }) => {
+        const monthName = monthStart.toLocaleDateString('es-ES', { month: 'short' });
+        const key = `${monthStart.getFullYear()}-${String(monthStart.getMonth() + 1).padStart(2, '0')}`;
+        return {
+          name: monthName.charAt(0).toUpperCase() + monthName.slice(1),
+          ventas: total,
+          presupuestos: quoteBuckets.get(key) ?? 0,
+        };
+      });
 
       return {
-        activeClients: customersRes.count || 0,
-        todayAppointments: appointmentsRes.count || 0,
-        activeVouchers: (vouchersRes.count || 0) + bonosCount,
-        monthlyRevenue,
+        stats: {
+          activeClients: customersRes.count || 0,
+          todayAppointments: appointmentsRes.count || 0,
+          activeVouchers: (vouchersRes.count || 0) + bonosCount,
+          monthlyRevenue: billing.currentMonth.total,
+        },
+        chartData,
       };
     },
     enabled: !!companyId && !companyLoading,
     staleTime: 5 * 60 * 1000,
     refetchInterval: 5 * 60 * 1000,
-  });
-
-  const { data: chartData, isLoading: chartLoading } = useQuery({
-    queryKey: ['dashboard-chart-data', companyId],
-    queryFn: async () => {
-      if (!companyId) return [];
-      const revenueSeries = await fetchMonthlyRevenueSeries(companyId, 5);
-      const results = [];
-      for (const { monthStart, monthEnd, total } of revenueSeries) {
-        const monthName = monthStart.toLocaleDateString('es-ES', { month: 'short' });
-        const quo = await supabase.from('quotes').select('total_amount').eq('company_id', companyId)
-          .gte('created_at', monthStart.toISOString()).lte('created_at', monthEnd.toISOString());
-
-        results.push({
-          name: monthName.charAt(0).toUpperCase() + monthName.slice(1),
-          ventas: total,
-          presupuestos: quo.data?.reduce((s, x) => s + (x.total_amount || 0), 0) || 0,
-        });
-      }
-      return results;
-    },
-    enabled: !!companyId && !companyLoading,
-    staleTime: 5 * 60 * 1000,
   });
 
   const { data: recentActivity, isLoading: activityLoading } = useQuery({
@@ -132,10 +130,10 @@ export const useDashboardData = () => {
   });
 
   return {
-    stats,
-    chartData,
+    stats: main?.stats,
+    chartData: main?.chartData,
     recentActivity,
-    isLoading: statsLoading || chartLoading || activityLoading || companyLoading,
+    isLoading: mainLoading || activityLoading || companyLoading,
   };
 };
 

@@ -25,6 +25,7 @@ import { MetaConfig } from './MetaConfig';
 import { WhatsappConfig } from './WhatsappConfig';
 import { WorkCenterAuditPanel } from './WorkCenterAuditPanel';
 import { LegacyImportPanel } from './LegacyImportPanel';
+import { TpvSettingsConfig } from './TpvSettingsConfig';
 import { useWorkCenter } from '@/hooks/useWorkCenter';
 
 const VALID_TABS = [
@@ -37,6 +38,7 @@ const VALID_TABS = [
   'email',
   'meta',
   'whatsapp',
+  'tpv',
   'prestashop',
   'verifactu',
   'verifactu-xml',
@@ -131,6 +133,7 @@ export const Configuracion: React.FC = () => {
           <TabsTrigger value="email">Email</TabsTrigger>
           <TabsTrigger value="meta">Meta</TabsTrigger>
           <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
+          <TabsTrigger value="tpv">TPV</TabsTrigger>
           <TabsTrigger value="prestashop">PrestaShop</TabsTrigger>
           <TabsTrigger value="verifactu">Verifactu</TabsTrigger>
           <TabsTrigger value="verifactu-xml">XML Docs</TabsTrigger>
@@ -210,6 +213,10 @@ export const Configuracion: React.FC = () => {
 
         <TabsContent value="whatsapp" className="space-y-4">
           <WhatsappConfig />
+        </TabsContent>
+
+        <TabsContent value="tpv" className="space-y-4">
+          <TpvSettingsConfig />
         </TabsContent>
 
         <TabsContent value="prestashop" className="space-y-4">

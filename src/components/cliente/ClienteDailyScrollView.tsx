@@ -1,7 +1,8 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
 import {
   Table,
   TableBody,
@@ -16,6 +17,7 @@ import {
   type DayGroup,
   type DayTimelineItem,
 } from '@/hooks/useCustomerDayTimeline';
+import { CUSTOMER_APPOINTMENTS_TIMELINE_LIMIT } from '@/lib/agendaCustomerAppointments';
 import { cn } from '@/lib/utils';
 
 type HistoryTableRow = {
@@ -130,8 +132,12 @@ interface Props {
 }
 
 export const ClienteDailyScrollView: React.FC<Props> = ({ customerId, className, onAppointmentClick }) => {
-  const { data, isLoading, isError, error } = useCustomerDayTimeline(customerId);
-  const rows = useMemo(() => buildTableRows(data || []), [data]);
+  const [appointmentLimit, setAppointmentLimit] = useState(CUSTOMER_APPOINTMENTS_TIMELINE_LIMIT);
+  const { data, isLoading, isFetching, isError, error } = useCustomerDayTimeline(customerId, {
+    appointmentLimit,
+  });
+  const rows = useMemo(() => buildTableRows(data?.days || []), [data?.days]);
+  const hasMoreAppointments = data?.hasMoreAppointments ?? false;
 
   if (isLoading) {
     return (
@@ -235,6 +241,22 @@ export const ClienteDailyScrollView: React.FC<Props> = ({ customerId, className,
           })}
         </TableBody>
       </Table>
+      {hasMoreAppointments && (
+        <div className="flex justify-center border-t border-sky-100/80 dark:border-sky-900/40 py-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="text-xs"
+            disabled={isFetching}
+            onClick={() =>
+              setAppointmentLimit((n) => n + CUSTOMER_APPOINTMENTS_TIMELINE_LIMIT)
+            }
+          >
+            {isFetching ? 'Cargando…' : 'Cargar citas anteriores'}
+          </Button>
+        </div>
+      )}
     </div>
   );
 };

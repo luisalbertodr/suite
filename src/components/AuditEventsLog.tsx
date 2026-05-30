@@ -64,6 +64,7 @@ const TABLE_FILTERS: Array<{ value: string; label: string }> = [
   { value: 'customers', label: 'Clientes' },
   { value: 'invoices', label: 'Facturas' },
   { value: 'sales', label: 'Ventas (TPV)' },
+  { value: 'sale_items', label: 'Líneas TPV' },
   { value: 'notifications', label: 'Notificaciones' },
   { value: 'marketing_leads', label: 'Marketing (leads)' },
 ];

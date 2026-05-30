@@ -7,80 +7,220 @@ export type RevenueBreakdown = {
   total: number;
 };
 
-function sumAmount(rows: Array<{ total_amount?: number | null }> | null | undefined): number {
-  return (rows ?? []).reduce((s, r) => s + Number(r.total_amount ?? 0), 0);
+type InvoiceRow = {
+  id: string;
+  issue_date?: string | null;
+  total_amount?: number | null;
+  status?: string | null;
+  notes?: string | null;
+};
+
+type SaleRow = {
+  total_amount?: number | null;
+  created_at?: string | null;
+};
+
+const PAGE = 1000;
+
+function invoiceCountsAsBilling(row: { status?: string | null; notes?: string | null }): boolean {
+  const status = String(row.status ?? '').toLowerCase();
+  if (['cancelled', 'void', 'anulada'].includes(status)) return false;
+  // Huérfanas legacy (sin ticket) se eliminan en reset; evitar escanear todas las ventas.
+  return true;
 }
 
-function toDateOnly(iso: string): string {
-  return iso.slice(0, 10);
+function localMonthKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
-/** Ingresos cobrados del periodo: facturas pagadas (issue_date) + tickets TPV no facturados completados. */
+function localDateOnly(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** Clave yyyy-mm desde issue_date (YYYY-MM-DD) o timestamp ISO. */
+export function monthKey(value: string): string {
+  if (value.length >= 7 && value[4] === '-') return value.slice(0, 7);
+  return localMonthKey(new Date(value));
+}
+
+async function fetchAllPages<T>(
+  build: (from: number, to: number) => ReturnType<typeof supabase.from>,
+  selectFallback?: () => ReturnType<typeof supabase.from>,
+): Promise<T[]> {
+  const out: T[] = [];
+  let offset = 0;
+
+  while (true) {
+    let res = await build(offset, offset + PAGE - 1);
+    if (res.error && selectFallback) {
+      res = await selectFallback();
+      if (!res.error && res.data) {
+        return res.data as T[];
+      }
+    }
+    if (res.error) throw res.error;
+
+    const rows = (res.data ?? []) as T[];
+    out.push(...rows);
+    if (rows.length < PAGE) break;
+    offset += PAGE;
+  }
+
+  return out;
+}
+
+async function loadInvoices(companyId: string, fromDate: string, toDate: string): Promise<InvoiceRow[]> {
+  return fetchAllPages<InvoiceRow>(
+    (from, to) =>
+      supabase
+        .from('invoices')
+        .select('id, issue_date, total_amount, status, notes')
+        .eq('company_id', companyId)
+        .gte('issue_date', fromDate)
+        .lte('issue_date', toDate)
+        .order('issue_date')
+        .range(from, to),
+    () =>
+      supabase
+        .from('invoices')
+        .select('id, issue_date, total_amount, status')
+        .eq('company_id', companyId)
+        .gte('issue_date', fromDate)
+        .lte('issue_date', toDate),
+  );
+}
+
+async function loadSalesWithoutInvoice(
+  companyId: string,
+  fromIso: string,
+  toIso: string,
+): Promise<SaleRow[]> {
+  try {
+    return await fetchAllPages<SaleRow>((from, to) =>
+      supabase
+        .from('sales')
+        .select('total_amount, created_at')
+        .eq('company_id', companyId)
+        .eq('status', 'completed')
+        .is('invoice_id', null)
+        .gte('created_at', fromIso)
+        .lte('created_at', toIso)
+        .order('created_at')
+        .range(from, to),
+    );
+  } catch (err) {
+    if (!isSchemaColumnError(err as { code?: string; message?: string })) throw err;
+    return [];
+  }
+}
+
+function sumInvoices(rows: InvoiceRow[]): number {
+  return rows.reduce((sum, inv) => {
+    if (!invoiceCountsAsBilling(inv)) return sum;
+    return sum + Number(inv.total_amount ?? 0);
+  }, 0);
+}
+
+function sumSales(rows: SaleRow[]): number {
+  return rows.reduce((s, row) => s + Number(row.total_amount ?? 0), 0);
+}
+
+function bucketInvoices(rows: InvoiceRow[]): Map<string, number> {
+  const buckets = new Map<string, number>();
+  for (const inv of rows) {
+    if (!invoiceCountsAsBilling(inv) || !inv.issue_date) continue;
+    const key = monthKey(inv.issue_date);
+    buckets.set(key, (buckets.get(key) ?? 0) + Number(inv.total_amount ?? 0));
+  }
+  return buckets;
+}
+
+function bucketSales(rows: SaleRow[]): Map<string, number> {
+  const buckets = new Map<string, number>();
+  for (const row of rows) {
+    const created = row.created_at;
+    if (!created) continue;
+    const key = monthKey(created);
+    buckets.set(key, (buckets.get(key) ?? 0) + Number(row.total_amount ?? 0));
+  }
+  return buckets;
+}
+
+export type DashboardBilling = {
+  currentMonth: RevenueBreakdown;
+  series: Array<{ monthStart: Date; monthEnd: Date; total: number }>;
+};
+
+/** Una sola carga para tarjeta + gráfico del dashboard (evita N consultas repetidas). */
+export async function fetchDashboardBilling(
+  companyId: string,
+  monthsBack: number,
+): Promise<DashboardBilling> {
+  const now = new Date();
+  const rangeStart = new Date(now.getFullYear(), now.getMonth() - monthsBack, 1);
+  const rangeEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+  const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  const [invoices, salesNoInv] = await Promise.all([
+    loadInvoices(companyId, localDateOnly(rangeStart), localDateOnly(rangeEnd)),
+    loadSalesWithoutInvoice(companyId, rangeStart.toISOString(), rangeEnd.toISOString()),
+  ]);
+
+  const invBuckets = bucketInvoices(invoices);
+  const saleBuckets = bucketSales(salesNoInv);
+
+  const series: DashboardBilling['series'] = [];
+  for (let i = monthsBack; i >= 0; i -= 1) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const monthStart = new Date(d.getFullYear(), d.getMonth(), 1);
+    const monthEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
+    const key = localMonthKey(monthStart);
+    const total = (invBuckets.get(key) ?? 0) + (saleBuckets.get(key) ?? 0);
+    series.push({ monthStart, monthEnd, total });
+  }
+
+  const cmKey = localMonthKey(currentMonthStart);
+  const currentInvoices = invoices.filter(
+    (inv) => inv.issue_date && monthKey(inv.issue_date) === cmKey,
+  );
+  const currentSales = salesNoInv.filter(
+    (s) => s.created_at && monthKey(s.created_at) === cmKey,
+  );
+
+  const invTotal = sumInvoices(currentInvoices);
+  const salesTotal = sumSales(currentSales);
+
+  return {
+    currentMonth: {
+      invoices: invTotal,
+      salesWithoutInvoice: salesTotal,
+      total: invTotal + salesTotal,
+    },
+    series,
+  };
+}
+
+/** Facturación de un periodo concreto. */
 export async function fetchPeriodRevenue(
   companyId: string,
   fromIso: string,
   toIso: string,
 ): Promise<RevenueBreakdown> {
-  const fromDate = toDateOnly(fromIso);
-  const toDate = toDateOnly(toIso);
+  const fromDate = fromIso.slice(0, 10);
+  const toDate = toIso.slice(0, 10);
 
-  let invRes = await supabase
-    .from('invoices')
-    .select('total_amount, status, paid_status')
-    .eq('company_id', companyId)
-    .gte('issue_date', fromDate)
-    .lte('issue_date', toDate);
+  const [invoices, salesNoInv] = await Promise.all([
+    loadInvoices(companyId, fromDate, toDate),
+    loadSalesWithoutInvoice(companyId, fromIso, toIso),
+  ]);
 
-  if (invRes.error && isSchemaColumnError(invRes.error)) {
-    invRes = await supabase
-      .from('invoices')
-      .select('total_amount, status')
-      .eq('company_id', companyId)
-      .gte('issue_date', fromDate)
-      .lte('issue_date', toDate);
-  }
-
-  if (invRes.error) throw invRes.error;
-
-  const invoiceRows = (invRes.data ?? []).filter((row) => {
-    const status = String(row.status ?? '').toLowerCase();
-    if (['cancelled', 'void', 'anulada', 'pending'].includes(status)) return false;
-    const paid = (row as { paid_status?: boolean | null }).paid_status;
-    if (paid === false) return false;
-    return status === 'paid' || paid === true || status === '';
-  });
-
-  let salesRes = await supabase
-    .from('sales')
-    .select('total_amount, invoice_id')
-    .eq('company_id', companyId)
-    .eq('status', 'completed')
-    .gte('created_at', fromIso)
-    .lte('created_at', toIso);
-
-  if (salesRes.error && isSchemaColumnError(salesRes.error)) {
-    salesRes = await supabase
-      .from('sales')
-      .select('total_amount')
-      .eq('company_id', companyId)
-      .eq('status', 'completed')
-      .gte('created_at', fromIso)
-      .lte('created_at', toIso);
-  }
-
-  if (salesRes.error) throw salesRes.error;
-
-  const invoices = sumAmount(invoiceRows);
-  const salesWithoutInvoice = (salesRes.data ?? []).reduce((s, row) => {
-    const linked = (row as { invoice_id?: string | null }).invoice_id;
-    if (linked) return s;
-    return s + Number(row.total_amount ?? 0);
-  }, 0);
+  const invTotal = sumInvoices(invoices);
+  const salesTotal = sumSales(salesNoInv);
 
   return {
-    invoices,
-    salesWithoutInvoice,
-    total: invoices + salesWithoutInvoice,
+    invoices: invTotal,
+    salesWithoutInvoice: salesTotal,
+    total: invTotal + salesTotal,
   };
 }
 
@@ -127,21 +267,11 @@ export async function fetchSalesWithoutInvoiceRows(
   return (res.data ?? []).filter((row) => !(row as SaleRevenueRow).invoice_id) as SaleRevenueRow[];
 }
 
-/** Serie mensual de ingresos (facturas + TPV sin factura). */
+/** Serie mensual de facturación (preferir fetchDashboardBilling en el dashboard). */
 export async function fetchMonthlyRevenueSeries(
   companyId: string,
   monthsBack: number,
 ): Promise<Array<{ monthStart: Date; monthEnd: Date; total: number }>> {
-  const out: Array<{ monthStart: Date; monthEnd: Date; total: number }> = [];
-  const now = new Date();
-
-  for (let i = monthsBack; i >= 0; i -= 1) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const monthStart = new Date(d.getFullYear(), d.getMonth(), 1);
-    const monthEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
-    const rev = await fetchPeriodRevenue(companyId, monthStart.toISOString(), monthEnd.toISOString());
-    out.push({ monthStart, monthEnd, total: rev.total });
-  }
-
-  return out;
+  const { series } = await fetchDashboardBilling(companyId, monthsBack);
+  return series;
 }

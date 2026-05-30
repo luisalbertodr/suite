@@ -69,7 +69,14 @@ def count_rows(cur, sql: str, params: tuple) -> int:
 
 def delete_legacy_sales(cur, company_id: str, dry_run: bool) -> dict[str, int]:
     sale_ids = legacy_sale_ids_sql("%s")
-    stats = {"sales": 0, "sale_items": 0, "invoices": 0, "invoice_items": 0}
+    stats = {
+        "sales": 0,
+        "sale_items": 0,
+        "invoices": 0,
+        "invoice_items": 0,
+        "orphan_invoices": 0,
+        "unmatched_faccab_invoices": 0,
+    }
 
     stats["sales"] = count_rows(cur, sale_ids, (company_id,))
     cur.execute(
@@ -104,6 +111,8 @@ def delete_legacy_sales(cur, company_id: str, dry_run: bool) -> dict[str, int]:
     stats["invoice_items"] = int(cur.fetchone()["c"])
 
     if dry_run:
+        stats["orphan_invoices"] = delete_orphan_legacy_invoices(cur, company_id, dry_run=True)
+        stats["unmatched_faccab_invoices"] = delete_unmatched_faccab_invoices(cur, company_id, dry_run=True)
         return stats
 
     cur.execute(
@@ -131,7 +140,88 @@ def delete_legacy_sales(cur, company_id: str, dry_run: bool) -> dict[str, int]:
         (company_id,),
     )
     cur.execute(f"DELETE FROM public.sales WHERE id IN ({sale_ids})", (company_id,))
+    stats["orphan_invoices"] = delete_orphan_legacy_invoices(cur, company_id, dry_run=False)
+    stats["unmatched_faccab_invoices"] = delete_unmatched_faccab_invoices(cur, company_id, dry_run=False)
     return stats
+
+
+def delete_unmatched_faccab_invoices(cur, company_id: str, dry_run: bool) -> int:
+    """Facturas faccab sin cita (promote_legacy_unmatched_faccab)."""
+    cur.execute(
+        """
+        SELECT COUNT(*) AS c
+        FROM public.invoices i
+        WHERE i.company_id = %s
+          AND i.notes LIKE 'Factura legacy sin cita%%'
+        """,
+        (company_id,),
+    )
+    count = int(cur.fetchone()["c"])
+    if dry_run or count == 0:
+        return count
+
+    cur.execute(
+        """
+        DELETE FROM public.invoice_items
+        WHERE invoice_id IN (
+          SELECT i.id FROM public.invoices i
+          WHERE i.company_id = %s AND i.notes LIKE 'Factura legacy sin cita%%'
+        )
+        """,
+        (company_id,),
+    )
+    cur.execute(
+        """
+        DELETE FROM public.invoices
+        WHERE company_id = %s AND notes LIKE 'Factura legacy sin cita%%'
+        """,
+        (company_id,),
+    )
+    return count
+
+
+def delete_orphan_legacy_invoices(cur, company_id: str, dry_run: bool) -> int:
+    """Facturas legacy automáticas sin ticket vinculado (restos de importaciones fallidas)."""
+    cur.execute(
+        """
+        SELECT COUNT(*) AS c
+        FROM public.invoices i
+        WHERE i.company_id = %s
+          AND i.notes LIKE 'Factura legacy automática%%'
+          AND NOT EXISTS (
+            SELECT 1 FROM public.sales s WHERE s.invoice_id = i.id
+          )
+        """,
+        (company_id,),
+    )
+    count = int(cur.fetchone()["c"])
+
+    if dry_run or count == 0:
+        return count
+
+    cur.execute(
+        """
+        DELETE FROM public.invoice_items
+        WHERE invoice_id IN (
+          SELECT i.id
+          FROM public.invoices i
+          WHERE i.company_id = %s
+            AND i.notes LIKE 'Factura legacy automática%%'
+            AND NOT EXISTS (SELECT 1 FROM public.sales s WHERE s.invoice_id = i.id)
+        )
+        """,
+        (company_id,),
+    )
+    cur.execute(
+        """
+        DELETE FROM public.invoices
+        WHERE company_id = %s
+          AND notes LIKE 'Factura legacy automática%%'
+          AND NOT EXISTS (SELECT 1 FROM public.sales s WHERE s.invoice_id = public.invoices.id)
+        """,
+        (company_id,),
+    )
+    return count
 
 
 def delete_legacy_appointments(cur, company_id: str, dry_run: bool) -> dict[str, int]:

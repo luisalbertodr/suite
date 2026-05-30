@@ -147,7 +147,8 @@ export const AgendaEmployeeHoursConfig: React.FC = () => {
         <CardDescription>
           Activa o desactiva cada profesional en la vista de agenda, define la posición de su columna (número más
           bajo = más a la izquierda) y el horario. Los inactivos se pueden editar y reactivar aquí. Por defecto aplica
-          el horario del centro; «Horario personalizado» y las excepciones acotan disponibilidad.
+          el horario del centro; «Horario personalizado» marca tramos sombreados (orientativo). Las excepciones «No
+          disponible» sí impiden reservar en esos tramos.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-8">

@@ -6,6 +6,7 @@ import type {
   LegacyImportRun,
   LegacyImportStatus,
 } from '@/lib/legacyImportSteps';
+import { legacyImportWorkerCommand } from '@/lib/legacyImportSteps';
 
 type LegacyImportAction =
   | { action: 'getStatus' }
@@ -130,7 +131,10 @@ export function useLegacyImport() {
           workerCommand: string;
         }>({ action: 'createRun', mode, options }, companyId);
         await refresh();
-        return { runId: res.run.id, workerCommand: res.workerCommand };
+        return {
+          runId: res.run.id,
+          workerCommand: res.workerCommand || legacyImportWorkerCommand(res.run.id),
+        };
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Error al crear ejecución');
         throw e;

@@ -85,7 +85,7 @@ export const AgendaCenterHoursConfig: React.FC = () => {
         <CardTitle>Horario del centro (agenda)</CardTitle>
         <CardDescription>
           Tramos abiertos por día. Día cerrado = sin tramos. Los huecos fuera de horario aparecen sombreados en la
-          agenda.
+          agenda (orientativo; aún puedes crear citas excepcionales en esos tramos).
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

@@ -1,7 +1,11 @@
 import React from 'react';
 import { Card, CardContent } from '@/components/ui/card';
-import { useQuery } from '@tanstack/react-query';
-import { fetchAppointmentsForCustomer } from '@/lib/agendaCustomerAppointments';
+import { Button } from '@/components/ui/button';
+import { useInfiniteQuery } from '@tanstack/react-query';
+import {
+  CUSTOMER_APPOINTMENTS_PAGE_SIZE,
+  fetchAppointmentsForCustomer,
+} from '@/lib/agendaCustomerAppointments';
 import { Calendar, Clock, User } from 'lucide-react';
 
 interface Props {
@@ -9,14 +13,30 @@ interface Props {
 }
 
 export const ClienteCitasTab: React.FC<Props> = ({ customerId }) => {
-  const { data: appointments, isLoading } = useQuery({
+  const {
+    data,
+    isLoading,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+  } = useInfiniteQuery({
     queryKey: ['customer_appointments', customerId],
-    queryFn: () => fetchAppointmentsForCustomer(customerId),
+    queryFn: ({ pageParam = 0 }) =>
+      fetchAppointmentsForCustomer(customerId, {
+        limit: CUSTOMER_APPOINTMENTS_PAGE_SIZE,
+        offset: pageParam,
+        includeItems: false,
+      }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, _pages, lastPageParam) =>
+      lastPage.hasMore ? lastPageParam + CUSTOMER_APPOINTMENTS_PAGE_SIZE : undefined,
   });
+
+  const appointments = data?.pages.flatMap((p) => p.rows) ?? [];
 
   if (isLoading) return <div className="text-center py-8 text-muted-foreground">Cargando...</div>;
 
-  if (!appointments?.length) {
+  if (!appointments.length) {
     return <div className="text-center py-8 text-muted-foreground">No hay citas registradas</div>;
   }
 
@@ -40,7 +60,7 @@ export const ClienteCitasTab: React.FC<Props> = ({ customerId }) => {
 
   return (
     <div className="space-y-3">
-      <h3 className="text-lg font-semibold">Citas ({appointments.length})</h3>
+      <h3 className="text-lg font-semibold">Citas ({appointments.length}{hasNextPage ? '+' : ''})</h3>
       {appointments.map((apt) => (
         <Card key={apt.id}>
           <CardContent className="pt-4">
@@ -61,14 +81,27 @@ export const ClienteCitasTab: React.FC<Props> = ({ customerId }) => {
                   )}
                 </div>
               </div>
-              <span className={`text-xs px-2 py-1 rounded-full ${getStatusColor(apt.status)}`}>
-                {getStatusLabel(apt.status)}
+              <span className={`text-xs px-2 py-1 rounded-full ${getStatusColor(apt.status ?? '')}`}>
+                {getStatusLabel(apt.status ?? '')}
               </span>
             </div>
             {apt.description && <p className="text-sm text-muted-foreground mt-2">{apt.description}</p>}
           </CardContent>
         </Card>
       ))}
+      {hasNextPage && (
+        <div className="flex justify-center pt-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={isFetchingNextPage}
+            onClick={() => fetchNextPage()}
+          >
+            {isFetchingNextPage ? 'Cargando…' : 'Cargar citas anteriores'}
+          </Button>
+        </div>
+      )}
     </div>
   );
 };

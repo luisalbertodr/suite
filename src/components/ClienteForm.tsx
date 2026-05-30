@@ -110,6 +110,7 @@ export const ClienteForm: React.FC<ClienteFormProps> = ({ customer, onClose }) =
   const [openDoc, setOpenDoc] = useState(false);
   const [openFact, setOpenFact] = useState(false);
   const [openBonos, setOpenBonos] = useState(false);
+  const [openActividad, setOpenActividad] = useState(false);
 
   const { register, handleSubmit, setValue, watch, formState: { errors } } = useForm<FormData>({
     defaultValues: {
@@ -213,10 +214,18 @@ export const ClienteForm: React.FC<ClienteFormProps> = ({ customer, onClose }) =
       </div>
 
       {isExisting && customer?.id && (
-        <section className="space-y-2">
-          <h2 className="text-lg font-semibold">Actividad por día</h2>
-          <ClienteDailyScrollView customerId={customer.id} className="max-w-full" />
-        </section>
+        <Section
+          title="Actividad por día"
+          icon={Calendar}
+          open={openActividad}
+          onOpenChange={setOpenActividad}
+        >
+          {openActividad ? (
+            <ClienteDailyScrollView customerId={customer.id} className="max-w-full" />
+          ) : (
+            <p className="text-sm text-muted-foreground py-2">Abre esta sección para ver el historial.</p>
+          )}
+        </Section>
       )}
 
       <div className="space-y-2">
@@ -245,7 +254,11 @@ export const ClienteForm: React.FC<ClienteFormProps> = ({ customer, onClose }) =
               <ClienteHistorialTab customerId={customer.id} />
             </Section>
             <Section title="Citas" icon={Calendar} open={openCitas} onOpenChange={setOpenCitas}>
-              <ClienteCitasTab customerId={customer.id} />
+              {openCitas ? (
+                <ClienteCitasTab customerId={customer.id} />
+              ) : (
+                <p className="text-sm text-muted-foreground py-2">Abre esta sección para ver las citas.</p>
+              )}
             </Section>
             <Section
               title="Documentación"

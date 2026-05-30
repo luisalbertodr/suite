@@ -252,7 +252,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
     .join(' · ') || null;
 
   const { data: linkedInvoice } = useQuery({
-    queryKey: ['appointment-linked-invoice', primarySale?.invoice_id, appointmentSales.map((s) => s.invoice_id).join(',')],
+    queryKey: ['appointment-linked-invoice', appointment.id, appointmentSales.map((s) => s.invoice_id).join(',')],
     enabled: appointmentSales.some((s) => s.invoice_id),
     queryFn: async () => {
       const invoiceId = appointmentSales.find((s) => s.invoice_id)?.invoice_id;

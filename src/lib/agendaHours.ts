@@ -169,7 +169,7 @@ export function slotBookableForAgenda(
   center: AgendaDayHoursMap,
   employeeWeekly: AgendaDayHoursMap | null | undefined,
   employeeBlocks: AgendaUnavailabilityEntry[],
-): { centerOpen: boolean; employeeOpen: boolean; bookable: boolean } {
+): { centerOpen: boolean; employeeOpen: boolean; blocked: boolean; bookable: boolean; schedulingAllowed: boolean } {
   const dayKey = weekdayKeyFromYmd(dateYmd);
   const centerSegs = center[dayKey] ?? [];
   const empSegs = employeeDaySegments(dayKey, center, employeeWeekly);
@@ -185,7 +185,10 @@ export function slotBookableForAgenda(
   return {
     centerOpen,
     employeeOpen: employeeOpen && !blocked,
+    blocked,
     bookable,
+    /** Fuera de horario habitual sigue permitido; solo bloquean ausencias explícitas. */
+    schedulingAllowed: !blocked,
   };
 }
 

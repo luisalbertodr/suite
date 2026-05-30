@@ -30,7 +30,7 @@ import {
 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
-import { ArrowLeft, ChevronLeft, ChevronRight, Download, FileText, Filter, Receipt, Search } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, Download, FileText, Filter, MoreHorizontal, Receipt, Search } from 'lucide-react';
 
 import { format, subDays } from 'date-fns';
 
@@ -45,17 +45,17 @@ import {
 
   isSchemaColumnError,
 
-  buildInvoicePrefillFromSale,
-
   TPV_SALE_INVOICE_PREFILL_KEY,
 
 } from '@/lib/appointmentSales';
 
+import { issueInvoiceFromSale } from '@/lib/tpvSaleOperations';
 
+import { SaleTicketManageDialog } from '@/components/tpv/SaleTicketManageDialog';
+
+import { useToast } from '@/hooks/use-toast';
 
 const PAGE_SIZE = 50;
-
-
 
 type SaleRow = {
 
@@ -192,6 +192,7 @@ function itemSummaryFromNotes(notes: string | null | undefined): string {
 export const SalesHistory: React.FC<SalesHistoryProps> = ({ onBack }) => {
 
   const navigate = useNavigate();
+  const { toast } = useToast();
 
   const { companyId } = useCompanyFilter();
   const { isMultiEntity, billingCompanies, companyLabels } = useWorkCenter();
@@ -209,6 +210,8 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ onBack }) => {
   const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>('all');
   const [billingCompanyFilter, setBillingCompanyFilter] = useState<BillingCompanyFilter>('all');
   const [page, setPage] = useState(0);
+  const [manageSaleId, setManageSaleId] = useState<string | null>(null);
+  const [invoicingSaleId, setInvoicingSaleId] = useState<string | null>(null);
 
 
 
@@ -360,56 +363,6 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ onBack }) => {
 
 
 
-  const resolveCustomerId = async (sale: SaleRow): Promise<string | null> => {
-
-    const fromNotes = parseAgendaSaleNotes(sale.notes)?.customer_id;
-
-    if (fromNotes) return String(fromNotes);
-
-    if (sale.customer_id) return String(sale.customer_id);
-
-    if (!sale.customer_name?.trim() || !companyId) return null;
-
-    const name = sale.customer_name.trim();
-
-    const { data } = await supabase
-
-      .from('customers')
-
-      .select('id')
-
-      .eq('company_id', companyId)
-
-      .ilike('name', name)
-
-      .limit(1)
-
-      .maybeSingle();
-
-    return data?.id ? String(data.id) : null;
-
-  };
-
-
-
-  const fetchSaleItems = async (saleId: string) => {
-
-    const { data, error: itemsError } = await supabase
-
-      .from('sale_items')
-
-      .select('description, quantity, unit_price, total_price')
-
-      .eq('sale_id', saleId);
-
-    if (itemsError) throw itemsError;
-
-    return data ?? [];
-
-  };
-
-
-
   const openInvoiceFromSale = async (sale: SaleRow) => {
 
     if (sale.invoice_id) {
@@ -420,47 +373,63 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ onBack }) => {
 
     }
 
-    const customerId = await resolveCustomerId(sale);
+    if (!companyId) return;
 
-    const appointmentId = resolveAppointmentId(sale);
+    setInvoicingSaleId(sale.id);
 
-    const saleItems = await fetchSaleItems(sale.id);
+    try {
 
-    const prefill = buildInvoicePrefillFromSale(
+      const result = await issueInvoiceFromSale(sale.id, companyId);
 
-      {
+      if (result.mode === 'created') {
 
-        id: sale.id,
+        toast({
 
-        ticket_number: sale.ticket_number,
+          title: 'Factura emitida',
 
-        total_amount: Number(sale.total_amount ?? 0),
+          description: result.invoiceNumber
 
-        status: sale.status ?? 'completed',
+            ? `Factura ${result.invoiceNumber} vinculada al ticket ${sale.ticket_number}`
 
-        created_at: sale.created_at,
+            : 'Factura creada y vinculada al ticket.',
 
-        customer_id: customerId,
+        });
 
-        appointment_id: appointmentId,
+        navigate(`/facturacion?invoice=${result.invoiceId}`);
 
-        invoice_id: null,
+        return;
 
-        notes: sale.notes ?? null,
+      }
 
-      },
+      sessionStorage.setItem(TPV_SALE_INVOICE_PREFILL_KEY, JSON.stringify(result.prefill));
 
-      saleItems,
+      toast({
 
-      customerId,
+        title: 'Completa la factura',
 
-      appointmentId,
+        description: result.reason,
 
-    );
+      });
 
-    sessionStorage.setItem(TPV_SALE_INVOICE_PREFILL_KEY, JSON.stringify(prefill));
+      navigate('/facturacion');
 
-    navigate('/facturacion');
+    } catch (e) {
+
+      toast({
+
+        title: 'Error al facturar',
+
+        description: e instanceof Error ? e.message : 'Error desconocido',
+
+        variant: 'destructive',
+
+      });
+
+    } finally {
+
+      setInvoicingSaleId(null);
+
+    }
 
   };
 
@@ -556,7 +525,7 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ onBack }) => {
 
             <p className="text-sm text-gray-600 mt-1">
 
-              Por defecto últimos 30 días · {PAGE_SIZE} por página
+              Por defecto últimos 30 días · {PAGE_SIZE} por página · Ticket = cobro TPV; factura = documento fiscal (se emite automáticamente si hay cliente vinculado)
 
             </p>
 
@@ -882,6 +851,8 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ onBack }) => {
 
                       <TableHead>Factura</TableHead>
 
+                      <TableHead className="w-[120px]">Acciones</TableHead>
+
                     </TableRow>
 
                   </TableHeader>
@@ -930,13 +901,25 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ onBack }) => {
 
                                 ? 'bg-green-100 text-green-800'
 
-                                : 'bg-yellow-100 text-yellow-800'
+                                : sale.status === 'cancelled'
+
+                                  ? 'bg-red-100 text-red-800'
+
+                                  : 'bg-yellow-100 text-yellow-800'
 
                             }`}
 
                           >
 
-                            {sale.status === 'completed' ? 'Completada' : sale.status}
+                            {sale.status === 'completed'
+
+                                ? 'Completada'
+
+                                : sale.status === 'cancelled'
+
+                                  ? 'Anulada'
+
+                                  : sale.status}
 
                           </span>
 
@@ -1018,13 +1001,15 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ onBack }) => {
 
                               className="h-7 text-xs"
 
+                              disabled={invoicingSaleId === sale.id}
+
                               onClick={() => void openInvoiceFromSale(sale)}
 
                             >
 
                               <Receipt className="w-3 h-3 mr-1" />
 
-                              Facturar
+                              {invoicingSaleId === sale.id ? '…' : 'Facturar'}
 
                             </Button>
 
@@ -1033,6 +1018,26 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ onBack }) => {
                             '—'
 
                           )}
+
+                        </TableCell>
+
+                        <TableCell>
+
+                          <Button
+
+                            variant="ghost"
+
+                            size="sm"
+
+                            className="h-7 text-xs"
+
+                            onClick={() => setManageSaleId(sale.id)}
+
+                          >
+
+                            <MoreHorizontal className="w-4 h-4" />
+
+                          </Button>
 
                         </TableCell>
 
@@ -1089,6 +1094,16 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ onBack }) => {
         </CardContent>
 
       </Card>
+
+      <SaleTicketManageDialog
+
+        saleId={manageSaleId}
+
+        open={!!manageSaleId}
+
+        onOpenChange={(open) => !open && setManageSaleId(null)}
+
+      />
 
     </div>
 
