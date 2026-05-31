@@ -127,7 +127,7 @@ export async function processSplitPayment(
 
   const saleItems = input.group.map((item) => ({
     sale_id: sale!.id,
-    company_id: input.context.companyId,
+    company_id: input.context.hostCompanyId,
     article_id: item.variationId ? null : item.id.match(/^[0-9a-f-]{36}$/i) ? item.id : null,
     variation_id: item.variationId || null,
     description: item.name,

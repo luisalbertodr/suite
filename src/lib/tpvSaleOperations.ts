@@ -160,7 +160,7 @@ export async function deleteSaleTicket(saleId: string): Promise<void> {
 
 export async function resolveSaleCustomerId(
   sale: Pick<AppointmentSaleInfo, 'customer_id' | 'notes' | 'customer_name'>,
-  companyId: string,
+  catalogCompanyId: string,
 ): Promise<string | null> {
   const fromNotes = parseAgendaSaleNotes(sale.notes)?.customer_id;
   if (fromNotes) return String(fromNotes);
@@ -170,7 +170,7 @@ export async function resolveSaleCustomerId(
   const { data } = await supabase
     .from('customers')
     .select('id')
-    .eq('company_id', companyId)
+    .eq('company_id', catalogCompanyId)
     .ilike('name', name)
     .limit(1)
     .maybeSingle();
@@ -184,11 +184,16 @@ export type IssueInvoiceResult =
 /** Emite factura automática si hay cliente identificado; si no, devuelve prefill para el formulario. */
 export async function issueInvoiceFromSale(
   saleId: string,
-  companyId: string,
+  catalogCompanyId?: string | null,
 ): Promise<IssueInvoiceResult> {
   const detail = await fetchSaleTicketDetail(saleId);
   if (!detail) throw new Error('Ticket no encontrado');
   const { sale, items } = detail;
+
+  const billingCompanyId = sale.company_id ?? catalogCompanyId;
+  if (!billingCompanyId) throw new Error('No se pudo determinar la empresa emisora del ticket');
+
+  const customerCatalogId = catalogCompanyId ?? billingCompanyId;
 
   if (sale.invoice_id) {
     return { mode: 'created', invoiceId: sale.invoice_id, invoiceNumber: '' };
@@ -200,7 +205,7 @@ export async function issueInvoiceFromSale(
     throw new Error('El ticket no tiene líneas de venta');
   }
 
-  const customerId = await resolveSaleCustomerId(sale, companyId);
+  const customerId = await resolveSaleCustomerId(sale, customerCatalogId);
   if (!customerId) {
     return {
       mode: 'manual_required',
@@ -210,7 +215,7 @@ export async function issueInvoiceFromSale(
   }
 
   const today = new Date().toISOString().split('T')[0];
-  const number = await generateInvoiceNumber(companyId);
+  const number = await generateInvoiceNumber(billingCompanyId);
 
   const subtotal =
     sale.subtotal != null && sale.subtotal > 0
@@ -228,7 +233,7 @@ export async function issueInvoiceFromSale(
   const { data: invoice, error: invError } = await supabase
     .from('invoices')
     .insert({
-      company_id: companyId,
+      company_id: billingCompanyId,
       customer_id: customerId,
       number,
       issue_date: today,

@@ -35,12 +35,10 @@ import {
   formatMetaSyncErrorsSummary,
   type MetaSyncResponse,
 } from '@/hooks/useMetaConfig';
-import { useWorkCenter } from '@/hooks/useWorkCenter';
 import {
   useMarketingLeadViewedSet,
   useMarkMarketingLeadViewed,
 } from '@/hooks/useMarketingUnread';
-import { BillingEntityTabs, type BillingEntityTabValue } from '@/components/BillingEntityTabs';
 import {
   MarketingFiltersPopover,
   DEFAULT_MARKETING_FILTERS,
@@ -86,25 +84,14 @@ export const Marketing: React.FC = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
   const { companyId, loading: companyLoading } = useCompanyFilter();
-  const { isMultiEntity, billingCompanies, hostCompany } = useWorkCenter();
-  const [marketingBillingTab, setMarketingBillingTab] = useState<BillingEntityTabValue>('');
 
-  useEffect(() => {
-    if (marketingBillingTab || !isMultiEntity) return;
-    const defaultId = hostCompany?.id ?? billingCompanies[0]?.id ?? companyId;
-    if (defaultId) setMarketingBillingTab(defaultId);
-  }, [marketingBillingTab, isMultiEntity, hostCompany?.id, billingCompanies, companyId]);
-
-  const scopeCompanyId =
-    isMultiEntity && marketingBillingTab ? marketingBillingTab : companyId;
-
-  const { leads, isLoading: leadsLoading, refetch, moveLeadToStage } = useMarketingLeads(scopeCompanyId);
-  const { stages, isLoading: stagesLoading } = useMarketingStages(scopeCompanyId);
-  const { fields, isLoading: fieldsLoading } = useMarketingFieldConfig(scopeCompanyId);
+  const { leads, isLoading: leadsLoading, refetch, moveLeadToStage } = useMarketingLeads(companyId);
+  const { stages, isLoading: stagesLoading } = useMarketingStages(companyId);
+  const { fields, isLoading: fieldsLoading } = useMarketingFieldConfig(companyId);
   const { data: notesIndex } = useMarketingLeadNotesIndex();
   const { index: customerIndex } = useCustomerLookup();
   const { config: metaConfig, forms: metaForms, syncNow } = useMetaConfig();
-  const { viewedLeadIds } = useMarketingLeadViewedSet(scopeCompanyId ?? null);
+  const { viewedLeadIds } = useMarketingLeadViewedSet(companyId ?? null);
   const markLeadViewed = useMarkMarketingLeadViewed();
 
   const [search, setSearch] = useState('');
@@ -423,16 +410,6 @@ export const Marketing: React.FC = () => {
             <div>
               <CardTitle className="text-2xl">Marketing</CardTitle>
               <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
-                {isMultiEntity && marketingBillingTab ? (
-                  <BillingEntityTabs
-                    value={marketingBillingTab}
-                    onChange={setMarketingBillingTab}
-                    className="h-7"
-                  />
-                ) : null}
-                {isMultiEntity && marketingBillingTab ? (
-                  <span className="hidden sm:inline text-border">|</span>
-                ) : null}
                 <span>
                   <span className="font-semibold text-foreground">{totalLeads}</span>{' '}
                   {totalLeads === 1 ? 'cliente potencial' : 'clientes potenciales'}

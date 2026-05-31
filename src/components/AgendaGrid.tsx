@@ -88,6 +88,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
 }) => {
   const scrollRootRef = React.useRef<HTMLDivElement>(null);
   const stickyHeaderRef = React.useRef<HTMLDivElement>(null);
+  const lastScrollTopRef = React.useRef(0);
   const lastHandledGoTodayRef = React.useRef(0);
   const lastHandledScrollToTimeRef = React.useRef(0);
   const scrollSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -261,9 +262,17 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
   const flushScrollToStorage = React.useCallback(() => {
     if (!persistUserId || !viewDateYmd) return;
     const el = scrollRootRef.current;
-    if (!el) return;
+    let scrollTop: number;
+    if (el) {
+      scrollTop = el.scrollTop;
+      lastScrollTopRef.current = scrollTop;
+    } else {
+      scrollTop = lastScrollTopRef.current;
+      // Desmontaje sin DOM: no guardar 0 y borrar la posición previa.
+      if (scrollTop <= 0) return;
+    }
     const prev = loadAgendaViewPersisted(persistUserId);
-    saveAgendaViewPersisted(persistUserId, mergePersistedScroll(prev, viewDateYmd, el.scrollTop));
+    saveAgendaViewPersisted(persistUserId, mergePersistedScroll(prev, viewDateYmd, scrollTop));
   }, [persistUserId, viewDateYmd]);
 
   React.useLayoutEffect(() => {
@@ -272,6 +281,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
     if (!el) return;
     const p = loadAgendaViewPersisted(persistUserId);
     const top = p?.scrollByYmd[viewDateYmd] ?? 0;
+    lastScrollTopRef.current = top;
     const run = () => {
       if (!scrollRootRef.current) return;
       scrollRootRef.current.scrollTop = top;
@@ -336,6 +346,9 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
     const el = scrollRootRef.current;
     if (!el) return;
     const onScroll = () => {
+      if (scrollRootRef.current) {
+        lastScrollTopRef.current = scrollRootRef.current.scrollTop;
+      }
       if (scrollSaveTimerRef.current) clearTimeout(scrollSaveTimerRef.current);
       scrollSaveTimerRef.current = setTimeout(() => flushScrollToStorage(), 220);
     };
@@ -423,7 +436,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
                 onDrop={(e) => handleDrop(e, appointment.employeeId, appointment.startTime)}
               >
                 <div
-                  className={`relative h-full p-0.5 text-[11px] overflow-hidden rounded border-2 border-gray-400 cursor-move ${employees[employeeIndex]?.color}`}
+                  className={`relative h-full p-0.5 text-[11px] overflow-hidden rounded border-2 border-border dark:border-border cursor-move ${employees[employeeIndex]?.color}`}
                   draggable
                   onDragStart={(e) => handleDragStart(e, appointment)}
                   onDragEnd={handleDragEnd}
@@ -460,7 +473,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
                       title="Tramo sin reserva de tiempo (solo cobros u holgura)"
                     />
                   )}
-                  <div className="relative z-[1] bg-white/92 rounded px-1.5 py-1 text-gray-800 font-medium h-full leading-tight overflow-hidden">
+                  <div className="relative z-[1] bg-card/95 dark:bg-card/90 rounded px-1.5 py-1 text-foreground font-medium h-full leading-tight overflow-hidden">
                     <div className="flex items-center justify-between mb-0.5 gap-1">
                       {visibleFields.clientName && (
                         <div className="font-semibold truncate flex-1">{appointment.clientName}</div>
@@ -550,23 +563,23 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
               <div key={slot.time} className="contents">
                 {/* Columna de tiempo — etiqueta sobre la línea del slot */}
                 <div
-                  className={`sticky left-0 z-[26] relative border-r border-gray-300 shadow-[2px_0_4px_rgba(0,0,0,0.06)] ${
+                  className={`sticky left-0 z-[26] relative border-r border-border shadow-[2px_0_4px_rgba(0,0,0,0.06)] ${
                     isHourMark
-                      ? 'border-t-2 border-gray-400 bg-gray-100'
-                      : 'border-t border-gray-200 bg-gray-50'
+                      ? 'border-t-2 border-border bg-muted'
+                      : 'border-t border-border bg-muted/60'
                   } ${timeShade ? UNAVAILABLE_TIME_GUTTER : ''}`}
                   style={{ height: `${cellHeight}px`, minHeight: `${cellHeight}px` }}
                 >
                   <span
                     className={`absolute left-0 right-0 top-0 z-[1] -translate-y-1/2 text-center leading-none px-2.5 ${
                       isHourMark
-                        ? 'text-sm font-semibold text-gray-700 tabular-nums'
-                        : 'text-xs font-medium text-gray-500 tabular-nums'
+                        ? 'text-sm font-semibold text-foreground tabular-nums'
+                        : 'text-xs font-medium text-muted-foreground tabular-nums'
                     } ${timeShade ? '!text-neutral-700 dark:!text-neutral-300' : ''}`}
                   >
                     <span
                       className={`inline-block px-1.5 ${
-                        isHourMark ? 'bg-gray-100' : 'bg-gray-50'
+                        isHourMark ? 'bg-muted' : 'bg-muted/60'
                       } ${timeShade ? 'bg-neutral-300/95 dark:bg-neutral-800/95' : ''}`}
                     >
                       {slot.time}
@@ -593,17 +606,17 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
                   return (
                     <div
                       key={`${employee.id}-${slot.time}`}
-                      className={`relative border-r border-gray-300 transition-colors ${
-                        isHourMark ? 'border-t-2 border-gray-400' : 'border-t border-gray-200'
+                      className={`relative border-r border-border transition-colors ${
+                        isHourMark ? 'border-t-2 border-border' : 'border-t border-border'
                       } ${
                         isOccupied
-                          ? 'bg-gray-50'
+                          ? 'bg-muted/50'
                           : shade
                             ? blocked
                               ? UNAVAILABLE_CELL_BLOCKED
-                              : `${UNAVAILABLE_CELL} cursor-pointer hover:bg-blue-50/70 dark:hover:bg-blue-950/30`
-                            : 'bg-white cursor-pointer hover:bg-blue-50'
-                      } ${isHighlighted ? 'bg-blue-100 border-blue-300' : ''}`}
+                              : `${UNAVAILABLE_CELL} cursor-pointer hover:bg-accent/50`
+                            : 'bg-card cursor-pointer hover:bg-accent/40'
+                      } ${isHighlighted ? 'bg-blue-100 dark:bg-blue-950/40 border-blue-300 dark:border-blue-700' : ''}`}
                       style={{ height: `${cellHeight}px` }}
                       title={
                         shade && canSchedule

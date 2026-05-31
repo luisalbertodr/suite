@@ -7,7 +7,9 @@ import { useTheme } from 'next-themes';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
-import { CompanySwitcher } from './CompanySwitcher';
+import { useWorkCenter } from '@/hooks/useWorkCenter';
+import { useBillingScopeRoute } from '@/hooks/useBillingScopeRoute';
+import { BillingScopeToggle } from '@/components/BillingScopeToggle';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,16 +23,19 @@ export const TopBar: React.FC = () => {
   const { user, signOut } = useAuth();
   const { theme, setTheme } = useTheme();
   const { companyId, loading: companyLoading } = useCompanyFilter();
+  const { catalogHostCompanyId, isMultiEntity, loading: wcLoading } = useWorkCenter();
+  const { enabled: billingScopeEnabled } = useBillingScopeRoute();
+  const brandCompanyId = catalogHostCompanyId ?? companyId;
   const [currentDateTime, setCurrentDateTime] = useState(new Date());
 
   const { data: company } = useQuery({
-    queryKey: ['company', companyId, 'topbar-brand'],
+    queryKey: ['company', brandCompanyId, 'topbar-brand'],
     queryFn: async () => {
-      if (!companyId) return null;
+      if (!brandCompanyId) return null;
       const { data, error } = await supabase
         .from('companies')
         .select('name, logo_url')
-        .eq('id', companyId)
+        .eq('id', brandCompanyId)
         .single();
       if (error) {
         console.error('Error fetching company for top bar:', error);
@@ -38,7 +43,7 @@ export const TopBar: React.FC = () => {
       }
       return data as { name: string; logo_url: string | null };
     },
-    enabled: !!companyId && !companyLoading,
+    enabled: !!brandCompanyId && !companyLoading,
   });
 
   useEffect(() => {
@@ -67,9 +72,13 @@ export const TopBar: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
-          <CompanySwitcher />
+          {isMultiEntity && !wcLoading && (
+            <BillingScopeToggle disabled={!billingScopeEnabled} />
+          )}
 
           <button
+            type="button"
+            onClick={toggleTheme}
             className="relative p-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
             aria-label="Cambiar tema"
           >

@@ -16,9 +16,9 @@ import { VerifactuQueueMonitor } from './VerifactuQueueMonitor';
 import { Plus, Search, FileText, Settings, History, File, ListOrdered, ChevronLeft, ChevronRight } from 'lucide-react';
 import { format } from 'date-fns';
 import { TPV_SALE_INVOICE_PREFILL_KEY } from '@/lib/appointmentSales';
+import { buildInvoiceSearchOrFilter, searchCustomerIdsByIlike } from '@/lib/customerSearch';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { useWorkCenter } from '@/hooks/useWorkCenter';
-import { BillingEntityTabs, billingCompanyIdsForTab, type BillingEntityTabValue } from '@/components/BillingEntityTabs';
 
 const PAGE_SIZE = 50;
 
@@ -54,9 +54,8 @@ export const Facturas: React.FC = () => {
   const [activeTab, setActiveTab] = useState('invoices');
   const [budgetData, setBudgetData] = useState<any>(null);
   const { companyId, loading: companyLoading } = useCompanyFilter();
-  const { isMultiEntity, billingCompanies, catalogHostCompanyId } = useWorkCenter();
+  const { catalogHostCompanyId } = useWorkCenter();
   const catalogCompanyId = catalogHostCompanyId ?? companyId;
-  const [invoiceBillingTab, setInvoiceBillingTab] = useState<BillingEntityTabValue>('');
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedSearch(searchTerm.trim()), 350);
@@ -64,19 +63,10 @@ export const Facturas: React.FC = () => {
   }, [searchTerm]);
 
   useEffect(() => {
-    if (!isMultiEntity || !companyId) return;
-    setInvoiceBillingTab(companyId);
-  }, [companyId, isMultiEntity]);
-
-  useEffect(() => {
     setPage(0);
-  }, [debouncedSearch, companyId, invoiceBillingTab]);
+  }, [debouncedSearch, companyId]);
 
-  const billingCompanyIds = billingCompanyIdsForTab(
-    isMultiEntity && invoiceBillingTab ? invoiceBillingTab : 'all',
-    companyId,
-    billingCompanies,
-  );
+  const billingCompanyIds = companyId ? [companyId] : [];
 
   const loadInvoiceById = useCallback(async (invoiceId: string) => {
     if (!companyId) return null;
@@ -106,18 +96,6 @@ export const Facturas: React.FC = () => {
 
       const from = page * PAGE_SIZE;
       const to = from + PAGE_SIZE - 1;
-      const st = debouncedSearch.replace(/%/g, '');
-
-      let customerIds: string[] = [];
-      if (st.length >= 2) {
-        const { data: matchedCustomers } = await supabase
-          .from('customers')
-          .select('id')
-          .eq('company_id', catalogCompanyId)
-          .or(`name.ilike.%${st}%,email.ilike.%${st}%,tax_id.ilike.%${st}%,phone.ilike.%${st}%`)
-          .limit(30);
-        customerIds = (matchedCustomers ?? []).map((c) => c.id);
-      }
 
       let query = supabase
         .from('invoices')
@@ -125,11 +103,14 @@ export const Facturas: React.FC = () => {
         .in('company_id', billingCompanyIds)
         .order('created_at', { ascending: false });
 
-      if (st) {
-        if (customerIds.length > 0) {
-          query = query.or(`number.ilike.%${st}%,customer_id.in.(${customerIds.join(',')})`);
-        } else {
-          query = query.ilike('number', `%${st}%`);
+      if (debouncedSearch) {
+        const customerIds =
+          catalogCompanyId
+            ? await searchCustomerIdsByIlike(supabase, catalogCompanyId, debouncedSearch)
+            : [];
+        const searchOr = buildInvoiceSearchOrFilter(debouncedSearch, customerIds);
+        if (searchOr) {
+          query = query.or(searchOr);
         }
       }
 
@@ -291,13 +272,6 @@ export const Facturas: React.FC = () => {
         <div>
           <h1 className="text-3xl font-bold">Facturas</h1>
           <p className="text-gray-600">Gestiona tus facturas y su integración con Verifactu</p>
-          {isMultiEntity && invoiceBillingTab && (
-            <BillingEntityTabs
-              value={invoiceBillingTab}
-              onChange={setInvoiceBillingTab}
-              className="mt-3"
-            />
-          )}
         </div>
         <Button onClick={() => setShowForm(true)}>
           <Plus className="w-4 h-4 mr-2" />

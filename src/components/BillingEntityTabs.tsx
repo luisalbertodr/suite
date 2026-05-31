@@ -1,9 +1,7 @@
 import React from 'react';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useWorkCenter } from '@/hooks/useWorkCenter';
-import { companyDisplayName } from '@/lib/billingCompany';
+import { BillingEntityToggle, type BillingEntityToggleValue } from '@/components/BillingEntityToggle';
 
-export type BillingEntityTabValue = 'all' | string;
+export type BillingEntityTabValue = BillingEntityToggleValue;
 
 type BillingEntityTabsProps = {
   value: BillingEntityTabValue;
@@ -19,32 +17,15 @@ export const BillingEntityTabs: React.FC<BillingEntityTabsProps> = ({
   showAllTab = false,
   allLabel = 'Todas',
   className,
-}) => {
-  const { isMultiEntity, billingCompanies, loading } = useWorkCenter();
-
-  if (loading || !isMultiEntity || billingCompanies.length <= 1) return null;
-
-  return (
-    <Tabs
-      value={value}
-      onValueChange={(v) => onChange(v as BillingEntityTabValue)}
-      className={className}
-    >
-      <TabsList className="h-8 flex-wrap">
-        {showAllTab && (
-          <TabsTrigger value="all" className="text-xs px-3">
-            {allLabel}
-          </TabsTrigger>
-        )}
-        {billingCompanies.map((c) => (
-          <TabsTrigger key={c.id} value={c.id} className="text-xs px-3">
-            {companyDisplayName(c)}
-          </TabsTrigger>
-        ))}
-      </TabsList>
-    </Tabs>
-  );
-};
+}) => (
+  <BillingEntityToggle
+    value={value}
+    onChange={onChange}
+    showAll={showAllTab}
+    allLabel={allLabel}
+    className={className}
+  />
+);
 
 /** company_id efectivo para consultas filtradas por pestaña. */
 export function resolveBillingScopeCompanyId(

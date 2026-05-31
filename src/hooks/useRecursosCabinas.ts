@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useWorkCenter } from '@/hooks/useWorkCenter';
 import { useToast } from '@/hooks/use-toast';
 
 const isMissingRelation = (error: { code?: string; message?: string } | null) =>
@@ -14,28 +15,30 @@ const isMissingRelation = (error: { code?: string; message?: string } | null) =>
 
 export const useCabinas = () => {
   const { companyId } = useCompanyFilter();
+  const { operationalCompanyId, loading: wcLoading } = useWorkCenter();
+  const scopeCompanyId = operationalCompanyId ?? companyId;
   const { toast } = useToast();
   const qc = useQueryClient();
 
   const cabinas = useQuery({
-    queryKey: ['cabinas', companyId],
+    queryKey: ['cabinas', scopeCompanyId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('cabinas')
         .select('*')
-        .eq('company_id', companyId!)
+        .eq('company_id', scopeCompanyId!)
         .order('nombre');
       if (isMissingRelation(error)) return [];
       if (error) throw error;
       return data;
     },
-    enabled: !!companyId,
+    enabled: !!scopeCompanyId && !wcLoading,
     retry: false,
   });
 
   const create = useMutation({
     mutationFn: async (values: { nombre: string; descripcion?: string; capacidad?: number; color?: string }) => {
-      const { error } = await supabase.from('cabinas').insert({ ...values, company_id: companyId! });
+      const { error } = await supabase.from('cabinas').insert({ ...values, company_id: scopeCompanyId! });
       if (error) throw error;
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['cabinas'] }); toast({ title: 'Cabina creada' }); },
@@ -60,27 +63,29 @@ export const useCabinas = () => {
     onError: () => toast({ title: 'Error', variant: 'destructive' }),
   });
 
-  return { cabinas, create, update, remove, companyId };
+  return { cabinas, create, update, remove, companyId: scopeCompanyId };
 };
 
 export const useRecursos = () => {
   const { companyId } = useCompanyFilter();
+  const { operationalCompanyId, loading: wcLoading } = useWorkCenter();
+  const scopeCompanyId = operationalCompanyId ?? companyId;
   const { toast } = useToast();
   const qc = useQueryClient();
 
   const recursos = useQuery({
-    queryKey: ['recursos', companyId],
+    queryKey: ['recursos', scopeCompanyId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('recursos')
         .select('*, cabinas(nombre)')
-        .eq('company_id', companyId!)
+        .eq('company_id', scopeCompanyId!)
         .order('nombre');
       if (isMissingRelation(error)) return [];
       if (error) throw error;
       return data;
     },
-    enabled: !!companyId,
+    enabled: !!scopeCompanyId && !wcLoading,
     retry: false,
   });
 
@@ -93,7 +98,7 @@ export const useRecursos = () => {
       color?: string;
       match_keywords?: string;
     }) => {
-      const { error } = await supabase.from('recursos').insert({ ...values, company_id: companyId! });
+      const { error } = await supabase.from('recursos').insert({ ...values, company_id: scopeCompanyId! });
       if (error) throw error;
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['recursos'] }); toast({ title: 'Recurso creado' }); },
@@ -118,5 +123,5 @@ export const useRecursos = () => {
     onError: () => toast({ title: 'Error', variant: 'destructive' }),
   });
 
-  return { recursos, create, update, remove, companyId };
+  return { recursos, create, update, remove, companyId: scopeCompanyId };
 };

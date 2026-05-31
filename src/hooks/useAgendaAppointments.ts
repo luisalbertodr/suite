@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useWorkCenter } from '@/hooks/useWorkCenter';
 
 export interface AgendaAppointment {
   id: string;
@@ -164,16 +165,18 @@ export const useAgendaAppointments = (date?: string) => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { companyId } = useCompanyFilter();
+  const { operationalCompanyId, loading: wcLoading } = useWorkCenter();
+  const scopeCompanyId = operationalCompanyId ?? companyId;
 
   const { data: appointments = [], isLoading, error } = useQuery({
-    queryKey: ['agenda-appointments', date, companyId],
+    queryKey: ['agenda-appointments', date, scopeCompanyId],
     queryFn: async () => {
-      if (!companyId) return [];
+      if (!scopeCompanyId) return [];
 
       const base = supabase
         .from('agenda_appointments')
         .select('*')
-        .eq('company_id', companyId);
+        .eq('company_id', scopeCompanyId);
 
       // Soporta ambos esquemas:
       // - Legacy: appointment_date + start_time(HH:mm)
@@ -223,12 +226,12 @@ export const useAgendaAppointments = (date?: string) => {
         dedupeByLegacyIdPlan((modernResult.data || []) as AgendaAppointment[]),
       );
     },
-    enabled: !!companyId,
+    enabled: !!scopeCompanyId && !wcLoading,
   });
 
   const createAppointment = useMutation({
     mutationFn: async (appointment: CreateAppointmentInput) => {
-      if (!companyId) throw new Error('No company ID available');
+      if (!scopeCompanyId) throw new Error('No company ID available');
       const titleValue = String((appointment as Record<string, unknown>).title ?? '').trim();
       const clientNameValue = String((appointment as Record<string, unknown>).client_name ?? titleValue).trim();
       const appointmentDate =
@@ -242,7 +245,7 @@ export const useAgendaAppointments = (date?: string) => {
         title: titleValue || clientNameValue || 'Cita',
         client_name: clientNameValue || titleValue || 'Cita',
         ...(appointmentDate ? { appointment_date: appointmentDate } : {}),
-        company_id: companyId,
+        company_id: scopeCompanyId,
       });
       if (error) throw error;
       return data;

@@ -11,6 +11,7 @@ import { useToast } from '@/hooks/use-toast';
 import { ClienteForm } from './ClienteForm';
 import { ClienteDetailView } from './ClienteDetailView';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useWorkCenter } from '@/hooks/useWorkCenter';
 import { useCustomerSearch } from '@/hooks/useCustomerSearch';
 import { CUSTOMER_SEARCH_MIN_CHARS, isCustomerSearchQueryReady } from '@/lib/customerSearch';
 import { formatCustomerPhoneLabels } from '@/lib/legacyCustomerPhones';
@@ -46,8 +47,10 @@ export const Clientes: React.FC = () => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { companyId, loading: companyLoading } = useCompanyFilter();
+  const { operationalCompanyId, loading: wcLoading } = useWorkCenter();
+  const catalogCompanyId = operationalCompanyId ?? companyId;
 
-  const { customers: searchResults, isLoading } = useCustomerSearch(companyId, searchTerm);
+  const { customers: searchResults, isLoading } = useCustomerSearch(catalogCompanyId, searchTerm);
 
   useEffect(() => {
     const customerId = searchParams.get('customer');
@@ -96,7 +99,7 @@ export const Clientes: React.FC = () => {
     );
   }
 
-  if (!companyId) {
+  if (!catalogCompanyId) {
     return (
       <div className="flex justify-center items-center h-64 text-center">
         <div>

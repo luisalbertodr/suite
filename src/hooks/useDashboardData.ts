@@ -1,9 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useWorkCenter } from '@/hooks/useWorkCenter';
 import { format } from 'date-fns';
 import type { PostgrestError } from '@supabase/supabase-js';
 
+import { countCatalogCustomers } from '@/lib/customerSearch';
 import { isSchemaColumnError } from '@/lib/appointmentSales';
 import { fetchDashboardBilling, monthKey } from '@/lib/salesRevenue';
 
@@ -17,28 +19,31 @@ const isMissingRelation = (error: PostgrestError | null) =>
 
 export const useDashboardData = () => {
   const { companyId, loading: companyLoading } = useCompanyFilter();
+  const { operationalCompanyId, loading: wcLoading } = useWorkCenter();
+  const opCompanyId = operationalCompanyId ?? companyId;
 
   const today = format(new Date(), 'yyyy-MM-dd');
 
   const { data: main, isLoading: mainLoading } = useQuery({
-    queryKey: ['dashboard-main', companyId],
+    queryKey: ['dashboard-main', companyId, opCompanyId],
     queryFn: async () => {
-      if (!companyId) return null;
+      if (!companyId || !opCompanyId) return null;
 
       const billingPromise = fetchDashboardBilling(companyId, 5);
+      const customersCountPromise = countCatalogCustomers(supabase, opCompanyId);
       const countsPromise = Promise.all([
-        supabase.from('customers').select('id', { count: 'exact', head: true }).eq('company_id', companyId),
+        customersCountPromise,
         supabase.from('agenda_appointments').select('id', { count: 'exact', head: true })
-          .eq('company_id', companyId)
+          .eq('company_id', opCompanyId)
           .gte('start_time', `${today}T00:00:00`)
           .lte('start_time', `${today}T23:59:59`),
         supabase.from('customer_vouchers').select('id', { count: 'exact', head: true })
-          .eq('company_id', companyId).eq('is_active', true),
+          .eq('company_id', opCompanyId).eq('is_active', true),
         supabase.from('bonos').select('id', { count: 'exact', head: true })
-          .eq('company_id', companyId).eq('estado', 'activo'),
+          .eq('company_id', opCompanyId).eq('estado', 'activo'),
       ]);
 
-      const [billing, [customersRes, appointmentsRes, vouchersRes, bonosRes]] = await Promise.all([
+      const [billing, [customersCount, appointmentsRes, vouchersRes, bonosRes]] = await Promise.all([
         billingPromise,
         countsPromise,
       ]);
@@ -70,7 +75,7 @@ export const useDashboardData = () => {
 
       return {
         stats: {
-          activeClients: customersRes.count || 0,
+          activeClients: customersCount,
           todayAppointments: appointmentsRes.count || 0,
           activeVouchers: (vouchersRes.count || 0) + bonosCount,
           monthlyRevenue: billing.currentMonth.total,
@@ -78,22 +83,24 @@ export const useDashboardData = () => {
         chartData,
       };
     },
-    enabled: !!companyId && !companyLoading,
+    enabled: !!companyId && !!opCompanyId && !companyLoading && !wcLoading,
     staleTime: 5 * 60 * 1000,
     refetchInterval: 5 * 60 * 1000,
   });
 
   const { data: recentActivity, isLoading: activityLoading } = useQuery({
-    queryKey: ['dashboard-recent-activity', companyId],
+    queryKey: ['dashboard-recent-activity', companyId, opCompanyId],
     queryFn: async () => {
-      if (!companyId) return [];
+      if (!companyId || !opCompanyId) return [];
       const activities: { type: string; description: string; time: string }[] = [];
 
       const [invRes, cusRes] = await Promise.all([
         supabase.from('invoices').select('number, created_at').eq('company_id', companyId)
           .order('created_at', { ascending: false }).limit(3),
-        supabase.from('customers').select('name, created_at').eq('company_id', companyId)
-          .order('created_at', { ascending: false }).limit(3),
+        supabase.rpc('recent_catalog_customers', {
+          p_catalog_company_id: opCompanyId,
+          p_limit: 3,
+        }),
       ]);
 
       let aptRows: Array<{ created_at: string; title?: string | null; description?: string | null }> = [];
@@ -101,7 +108,7 @@ export const useDashboardData = () => {
         const aptRes = await supabase
           .from('agenda_appointments')
           .select(select)
-          .eq('company_id', companyId)
+          .eq('company_id', opCompanyId)
           .order('created_at', { ascending: false })
           .limit(3);
         if (!aptRes.error) {
@@ -119,13 +126,13 @@ export const useDashboardData = () => {
         description: `Cita: ${a.title || a.description || 'Nueva cita'}`,
         time: getTimeAgo(a.created_at),
       }));
-      cusRes.data?.forEach(c => activities.push({
+      cusRes.data?.forEach((c: { name: string; created_at: string }) => activities.push({
         type: 'cliente', description: `Cliente ${c.name} registrado`, time: getTimeAgo(c.created_at),
       }));
 
       return activities.sort((a, b) => parseTimeAgo(a.time) - parseTimeAgo(b.time)).slice(0, 8);
     },
-    enabled: !!companyId && !companyLoading,
+    enabled: !!companyId && !!opCompanyId && !companyLoading && !wcLoading,
     staleTime: 2 * 60 * 1000,
   });
 
@@ -133,7 +140,7 @@ export const useDashboardData = () => {
     stats: main?.stats,
     chartData: main?.chartData,
     recentActivity,
-    isLoading: mainLoading || activityLoading || companyLoading,
+    isLoading: mainLoading || activityLoading || companyLoading || wcLoading,
   };
 };
 

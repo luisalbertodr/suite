@@ -6,6 +6,7 @@ import { ArrowLeft, Save, User, Heart, Calendar, FileText, Receipt, Gift, Sticky
 import { useToast } from '@/hooks/use-toast';
 import { useForm } from 'react-hook-form';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useWorkCenter } from '@/hooks/useWorkCenter';
 import { useCustomerAdvanced } from '@/hooks/useCustomerAdvanced';
 import { ClienteDatosTab } from './cliente/ClienteDatosTab';
 import { ClienteHistorialTab } from './cliente/ClienteHistorialTab';
@@ -98,6 +99,8 @@ export const ClienteForm: React.FC<ClienteFormProps> = ({ customer, onClose }) =
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { companyId } = useCompanyFilter();
+  const { operationalCompanyId } = useWorkCenter();
+  const catalogCompanyId = operationalCompanyId ?? companyId;
   const { contacts, addresses, saveContacts, saveAddresses } = useCustomerAdvanced(customer?.id);
   const [advancedContacts, setAdvancedContacts] = useState<any[]>([]);
   const [advancedAddresses, setAdvancedAddresses] = useState<any[]>([]);
@@ -139,13 +142,13 @@ export const ClienteForm: React.FC<ClienteFormProps> = ({ customer, onClose }) =
 
   const saveCustomerMutation = useMutation({
     mutationFn: async (data: FormData) => {
-      if (!companyId) throw new Error('No se pudo obtener el ID de la empresa');
+      if (!catalogCompanyId) throw new Error('No se pudo obtener el ID de la empresa');
 
       let paymentTermsValue: number | null = null;
       if (data.payment_terms === '30 días') paymentTermsValue = 30;
       else if (data.payment_terms === '60 días') paymentTermsValue = 60;
 
-      const customerData = { ...data, payment_terms: paymentTermsValue, company_id: companyId };
+      const customerData = { ...data, payment_terms: paymentTermsValue, company_id: catalogCompanyId };
       let savedCustomerId: string;
 
       if (customer) {
@@ -187,14 +190,14 @@ export const ClienteForm: React.FC<ClienteFormProps> = ({ customer, onClose }) =
   });
 
   const onSubmit = (data: FormData) => {
-    if (!companyId) {
+    if (!catalogCompanyId) {
       toast({ title: 'Error', description: 'No se pudo obtener la empresa.', variant: 'destructive' });
       return;
     }
     saveCustomerMutation.mutate(data);
   };
 
-  if (!companyId) {
+  if (!catalogCompanyId) {
     return <div className="flex justify-center items-center h-64 text-muted-foreground">Cargando...</div>;
   }
 

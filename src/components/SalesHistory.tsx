@@ -94,9 +94,6 @@ type SaleRow = {
 type InvoiceFilter = 'all' | 'invoiced' | 'pending';
 
 type PaymentFilter = 'all' | 'cash' | 'card';
-type BillingCompanyFilter = 'all' | string;
-
-
 
 interface SalesHistoryProps {
 
@@ -195,7 +192,8 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ onBack }) => {
   const { toast } = useToast();
 
   const { companyId } = useCompanyFilter();
-  const { isMultiEntity, billingCompanies, companyLabels } = useWorkCenter();
+  const { catalogHostCompanyId } = useWorkCenter();
+  const catalogCompanyId = catalogHostCompanyId ?? companyId;
 
   const [dateFrom, setDateFrom] = useState(defaultDateFrom);
 
@@ -208,7 +206,6 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ onBack }) => {
   const [invoiceFilter, setInvoiceFilter] = useState<InvoiceFilter>('all');
 
   const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>('all');
-  const [billingCompanyFilter, setBillingCompanyFilter] = useState<BillingCompanyFilter>('all');
   const [page, setPage] = useState(0);
   const [manageSaleId, setManageSaleId] = useState<string | null>(null);
   const [invoicingSaleId, setInvoicingSaleId] = useState<string | null>(null);
@@ -229,7 +226,7 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ onBack }) => {
 
     setPage(0);
 
-  }, [dateFrom, dateTo, debouncedSearch, invoiceFilter, paymentFilter, billingCompanyFilter]);
+  }, [dateFrom, dateTo, debouncedSearch, invoiceFilter, paymentFilter, companyId]);
 
 
 
@@ -274,7 +271,6 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ onBack }) => {
     invoiceFilter,
 
     paymentFilter,
-    billingCompanyFilter,
     page,
 
   ];
@@ -306,12 +302,7 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ onBack }) => {
             .order('created_at', { ascending: false }),
         );
 
-        if (billingCompanyFilter !== 'all') {
-          query = query.eq('company_id', billingCompanyFilter);
-        } else if (isMultiEntity && billingCompanies.length > 1) {
-          const ids = billingCompanies.map((c) => c.id).join(',');
-          query = query.or(`host_company_id.eq.${companyId},company_id.in.(${ids})`);
-        } else {
+        if (companyId) {
           query = query.eq('company_id', companyId);
         }
 
@@ -379,7 +370,7 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ onBack }) => {
 
     try {
 
-      const result = await issueInvoiceFromSale(sale.id, companyId);
+      const result = await issueInvoiceFromSale(sale.id, catalogCompanyId);
 
       if (result.mode === 'created') {
 
@@ -515,12 +506,9 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ onBack }) => {
 
           <div>
 
-            <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-
+            <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2 flex-wrap">
               <FileText className="w-7 h-7 text-blue-600" />
-
               Historial de Ventas
-
             </h1>
 
             <p className="text-sm text-gray-600 mt-1">
@@ -660,28 +648,6 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ onBack }) => {
               </Select>
 
             </div>
-
-            {isMultiEntity && billingCompanies.length > 1 && (
-              <div>
-                <Label>Empresa emisora</Label>
-                <Select
-                  value={billingCompanyFilter}
-                  onValueChange={(v) => setBillingCompanyFilter(v as BillingCompanyFilter)}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todas (centro laboral)</SelectItem>
-                    {billingCompanies.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {companyLabels.get(c.id) ?? c.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
 
           </div>
 

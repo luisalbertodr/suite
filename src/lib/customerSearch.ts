@@ -3,6 +3,7 @@
  * DNI (tax_id), teléfono y email.
  */
 
+import type { SupabaseClient } from '@supabase/supabase-js';
 export type CustomerSearchRow = {
   id: string;
   name: string;
@@ -13,6 +14,91 @@ export type CustomerSearchRow = {
   phone_mobile?: string | null;
   legacy_codcli?: string | null;
 };
+
+/** Escapa comodines para filtros ilike de PostgREST. */
+export function escapeIlike(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+}
+
+const CUSTOMER_ILIKE_FIELDS = [
+  'name',
+  'email',
+  'tax_id',
+  'phone',
+  'phone_mobile',
+  'phone_home',
+  'legacy_codcli',
+] as const;
+
+/** PostgREST `.or()` sobre campos de cliente (tabla `customers`, sin prefijo). */
+export function buildCustomerIlikeOrFilter(rawQuery: string): string | null {
+  const q = rawQuery.trim().replace(/%/g, '');
+  if (!q) return null;
+  const pattern = `%${escapeIlike(q)}%`;
+  return CUSTOMER_ILIKE_FIELDS.map((f) => `${f}.ilike.${pattern}`).join(',');
+}
+
+/** PostgREST `.or()` para facturas: número y/o IDs de cliente (máx. para no alargar la URL). */
+export function buildInvoiceSearchOrFilter(rawQuery: string, customerIds: string[]): string | null {
+  const q = rawQuery.trim().replace(/%/g, '');
+  if (!q) return null;
+  const pattern = `%${escapeIlike(q)}%`;
+  const cappedIds = customerIds.slice(0, 100);
+  if (cappedIds.length > 0) {
+    return `number.ilike.${pattern},customer_id.in.(${cappedIds.join(',')})`;
+  }
+  return `number.ilike.${pattern}`;
+}
+
+/**
+ * Busca IDs de cliente vía RPC (PostgREST devuelve 500 con ilike directo sobre customers + RLS).
+ */
+export async function searchCustomerIdsByIlike(
+  supabase: SupabaseClient,
+  companyId: string,
+  rawQuery: string,
+  options?: { limit?: number; minChars?: number },
+): Promise<string[]> {
+  const q = rawQuery.trim().replace(/%/g, '');
+  const minChars = options?.minChars ?? 2;
+  if (!q || q.length < minChars) return [];
+
+  const { data, error } = await supabase.rpc('search_customer_ids', {
+    p_catalog_company_id: companyId,
+    p_query: q,
+    p_limit: options?.limit ?? 100,
+  });
+
+  if (error) throw error;
+  return (data ?? []) as string[];
+}
+
+/** Listado del catálogo de clientes (RPC; evita 500 en GET /customers). */
+export async function fetchCatalogCustomers(
+  supabase: SupabaseClient,
+  companyId: string,
+  options?: { limit?: number; offset?: number },
+): Promise<CustomerSearchRow[]> {
+  const { data, error } = await supabase.rpc('list_catalog_customers', {
+    p_catalog_company_id: companyId,
+    p_limit: options?.limit ?? 5000,
+    p_offset: options?.offset ?? 0,
+  });
+  if (error) throw error;
+  return (data ?? []) as CustomerSearchRow[];
+}
+
+/** Conteo de clientes del catálogo. */
+export async function countCatalogCustomers(
+  supabase: SupabaseClient,
+  companyId: string,
+): Promise<number> {
+  const { data, error } = await supabase.rpc('count_catalog_customers', {
+    p_catalog_company_id: companyId,
+  });
+  if (error) throw error;
+  return Number(data ?? 0);
+}
 
 function digitsOnly(s: string): string {
   return s.replace(/\D/g, '');

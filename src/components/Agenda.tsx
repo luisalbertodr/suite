@@ -26,8 +26,10 @@ import { checkAppointmentItemsResourceConflict } from '@/lib/agendaResourceConfl
 import { useAuth } from '@/hooks/useAuth';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import type { CustomerSearchRow } from '@/lib/customerSearch';
+import { fetchCatalogCustomers } from '@/lib/customerSearch';
 import {
   loadAgendaViewPersisted,
+  loadInitialAgendaDateYmd,
   mergePersistedLastDate,
   saveAgendaViewPersisted,
 } from '@/lib/agendaViewPersistence';
@@ -41,7 +43,7 @@ import { appointmentItemLineTotal } from '@/lib/agendaAppointmentPricing';
 import { canChargeAppointment, appointmentChargeableTotal, fetchAppointmentSalesMap, summarizeAppointmentChargeState } from '@/lib/appointmentSales';
 import { buildAgendaPrefillFromLead } from '@/lib/marketingLeadAgendaPrefill';
 import { buildCustomerHistoryUrl } from '@/lib/agendaCustomerNavigation';
-import { AgendaBillingViewSelect } from '@/components/AgendaBillingViewSelect';
+import { BillingEntityToggle } from '@/components/BillingEntityToggle';
 import {
   filterEmployeesForAgendaView,
   loadAgendaBillingView,
@@ -81,14 +83,14 @@ type CreateAppointmentData = {
 // Generate a Tailwind bg class from a hex color
 const hexToTailwindBg = (hex: string, index: number): string => {
   const fallbacks = [
-    'bg-sky-100 border-sky-300',
-    'bg-violet-100 border-violet-300',
-    'bg-emerald-100 border-emerald-300',
-    'bg-amber-100 border-amber-300',
-    'bg-rose-100 border-rose-300',
-    'bg-indigo-100 border-indigo-300',
-    'bg-teal-100 border-teal-300',
-    'bg-orange-100 border-orange-300',
+    'bg-sky-100 dark:bg-sky-950/50 border-sky-300 dark:border-sky-700 text-sky-900 dark:text-sky-100',
+    'bg-violet-100 dark:bg-violet-950/50 border-violet-300 dark:border-violet-700 text-violet-900 dark:text-violet-100',
+    'bg-emerald-100 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-700 text-emerald-900 dark:text-emerald-100',
+    'bg-amber-100 dark:bg-amber-950/50 border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-100',
+    'bg-rose-100 dark:bg-rose-950/50 border-rose-300 dark:border-rose-700 text-rose-900 dark:text-rose-100',
+    'bg-indigo-100 dark:bg-indigo-950/50 border-indigo-300 dark:border-indigo-700 text-indigo-900 dark:text-indigo-100',
+    'bg-teal-100 dark:bg-teal-950/50 border-teal-300 dark:border-teal-700 text-teal-900 dark:text-teal-100',
+    'bg-orange-100 dark:bg-orange-950/50 border-orange-300 dark:border-orange-700 text-orange-900 dark:text-orange-100',
   ];
   return fallbacks[index % fallbacks.length];
 };
@@ -98,7 +100,8 @@ export const Agenda: React.FC = () => {
   const location = useLocation();
   const { user } = useAuth();
   const { companyId, loading: companyLoading } = useCompanyFilter();
-  const { isMultiEntity } = useWorkCenter();
+  const { isMultiEntity, operationalCompanyId } = useWorkCenter();
+  const opCompanyId = operationalCompanyId ?? companyId;
   const { families: familyRecords } = useFamilies({ scope: 'all' });
   const familyBillingMap = useMemo(
     () => buildFamilyBillingMap(familyRecords.map((f) => ({ name: f.name, billing_company_id: f.billing_company_id }))),
@@ -107,7 +110,14 @@ export const Agenda: React.FC = () => {
   const skipPersistDateOnceRef = useRef(false);
   const [agendaBillingView, setAgendaBillingView] = useState<AgendaBillingView>('all');
 
-  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const ymd = loadInitialAgendaDateYmd(null);
+    if (ymd) {
+      const d = parse(ymd, 'yyyy-MM-dd', new Date());
+      if (isValid(d)) return d;
+    }
+    return new Date();
+  });
   const [showAppointmentForm, setShowAppointmentForm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<{ employeeId: string; time: string } | null>(null);
@@ -122,6 +132,8 @@ export const Agenda: React.FC = () => {
   const queryClient = useQueryClient();
 
   const selectedDateYmd = useMemo(() => format(selectedDate, 'yyyy-MM-dd'), [selectedDate]);
+  const selectedDateYmdRef = useRef(selectedDateYmd);
+  selectedDateYmdRef.current = selectedDateYmd;
   const pendingOpenAppointmentIdRef = useRef<string | null>(null);
 
   const selectAgendaDate = useCallback(
@@ -146,7 +158,10 @@ export const Agenda: React.FC = () => {
     if (!p?.lastDateYmd) return;
     const d = parse(p.lastDateYmd, 'yyyy-MM-dd', new Date());
     if (!isValid(d)) return;
-    setSelectedDate(d);
+    setSelectedDate((prev) => {
+      const prevYmd = format(prev, 'yyyy-MM-dd');
+      return prevYmd === p.lastDateYmd ? prev : d;
+    });
     skipPersistDateOnceRef.current = true;
   }, [user?.id]);
 
@@ -212,19 +227,27 @@ export const Agenda: React.FC = () => {
     saveAgendaViewPersisted(user.id, mergePersistedLastDate(prev, selectedDateYmd));
   }, [user?.id, selectedDateYmd]);
 
+  useEffect(() => {
+    if (!user?.id) return;
+    return () => {
+      const prev = loadAgendaViewPersisted(user.id);
+      saveAgendaViewPersisted(user.id, mergePersistedLastDate(prev, selectedDateYmdRef.current));
+    };
+  }, [user?.id]);
+
   const { data: companyAgendaRow } = useQuery({
-    queryKey: ['company-agenda-center-hours', companyId],
+    queryKey: ['company-agenda-center-hours', opCompanyId],
     queryFn: async () => {
-      if (!companyId) return null;
+      if (!opCompanyId) return null;
       const { data, error } = await supabase
         .from('companies')
         .select('agenda_center_hours')
-        .eq('id', companyId)
+        .eq('id', opCompanyId)
         .single();
       if (error) throw error;
       return data as { agenda_center_hours: unknown };
     },
-    enabled: !!companyId && !companyLoading,
+    enabled: !!opCompanyId && !companyLoading,
   });
 
   const centerHours: AgendaDayHoursMap = useMemo(
@@ -233,18 +256,12 @@ export const Agenda: React.FC = () => {
   );
 
   const { data: agendaCustomers = [] } = useQuery({
-    queryKey: ['customers', companyId, 'agenda-picker'],
+    queryKey: ['customers', opCompanyId, 'agenda-picker'],
     queryFn: async () => {
-      if (!companyId) return [];
-      const { data, error } = await supabase
-        .from('customers')
-        .select('id, name, email, tax_id, phone, phone_home, phone_mobile, legacy_codcli')
-        .eq('company_id', companyId)
-        .order('name');
-      if (error) throw error;
-      return (data || []) as CustomerSearchRow[];
+      if (!opCompanyId) return [];
+      return fetchCatalogCustomers(supabase, opCompanyId);
     },
-    enabled: !!companyId && !companyLoading,
+    enabled: !!opCompanyId && !companyLoading,
   });
 
   const fromLeadIdParam = useMemo(
@@ -270,14 +287,14 @@ export const Agenda: React.FC = () => {
   });
 
   const { data: notifyRecipients = [] } = useQuery({
-    queryKey: ['notify-recipients', companyId, user?.id],
+    queryKey: ['notify-recipients', opCompanyId, user?.id],
     queryFn: async () => {
-      if (!companyId || !user?.id) return [];
+      if (!opCompanyId || !user?.id) return [];
       const employeesBaseQuery = () =>
         supabase
           .from('agenda_employees')
           .select('id, name')
-          .eq('company_id', companyId);
+          .eq('company_id', opCompanyId);
 
       let employeesResult = await employeesBaseQuery().eq('is_active', true);
       if (employeesResult.error?.code === '42703') {
@@ -310,7 +327,7 @@ export const Agenda: React.FC = () => {
       for (const item of recipients) uniqueByUserId.set(item.userId, item);
       return Array.from(uniqueByUserId.values()).sort((a, b) => a.label.localeCompare(b.label, 'es'));
     },
-    enabled: !!companyId && !!user?.id,
+    enabled: !!opCompanyId && !!user?.id,
   });
 
   const { employees: dbEmployeesRaw, isLoading: employeesLoading } = useAgendaEmployees({ agendaOnly: true });
@@ -363,7 +380,7 @@ export const Agenda: React.FC = () => {
     items: AppointmentItemDraft[],
     appointmentId: string
   ) => {
-    if (!companyId || !customerId) return;
+    if (!opCompanyId || !customerId) return;
     const safeDateYmd = /^\d{4}-\d{2}-\d{2}$/.test(String(dateYmd || ''))
       ? String(dateYmd)
       : format(new Date(), 'yyyy-MM-dd');
@@ -377,7 +394,7 @@ export const Agenda: React.FC = () => {
       customer_voucher_id: it.customer_voucher_id ?? null,
     }));
     const payload = {
-      company_id: companyId,
+      company_id: opCompanyId,
       customer_id: customerId,
       event_type: 'appointment',
       event_date: `${safeDateYmd}T00:00:00`,
@@ -393,7 +410,7 @@ export const Agenda: React.FC = () => {
     const { data: existing, error: existingError } = await supabase
       .from('customer_aesthetic_history')
       .select('id,data')
-      .eq('company_id', companyId)
+      .eq('company_id', opCompanyId)
       .eq('customer_id', customerId)
       .eq('event_type', 'appointment');
     if (existingError) throw existingError;
@@ -483,7 +500,7 @@ export const Agenda: React.FC = () => {
       const { data: articleRows } = await supabase
         .from('articles')
         .select('codigo,descripcion,precio')
-        .eq('company_id', companyId);
+        .eq('company_id', opCompanyId);
       for (const a of articleRows || []) {
         const price = Math.max(0, Number(a.precio || 0));
         if (price <= 0) continue;
@@ -1169,7 +1186,7 @@ export const Agenda: React.FC = () => {
     const title = `Observación cita · ${apt.clientName}`;
     // Intento extendido (si existen columnas nuevas).
     let { error } = await supabase.from('notifications').insert({
-      company_id: companyId,
+      company_id: opCompanyId,
       user_id: recipientUserId,
       from_user_id: user.id,
       appointment_id: apt.id,
@@ -1183,7 +1200,7 @@ export const Agenda: React.FC = () => {
     if (error?.code === '42703') {
       // Fallback para esquemas con estructura mínima.
       ({ error } = await supabase.from('notifications').insert({
-        company_id: companyId,
+        company_id: opCompanyId,
         user_id: recipientUserId,
         title,
         message,
@@ -1203,7 +1220,11 @@ export const Agenda: React.FC = () => {
     toast({ title: 'Notificación enviada' });
   };
 
-  if (employeesLoading || appointmentsLoading || prefsLoading) {
+  if (
+    (employeesLoading && dbEmployeesRaw.length === 0) ||
+    (appointmentsLoading && dbAppointments.length === 0) ||
+    prefsLoading
+  ) {
     return (
       <div className="space-y-4">
         <Skeleton className="h-16 w-full" />
@@ -1312,7 +1333,8 @@ export const Agenda: React.FC = () => {
           >
             <Clock className="w-3.5 h-3.5 mr-1" /> Hoy
           </Button>
-          <AgendaBillingViewSelect
+          <BillingEntityToggle
+            showAll
             value={agendaBillingView}
             onChange={setAgendaBillingView}
           />

@@ -16,7 +16,6 @@ import { usePermissionGuard } from '@/hooks/usePermissionGuard';
 import { SplitPaymentDialog } from '@/components/SplitPaymentDialog';
 import {
   buildFamilyBillingMap,
-  filterArticlesForBillingCompany,
   groupCartByBillingCompany,
   hasSplitBilling,
   resolveBillingCompanyId,
@@ -96,8 +95,8 @@ function ProductGridCell({
   return (
     <div style={{ ...style, padding: gap / 2 }}>
       <div
-        className={`cursor-pointer hover:shadow-md transition-all duration-200 h-32 bg-white border border-gray-200 hover:border-blue-300 rounded-lg ${
-          article.stock_actual <= 0 ? 'bg-red-50 opacity-60' : 'hover:bg-blue-50'
+        className={`cursor-pointer hover:shadow-md transition-all duration-200 h-32 bg-card border border-border hover:border-blue-400 dark:hover:border-blue-600 rounded-lg ${
+          article.stock_actual <= 0 ? 'bg-red-50 dark:bg-red-950/30 opacity-60' : 'hover:bg-accent/50'
         }`}
         onClick={() => onAddToCart(article)}
       >
@@ -123,7 +122,7 @@ function ProductGridCell({
           </div>
           <div className="text-center mt-2">
             <p className="text-sm font-bold text-blue-600">€{(article.precio || 0).toFixed(2)}</p>
-            <p className="text-[10px] text-gray-500">Stock: {article.stock_actual}</p>
+            <p className="text-[10px] text-muted-foreground">Stock: {article.stock_actual}</p>
           </div>
         </div>
       </div>
@@ -149,7 +148,6 @@ export const TPV: React.FC = () => {
   const { companyId, loading: companyLoading } = useCompanyFilter();
   const { isMultiEntity, companyLabels, billingCompanies, catalogHostCompanyId } = useWorkCenter();
   const catalogCompanyId = catalogHostCompanyId ?? companyId;
-  const billingScopeId = companyId;
   const { requireOrToast: requirePermissionOrToast } = usePermissionGuard();
   const prefilledSourceRef = useRef<string | null>(null);
   const [showSplitPayment, setShowSplitPayment] = useState(false);
@@ -305,7 +303,7 @@ export const TPV: React.FC = () => {
   );
 
   const { data: articles = [], isLoading } = useQuery({
-    queryKey: ['tpv-articles', debouncedSearchTerm, catalogCompanyId, billingScopeId, isMultiEntity],
+    queryKey: ['tpv-articles', debouncedSearchTerm, catalogCompanyId, isMultiEntity],
     queryFn: async () => {
       if (!catalogCompanyId) return [];
 
@@ -330,14 +328,6 @@ export const TPV: React.FC = () => {
       }
 
       let rows = (data ?? []) as Article[];
-      if (isMultiEntity && billingScopeId) {
-        rows = filterArticlesForBillingCompany(
-          rows,
-          billingScopeId,
-          familyBillingMap,
-          catalogCompanyId,
-        );
-      }
       return rows;
     },
     enabled: !!catalogCompanyId
@@ -384,7 +374,7 @@ export const TPV: React.FC = () => {
       : null;
 
   const saleContext = () => ({
-    hostCompanyId: companyId!,
+    hostCompanyId: catalogCompanyId!,
     customerId: appointmentChargeContext?.customerId ?? prefill?.customerId ?? null,
     customerName: appointmentChargeContext?.customerName || prefill?.customerName || null,
     appointmentId: appointmentChargeContext?.appointmentId ?? prefill?.appointmentId ?? null,
@@ -452,7 +442,7 @@ export const TPV: React.FC = () => {
       sale.id
     ) {
       try {
-        const result = await issueInvoiceFromSale(sale.id, companyId);
+        const result = await issueInvoiceFromSale(sale.id, catalogCompanyId);
         if (result.mode === 'created') {
           autoInvoiceDone = true;
           setLastCompletedSale((prev) =>
@@ -514,11 +504,14 @@ export const TPV: React.FC = () => {
       customerName?: string | null;
       customerId?: string | null;
       appointmentId?: string | null;
+      billingCompanyId?: string;
     }) => {
-      if (!companyId) {
+      if (!companyId || !catalogCompanyId) {
         console.error('❌ No company ID available');
         throw new Error('No company ID available');
       }
+
+      const billingCompanyId = saleData.billingCompanyId ?? companyId;
 
       // Validate required data
       if (!saleData.items || saleData.items.length === 0) {
@@ -536,7 +529,8 @@ export const TPV: React.FC = () => {
       const taxAmount = Number((saleData.total - subtotal).toFixed(2));
 
       const saleRecord: Record<string, unknown> = {
-        company_id: companyId,
+        company_id: billingCompanyId,
+        host_company_id: catalogCompanyId,
         ticket_number: '',
         total_amount: saleData.total,
         subtotal: subtotal,
@@ -583,7 +577,7 @@ export const TPV: React.FC = () => {
       // Create sale items
       const saleItems = saleData.items.map((item) => ({
         sale_id: sale.id,
-        company_id: companyId,
+        company_id: catalogCompanyId,
         article_id: item.variationId ? null : (isUuid(item.id) ? item.id : null),
         variation_id: item.variationId || null,
         description: item.name,
@@ -645,23 +639,6 @@ export const TPV: React.FC = () => {
       }
 
       if (articleData) {
-        if (
-          isMultiEntity &&
-          billingScopeId &&
-          !filterArticlesForBillingCompany(
-            [articleData as Article],
-            billingScopeId,
-            familyBillingMap,
-            catalogCompanyId,
-          ).length
-        ) {
-          toast({
-            title: 'Artículo no disponible',
-            description: 'Este artículo pertenece a otra empresa emisora del centro laboral.',
-            variant: 'destructive',
-          });
-          return;
-        }
         addToCart(articleData as Article);
         setBarcodeInput('');
         toast({
@@ -985,8 +962,8 @@ export const TPV: React.FC = () => {
     return (
       <div className="flex justify-center items-center h-64">
         <div className="text-center">
-          <h3 className="text-lg font-semibold text-gray-700">Sin empresa</h3>
-          <p className="text-gray-500 mt-2">
+          <h3 className="text-lg font-semibold text-muted-foreground">Sin empresa</h3>
+          <p className="text-muted-foreground mt-2">
             No se pudo obtener la información de la empresa.
           </p>
         </div>
@@ -999,11 +976,11 @@ export const TPV: React.FC = () => {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50">
-      <div className="flex justify-between items-center p-4 bg-white shadow-sm border-b">
+    <div className="flex flex-col h-screen bg-background">
+      <div className="flex justify-between items-center p-4 bg-card shadow-sm border-b border-border">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center">
-            <CreditCard className="w-6 h-6 mr-2 text-blue-600" />
+          <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
+            <CreditCard className="w-6 h-6 text-blue-600" />
             Terminal TPV
           </h1>
         </div>
@@ -1018,7 +995,7 @@ export const TPV: React.FC = () => {
       </div>
 
       {appointmentChargeContext && (
-        <div className="mx-4 mt-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900 flex flex-wrap items-center gap-2">
+        <div className="mx-4 mt-2 rounded-md border border-sky-200 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/40 px-3 py-2 text-sm text-sky-900 dark:text-sky-100 flex flex-wrap items-center gap-2">
           <span>
             Cobro de cita · <strong>{appointmentChargeContext.customerName || 'Cliente'}</strong>
             {appointmentChargeContext.date ? ` · ${appointmentChargeContext.date}` : ''}
@@ -1027,7 +1004,7 @@ export const TPV: React.FC = () => {
       )}
 
       {lastCompletedSale && (
-        <div className="mx-4 mt-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 flex flex-wrap items-center gap-2">
+        <div className="mx-4 mt-2 rounded-md border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40 px-3 py-2 text-sm text-emerald-900 dark:text-emerald-100 flex flex-wrap items-center gap-2">
           <span>
             Ticket <strong>{lastCompletedSale.sale.ticket_number}</strong> · {lastCompletedSale.sale.total_amount.toFixed(2)} €
             <span className="text-emerald-800/80"> · El ticket acredita el cobro; la factura es el documento fiscal.</span>
@@ -1045,7 +1022,7 @@ export const TPV: React.FC = () => {
               }
               setIssuingInvoice(true);
               try {
-                const result = await issueInvoiceFromSale(lastCompletedSale.sale.id, companyId);
+                const result = await issueInvoiceFromSale(lastCompletedSale.sale.id, catalogCompanyId);
                 if (result.mode === 'created') {
                   setLastCompletedSale((prev) =>
                     prev ? { ...prev, invoiceId: result.invoiceId } : prev,
@@ -1095,7 +1072,7 @@ export const TPV: React.FC = () => {
         </div>
       )}
 
-      <div className="bg-white border-b p-4">
+      <div className="bg-card border-b border-border p-4">
         <div className="max-w-md">
           <Label htmlFor="barcode-input" className="text-sm font-medium flex items-center mb-2">
             <Scan className="w-4 h-4 mr-2" />
@@ -1121,7 +1098,7 @@ export const TPV: React.FC = () => {
               <Camera className="w-4 h-4" />
             </Button>
           </div>
-          <p className="text-xs text-gray-500 mt-1">
+          <p className="text-xs text-muted-foreground mt-1">
             Presiona Enter para buscar o usa la cámara para escanear
           </p>
         </div>
@@ -1145,13 +1122,13 @@ export const TPV: React.FC = () => {
 
       {showVariations && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-2xl w-full m-4 max-h-96 overflow-y-auto">
+          <div className="bg-card rounded-lg p-6 max-w-2xl w-full m-4 max-h-96 overflow-y-auto border border-border">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-semibold">Seleccionar Variación</h3>
               <Button
                 variant="ghost"
                 onClick={() => setShowVariations(null)}
-                className="text-gray-500 hover:text-gray-700"
+                className="text-muted-foreground hover:text-foreground"
               >
                 ×
               </Button>
@@ -1163,7 +1140,7 @@ export const TPV: React.FC = () => {
                   <Card
                     key={variation.id}
                     className={`cursor-pointer hover:shadow-md transition-shadow ${
-                      variation.stock_actual <= 0 ? 'bg-red-50 opacity-60' : 'hover:bg-blue-50'
+                      variation.stock_actual <= 0 ? 'bg-red-50 dark:bg-red-950/30 opacity-60' : 'hover:bg-accent/50'
                     }`}
                     onClick={() => article && addVariationToCart(variation, article)}
                   >
@@ -1180,7 +1157,7 @@ export const TPV: React.FC = () => {
                         <p className="text-sm font-bold text-blue-600">
                           €{variation.precio.toFixed(2)}
                         </p>
-                        <p className="text-xs text-gray-500">
+                        <p className="text-xs text-muted-foreground">
                           Stock: {variation.stock_actual}
                         </p>
                       </div>
@@ -1202,7 +1179,7 @@ export const TPV: React.FC = () => {
                 Productos
               </CardTitle>
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
                 <Input
                   placeholder="Buscar productos..."
                   value={searchTerm}
@@ -1214,9 +1191,9 @@ export const TPV: React.FC = () => {
             <CardContent className="flex-1 overflow-hidden p-2">
               <div ref={productsContainerRef} className="h-full overflow-hidden">
                 {isLoading ? (
-                  <div className="h-full text-center py-8 text-gray-500">Cargando productos...</div>
+                  <div className="h-full text-center py-8 text-muted-foreground">Cargando productos...</div>
                 ) : articles.length === 0 ? (
-                  <div className="h-full text-center py-8 text-gray-500">
+                  <div className="h-full text-center py-8 text-muted-foreground">
                     {searchTerm ? 'No se encontraron productos' : 'No hay productos disponibles'}
                   </div>
                 ) : !productsGrid ? null : (
@@ -1252,10 +1229,10 @@ export const TPV: React.FC = () => {
             <CardContent className="flex-1 overflow-hidden">
               <div className="space-y-2 h-full overflow-y-auto">
                 {cart.map((item, index) => (
-                  <div key={`${item.id}-${item.variationId || 'no-variation'}-${index}`} className="flex items-center justify-between py-2 border-b border-gray-100">
+                  <div key={`${item.id}-${item.variationId || 'no-variation'}-${index}`} className="flex items-center justify-between py-2 border-b border-border">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{item.name}</p>
-                      <p className="text-xs text-gray-500">€{item.price.toFixed(2)} c/u</p>
+                      <p className="text-xs text-muted-foreground">€{item.price.toFixed(2)} c/u</p>
                       {isMultiEntity && item.billingCompanyId && (
                         <p className="text-[10px] text-violet-600 font-medium">
                           {companyLabels.get(item.billingCompanyId) ?? 'Empresa'}
@@ -1299,7 +1276,7 @@ export const TPV: React.FC = () => {
               </div>
               
               {cart.length === 0 && (
-                <div className="text-center py-8 text-gray-500 flex flex-col items-center justify-center h-full">
+                <div className="text-center py-8 text-muted-foreground flex flex-col items-center justify-center h-full">
                   <ShoppingCart className="w-12 h-12 mx-auto mb-2 opacity-50" />
                   <p>Carrito vacío</p>
                 </div>
@@ -1310,7 +1287,7 @@ export const TPV: React.FC = () => {
       </div>
 
       {/* Elevado sobre el dock fijo (bottom-4, z-50) sin modificar DockBar */}
-      <div className="fixed bottom-28 left-0 right-0 bg-white border-t shadow-lg p-4 z-40">
+      <div className="fixed bottom-28 left-0 right-0 bg-card border-t border-border shadow-lg p-4 z-40">
         <div className="flex items-center justify-between max-w-7xl mx-auto">
           <div className="flex items-center space-x-4">
             <div className="flex space-x-2">
@@ -1341,7 +1318,7 @@ export const TPV: React.FC = () => {
                   className="w-32"
                 />
                 {amountPaid && (
-                  <span className="text-sm text-gray-600 whitespace-nowrap">
+                  <span className="text-sm text-muted-foreground whitespace-nowrap">
                     Cambio: €{getChange().toFixed(2)}
                   </span>
                 )}
@@ -1364,7 +1341,7 @@ export const TPV: React.FC = () => {
           </div>
 
           <div className="text-center">
-            <p className="text-sm text-gray-500">Total</p>
+            <p className="text-sm text-muted-foreground">Total</p>
             <p className="text-3xl font-bold text-blue-600">€{getTotalAmount().toFixed(2)}</p>
           </div>
 

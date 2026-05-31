@@ -21,7 +21,6 @@ import { ArticleForm } from './ArticleForm';
 import { FamilyManager } from './FamilyManager';
 import { BonusDefinitionsManager } from './BonusDefinitionsManager';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-
 export const Articulos: React.FC = () => {
   const { articles, loading, deleteArticle, refetch } = useArticles();
   const [searchTerm, setSearchTerm] = useState('');
@@ -149,9 +148,9 @@ export const Articulos: React.FC = () => {
       case 'calzado':
         return 'bg-orange-100 text-orange-800';
       case 'standard':
-        return 'bg-gray-100 text-gray-800';
+        return 'bg-muted text-foreground';
       default:
-        return 'bg-gray-100 text-gray-800';
+        return 'bg-muted text-foreground';
     }
   };
 
@@ -171,8 +170,8 @@ export const Articulos: React.FC = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Artículos</h1>
-          <p className="text-gray-600">Gestión de inventario y productos</p>
+          <h1 className="text-3xl font-bold text-foreground">Artículos</h1>
+          <p className="text-muted-foreground">Gestión de inventario y productos</p>
         </div>
         <div className="flex space-x-3">
           <button
@@ -202,39 +201,39 @@ export const Articulos: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
+        <div className="bg-card rounded-xl shadow-lg p-6 border border-border">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Total Artículos</p>
-              <p className="text-2xl font-bold text-gray-900">{articles.length}</p>
+              <p className="text-sm font-medium text-muted-foreground">Total Artículos</p>
+              <p className="text-2xl font-bold text-foreground">{articles.length}</p>
             </div>
             <Package className="w-8 h-8 text-blue-500" />
           </div>
         </div>
-        <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
+        <div className="bg-card rounded-xl shadow-lg p-6 border border-border">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Familias</p>
-              <p className="text-2xl font-bold text-gray-900">{familias.length}</p>
+              <p className="text-sm font-medium text-muted-foreground">Familias</p>
+              <p className="text-2xl font-bold text-foreground">{familias.length}</p>
             </div>
             <TrendingUp className="w-8 h-8 text-green-500" />
           </div>
         </div>
-        <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
+        <div className="bg-card rounded-xl shadow-lg p-6 border border-border">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Stock Total</p>
-              <p className="text-2xl font-bold text-gray-900">
+              <p className="text-sm font-medium text-muted-foreground">Stock Total</p>
+              <p className="text-2xl font-bold text-foreground">
                 {articles.reduce((sum, art) => sum + art.stock_actual, 0)}
               </p>
             </div>
             <Barcode className="w-8 h-8 text-purple-500" />
           </div>
         </div>
-        <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
+        <div className="bg-card rounded-xl shadow-lg p-6 border border-border">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Stock Bajo</p>
+              <p className="text-sm font-medium text-muted-foreground">Stock Bajo</p>
               <p className="text-2xl font-bold text-red-600">{articulosBajoStock.length}</p>
             </div>
             <AlertTriangle className="w-8 h-8 text-red-500" />
@@ -242,15 +241,15 @@ export const Articulos: React.FC = () => {
         </div>
       </div>
 
-      <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
-        <div className="mb-4 inline-flex rounded-lg border border-gray-200 p-1 bg-gray-50">
+      <div className="bg-card rounded-xl shadow-lg p-6 border border-border">
+        <div className="mb-4 inline-flex rounded-lg border border-border p-1 bg-muted">
           {(['producto', 'servicio', 'bono'] as const).map((kind) => (
             <button
               key={kind}
               type="button"
               onClick={() => handleKindChange(kind)}
               className={`px-3 py-1.5 rounded-md text-sm transition-colors ${
-                activeKind === kind ? 'bg-white shadow text-blue-700' : 'text-gray-600 hover:text-gray-900'
+                activeKind === kind ? 'bg-background shadow text-blue-700 dark:text-blue-300' : 'text-muted-foreground hover:text-foreground'
               }`}
             >
               {kind === 'producto' ? 'Productos' : kind === 'servicio' ? 'Servicios' : 'Bonos'}
@@ -259,13 +258,13 @@ export const Articulos: React.FC = () => {
         </div>
         <div className="flex flex-col md:flex-row md:items-center md:justify-between space-y-4 md:space-y-0">
           <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
             <input
               type="text"
               placeholder="Buscar por descripción, código, familia o tipo..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full pl-10 pr-4 py-2 border border-border bg-background text-foreground rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
           </div>
           <div className="flex items-center space-x-2">
@@ -275,8 +274,8 @@ export const Articulos: React.FC = () => {
                   type="button"
                   className={`flex items-center space-x-2 px-4 py-2 border rounded-lg transition-colors ${
                     familyFilter
-                      ? 'border-blue-500 bg-blue-50 text-blue-800'
-                      : 'border-gray-300 hover:bg-gray-50'
+                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/40 text-blue-800 dark:text-blue-200'
+                      : 'border-border hover:bg-accent'
                   }`}
                 >
                   <Filter className="w-4 h-4 shrink-0" />
@@ -287,7 +286,7 @@ export const Articulos: React.FC = () => {
                 </button>
               </PopoverTrigger>
               <PopoverContent align="end" className="w-72 p-2">
-                <p className="px-2 py-1 text-xs font-medium text-gray-500 uppercase tracking-wide">
+                <p className="px-2 py-1 text-xs font-medium text-muted-foreground uppercase tracking-wide">
                   Familia
                 </p>
                 <div className="max-h-64 overflow-y-auto">
@@ -297,14 +296,14 @@ export const Articulos: React.FC = () => {
                       setFamilyFilter(null);
                       setFamilyFilterOpen(false);
                     }}
-                    className={`w-full text-left px-2 py-2 rounded-md text-sm hover:bg-gray-100 ${
-                      !familyFilter ? 'bg-blue-50 text-blue-800 font-medium' : 'text-gray-700'
+                    className={`w-full text-left px-2 py-2 rounded-md text-sm hover:bg-accent ${
+                      !familyFilter ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-800 dark:text-blue-200 font-medium' : 'text-muted-foreground'
                     }`}
                   >
                     Todas las familias
                   </button>
                   {familyOptions.length === 0 ? (
-                    <p className="px-2 py-3 text-sm text-gray-500">No hay familias en esta pestaña</p>
+                    <p className="px-2 py-3 text-sm text-muted-foreground">No hay familias en esta pestaña</p>
                   ) : (
                     familyOptions.map((familia) => (
                       <button
@@ -314,10 +313,10 @@ export const Articulos: React.FC = () => {
                           setFamilyFilter(familia);
                           setFamilyFilterOpen(false);
                         }}
-                        className={`w-full text-left px-2 py-2 rounded-md text-sm hover:bg-gray-100 truncate ${
+                        className={`w-full text-left px-2 py-2 rounded-md text-sm hover:bg-accent truncate ${
                           familyFilter === familia
-                            ? 'bg-blue-50 text-blue-800 font-medium'
-                            : 'text-gray-700'
+                            ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-800 dark:text-blue-200 font-medium'
+                            : 'text-muted-foreground'
                         }`}
                         title={familia}
                       >
@@ -332,7 +331,7 @@ export const Articulos: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setFamilyFilter(null)}
-                className="text-sm text-gray-500 hover:text-gray-800 underline"
+                className="text-sm text-muted-foreground hover:text-foreground underline"
               >
                 Quitar filtro
               </button>
@@ -341,40 +340,40 @@ export const Articulos: React.FC = () => {
         </div>
       </div>
 
-      <div className="bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden">
+      <div className="bg-card rounded-xl shadow-lg border border-border overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-gray-50">
+            <thead className="bg-muted">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                   Artículo
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                   Tipo / Familia
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                   Precio
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                   Stock
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                   Variaciones
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                   Códigos
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                   Estado
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                   Acciones
                 </th>
               </tr>
             </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
+            <tbody className="bg-card divide-y divide-border">
               {filteredArticles.map((articulo) => [
-                  <tr key={articulo.id} className="hover:bg-gray-50 transition-colors">
+                  <tr key={articulo.id} className="hover:bg-muted transition-colors">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
                         {articulo.foto_url ? (
@@ -390,13 +389,13 @@ export const Articulos: React.FC = () => {
                         )}
                         <div className="ml-3">
                           <div 
-                            className="text-sm font-medium text-gray-900 hover:text-blue-600 cursor-pointer transition-colors"
+                            className="text-sm font-medium text-foreground hover:text-blue-600 cursor-pointer transition-colors"
                             onClick={() => handleEdit(articulo)}
                             title="Haz clic para editar este artículo"
                           >
                             {articulo.descripcion}
                           </div>
-                          <div className="text-sm text-gray-500">
+                          <div className="text-sm text-muted-foreground">
                             {articulo.codigo}
                           </div>
                         </div>
@@ -413,17 +412,17 @@ export const Articulos: React.FC = () => {
                         </span>
                       </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-medium">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground font-medium">
                       €{articulo.precio.toFixed(2)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
                         <span className={`text-sm font-medium ${
-                          articulo.stock_actual <= articulo.stock_minimo ? 'text-red-600' : 'text-gray-900'
+                          articulo.stock_actual <= articulo.stock_minimo ? 'text-red-600' : 'text-foreground'
                         }`}>
                           {articulo.stock_actual}
                         </span>
-                        <span className="text-xs text-gray-500 ml-1">
+                        <span className="text-xs text-muted-foreground ml-1">
                           (mín: {articulo.stock_minimo})
                         </span>
                         {articulo.stock_actual <= articulo.stock_minimo && (
@@ -449,10 +448,10 @@ export const Articulos: React.FC = () => {
                           )}
                         </button>
                       ) : (
-                        <span className="text-sm text-gray-400">Sin variaciones</span>
+                        <span className="text-sm text-muted-foreground">Sin variaciones</span>
                       )}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
                       <div className="flex items-center">
                         <Barcode className="w-4 h-4 mr-1" />
                         {articulo.codigo_barras || '-'}
@@ -487,20 +486,20 @@ export const Articulos: React.FC = () => {
                   
                   expandedArticles[articulo.id] && hasVariations(articulo) ? (
                     <tr key={`${articulo.id}-variations`}>
-                      <td colSpan={8} className="px-6 py-4 bg-gray-50">
+                      <td colSpan={8} className="px-6 py-4 bg-muted">
                         {loadingVariations[articulo.id] ? (
                           <div className="flex items-center justify-center py-4">
                             <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500"></div>
-                            <span className="ml-2 text-sm text-gray-600">Cargando variaciones...</span>
+                            <span className="ml-2 text-sm text-muted-foreground">Cargando variaciones...</span>
                           </div>
                         ) : articleVariations[articulo.id] && articleVariations[articulo.id].length > 0 ? (
                           <div className="space-y-3">
-                            <h4 className="text-sm font-medium text-gray-900 mb-3">
+                            <h4 className="text-sm font-medium text-foreground mb-3">
                               Variaciones de {articulo.descripcion}
                             </h4>
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                               {articleVariations[articulo.id].map((variation) => (
-                                <div key={variation.id} className="bg-white rounded-lg border border-gray-200 p-3">
+                                <div key={variation.id} className="bg-card rounded-lg border border-border p-3">
                                   <div className="flex items-center justify-between mb-2">
                                     <div className="flex space-x-2">
                                       <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">
@@ -516,15 +515,15 @@ export const Articulos: React.FC = () => {
                                       {variation.estado}
                                     </span>
                                   </div>
-                                  <div className="space-y-1 text-xs text-gray-600">
+                                  <div className="space-y-1 text-xs text-muted-foreground">
                                     <div className="flex justify-between">
                                       <span>Precio:</span>
-                                      <span className="font-medium text-gray-900">€{variation.precio.toFixed(2)}</span>
+                                      <span className="font-medium text-foreground">€{variation.precio.toFixed(2)}</span>
                                     </div>
                                     <div className="flex justify-between">
                                       <span>Stock:</span>
                                       <span className={`font-medium ${
-                                        variation.stock_actual <= variation.stock_minimo ? 'text-red-600' : 'text-gray-900'
+                                        variation.stock_actual <= variation.stock_minimo ? 'text-red-600' : 'text-foreground'
                                       }`}>
                                         {variation.stock_actual}
                                         {variation.stock_actual <= variation.stock_minimo && (
@@ -534,7 +533,7 @@ export const Articulos: React.FC = () => {
                                     </div>
                                     <div className="flex justify-between">
                                       <span>Mín:</span>
-                                      <span className="font-medium text-gray-900">{variation.stock_minimo}</span>
+                                      <span className="font-medium text-foreground">{variation.stock_minimo}</span>
                                     </div>
                                     {variation.codigo_barras && (
                                       <div className="flex justify-between">
@@ -549,7 +548,7 @@ export const Articulos: React.FC = () => {
                           </div>
                         ) : (
                           <div className="text-center py-4">
-                            <p className="text-sm text-gray-500">No hay variaciones creadas para este artículo</p>
+                            <p className="text-sm text-muted-foreground">No hay variaciones creadas para este artículo</p>
                           </div>
                         )}
                       </td>

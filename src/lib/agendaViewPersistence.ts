@@ -17,6 +17,23 @@ export function agendaViewStorageKey(userId: string | undefined | null): string 
   return `${PREFIX_V2}${userId}`;
 }
 
+/** userId explícito o el de sesión (disponible antes de que resuelva useAuth). */
+export function resolveAgendaPersistUserId(explicitUserId?: string | null): string | null {
+  if (explicitUserId) return explicitUserId;
+  if (typeof window === 'undefined') return null;
+  try {
+    return sessionStorage.getItem('current_user_id');
+  } catch {
+    return null;
+  }
+}
+
+/** yyyy-MM-dd persistido para inicializar la fecha sin parpadear en «hoy». */
+export function loadInitialAgendaDateYmd(userId?: string | null): string | null {
+  const p = loadAgendaViewPersisted(resolveAgendaPersistUserId(userId));
+  return p?.lastDateYmd ?? null;
+}
+
 function normalizePersisted(raw: unknown): AgendaViewPersisted | null {
   if (!raw || typeof raw !== 'object') return null;
   const o = raw as Record<string, unknown>;
@@ -73,6 +90,14 @@ export function mergePersistedScroll(
   scrollTop: number,
 ): AgendaViewPersisted {
   const scrollByYmd = { ...(prev?.scrollByYmd ?? {}) };
+  const prevTop = scrollByYmd[dateYmd] ?? 0;
+  // Evita pisar scroll guardado con 0 al desmontar la cuadrícula vacía o en transición.
+  if (scrollTop <= 0 && prevTop > 0) {
+    return {
+      lastDateYmd: dateYmd,
+      scrollByYmd,
+    };
+  }
   scrollByYmd[dateYmd] = scrollTop;
   return {
     lastDateYmd: dateYmd,

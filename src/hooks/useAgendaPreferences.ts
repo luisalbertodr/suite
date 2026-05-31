@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/hooks/useAuth';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useWorkCenter } from '@/hooks/useWorkCenter';
 
 export interface AgendaVisibleFields {
   clientName: boolean;
@@ -64,18 +65,20 @@ const normalize = (raw: unknown): AgendaPreferences => {
 export const useAgendaPreferences = () => {
   const { user } = useAuth();
   const { companyId } = useCompanyFilter();
+  const { operationalCompanyId, loading: wcLoading } = useWorkCenter();
+  const scopeCompanyId = operationalCompanyId ?? companyId;
   const queryClient = useQueryClient();
 
   const settingKey = user ? `agenda_preferences:${user.id}` : null;
 
   const query = useQuery({
-    queryKey: ['agenda-preferences', companyId, user?.id],
-    enabled: !!companyId && !!user && !!settingKey,
+    queryKey: ['agenda-preferences', scopeCompanyId, user?.id],
+    enabled: !!scopeCompanyId && !!user && !!settingKey && !wcLoading,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('system_settings')
         .select('setting_value')
-        .eq('company_id', companyId!)
+        .eq('company_id', scopeCompanyId!)
         .eq('setting_key', settingKey!)
         .maybeSingle();
 
@@ -93,14 +96,14 @@ export const useAgendaPreferences = () => {
 
   const saveMutation = useMutation({
     mutationFn: async (preferences: AgendaPreferences) => {
-      if (!companyId || !settingKey) throw new Error('No user/company context');
+      if (!scopeCompanyId || !settingKey) throw new Error('No user/company context');
       const payload = JSON.stringify(preferences);
 
       const { error } = await supabase
         .from('system_settings')
         .upsert(
           [{
-            company_id: companyId,
+            company_id: scopeCompanyId,
             setting_key: settingKey,
             setting_value: payload,
           }],

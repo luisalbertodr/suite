@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useWorkCenter } from '@/hooks/useWorkCenter';
 
 export interface AgendaEmployee {
   id: string;
@@ -33,18 +34,20 @@ export const useAgendaEmployees = (options?: UseAgendaEmployeesOptions) => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { companyId } = useCompanyFilter();
+  const { operationalCompanyId, loading: wcLoading } = useWorkCenter();
+  const scopeCompanyId = operationalCompanyId ?? companyId;
   const agendaOnly = options?.agendaOnly !== false;
 
   const { data: employees = [], isLoading, error } = useQuery({
-    queryKey: ['agenda-employees', companyId, agendaOnly ? 'active' : 'all'],
+    queryKey: ['agenda-employees', scopeCompanyId, agendaOnly ? 'active' : 'all'],
     queryFn: async () => {
-      if (!companyId) return [];
+      if (!scopeCompanyId) return [];
 
       const baseQuery = () =>
         supabase
           .from('agenda_employees')
           .select('*')
-          .eq('company_id', companyId)
+          .eq('company_id', scopeCompanyId)
           .order('agenda_sort_order', { ascending: true })
           .order('name');
 
@@ -65,7 +68,7 @@ export const useAgendaEmployees = (options?: UseAgendaEmployeesOptions) => {
         active: row.active ?? row.is_active ?? true,
       })) as AgendaEmployee[];
     },
-    enabled: !!companyId,
+    enabled: !!scopeCompanyId && !wcLoading,
     retry: false,
   });
 
@@ -79,11 +82,11 @@ export const useAgendaEmployees = (options?: UseAgendaEmployeesOptions) => {
       agenda_sort_order?: number;
       billing_company_id?: string | null;
     }) => {
-      if (!companyId) throw new Error('No company ID available');
+      if (!scopeCompanyId) throw new Error('No company ID available');
       const { active, billing_company_id, ...rest } = employee;
       const row: Record<string, unknown> = {
         ...rest,
-        company_id: companyId,
+        company_id: scopeCompanyId,
         is_active: active,
       };
       if (billing_company_id) row.billing_company_id = billing_company_id;
@@ -96,7 +99,7 @@ export const useAgendaEmployees = (options?: UseAgendaEmployeesOptions) => {
         .select()
         .single());
       if (error?.code === '42703') {
-        const fallback: Record<string, unknown> = { ...rest, active, company_id: companyId };
+        const fallback: Record<string, unknown> = { ...rest, active, company_id: scopeCompanyId };
         ({ data, error } = await supabase
           .from('agenda_employees')
           .insert([fallback])

@@ -116,6 +116,8 @@ export function useWorkCenter() {
     ? (catalogHostQuery.data ?? billingCompanies[0]?.id ?? companyId)
     : companyId;
 
+  const operationalCompanyId = catalogHostCompanyId ?? companyId;
+
   const siblingBillingCompanyId =
     isMultiEntity && companyId
       ? (billingCompanies.find((c) => c.id !== companyId)?.id ?? null)
@@ -134,6 +136,7 @@ export function useWorkCenter() {
     companyLabels,
     hostCompany: hostCompanyQuery.data ?? null,
     catalogHostCompanyId,
+    operationalCompanyId,
     siblingBillingCompanyId,
   };
 }

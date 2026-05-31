@@ -64,7 +64,7 @@ export const AppearanceConfig: React.FC = () => {
       <CardContent className="space-y-6">
         <div>
           <h3 className="text-lg font-medium mb-4">Color del Sidebar</h3>
-          <p className="text-sm text-gray-600 mb-4">
+          <p className="text-sm text-muted-foreground mb-4">
             Selecciona el color que prefieras para el sidebar de navegación
           </p>
           
@@ -85,14 +85,14 @@ export const AppearanceConfig: React.FC = () => {
             ))}
           </div>
 
-          <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 rounded-lg">
             <div className="flex items-center space-x-2">
               <Badge variant="secondary">Color actual</Badge>
-              <span className="text-sm text-blue-800">
+              <span className="text-sm text-blue-800 dark:text-blue-200">
                 {colorOptions.find(c => c.name === sidebarColor)?.label || 'Azul'}
               </span>
             </div>
-            <p className="text-sm text-blue-700 mt-2">
+            <p className="text-sm text-blue-700 dark:text-blue-300 mt-2">
               Los cambios se aplican inmediatamente y se guardan para tu usuario.
             </p>
           </div>
@@ -100,14 +100,14 @@ export const AppearanceConfig: React.FC = () => {
 
         <div className="mt-8">
           <h3 className="text-lg font-medium mb-4">Logo de la Empresa</h3>
-          <p className="text-sm text-gray-600 mb-4">
+          <p className="text-sm text-muted-foreground mb-4">
             Sube el logo de tu empresa para incluirlo en los PDFs de presupuestos
           </p>
           
           <div className="space-y-4">
             {logoUrl ? (
               <div className="flex items-center space-x-4">
-                <div className="w-32 h-20 border border-gray-200 rounded-lg overflow-hidden bg-gray-50 flex items-center justify-center">
+                <div className="w-32 h-20 border border-border rounded-lg overflow-hidden bg-muted flex items-center justify-center">
                   <img 
                     src={logoUrl} 
                     alt="Logo de la empresa" 
@@ -135,12 +135,12 @@ export const AppearanceConfig: React.FC = () => {
             ) : (
               <div className="w-full max-w-sm">
                 <div 
-                  className="w-32 h-20 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center cursor-pointer hover:border-gray-400 transition-colors"
+                  className="w-32 h-20 border-2 border-dashed border-border rounded-lg flex items-center justify-center cursor-pointer hover:border-muted-foreground/50 transition-colors"
                   onClick={() => fileInputRef.current?.click()}
                 >
                   <div className="text-center">
-                    <Image className="w-6 h-6 mx-auto text-gray-400 mb-1" />
-                    <p className="text-xs text-gray-500">Subir Logo</p>
+                    <Image className="w-6 h-6 mx-auto text-muted-foreground mb-1" />
+                    <p className="text-xs text-muted-foreground">Subir Logo</p>
                   </div>
                 </div>
                 <Button
@@ -162,8 +162,8 @@ export const AppearanceConfig: React.FC = () => {
               className="hidden"
             />
             
-            <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
-              <p className="text-xs text-gray-600">
+            <div className="p-3 bg-muted border border-border rounded-lg">
+              <p className="text-xs text-muted-foreground">
                 El logo aparecerá en la esquina superior izquierda de los PDFs de presupuestos. 
                 Formatos soportados: JPG, PNG, GIF. Tamaño recomendado: 200x100px.
               </p>
