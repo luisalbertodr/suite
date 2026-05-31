@@ -12,7 +12,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { MarketingLeadCard } from './MarketingLeadCard';
+import { TooltipProvider } from '@/components/ui/tooltip';
+import { MarketingLeadCardSlot } from './MarketingLeadCardSlot';
 
 interface MarketingStageColumnProps {
   stage: MarketingLeadStage;
@@ -24,9 +25,9 @@ interface MarketingStageColumnProps {
   noteCountByLead: Record<string, number>;
   notePreviewsByLead: Record<string, MarketingLeadNotePreview[]>;
   viewedLeadIds: Set<string>;
-  onLeadClick: (lead: MarketingLead) => void;
-  onLeadOpenNotes: (lead: MarketingLead) => void;
-  onLeadPromote: (lead: MarketingLead) => void;
+  onLeadClickById: (leadId: string) => void;
+  onLeadOpenNotesById: (leadId: string) => void;
+  onLeadPromoteById: (leadId: string) => void;
   onLeadDragStart: (event: React.DragEvent<HTMLDivElement>, lead: MarketingLead) => void;
   onLeadDragEnd: (event: React.DragEvent<HTMLDivElement>) => void;
   onStageDragOver: (event: React.DragEvent<HTMLDivElement>, stageId: string) => void;
@@ -34,9 +35,9 @@ interface MarketingStageColumnProps {
   onStageDrop: (event: React.DragEvent<HTMLDivElement>, stageId: string) => void;
   onEditStage: (stage: MarketingLeadStage) => void;
   onDeleteStage: (stage: MarketingLeadStage) => void;
-  /** Columna estrecha: sólo contador en cabecera (menos DOM = Kanban más ágil). */
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
+  compact?: boolean;
 }
 
 const currencyFormatter = new Intl.NumberFormat('es-ES', {
@@ -45,7 +46,6 @@ const currencyFormatter = new Intl.NumberFormat('es-ES', {
   maximumFractionDigits: 0,
 });
 
-/** Etapa tipo "Formulario+Agenda ficticia": mostrar aviso si no hay fecha detectada en el lead. */
 const stageExpectsAgendaContext = (stageName: string): boolean =>
   /formulario\s*\+\s*agenda ficticia|formulario\+agenda ficticia/i.test(stageName);
 
@@ -59,9 +59,9 @@ export const MarketingStageColumn = memo(function MarketingStageColumn({
   noteCountByLead,
   notePreviewsByLead,
   viewedLeadIds,
-  onLeadClick,
-  onLeadOpenNotes,
-  onLeadPromote,
+  onLeadClickById,
+  onLeadOpenNotesById,
+  onLeadPromoteById,
   onLeadDragStart,
   onLeadDragEnd,
   onStageDragOver,
@@ -71,6 +71,7 @@ export const MarketingStageColumn = memo(function MarketingStageColumn({
   onDeleteStage,
   collapsed = false,
   onToggleCollapsed,
+  compact = false,
 }: MarketingStageColumnProps) {
   const totalValue = leads.reduce((acc, l) => acc + Number(l.value ?? 0), 0);
   const isDropTarget = dragOverStageId === stage.id;
@@ -145,86 +146,96 @@ export const MarketingStageColumn = memo(function MarketingStageColumn({
         </>
       ) : (
         <>
-      <div className="flex items-center justify-between gap-1 border-b border-border/60 px-2 py-2">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <span
-            className="h-2.5 w-2.5 shrink-0 rounded-full"
-            style={{ backgroundColor: stage.color }}
-            aria-hidden
-          />
-          <span className="truncate text-sm font-semibold text-foreground" title={stage.name}>
-            {stage.name}
-          </span>
-        </div>
-        <div className="flex shrink-0 items-center gap-0.5">
-          {onToggleCollapsed ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6"
-              title="Colapsar columna"
-              aria-label="Colapsar columna"
-              onClick={onToggleCollapsed}
-            >
-              <ChevronLeft className="h-3.5 w-3.5" />
-            </Button>
-          ) : null}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-6 w-6">
-              <MoreVertical className="h-3.5 w-3.5" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => onEditStage(stage)}>
-              <Pencil className="mr-2 h-3.5 w-3.5" /> Renombrar
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className="text-destructive focus:text-destructive"
-              onClick={() => onDeleteStage(stage)}
-            >
-              <Trash2 className="mr-2 h-3.5 w-3.5" /> Eliminar
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        </div>
-      </div>
-
-      <div className="flex items-baseline justify-between px-3 py-1.5 text-[11px] text-muted-foreground">
-        <span>
-          {leads.length} {leads.length === 1 ? 'cliente potencial' : 'clientes potenciales'}
-        </span>
-        <span className="tabular-nums">{currencyFormatter.format(totalValue)}</span>
-      </div>
-
-      <div className="flex-1 space-y-2 overflow-y-auto px-2 pb-3 scrollbar-kanban min-h-0">
-        {leads.length === 0 ? (
-          <div className="rounded-md border border-dashed border-border/70 px-3 py-6 text-center text-xs text-muted-foreground">
-            Arrastra aquí
+          <div className="flex items-center justify-between gap-1 border-b border-border/60 px-2 py-2">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <span
+                className="h-2.5 w-2.5 shrink-0 rounded-full"
+                style={{ backgroundColor: stage.color }}
+                aria-hidden
+              />
+              <span className="truncate text-sm font-semibold text-foreground" title={stage.name}>
+                {stage.name}
+              </span>
+              <span
+                className="shrink-0 rounded-full bg-background/80 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-muted-foreground"
+                title={`${leads.length} ${leads.length === 1 ? 'cliente potencial' : 'clientes potenciales'}`}
+              >
+                {leads.length}
+              </span>
+              {totalValue > 0 ? (
+                <span
+                  className="hidden shrink-0 text-[10px] tabular-nums text-muted-foreground xl:inline"
+                  title="Valor total en etapa"
+                >
+                  {currencyFormatter.format(totalValue)}
+                </span>
+              ) : null}
+            </div>
+            <div className="flex shrink-0 items-center gap-0.5">
+              {onToggleCollapsed ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  title="Colapsar columna"
+                  aria-label="Colapsar columna"
+                  onClick={onToggleCollapsed}
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </Button>
+              ) : null}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-6 w-6">
+                    <MoreVertical className="h-3.5 w-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => onEditStage(stage)}>
+                    <Pencil className="mr-2 h-3.5 w-3.5" /> Renombrar
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="text-destructive focus:text-destructive"
+                    onClick={() => onDeleteStage(stage)}
+                  >
+                    <Trash2 className="mr-2 h-3.5 w-3.5" /> Eliminar
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
-        ) : (
-          leads.map((lead) => (
-            <MarketingLeadCard
-              key={lead.id}
-              lead={lead}
-              visibleFields={visibleFields}
-              stageColor={stage.color}
-              expectAgendaContext={expectAgendaContext}
-              matchedCustomer={matchedCustomerByLead.get(lead.id) ?? null}
-              noteCount={noteCountByLead[lead.id] ?? 0}
-              notePreviews={notePreviewsByLead[lead.id] ?? []}
-              isDragging={draggedLeadId === lead.id}
-              isUnread={!viewedLeadIds.has(lead.id)}
-              onClick={() => onLeadClick(lead)}
-              onOpenNotes={() => onLeadOpenNotes(lead)}
-              onPromote={() => onLeadPromote(lead)}
-              onDragStart={onLeadDragStart}
-              onDragEnd={onLeadDragEnd}
-            />
-          ))
-        )}
-      </div>
+
+          <TooltipProvider delayDuration={300}>
+            <div className="flex-1 space-y-2 overflow-y-auto px-2 pb-3 scrollbar-kanban min-h-0 contain-paint">
+              {leads.length === 0 ? (
+                <div className="rounded-md border border-dashed border-border/70 px-3 py-6 text-center text-xs text-muted-foreground">
+                  Arrastra aquí
+                </div>
+              ) : (
+                leads.map((lead) => (
+                  <MarketingLeadCardSlot
+                    key={lead.id}
+                    lead={lead}
+                    visibleFields={visibleFields}
+                    stageColor={stage.color}
+                    expectAgendaContext={expectAgendaContext}
+                    compact={compact}
+                    matchedCustomer={matchedCustomerByLead.get(lead.id) ?? null}
+                    noteCount={noteCountByLead[lead.id] ?? 0}
+                    notePreviews={notePreviewsByLead[lead.id] ?? []}
+                    isDragging={draggedLeadId === lead.id}
+                    isUnread={!viewedLeadIds.has(lead.id)}
+                    onLeadClick={onLeadClickById}
+                    onLeadOpenNotes={onLeadOpenNotesById}
+                    onLeadPromote={onLeadPromoteById}
+                    onDragStart={onLeadDragStart}
+                    onDragEnd={onLeadDragEnd}
+                  />
+                ))
+              )}
+            </div>
+          </TooltipProvider>
         </>
       )}
     </div>

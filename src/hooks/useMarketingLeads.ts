@@ -206,6 +206,9 @@ function dedupeTuPartnerLeadsByPhone(leads: ParsedTuPartnerLead[]): ParsedTuPart
   return [...without9, ...by9.values()];
 }
 
+const isImportAssignedToNoise = (value: string): boolean =>
+  /lipoout|triple\s*glow|medicina\s*est[eé]tica/i.test(value.trim());
+
 export const parseTuPartnerPayload = (raw: TuPartnerLeadsPayload): ParsedTuPartnerLead[] => {
   const items = Array.isArray(raw?.leads) ? raw.leads : [];
   return items.map((it) => {
@@ -259,7 +262,7 @@ export const parseTuPartnerPayload = (raw: TuPartnerLeadsPayload): ParsedTuPartn
       created_at_iso: parseLooseDate(it.createdAt),
       appointment_at: parseAppointmentLabel(it.appointmentDate),
       appointment_label: it.appointmentDate ?? null,
-      assigned_to: it.assignedTo ?? null,
+      assigned_to: it.assignedTo && !isImportAssignedToNoise(it.assignedTo) ? it.assignedTo : null,
       win_status: it.status ?? null,
       tags,
       notes,

@@ -164,15 +164,31 @@ function labelLooksLikeBookingIntentQuestion(label: string | null | undefined): 
   return metaFieldKeyIsBookingIntentQuestion(key);
 }
 
+function isAppointmentLabelNoise(label: string): boolean {
+  const v = label.trim().toLowerCase();
+  if (!v) return false;
+  if (/lipoout|triple\s*glow|medicina\s*est[eé]tica/i.test(v)) return true;
+  if (!/\d/.test(v) && v.length >= 12 && !valueLooksLikeScheduleDateTime(v)) return true;
+  return false;
+}
+
 export function sanitizeExtractedAppointment(
   extracted: ExtractedLeadAppointment,
 ): ExtractedLeadAppointment {
   const label = extracted.label?.trim() ?? '';
-  if (labelLooksLikeBookingIntentQuestion(label) || isYesNoOnlyAnswer(label)) {
+  if (
+    labelLooksLikeBookingIntentQuestion(label) ||
+    isYesNoOnlyAnswer(label) ||
+    isAppointmentLabelNoise(label)
+  ) {
     return { label: null, atIso: null };
   }
   if (extracted.atIso && !label) return extracted;
   if (extracted.atIso && label && !valueLooksLikeScheduleDateTime(label)) {
+    return { label: null, atIso: null };
+  }
+  // Sin fecha interpretable: no mostrar etiquetas que no parecen slot (p. ej. nombre del formulario Meta).
+  if (!extracted.atIso && label && !valueLooksLikeScheduleDateTime(label)) {
     return { label: null, atIso: null };
   }
   return extracted;

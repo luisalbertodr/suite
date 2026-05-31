@@ -16,6 +16,7 @@ import { usePermissionGuard } from '@/hooks/usePermissionGuard';
 import { SplitPaymentDialog } from '@/components/SplitPaymentDialog';
 import {
   buildFamilyBillingMap,
+  filterArticlesForBillingCompany,
   groupCartByBillingCompany,
   hasSplitBilling,
   resolveBillingCompanyId,
@@ -146,7 +147,9 @@ export const TPV: React.FC = () => {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { companyId, loading: companyLoading } = useCompanyFilter();
-  const { isMultiEntity, companyLabels, billingCompanies } = useWorkCenter();
+  const { isMultiEntity, companyLabels, billingCompanies, catalogHostCompanyId } = useWorkCenter();
+  const catalogCompanyId = catalogHostCompanyId ?? companyId;
+  const billingScopeId = companyId;
   const { requireOrToast: requirePermissionOrToast } = usePermissionGuard();
   const prefilledSourceRef = useRef<string | null>(null);
   const [showSplitPayment, setShowSplitPayment] = useState(false);
@@ -223,20 +226,20 @@ export const TPV: React.FC = () => {
   }, [prefill, navigate, location.pathname]);
 
   const { data: familyBillingRows = [] } = useQuery({
-    queryKey: ['tpv-family-billing', companyId],
+    queryKey: ['tpv-family-billing', catalogCompanyId],
     queryFn: async () => {
-      if (!companyId) return [];
+      if (!catalogCompanyId) return [];
       const { data, error } = await supabase
         .from('article_families')
         .select('name, billing_company_id')
-        .eq('company_id', companyId);
+        .eq('company_id', catalogCompanyId);
       if (error) {
         if (error.code === '42703') return [];
         throw error;
       }
       return data ?? [];
     },
-    enabled: !!companyId,
+    enabled: !!catalogCompanyId,
   });
 
   const familyBillingMap = useMemo(
@@ -245,7 +248,7 @@ export const TPV: React.FC = () => {
   );
 
   const resolveItemBilling = (article: Article): string => {
-    if (!companyId) return '';
+    if (!catalogCompanyId) return '';
     return resolveBillingCompanyId(
       {
         billing_company_id: article.billing_company_id,
@@ -253,7 +256,7 @@ export const TPV: React.FC = () => {
         company_id: article.company_id,
       },
       familyBillingMap,
-      companyId,
+      catalogCompanyId,
     );
   };
 
@@ -302,15 +305,15 @@ export const TPV: React.FC = () => {
   );
 
   const { data: articles = [], isLoading } = useQuery({
-    queryKey: ['tpv-articles', debouncedSearchTerm, companyId],
+    queryKey: ['tpv-articles', debouncedSearchTerm, catalogCompanyId, billingScopeId, isMultiEntity],
     queryFn: async () => {
-      if (!companyId) return [];
+      if (!catalogCompanyId) return [];
 
       let query = supabase
         .from('articles')
         .select('id, descripcion, precio, stock_actual, codigo, foto_url, tipo_producto, codigo_barras, familia, billing_company_id, company_id')
         .eq('estado', 'activo')
-        .eq('company_id', companyId)
+        .eq('company_id', catalogCompanyId)
         .order('descripcion')
         .limit(debouncedSearchTerm.trim() ? 300 : 120);
 
@@ -325,9 +328,19 @@ export const TPV: React.FC = () => {
         console.error('Error fetching articles:', error);
         throw error;
       }
-      return data as Article[];
+
+      let rows = (data ?? []) as Article[];
+      if (isMultiEntity && billingScopeId) {
+        rows = filterArticlesForBillingCompany(
+          rows,
+          billingScopeId,
+          familyBillingMap,
+          catalogCompanyId,
+        );
+      }
+      return rows;
     },
-    enabled: !!companyId
+    enabled: !!catalogCompanyId
   });
 
   const { data: variations = [] } = useQuery({
@@ -616,15 +629,15 @@ export const TPV: React.FC = () => {
   });
 
   const handleBarcodeSearch = async (barcode: string) => {
-    if (!barcode.trim() || !companyId) return;
+    if (!barcode.trim() || !catalogCompanyId) return;
 
     try {
       const { data: articleData, error: articleError } = await supabase
         .from('articles')
-        .select('id, descripcion, precio, stock_actual, codigo, foto_url, tipo_producto, codigo_barras')
+        .select('id, descripcion, precio, stock_actual, codigo, foto_url, tipo_producto, codigo_barras, familia, billing_company_id, company_id')
         .eq('codigo_barras', barcode.trim())
         .eq('estado', 'activo')
-        .eq('company_id', companyId)
+        .eq('company_id', catalogCompanyId)
         .maybeSingle();
 
       if (articleError) {
@@ -632,6 +645,23 @@ export const TPV: React.FC = () => {
       }
 
       if (articleData) {
+        if (
+          isMultiEntity &&
+          billingScopeId &&
+          !filterArticlesForBillingCompany(
+            [articleData as Article],
+            billingScopeId,
+            familyBillingMap,
+            catalogCompanyId,
+          ).length
+        ) {
+          toast({
+            title: 'Artículo no disponible',
+            description: 'Este artículo pertenece a otra empresa emisora del centro laboral.',
+            variant: 'destructive',
+          });
+          return;
+        }
         addToCart(articleData as Article);
         setBarcodeInput('');
         toast({

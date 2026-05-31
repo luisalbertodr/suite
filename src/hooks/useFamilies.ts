@@ -100,9 +100,22 @@ export const useFamilies = (options?: UseFamiliesOptions) => {
         .select()
         .single();
       if (error) throw error;
+
+      const { error: articlesError } = await supabase
+        .from('articles')
+        .update({ billing_company_id })
+        .eq('company_id', catalogCompanyId)
+        .eq('familia', data.name);
+
+      if (articlesError && articlesError.code !== '42703') throw articlesError;
+
       return data;
     },
-    onSuccess: invalidateFamilies,
+    onSuccess: () => {
+      invalidateFamilies();
+      queryClient.invalidateQueries({ queryKey: ['articles'] });
+      queryClient.invalidateQueries({ queryKey: ['tpv-articles'] });
+    },
   });
 
   const releaseFamilyFromBillingMutation = useMutation({

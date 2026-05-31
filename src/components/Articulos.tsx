@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { 
   Plus, 
   Search, 
@@ -20,10 +20,13 @@ import { supabase } from '@/lib/supabase';
 import { ArticleForm } from './ArticleForm';
 import { FamilyManager } from './FamilyManager';
 import { BonusDefinitionsManager } from './BonusDefinitionsManager';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 export const Articulos: React.FC = () => {
   const { articles, loading, deleteArticle, refetch } = useArticles();
   const [searchTerm, setSearchTerm] = useState('');
+  const [familyFilter, setFamilyFilter] = useState<string | null>(null);
+  const [familyFilterOpen, setFamilyFilterOpen] = useState(false);
   const [activeKind, setActiveKind] = useState<'producto' | 'servicio' | 'bono'>('producto');
   const [showForm, setShowForm] = useState(false);
   const [showFamilyManager, setShowFamilyManager] = useState(false);
@@ -33,9 +36,23 @@ export const Articulos: React.FC = () => {
   const [articleVariations, setArticleVariations] = useState<{[key: string]: any[]}>({});
   const [loadingVariations, setLoadingVariations] = useState<{[key: string]: boolean}>({});
 
-  const filteredArticles = articles.filter(article => {
-    if ((article.article_kind || 'producto') !== activeKind) return false;
+  const articlesForKind = useMemo(
+    () => articles.filter((article) => (article.article_kind || 'producto') === activeKind),
+    [articles, activeKind],
+  );
+
+  const familyOptions = useMemo(
+    () =>
+      [...new Set(articlesForKind.map((art) => art.familia).filter(Boolean))].sort((a, b) =>
+        a.localeCompare(b, 'es'),
+      ),
+    [articlesForKind],
+  );
+
+  const filteredArticles = articlesForKind.filter((article) => {
+    if (familyFilter && article.familia !== familyFilter) return false;
     const term = searchTerm.toLowerCase();
+    if (!term) return true;
     return (
       article.descripcion.toLowerCase().includes(term) ||
       article.codigo.toLowerCase().includes(term) ||
@@ -46,6 +63,11 @@ export const Articulos: React.FC = () => {
 
   const articulosBajoStock = articles.filter(art => art.stock_actual <= art.stock_minimo);
   const familias = [...new Set(articles.map(art => art.familia))];
+
+  const handleKindChange = (kind: 'producto' | 'servicio' | 'bono') => {
+    setActiveKind(kind);
+    setFamilyFilter(null);
+  };
 
   const handleDelete = async (id: string) => {
     if (window.confirm('¿Estás seguro de que quieres eliminar este artículo?')) {
@@ -226,7 +248,7 @@ export const Articulos: React.FC = () => {
             <button
               key={kind}
               type="button"
-              onClick={() => setActiveKind(kind)}
+              onClick={() => handleKindChange(kind)}
               className={`px-3 py-1.5 rounded-md text-sm transition-colors ${
                 activeKind === kind ? 'bg-white shadow text-blue-700' : 'text-gray-600 hover:text-gray-900'
               }`}
@@ -246,11 +268,75 @@ export const Articulos: React.FC = () => {
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
           </div>
-          <div className="flex space-x-2">
-            <button className="flex items-center space-x-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
-              <Filter className="w-4 h-4" />
-              <span>Filtrar por familia</span>
-            </button>
+          <div className="flex items-center space-x-2">
+            <Popover open={familyFilterOpen} onOpenChange={setFamilyFilterOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className={`flex items-center space-x-2 px-4 py-2 border rounded-lg transition-colors ${
+                    familyFilter
+                      ? 'border-blue-500 bg-blue-50 text-blue-800'
+                      : 'border-gray-300 hover:bg-gray-50'
+                  }`}
+                >
+                  <Filter className="w-4 h-4 shrink-0" />
+                  <span className="max-w-[200px] truncate">
+                    {familyFilter ?? 'Filtrar por familia'}
+                  </span>
+                  <ChevronDown className="w-4 h-4 shrink-0 opacity-60" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-72 p-2">
+                <p className="px-2 py-1 text-xs font-medium text-gray-500 uppercase tracking-wide">
+                  Familia
+                </p>
+                <div className="max-h-64 overflow-y-auto">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFamilyFilter(null);
+                      setFamilyFilterOpen(false);
+                    }}
+                    className={`w-full text-left px-2 py-2 rounded-md text-sm hover:bg-gray-100 ${
+                      !familyFilter ? 'bg-blue-50 text-blue-800 font-medium' : 'text-gray-700'
+                    }`}
+                  >
+                    Todas las familias
+                  </button>
+                  {familyOptions.length === 0 ? (
+                    <p className="px-2 py-3 text-sm text-gray-500">No hay familias en esta pestaña</p>
+                  ) : (
+                    familyOptions.map((familia) => (
+                      <button
+                        key={familia}
+                        type="button"
+                        onClick={() => {
+                          setFamilyFilter(familia);
+                          setFamilyFilterOpen(false);
+                        }}
+                        className={`w-full text-left px-2 py-2 rounded-md text-sm hover:bg-gray-100 truncate ${
+                          familyFilter === familia
+                            ? 'bg-blue-50 text-blue-800 font-medium'
+                            : 'text-gray-700'
+                        }`}
+                        title={familia}
+                      >
+                        {familia}
+                      </button>
+                    ))
+                  )}
+                </div>
+              </PopoverContent>
+            </Popover>
+            {familyFilter && (
+              <button
+                type="button"
+                onClick={() => setFamilyFilter(null)}
+                className="text-sm text-gray-500 hover:text-gray-800 underline"
+              >
+                Quitar filtro
+              </button>
+            )}
           </div>
         </div>
       </div>

@@ -47,6 +47,37 @@ export function resolveBillingCompanyId(
   return article.company_id ?? defaultCompanyId;
 }
 
+/** Artículo visible para la empresa emisora activa en un centro laboral multi-entidad. */
+export function articleBelongsToBillingCompany(
+  article: ArticleBillingSource,
+  billingCompanyId: string,
+  familyBillingMap: Map<string, string | null>,
+  catalogHostCompanyId: string,
+): boolean {
+  return (
+    resolveBillingCompanyId(article, familyBillingMap, catalogHostCompanyId) ===
+    billingCompanyId
+  );
+}
+
+export function filterArticlesForBillingCompany<
+  T extends ArticleBillingSource,
+>(
+  articles: T[],
+  billingCompanyId: string,
+  familyBillingMap: Map<string, string | null>,
+  catalogHostCompanyId: string,
+): T[] {
+  return articles.filter((article) =>
+    articleBelongsToBillingCompany(
+      article,
+      billingCompanyId,
+      familyBillingMap,
+      catalogHostCompanyId,
+    ),
+  );
+}
+
 export function buildFamilyBillingMap(families: FamilyBillingRow[]): Map<string, string | null> {
   return new Map(families.map((f) => [f.name, f.billing_company_id]));
 }

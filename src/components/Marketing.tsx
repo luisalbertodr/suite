@@ -4,26 +4,13 @@ import {
   Search,
   LayoutGrid,
   Settings2,
-  Filter as FilterIcon,
+  ListFilter,
   RefreshCw,
-  ArrowUpDown,
-  ArrowUp,
-  ArrowDown,
   Settings as SettingsIcon,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import {
@@ -54,28 +41,21 @@ import {
   useMarkMarketingLeadViewed,
 } from '@/hooks/useMarketingUnread';
 import { BillingEntityTabs, type BillingEntityTabValue } from '@/components/BillingEntityTabs';
-
-type SortField =
-  | 'created_at'
-  | 'external_created_at'
-  | 'updated_at'
-  | 'first_name'
-  | 'phone'
-  | 'value'
-  | 'form_name';
-type SortDir = 'asc' | 'desc';
+import {
+  MarketingFiltersPopover,
+  DEFAULT_MARKETING_FILTERS,
+  type SortField,
+  type SortDir,
+  type MarketingFilters,
+} from './marketing/MarketingFiltersPopover';
+import {
+  leadMatchesFilters,
+  compareLeads,
+  collectDistinctValues,
+} from './marketing/marketingFilterUtils';
 
 const COLLAPSED_STAGES_STORAGE_KEY = 'marketing-kanban-collapsed-stage-ids';
-
-const SORT_OPTIONS: Array<{ value: SortField; label: string }> = [
-  { value: 'external_created_at', label: 'Fecha del lead (Meta)' },
-  { value: 'created_at',          label: 'Fecha de importación' },
-  { value: 'updated_at',          label: 'Última actualización' },
-  { value: 'first_name',          label: 'Nombre' },
-  { value: 'phone',               label: 'Teléfono' },
-  { value: 'value',               label: 'Valor del cliente' },
-  { value: 'form_name',           label: 'Formulario' },
-];
+const COMPACT_CARDS_STORAGE_KEY = 'marketing-kanban-compact-cards';
 
 const matchesQuery = (lead: MarketingLead, q: string): boolean => {
   if (!q) return true;
@@ -100,36 +80,6 @@ const matchesQuery = (lead: MarketingLead, q: string): boolean => {
       f.name.toLowerCase().includes(needle) ||
       (f.values ?? []).some((v) => String(v).toLowerCase().includes(needle)),
   );
-};
-
-const compareLeads = (a: MarketingLead, b: MarketingLead, field: SortField, dir: SortDir): number => {
-  const mul = dir === 'asc' ? 1 : -1;
-  const read = (l: MarketingLead): string | number | null => {
-    switch (field) {
-      case 'created_at': return l.created_at;
-      case 'external_created_at': return l.external_created_at ?? l.created_at;
-      case 'updated_at': return l.updated_at;
-      case 'first_name': return (l.first_name ?? '').toLowerCase();
-      case 'phone': return (l.phone ?? '').replace(/\D/g, '');
-      case 'value': return Number(l.value ?? 0);
-      case 'form_name': return (l.form_name ?? '').toLowerCase();
-      default: return null;
-    }
-  };
-  const va = read(a);
-  const vb = read(b);
-  if (va == null && vb == null) return 0;
-  if (va == null) return 1;
-  if (vb == null) return -1;
-  if (typeof va === 'number' && typeof vb === 'number') {
-    return (va - vb) * mul;
-  }
-  const sa = String(va);
-  const sb = String(vb);
-  if (field === 'created_at' || field === 'external_created_at' || field === 'updated_at') {
-    return (new Date(sa).getTime() - new Date(sb).getTime()) * mul;
-  }
-  return sa.localeCompare(sb, 'es') * mul;
 };
 
 export const Marketing: React.FC = () => {
@@ -160,7 +110,14 @@ export const Marketing: React.FC = () => {
   const [search, setSearch] = useState('');
   const [sortField, setSortField] = useState<SortField>('external_created_at');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
-  const [hideLinked, setHideLinked] = useState(false);
+  const [filters, setFilters] = useState<MarketingFilters>(DEFAULT_MARKETING_FILTERS);
+  const [compactCards, setCompactCards] = useState(() => {
+    try {
+      return localStorage.getItem(COMPACT_CARDS_STORAGE_KEY) === '1';
+    } catch {
+      return true;
+    }
+  });
   const [draggedLeadId, setDraggedLeadId] = useState<string | null>(null);
   const [dragOverStageId, setDragOverStageId] = useState<string | null>(null);
   const [activeLead, setActiveLead] = useState<MarketingLead | null>(null);
@@ -205,6 +162,13 @@ export const Marketing: React.FC = () => {
     localStorage.setItem(COLLAPSED_STAGES_STORAGE_KEY, JSON.stringify([...collapsedStageIds]));
   }, [collapsedStageIds]);
 
+  useEffect(() => {
+    localStorage.setItem(COMPACT_CARDS_STORAGE_KEY, compactCards ? '1' : '0');
+  }, [compactCards]);
+
+  const leadsRef = useRef(leads);
+  leadsRef.current = leads;
+
   const toggleStageColumnCollapsed = useCallback((stageId: string) => {
     setCollapsedStageIds((prev) => {
       const next = new Set(prev);
@@ -217,7 +181,27 @@ export const Marketing: React.FC = () => {
   const deferredSearch = useDeferredValue(search);
 
   const visibleCardFields = useMemo(
-    () => fields.filter((f) => f.visible_in_card).sort((a, b) => a.sort_order - b.sort_order),
+    () =>
+      fields
+        .filter((f) => {
+          if (!f.visible_in_card) return false;
+          if (
+            f.field_key === 'form_name' ||
+            f.field_key === 'created_at' ||
+            f.field_key === 'first_name' ||
+            f.field_key === 'last_name' ||
+            f.field_key === 'campaign' ||
+            f.field_key === 'source' ||
+            f.field_key === 'appointment_label' ||
+            f.field_key === 'appointment_at'
+          ) {
+            return false;
+          }
+          const label = (f.display_label ?? '').trim();
+          if (/lipoout|medicina\s*est[eé]tica|triple\s*glow/i.test(label)) return false;
+          return true;
+        })
+        .sort((a, b) => a.sort_order - b.sort_order),
     [fields],
   );
 
@@ -239,24 +223,34 @@ export const Marketing: React.FC = () => {
     });
   }, [metaConfig, metaForms, syncNow, toastMetaSyncResult, toast]);
 
-  const { matchedCustomerByLead, linkedCount } = useMemo(() => {
+  const { matchedCustomerByLead } = useMemo(() => {
     const map = new Map<string, CustomerLookupRow | null>();
-    let linked = 0;
     for (const lead of leads) {
       const m = customerIndex.match({ phone: lead.phone, email: lead.email });
       map.set(lead.id, m);
-      if (m) linked++;
     }
-    return { matchedCustomerByLead: map, linkedCount: linked };
+    return { matchedCustomerByLead: map };
   }, [leads, customerIndex]);
 
   const filteredLeads = useMemo(() => {
     return leads.filter((l) => {
       if (!matchesQuery(l, deferredSearch)) return false;
-      if (hideLinked && matchedCustomerByLead.get(l.id)) return false;
-      return true;
+      return leadMatchesFilters(l, filters, matchedCustomerByLead.get(l.id) ?? null);
     });
-  }, [leads, deferredSearch, hideLinked, matchedCustomerByLead]);
+  }, [leads, deferredSearch, filters, matchedCustomerByLead]);
+
+  const formNames = useMemo(
+    () => collectDistinctValues(leads, (l) => l.form_name),
+    [leads],
+  );
+  const sources = useMemo(
+    () => collectDistinctValues(leads, (l) => l.source),
+    [leads],
+  );
+  const filterableFields = useMemo(
+    () => fields.filter((f) => f.visible_in_card || f.visible_in_detail),
+    [fields],
+  );
 
   const leadsByStage = useMemo(() => {
     const map = new Map<string, MarketingLead[]>();
@@ -339,36 +333,52 @@ export const Marketing: React.FC = () => {
     setOpenStagesManager(true);
   }, []);
 
-  const markViewed = useCallback(
-    (lead: MarketingLead) => {
-      if (!lead.company_id || viewedLeadIds.has(lead.id)) return;
-      markLeadViewed.mutate({ leadId: lead.id, companyId: lead.company_id });
+  const handleLeadClickById = useCallback(
+    (leadId: string) => {
+      const lead = leadsRef.current.find((l) => l.id === leadId);
+      if (!lead) return;
+      if (lead.company_id && !viewedLeadIds.has(lead.id)) {
+        markLeadViewed.mutate({ leadId: lead.id, companyId: lead.company_id });
+      }
+      setActiveLead(lead);
     },
     [viewedLeadIds, markLeadViewed],
   );
 
-  const handleLeadClick = useCallback(
-    (lead: MarketingLead) => {
-      markViewed(lead);
-      setActiveLead(lead);
-    },
-    [markViewed],
-  );
-
-  const handleLeadOpenNotes = useCallback(
-    (lead: MarketingLead) => {
-      markViewed(lead);
+  const handleLeadOpenNotesById = useCallback(
+    (leadId: string) => {
+      const lead = leadsRef.current.find((l) => l.id === leadId);
+      if (!lead) return;
+      if (lead.company_id && !viewedLeadIds.has(lead.id)) {
+        markLeadViewed.mutate({ leadId: lead.id, companyId: lead.company_id });
+      }
       setNotesLead(lead);
     },
-    [markViewed],
+    [viewedLeadIds, markLeadViewed],
   );
 
-  const handleLeadPromote = useCallback((lead: MarketingLead) => {
-    setPromoteLead(lead);
+  const handleLeadPromoteById = useCallback((leadId: string) => {
+    const lead = leadsRef.current.find((l) => l.id === leadId);
+    if (lead) setPromoteLead(lead);
   }, []);
+
+  const handleLeadClick = useCallback(
+    (lead: MarketingLead) => handleLeadClickById(lead.id),
+    [handleLeadClickById],
+  );
 
   const totalLeads = filteredLeads.length;
   const totalValue = filteredLeads.reduce((acc, l) => acc + Number(l.value ?? 0), 0);
+  const linkedInView = filteredLeads.filter((l) => matchedCustomerByLead.get(l.id)).length;
+  const currencyFmt = useMemo(
+    () =>
+      new Intl.NumberFormat('es-ES', {
+        style: 'currency',
+        currency: 'EUR',
+        maximumFractionDigits: 0,
+      }),
+    [],
+  );
 
   if (companyLoading || stagesLoading || leadsLoading || fieldsLoading) {
     return (
@@ -388,10 +398,6 @@ export const Marketing: React.FC = () => {
       </div>
     );
   }
-
-  const currentSortLabel =
-    SORT_OPTIONS.find((s) => s.value === sortField)?.label ?? 'Ordenar';
-  const sortDirLabel = sortDir === 'asc' ? 'Asc' : 'Desc';
 
   const handleManualRefresh = async () => {
     await refetch();
@@ -416,16 +422,41 @@ export const Marketing: React.FC = () => {
             </div>
             <div>
               <CardTitle className="text-2xl">Marketing</CardTitle>
-              <p className="text-xs text-muted-foreground">
-                Embudo de clientes potenciales de Meta (Facebook · Instagram)
-              </p>
-              {isMultiEntity && marketingBillingTab && (
-                <BillingEntityTabs
-                  value={marketingBillingTab}
-                  onChange={setMarketingBillingTab}
-                  className="mt-2"
-                />
-              )}
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
+                {isMultiEntity && marketingBillingTab ? (
+                  <BillingEntityTabs
+                    value={marketingBillingTab}
+                    onChange={setMarketingBillingTab}
+                    className="h-7"
+                  />
+                ) : null}
+                {isMultiEntity && marketingBillingTab ? (
+                  <span className="hidden sm:inline text-border">|</span>
+                ) : null}
+                <span>
+                  <span className="font-semibold text-foreground">{totalLeads}</span>{' '}
+                  {totalLeads === 1 ? 'cliente potencial' : 'clientes potenciales'}
+                </span>
+                {totalValue > 0 ? (
+                  <>
+                    <span className="hidden sm:inline">·</span>
+                    <span>
+                      Valor total{' '}
+                      <span className="font-semibold text-foreground">
+                        {currencyFmt.format(totalValue)}
+                      </span>
+                    </span>
+                  </>
+                ) : null}
+                {linkedInView > 0 ? (
+                  <>
+                    <span className="hidden sm:inline">·</span>
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                      {linkedInView} ya en clientes
+                    </span>
+                  </>
+                ) : null}
+              </div>
             </div>
           </div>
 
@@ -440,56 +471,19 @@ export const Marketing: React.FC = () => {
               />
             </div>
 
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" title="Ordenar por…">
-                  <ArrowUpDown className="mr-2 h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">{currentSortLabel}</span>
-                  <span className="sm:hidden">Ordenar</span>
-                  <span className="ml-1 inline-flex items-center text-[10px] uppercase tracking-wide text-muted-foreground">
-                    {sortDir === 'asc' ? (
-                      <ArrowUp className="h-3 w-3" />
-                    ) : (
-                      <ArrowDown className="h-3 w-3" />
-                    )}
-                    <span className="ml-0.5 hidden md:inline">{sortDirLabel}</span>
-                  </span>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-64">
-                <DropdownMenuLabel>Ordenar por</DropdownMenuLabel>
-                <DropdownMenuRadioGroup
-                  value={sortField}
-                  onValueChange={(v) => setSortField(v as SortField)}
-                >
-                  {SORT_OPTIONS.map((opt) => (
-                    <DropdownMenuRadioItem key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel>Dirección</DropdownMenuLabel>
-                <DropdownMenuRadioGroup
-                  value={sortDir}
-                  onValueChange={(v) => setSortDir(v as SortDir)}
-                >
-                  <DropdownMenuRadioItem value="asc">
-                    <ArrowUp className="mr-2 h-3.5 w-3.5" /> Ascendente
-                  </DropdownMenuRadioItem>
-                  <DropdownMenuRadioItem value="desc">
-                    <ArrowDown className="mr-2 h-3.5 w-3.5" /> Descendente
-                  </DropdownMenuRadioItem>
-                </DropdownMenuRadioGroup>
-                <DropdownMenuSeparator />
-                <DropdownMenuCheckboxItem
-                  checked={hideLinked}
-                  onCheckedChange={(v) => setHideLinked(!!v)}
-                >
-                  Ocultar leads ya clientes
-                </DropdownMenuCheckboxItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <MarketingFiltersPopover
+              sortField={sortField}
+              sortDir={sortDir}
+              onSortFieldChange={setSortField}
+              onSortDirChange={setSortDir}
+              filters={filters}
+              onFiltersChange={setFilters}
+              formNames={formNames}
+              sources={sources}
+              filterableFields={filterableFields}
+              compactCards={compactCards}
+              onCompactCardsChange={setCompactCards}
+            />
 
             <Button
               variant="outline"
@@ -501,7 +495,7 @@ export const Marketing: React.FC = () => {
               <RefreshCw className={`h-3.5 w-3.5 ${syncNow.isPending ? 'animate-spin' : ''}`} />
             </Button>
             <Button variant="outline" size="sm" onClick={() => setOpenFieldsConfig(true)}>
-              <FilterIcon className="mr-2 h-3.5 w-3.5" /> Campos
+              <ListFilter className="mr-2 h-3.5 w-3.5" /> Campos
             </Button>
             <Button variant="outline" size="sm" onClick={() => setOpenStagesManager(true)}>
               <Settings2 className="mr-2 h-3.5 w-3.5" /> Etapas
@@ -516,33 +510,6 @@ export const Marketing: React.FC = () => {
             </Button>
           </div>
         </div>
-
-        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-          <span>
-            <span className="font-semibold text-foreground">{totalLeads}</span>{' '}
-            {totalLeads === 1 ? 'cliente potencial' : 'clientes potenciales'}
-          </span>
-          {totalValue > 0 ? (
-            <span>
-              · Valor total:{' '}
-              <span className="font-semibold text-foreground">
-                {new Intl.NumberFormat('es-ES', {
-                  style: 'currency',
-                  currency: 'EUR',
-                  maximumFractionDigits: 0,
-                }).format(totalValue)}
-              </span>
-            </span>
-          ) : null}
-          {linkedCount > 0 ? (
-            <span>
-              ·{' '}
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
-                {linkedCount} ya en clientes
-              </span>
-            </span>
-          ) : null}
-        </div>
       </CardHeader>
 
       <CardContent className="px-0 pb-0">
@@ -556,7 +523,12 @@ export const Marketing: React.FC = () => {
             </Button>
           </div>
         ) : (
-          <div className="w-full min-w-0 overflow-x-scroll overflow-y-hidden scrollbar-kanban h-[calc(100vh-180px)] -mb-24">
+          <div
+            className={[
+              'w-full min-w-0 overflow-x-scroll overflow-y-hidden scrollbar-kanban h-[calc(100vh-180px)] -mb-24',
+              draggedLeadId ? '[&_*]:!transition-none' : '',
+            ].join(' ')}
+          >
             <div className="inline-flex h-full gap-3 pr-1">
               {stages.map((stage) => (
                 <MarketingStageColumn
@@ -571,10 +543,11 @@ export const Marketing: React.FC = () => {
                   notePreviewsByLead={notesIndex?.previews ?? {}}
                   viewedLeadIds={viewedLeadIds}
                   collapsed={collapsedStageIds.has(stage.id)}
+                  compact={compactCards}
                   onToggleCollapsed={() => toggleStageColumnCollapsed(stage.id)}
-                  onLeadClick={handleLeadClick}
-                  onLeadOpenNotes={handleLeadOpenNotes}
-                  onLeadPromote={handleLeadPromote}
+                  onLeadClickById={handleLeadClickById}
+                  onLeadOpenNotesById={handleLeadOpenNotesById}
+                  onLeadPromoteById={handleLeadPromoteById}
                   onLeadDragStart={handleLeadDragStart}
                   onLeadDragEnd={handleLeadDragEnd}
                   onStageDragOver={handleStageDragOver}

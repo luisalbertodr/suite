@@ -54,7 +54,8 @@ export const Facturas: React.FC = () => {
   const [activeTab, setActiveTab] = useState('invoices');
   const [budgetData, setBudgetData] = useState<any>(null);
   const { companyId, loading: companyLoading } = useCompanyFilter();
-  const { isMultiEntity, billingCompanies, hostCompany } = useWorkCenter();
+  const { isMultiEntity, billingCompanies, catalogHostCompanyId } = useWorkCenter();
+  const catalogCompanyId = catalogHostCompanyId ?? companyId;
   const [invoiceBillingTab, setInvoiceBillingTab] = useState<BillingEntityTabValue>('');
 
   useEffect(() => {
@@ -63,10 +64,9 @@ export const Facturas: React.FC = () => {
   }, [searchTerm]);
 
   useEffect(() => {
-    if (invoiceBillingTab || !isMultiEntity) return;
-    const defaultId = hostCompany?.id ?? billingCompanies[0]?.id ?? companyId;
-    if (defaultId) setInvoiceBillingTab(defaultId);
-  }, [invoiceBillingTab, isMultiEntity, hostCompany?.id, billingCompanies, companyId]);
+    if (!isMultiEntity || !companyId) return;
+    setInvoiceBillingTab(companyId);
+  }, [companyId, isMultiEntity]);
 
   useEffect(() => {
     setPage(0);
@@ -113,7 +113,7 @@ export const Facturas: React.FC = () => {
         const { data: matchedCustomers } = await supabase
           .from('customers')
           .select('id')
-          .eq('company_id', companyId)
+          .eq('company_id', catalogCompanyId)
           .or(`name.ilike.%${st}%,email.ilike.%${st}%,tax_id.ilike.%${st}%,phone.ilike.%${st}%`)
           .limit(30);
         customerIds = (matchedCustomers ?? []).map((c) => c.id);

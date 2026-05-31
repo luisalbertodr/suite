@@ -29,10 +29,12 @@ import { usePermissions } from '@/hooks/usePermissions';
 import {
   formatLeadFieldValue,
   getLeadFullName,
-  getLeadSubtitle,
+  getLeadCreatedAtLabel,
+  isMarketingNoiseText,
   readLeadField,
+  shouldShowLeadCardField,
 } from './marketingFormatters';
-import { resolveLeadAppointmentParts } from '@/lib/marketingLeadAppointment';
+import { resolveLeadAppointmentParts, valueLooksLikeScheduleDateTime } from '@/lib/marketingLeadAppointment';
 
 interface MarketingLeadCardProps {
   lead: MarketingLead;
@@ -40,6 +42,8 @@ interface MarketingLeadCardProps {
   stageColor: string;
   /** Etapa "Formulario+Agenda ficticia": avisar si no hay fecha detectada */
   expectAgendaContext?: boolean;
+  /** Menos DOM y sin tooltips: kanban más ágil */
+  compact?: boolean;
   matchedCustomer: CustomerLookupRow | null;
   noteCount: number;
   notePreviews: MarketingLeadNotePreview[];
@@ -134,6 +138,7 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
   visibleFields,
   stageColor,
   expectAgendaContext = false,
+  compact = false,
   matchedCustomer,
   noteCount,
   notePreviews,
@@ -150,11 +155,13 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
   const canUseWhatsapp = hasPermission('whatsapp', 'read');
 
   const fullName = getLeadFullName(lead);
-  const subtitle = getLeadSubtitle(lead);
+  const createdAtLabel = getLeadCreatedAtLabel(lead);
   const isLinked = !!matchedCustomer;
   const isWon = (lead.win_status ?? '').toUpperCase() === 'GANADO';
   const isLost = (lead.win_status ?? '').toUpperCase() === 'PERDIDO';
-  const tags = Array.isArray(lead.tags) ? lead.tags.filter(Boolean) : [];
+  const tags = Array.isArray(lead.tags)
+    ? lead.tags.filter(Boolean).filter((t) => !isMarketingNoiseText(t, lead))
+    : [];
   const waBadge = waAutomationBadge(lead.wa_automation_status, lead.wa_automation_error);
 
   const stopPropagation = (e: React.MouseEvent) => e.stopPropagation();
@@ -180,24 +187,39 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
 
   const { atIso: resolvedApptIso, label: resolvedApptLabel } =
     resolveLeadAppointmentParts(lead);
-  const appointmentText = resolvedApptIso
-    ? dateFormatter.format(new Date(resolvedApptIso))
-    : resolvedApptLabel;
+  const hasValidAppointmentDate =
+    !!resolvedApptIso && !Number.isNaN(new Date(resolvedApptIso).getTime());
+  const appointmentText = hasValidAppointmentDate
+    ? dateFormatter.format(new Date(resolvedApptIso!))
+    : null;
+  // En tarjeta sólo mostramos citas con fecha real; nunca el nombre del formulario como “cita”.
+  const showAppointment =
+    hasValidAppointmentDate &&
+    !!appointmentText &&
+    !isMarketingNoiseText(appointmentText, lead);
+  const showAppointmentSlotLabel =
+    !hasValidAppointmentDate &&
+    !!resolvedApptLabel &&
+    valueLooksLikeScheduleDateTime(resolvedApptLabel) &&
+    !isMarketingNoiseText(resolvedApptLabel, lead);
+  const appointmentDisplayText = appointmentText ?? (showAppointmentSlotLabel ? resolvedApptLabel : null);
+  const showAppointmentBadge = !!appointmentDisplayText;
 
   const showAgendaMissingHint =
-    expectAgendaContext && !appointmentText && ['meta', 'facebook', 'instagram'].includes(
+    expectAgendaContext && !showAppointmentBadge && ['meta', 'facebook', 'instagram'].includes(
       String(lead.source ?? '').toLowerCase(),
     );
-  return (
-    <TooltipProvider delayDuration={250}>
+
+  const cardShell = (
       <div
         draggable
         onDragStart={(e) => onDragStart(e, lead)}
         onDragEnd={onDragEnd}
         onClick={onClick}
+        style={{ contentVisibility: 'auto', containIntrinsicSize: compact ? '0 72px' : '0 160px' }}
         className={[
-          'group relative cursor-pointer rounded-xl border shadow-sm transition-all',
-          'hover:shadow-md hover:-translate-y-0.5',
+          'group relative cursor-pointer rounded-xl border shadow-sm',
+          compact ? '' : 'transition-all hover:shadow-md hover:-translate-y-0.5',
           isWon
             ? 'border-amber-300/70 bg-amber-50/70 dark:border-amber-700/50 dark:bg-amber-950/30'
             : isLinked
@@ -216,15 +238,31 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
           className="absolute left-0 top-0 h-full w-1 rounded-l-xl"
           style={{ backgroundColor: stageColor }}
         />
-        <div className="p-3 pl-4">
+        <div className={compact ? 'p-2 pl-3' : 'p-3 pl-4'}>
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
               <h4 className="truncate text-sm font-semibold text-foreground">
                 {fullName}
-                {subtitle ? <span className="text-muted-foreground"> · {subtitle}</span> : null}
+                {createdAtLabel ? (
+                  <span className="text-muted-foreground font-normal"> · {createdAtLabel}</span>
+                ) : null}
               </h4>
+              {compact ? (
+                <p className="truncate text-[10px] text-muted-foreground">
+                  {[lead.phone, lead.email].filter(Boolean).join(' · ') || '—'}
+                </p>
+              ) : null}
               <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
                 {isLinked ? (
+                  compact ? (
+                    <span
+                      className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-700 dark:text-emerald-400"
+                      title={`Cliente: ${matchedCustomer!.name}`}
+                    >
+                      <UserCheck className="h-3 w-3" />
+                      {truncate(matchedCustomer!.name, 16)}
+                    </span>
+                  ) : (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
@@ -236,8 +274,17 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
                       Coincide con un cliente existente: {matchedCustomer!.name}
                     </TooltipContent>
                   </Tooltip>
+                  )
                 ) : null}
                 {isWon ? (
+                  compact ? (
+                    <span
+                      className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300"
+                      title="Ganado"
+                    >
+                      <Trophy className="h-3 w-3" />
+                    </span>
+                  ) : (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300">
@@ -247,24 +294,26 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
                     </TooltipTrigger>
                     <TooltipContent>Cliente convertido (estado: GANADO)</TooltipContent>
                   </Tooltip>
+                  )
                 ) : null}
                 {isLost ? (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700 dark:text-rose-300">
+                  <span
+                    className="inline-flex items-center gap-1 rounded-full bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700 dark:text-rose-300"
+                    title="Perdido"
+                  >
                     <XCircle className="h-3 w-3" />
-                    Perdido
+                    {!compact ? 'Perdido' : null}
                   </span>
                 ) : null}
-                {lead.assigned_to ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span className="inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-sky-500/15 px-1 text-[9px] font-bold uppercase text-sky-700 dark:text-sky-300">
-                        {lead.assigned_to}
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>Asignado a: {lead.assigned_to}</TooltipContent>
-                  </Tooltip>
-                ) : null}
                 {waBadge ? (
+                  compact ? (
+                    <span
+                      className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ${waBadge.className}`}
+                      title={waBadge.title}
+                    >
+                      WA
+                    </span>
+                  ) : (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <span
@@ -275,16 +324,20 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
                     </TooltipTrigger>
                     <TooltipContent>{waBadge.title}</TooltipContent>
                   </Tooltip>
+                  )
                 ) : null}
               </div>
             </div>
-            <GripVertical className="h-4 w-4 shrink-0 text-muted-foreground/50 transition-opacity opacity-0 group-hover:opacity-100" />
+            <GripVertical className={`h-4 w-4 shrink-0 text-muted-foreground/50 ${compact ? 'opacity-40' : 'opacity-0 transition-opacity group-hover:opacity-100'}`} />
           </div>
 
+          {!compact ? (
           <dl className="mt-2 space-y-1 text-[11px]">
             {visibleFields.map((field) => {
               const raw = readLeadField(lead, field.field_key);
+              if (!shouldShowLeadCardField(lead, field, raw)) return null;
               const formatted = formatLeadFieldValue(raw, field.field_type);
+              if (isMarketingNoiseText(formatted, lead)) return null;
               return (
                 <div key={field.id} className="flex items-baseline justify-between gap-2">
                   <dt className="shrink-0 text-muted-foreground">{field.display_label}:</dt>
@@ -295,18 +348,19 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
               );
             })}
           </dl>
+          ) : null}
 
-          {appointmentText ? (
+          {!compact && showAppointmentBadge ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-medium text-sky-800 dark:bg-sky-950/50 dark:text-sky-200">
                   <Calendar className="h-3 w-3" />
-                  {truncate(appointmentText, 36)}
+                  {truncate(appointmentDisplayText!, 36)}
                 </div>
               </TooltipTrigger>
-              <TooltipContent>Cita: {appointmentText}</TooltipContent>
+              <TooltipContent>Cita: {appointmentDisplayText}</TooltipContent>
             </Tooltip>
-          ) : showAgendaMissingHint ? (
+          ) : !compact && showAgendaMissingHint ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <div className="mt-2 inline-flex max-w-full items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
@@ -322,10 +376,10 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
           ) : null}
 
           <div
-            className="mt-3 flex flex-wrap items-center justify-end gap-1"
+            className={`flex flex-wrap items-center justify-end gap-1 ${compact ? 'mt-1.5' : 'mt-3'}`}
             onClick={stopPropagation}
           >
-            {phoneHref ? (
+            {!compact && phoneHref ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button asChild variant="ghost" size="icon" className="h-7 w-7">
@@ -337,7 +391,7 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
                 <TooltipContent>Llamar</TooltipContent>
               </Tooltip>
             ) : null}
-            {lead.phone ? (
+            {!compact && lead.phone ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -355,7 +409,7 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
                 </TooltipContent>
               </Tooltip>
             ) : null}
-            {emailHref ? (
+            {!compact && emailHref ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button asChild variant="ghost" size="icon" className="h-7 w-7">
@@ -368,6 +422,22 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
               </Tooltip>
             ) : null}
 
+            {compact ? (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="relative h-6 w-6"
+                aria-label="Notas"
+                title={noteCount > 0 ? `${noteCount} notas` : 'Notas'}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenNotes();
+                }}
+              >
+                <StickyNote className="h-3 w-3" />
+                {noteCount > 0 ? <CounterBadge count={noteCount} /> : null}
+              </Button>
+            ) : (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -407,8 +477,9 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
                 )}
               </TooltipContent>
             </Tooltip>
+            )}
 
-            {tags.length > 0 ? (
+            {!compact && tags.length > 0 ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -441,7 +512,7 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
               </Tooltip>
             ) : null}
 
-            {!isLinked ? (
+            {!compact && !isLinked ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -461,6 +532,7 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
               </Tooltip>
             ) : null}
 
+            {!compact ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -478,9 +550,17 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
               </TooltipTrigger>
               <TooltipContent>Cita (abrir agenda)</TooltipContent>
             </Tooltip>
+            ) : null}
           </div>
         </div>
       </div>
+  );
+
+  if (compact) return cardShell;
+
+  return (
+    <TooltipProvider delayDuration={250}>
+      {cardShell}
     </TooltipProvider>
   );
 });

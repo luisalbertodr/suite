@@ -3,6 +3,11 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useWorkCenter } from '@/hooks/useWorkCenter';
+import {
+  buildFamilyBillingMap,
+  filterArticlesForBillingCompany,
+} from '@/lib/billingCompany';
 
 export interface Article {
   id: string;
@@ -61,17 +66,25 @@ export const useArticles = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { companyId, loading: companyLoading } = useCompanyFilter();
+  const {
+    isMultiEntity,
+    catalogHostCompanyId,
+    loading: wcLoading,
+  } = useWorkCenter();
 
-  console.log('useArticles: companyId', companyId, 'companyLoading', companyLoading);
+  const catalogCompanyId = catalogHostCompanyId ?? companyId;
+  const billingScopeId = companyId;
+
+  console.log('useArticles: companyId', companyId, 'catalogCompanyId', catalogCompanyId, 'companyLoading', companyLoading);
 
   const fetchArticles = async () => {
-    if (companyLoading) {
+    if (companyLoading || wcLoading) {
       console.log('useArticles: Company still loading, waiting...');
       return;
     }
 
-    if (!companyId) {
-      console.log('useArticles: No company ID available');
+    if (!catalogCompanyId) {
+      console.log('useArticles: No catalog company ID available');
       setArticles([]);
       setLoading(false);
       return;
@@ -79,21 +92,41 @@ export const useArticles = () => {
 
     try {
       setLoading(true);
-      console.log('useArticles: Fetching articles for company:', companyId);
+      console.log('useArticles: Fetching articles for catalog:', catalogCompanyId, 'billing scope:', billingScopeId);
       
       const { data, error } = await supabase
         .from('articles')
         .select('*')
-        .eq('company_id', companyId)
+        .eq('company_id', catalogCompanyId)
         .order('created_at', { ascending: false });
 
       if (error) {
         console.error('useArticles: Error fetching articles:', error);
         throw error;
       }
+
+      let typedData = (data || []) as Article[];
+
+      if (isMultiEntity && billingScopeId) {
+        const { data: families, error: familiesError } = await supabase
+          .from('article_families')
+          .select('name, billing_company_id')
+          .eq('company_id', catalogCompanyId);
+
+        if (familiesError && familiesError.code !== '42703') {
+          throw familiesError;
+        }
+
+        const familyBillingMap = buildFamilyBillingMap(families ?? []);
+        typedData = filterArticlesForBillingCompany(
+          typedData,
+          billingScopeId,
+          familyBillingMap,
+          catalogCompanyId,
+        );
+      }
       
-      console.log('useArticles: Articles fetched:', data?.length || 0);
-      const typedData = (data || []) as Article[];
+      console.log('useArticles: Articles fetched:', typedData.length);
       setArticles(typedData);
       setError(null);
     } catch (err) {
@@ -109,7 +142,7 @@ export const useArticles = () => {
     try {
       console.log('useArticles: Creating article:', articleData);
 
-      if (!companyId) {
+      if (!catalogCompanyId) {
         throw new Error('No company ID available for creating article');
       }
 
@@ -141,11 +174,20 @@ export const useArticles = () => {
       // Remove talla and color from the data since they're no longer in the table
       const { talla, color, ...dataToInsert } = articleData;
       
-      console.log('useArticles: Inserting article data:', { ...dataToInsert, foto_url, company_id: companyId });
+      const insertRow = {
+        ...dataToInsert,
+        foto_url,
+        company_id: catalogCompanyId,
+        billing_company_id:
+          dataToInsert.billing_company_id ??
+          (isMultiEntity && billingScopeId ? billingScopeId : null),
+      };
+
+      console.log('useArticles: Inserting article data:', insertRow);
 
       const { data, error } = await supabase
         .from('articles')
-        .insert([{ ...dataToInsert, foto_url, company_id: companyId }])
+        .insert([insertRow])
         .select()
         .single();
 
@@ -264,20 +306,20 @@ export const useArticles = () => {
   };
 
   useEffect(() => {
-    console.log('useArticles: useEffect triggered, companyId:', companyId, 'companyLoading:', companyLoading);
+    console.log('useArticles: useEffect triggered, companyId:', companyId, 'catalogCompanyId:', catalogCompanyId, 'companyLoading:', companyLoading, 'wcLoading:', wcLoading);
     fetchArticles();
-  }, [companyId, companyLoading]);
+  }, [catalogCompanyId, billingScopeId, companyLoading, wcLoading, isMultiEntity]);
 
   console.log('useArticles: Current state:', {
     articlesCount: articles.length,
-    loading: companyLoading || loading,
+    loading: companyLoading || wcLoading || loading,
     error,
     companyId
   });
 
   return {
     articles,
-    loading: companyLoading || loading,
+    loading: companyLoading || wcLoading || loading,
     error,
     createArticle,
     updateArticle,

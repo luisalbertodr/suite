@@ -10,6 +10,7 @@ import { ArrowLeft, Plus, Save } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useInvoiceOperations } from '@/hooks/useInvoiceOperations';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useWorkCenter } from '@/hooks/useWorkCenter';
 import { useInvoiceItems } from '@/hooks/useInvoiceItems';
 import { InvoiceItemRow } from './InvoiceItemRow';
 import { CustomerSelector } from '@/components/forms/CustomerSelector';
@@ -102,11 +103,13 @@ export const FacturaForm: React.FC<FacturaFormProps> = ({ invoice, onClose, onCr
   const queryClient = useQueryClient();
   const { generateInvoiceNumber, createInvoice } = useInvoiceOperations();
   const { companyId, loading: companyLoading } = useCompanyFilter();
+  const { catalogHostCompanyId } = useWorkCenter();
+  const catalogCompanyId = catalogHostCompanyId ?? companyId;
 
   const { data: customers } = useQuery({
-    queryKey: ['customers', companyId],
+    queryKey: ['customers', catalogCompanyId],
     queryFn: async () => {
-      if (!companyId) {
+      if (!catalogCompanyId) {
         console.log('No company ID available, skipping customers query');
         return [];
       }
@@ -114,7 +117,7 @@ export const FacturaForm: React.FC<FacturaFormProps> = ({ invoice, onClose, onCr
       const { data, error } = await supabase
         .from('customers')
         .select('id, name, email, tax_id, phone, re_percentage, intracomunitario')
-        .eq('company_id', companyId)
+        .eq('company_id', catalogCompanyId)
         .order('name');
       
       if (error) {
@@ -124,10 +127,8 @@ export const FacturaForm: React.FC<FacturaFormProps> = ({ invoice, onClose, onCr
       
       return data as Customer[];
     },
-    enabled: !!companyId && !companyLoading,
+    enabled: !!catalogCompanyId && !companyLoading,
   });
-
-  // Load existing invoice items if editing or from budget
   useEffect(() => {
     if (budgetData) {
       const fromTpv = budgetData.source === 'tpv_sale';

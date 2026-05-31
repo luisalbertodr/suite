@@ -91,9 +91,84 @@ export const getLeadFullName = (lead: MarketingLead): string => {
 };
 
 export const getLeadSubtitle = (lead: MarketingLead): string => {
-  const candidates = [lead.form_name, lead.campaign, lead.source]
+  const candidates = [lead.campaign, lead.source]
     .filter(Boolean) as string[];
   return candidates[0] ?? '';
+};
+
+const cardDateFormatter = new Intl.DateTimeFormat('es-ES', {
+  day: 'numeric',
+  month: 'short',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+
+export const getLeadCreatedAtLabel = (lead: MarketingLead): string => {
+  const raw = lead.external_created_at ?? lead.created_at;
+  if (!raw) return '';
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return '';
+  return cardDateFormatter.format(d);
+};
+
+const normalizeNoise = (value: string): string =>
+  value.trim().toLowerCase().replace(/\s+/g, ' ');
+
+/** Textos de formulario/marca Meta que se repiten en todos los leads sin aportar. */
+const MARKETING_NOISE_PATTERNS = [
+  /lipoout/i,
+  /triple\s*glow/i,
+  /medicina\s*est[eé]tica/i,
+];
+
+export const isMarketingNoiseText = (
+  value: unknown,
+  lead?: Pick<MarketingLead, 'form_name' | 'campaign' | 'source' | 'appointment_label' | 'tags'>,
+): boolean => {
+  const v = normalizeNoise(String(value ?? ''));
+  if (!v) return false;
+  if (MARKETING_NOISE_PATTERNS.some((re) => re.test(v))) return true;
+  if (lead) {
+    for (const candidate of [
+      lead.form_name,
+      lead.campaign,
+      lead.source,
+      lead.appointment_label,
+    ]) {
+      const c = normalizeNoise(String(candidate ?? ''));
+      if (!c) continue;
+      if (v === c || v.includes(c) || c.includes(v)) return true;
+    }
+    if (Array.isArray(lead.tags)) {
+      for (const tag of lead.tags) {
+        const t = normalizeNoise(String(tag ?? ''));
+        if (t && (v === t || v.includes(t) || t.includes(v))) return true;
+      }
+    }
+  }
+  return false;
+};
+
+/** @deprecated Usar isMarketingNoiseText */
+export const isLeadMarketingNoiseValue = (
+  lead: MarketingLead,
+  value: unknown,
+): boolean => isMarketingNoiseText(value, lead);
+
+export const shouldShowLeadCardField = (
+  lead: MarketingLead,
+  field: MarketingFieldConfig,
+  rawValue: unknown,
+): boolean => {
+  const fieldKey = field.field_key;
+  if (fieldKey === 'first_name' || fieldKey === 'last_name') return false;
+  if (fieldKey === 'form_name' || fieldKey === 'campaign' || fieldKey === 'source') return false;
+  if (fieldKey === 'appointment_label' || fieldKey === 'appointment_at') return false;
+  if (isMarketingNoiseText(rawValue, lead)) return false;
+  if (isMarketingNoiseText(field.display_label, lead)) return false;
+  const formatted = String(rawValue ?? '').trim();
+  return formatted.length > 0;
 };
 
 export const humanizeFieldKey = (key: string): string => {

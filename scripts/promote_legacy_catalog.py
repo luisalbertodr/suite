@@ -212,17 +212,24 @@ def normalize_family_code(code: str) -> str:
     return c
 
 
+def format_dunasoft_family_name(code: str, description: str) -> str:
+    """Etiqueta como en Dunasoft: «09-Facial», «025-MEDICINA ESTETICA»."""
+    c = (code or "").strip()
+    d = (description or "").strip()
+    if c and d:
+        return f"{c}-{d}"
+    return d or c or "Varios"
+
+
 def build_family_map(cur) -> dict[str, str]:
-    """Mapa código familia Dunasoft -> nombre legible (desfam1)."""
-    cur.execute("SELECT codfam1, desfam1, obsoleto FROM legacy.familia1")
+    """Mapa código familia Dunasoft -> etiqueta «cod-desfam1» (incluye obsoletas)."""
+    cur.execute("SELECT codfam1, desfam1 FROM legacy.familia1")
     fam_map: dict[str, str] = {}
-    for cod, des, obsoleto in cur.fetchall():
-        if parse_bool(obsoleto):
-            continue
+    for cod, des in cur.fetchall():
         code = str(cod or "").strip()
-        name = (str(des).strip() if des is not None else "") or code
         if not code:
             continue
+        name = format_dunasoft_family_name(code, str(des).strip() if des is not None else "")
         fam_map[code] = name
         norm = normalize_family_code(code)
         if norm and norm not in fam_map:
@@ -232,14 +239,14 @@ def build_family_map(cur) -> dict[str, str]:
 
 def resolve_familia(fam_code: str, fam_map: dict[str, str]) -> str:
     code = str(fam_code or "").strip()
-    if not code:
+    if not code or code.lower() == "none":
         return "Varios"
     if code in fam_map:
         return fam_map[code]
     norm = normalize_family_code(code)
     if norm and norm in fam_map:
         return fam_map[norm]
-    # Si no hay tabla familia1 cargada, conservar el código como nombre provisional.
+    # Código sin fila en familia1: conservar código como nombre provisional.
     return code
 
 
@@ -256,6 +263,18 @@ def sync_article_families(cur, company_id: str, names: Iterable[str], dry_run: b
             """,
             (company_id, name),
         )
+    # Quitar familias huérfanas (p. ej. nombres antiguos sin prefijo numérico).
+    cur.execute(
+        """
+        DELETE FROM public.article_families af
+        WHERE af.company_id = %s
+          AND NOT EXISTS (
+            SELECT 1 FROM public.articles a
+            WHERE a.company_id = af.company_id AND a.familia = af.name
+          )
+        """,
+        (company_id,),
+    )
     return len(unique)
 
 

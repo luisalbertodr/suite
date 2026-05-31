@@ -6,6 +6,11 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Search, Plus } from 'lucide-react';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useWorkCenter } from '@/hooks/useWorkCenter';
+import {
+  buildFamilyBillingMap,
+  filterArticlesForBillingCompany,
+} from '@/lib/billingCompany';
 
 interface Article {
   id: string;
@@ -24,26 +29,48 @@ export const ArticleSearch: React.FC<ArticleSearchProps> = ({ onAddArticle }) =>
   const [searchTerm, setSearchTerm] = useState('');
   const [showResults, setShowResults] = useState(false);
   const { companyId } = useCompanyFilter();
+  const { isMultiEntity, catalogHostCompanyId } = useWorkCenter();
+  const catalogCompanyId = catalogHostCompanyId ?? companyId;
+  const billingScopeId = companyId;
 
   const { data: articles, isLoading } = useQuery({
-    queryKey: ['articles-search', searchTerm, companyId],
+    queryKey: ['articles-search', searchTerm, catalogCompanyId, billingScopeId, isMultiEntity],
     queryFn: async () => {
-      if (!companyId || !searchTerm || searchTerm.length < 2) {
+      if (!catalogCompanyId || !searchTerm || searchTerm.length < 2) {
         return [];
       }
 
       const { data, error } = await supabase
         .from('articles')
-        .select('id, codigo, descripcion, precio, stock_actual, codigo_barras')
-        .eq('company_id', companyId)
+        .select('id, codigo, descripcion, precio, stock_actual, codigo_barras, familia, billing_company_id, company_id')
+        .eq('company_id', catalogCompanyId)
         .eq('estado', 'activo')
         .or(`descripcion.ilike.%${searchTerm}%,codigo.ilike.%${searchTerm}%,codigo_barras.ilike.%${searchTerm}%`)
         .limit(10);
 
       if (error) throw error;
-      return data as Article[];
+
+      let rows = (data ?? []) as Array<
+        Article & { familia: string; billing_company_id?: string | null; company_id?: string | null }
+      >;
+
+      if (isMultiEntity && billingScopeId) {
+        const { data: families } = await supabase
+          .from('article_families')
+          .select('name, billing_company_id')
+          .eq('company_id', catalogCompanyId);
+        const familyBillingMap = buildFamilyBillingMap(families ?? []);
+        rows = filterArticlesForBillingCompany(
+          rows,
+          billingScopeId,
+          familyBillingMap,
+          catalogCompanyId,
+        );
+      }
+
+      return rows as Article[];
     },
-    enabled: !!companyId && searchTerm.length >= 2,
+    enabled: !!catalogCompanyId && searchTerm.length >= 2,
   });
 
   const handleAddArticle = (article: Article) => {
