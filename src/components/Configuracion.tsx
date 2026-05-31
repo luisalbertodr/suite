@@ -26,6 +26,7 @@ import { WhatsappConfig } from './WhatsappConfig';
 import { WorkCenterAuditPanel } from './WorkCenterAuditPanel';
 import { LegacyImportPanel } from './LegacyImportPanel';
 import { TpvSettingsConfig } from './TpvSettingsConfig';
+import { StripeConfigPanel } from './StripeConfig';
 import { useWorkCenter } from '@/hooks/useWorkCenter';
 
 const VALID_TABS = [
@@ -38,6 +39,7 @@ const VALID_TABS = [
   'email',
   'meta',
   'whatsapp',
+  'stripe',
   'tpv',
   'prestashop',
   'verifactu',
@@ -133,6 +135,7 @@ export const Configuracion: React.FC = () => {
           <TabsTrigger value="email">Email</TabsTrigger>
           <TabsTrigger value="meta">Meta</TabsTrigger>
           <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
+          <TabsTrigger value="stripe">Stripe</TabsTrigger>
           <TabsTrigger value="tpv">TPV</TabsTrigger>
           <TabsTrigger value="prestashop">PrestaShop</TabsTrigger>
           <TabsTrigger value="verifactu">Verifactu</TabsTrigger>
@@ -213,6 +216,10 @@ export const Configuracion: React.FC = () => {
 
         <TabsContent value="whatsapp" className="space-y-4">
           <WhatsappConfig />
+        </TabsContent>
+
+        <TabsContent value="stripe" className="space-y-4">
+          <StripeConfigPanel />
         </TabsContent>
 
         <TabsContent value="tpv" className="space-y-4">

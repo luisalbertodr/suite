@@ -2,10 +2,12 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import type { MetaLeadInfo } from '@/components/whatsapp/whatsappUtils';
 
 export interface WhatsappLinkSummary {
   customerNameById: Record<string, string>;
   leadNameById: Record<string, string>;
+  leadMetaById: Record<string, MetaLeadInfo>;
 }
 
 export const useWhatsappLinkLookup = (
@@ -49,7 +51,7 @@ export const useWhatsappLinkLookup = (
       if (leadIds.length === 0) return [];
       const { data, error } = await supabase
         .from('marketing_leads')
-        .select('id, first_name, last_name')
+        .select('id, first_name, last_name, campaign, form_name, source, external_created_at')
         .in('id', leadIds);
       if (error) throw error;
       return data ?? [];
@@ -62,10 +64,19 @@ export const useWhatsappLinkLookup = (
       customerNameById[c.id] = c.name ?? '';
     }
     const leadNameById: Record<string, string> = {};
+    const leadMetaById: Record<string, MetaLeadInfo> = {};
     for (const l of leadsQuery.data ?? []) {
       const full = [l.first_name, l.last_name].filter(Boolean).join(' ').trim();
-      leadNameById[l.id] = full || 'Lead';
+      const name = full || 'Lead';
+      leadNameById[l.id] = name;
+      leadMetaById[l.id] = {
+        name,
+        campaign: l.campaign ?? null,
+        formName: l.form_name ?? null,
+        source: l.source ?? null,
+        externalCreatedAt: l.external_created_at ?? null,
+      };
     }
-    return { customerNameById, leadNameById };
+    return { customerNameById, leadNameById, leadMetaById };
   }, [customersQuery.data, leadsQuery.data]);
 };

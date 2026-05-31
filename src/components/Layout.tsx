@@ -2,6 +2,7 @@ import React from 'react';
 import { TopBar } from './TopBar';
 import { DockBar } from './DockBar';
 import { Screensaver } from './Screensaver';
+import { Toaster } from '@/components/ui/toaster';
 import { useWhatsappIncomingNotifier } from '@/hooks/useWhatsappIncomingNotifier';
 
 interface LayoutProps {
@@ -18,6 +19,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         {children}
       </main>
       <DockBar />
+      <Toaster />
     </div>
   );
 };

@@ -1,19 +1,51 @@
 import React from 'react';
-import { Check, CheckCheck, Clock, AlertCircle, FileText, Download } from 'lucide-react';
+import {
+  Check,
+  CheckCheck,
+  Clock,
+  AlertCircle,
+  FileText,
+  Download,
+  Reply,
+  Forward,
+  ChevronDown,
+} from 'lucide-react';
 import type { WhatsappMessageRow } from '@/hooks/useWhatsappMessages';
 import {
   formatMessageTime,
   ackLabel,
   extractBodyFromWahaMessageRaw,
   extractMediaUrlFromWahaMessageRaw,
-  jidToDisplay,
+  extractPushNameFromRaw,
+  extractReplyToFromRaw,
+  formatGroupSenderLabel,
+  isExternalWhatsappCdnUrl,
+  messagePreviewText,
+  resolveGroupSenderJidFromRaw,
+  waTheme,
 } from './whatsappUtils';
-import { supabase } from '@/lib/supabase';
+import { downloadWhatsappMedia } from '@/hooks/useWhatsappConfig';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Button } from '@/components/ui/button';
 
 interface Props {
   message: WhatsappMessageRow;
-  /** Si el chat es grupo, mostramos remitente en mensajes entrantes. */
   isGroupChat?: boolean;
+  quotedMessage?: WhatsappMessageRow | null;
+  quotedPreview?: string | null;
+  onReply?: (message: WhatsappMessageRow) => void;
+  onForward?: (message: WhatsappMessageRow) => void;
 }
 
 const AckIcon: React.FC<{ ack: number }> = ({ ack }) => {
@@ -25,48 +57,92 @@ const AckIcon: React.FC<{ ack: number }> = ({ ack }) => {
   return <AlertCircle className="h-3.5 w-3.5 text-rose-200" aria-label="Error" />;
 };
 
+function QuoteBlock({ preview, isOut }: { preview: string; isOut: boolean }) {
+  return (
+    <div
+      className={`mb-1 rounded border-l-4 px-2 py-1 text-xs ${
+        isOut
+          ? 'border-emerald-600 bg-emerald-700/10 text-emerald-900 dark:text-emerald-100'
+          : 'border-sky-500 bg-black/5 text-zinc-700 dark:text-zinc-200'
+      }`}
+    >
+      <p className="line-clamp-2 whitespace-pre-wrap break-words opacity-90">{preview}</p>
+    </div>
+  );
+}
+
+function MessageActions({
+  message,
+  canForward,
+  onReply,
+  onForward,
+  className,
+}: {
+  message: WhatsappMessageRow;
+  canForward: boolean;
+  onReply?: (message: WhatsappMessageRow) => void;
+  onForward?: (message: WhatsappMessageRow) => void;
+  className?: string;
+}) {
+  if (!onReply && !onForward) return null;
+  return (
+    <div className={`flex items-center gap-0.5 ${className ?? ''}`}>
+      {onReply ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 rounded-full text-[#54656f] hover:bg-black/5 dark:text-zinc-300"
+          title="Responder"
+          onClick={() => onReply(message)}
+        >
+          <Reply className="h-3.5 w-3.5" />
+        </Button>
+      ) : null}
+      {onForward ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 rounded-full text-[#54656f] hover:bg-black/5 disabled:opacity-40 dark:text-zinc-300"
+          title="Reenviar"
+          disabled={!canForward}
+          onClick={() => onForward(message)}
+        >
+          <Forward className="h-3.5 w-3.5" />
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
 function MediaContent({ message }: { message: WhatsappMessageRow }) {
   const type = (message.type ?? 'text').toLowerCase();
   const rawStickerUrl = extractMediaUrlFromWahaMessageRaw(message.raw);
-  const effectiveUrl = message.media_url || rawStickerUrl || null;
-  const hasUrl = !!effectiveUrl;
-  const proxyUrl =
-    hasUrl && effectiveUrl
-      ? // Proxy via edge function; el frontend hace fetch con su Authorization
-        effectiveUrl
-      : null;
+  const storedUrl = message.media_url || rawStickerUrl || null;
+  const wahaDirectUrl =
+    storedUrl && !isExternalWhatsappCdnUrl(storedUrl) ? storedUrl : null;
+  const canDownload =
+    !!wahaDirectUrl || !!(message.waha_message_id && message.chat_id);
 
-  // Como `media_url` desde Waha NO es accesible directamente desde el browser
-  // (suele ser local al server Waha), el componente usa un loader que descarga
-  // vía supabase.functions.invoke. Pero para imagen/video conviene un <img>
-  // con un objectURL ya resuelto. Lo hacemos lazy: si media_url contiene el
-  // host de Waha, lo cargamos por proxy; si no, lo usamos como está.
   const [objectUrl, setObjectUrl] = React.useState<string | null>(null);
   React.useEffect(() => {
     let cancelled = false;
     let revoke: string | null = null;
     const load = async () => {
-      if (!proxyUrl) return;
+      if (!canDownload) return;
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) return;
-        const res = await supabase.functions.invoke('whatsapp-proxy', {
-          headers: { Authorization: `Bearer ${session.access_token}` },
-          body: { action: 'media.download', url: proxyUrl },
+        const blob = await downloadWhatsappMedia({
+          url: wahaDirectUrl,
+          chat_id: message.chat_id,
+          message_id: message.waha_message_id,
         });
         if (cancelled) return;
-        if (res.error || !res.data) return;
-        const blob =
-          res.data instanceof Blob
-            ? res.data
-            : new Blob([res.data as ArrayBuffer], {
-                type: message.media_mime_type ?? 'application/octet-stream',
-              });
         const url = URL.createObjectURL(blob);
         revoke = url;
         setObjectUrl(url);
       } catch {
-        // ignoramos: dejamos el placeholder
+        // placeholder
       }
     };
     load();
@@ -74,7 +150,7 @@ function MediaContent({ message }: { message: WhatsappMessageRow }) {
       cancelled = true;
       if (revoke) URL.revokeObjectURL(revoke);
     };
-  }, [proxyUrl, message.media_mime_type]);
+  }, [canDownload, wahaDirectUrl, message.chat_id, message.waha_message_id]);
 
   if (type === 'image' || type === 'sticker') {
     return (
@@ -95,7 +171,7 @@ function MediaContent({ message }: { message: WhatsappMessageRow }) {
               type === 'sticker' ? 'h-32 w-32' : 'h-40 w-60'
             }`}
           >
-            {type === 'sticker' && !proxyUrl ? (
+            {type === 'sticker' && !canDownload ? (
               <span className="text-4xl" title="Sticker (sin vista previa en servidor)">
                 🎭
               </span>
@@ -136,7 +212,6 @@ function MediaContent({ message }: { message: WhatsappMessageRow }) {
     );
   }
 
-  // Document u otros: tarjeta con icono y nombre.
   return (
     <div className="flex items-center gap-2 rounded-md bg-black/5 p-2 text-xs">
       <FileText className="h-5 w-5 shrink-0 text-muted-foreground" />
@@ -166,15 +241,36 @@ function MediaContent({ message }: { message: WhatsappMessageRow }) {
   );
 }
 
-function senderLabel(message: WhatsappMessageRow): string | null {
+function senderLabel(message: WhatsappMessageRow, isGroupChat?: boolean): string | null {
   if (message.from_me) return null;
-  const raw = message.raw as Record<string, unknown> | null | undefined;
-  const pn = raw && typeof raw.pushName === 'string' ? raw.pushName.trim() : '';
-  if (pn) return pn;
-  return message.from_jid ? jidToDisplay(message.from_jid) : null;
+  const pushName = extractPushNameFromRaw(message.raw);
+  const jid = isGroupChat
+    ? resolveGroupSenderJidFromRaw(message.raw, message.from_jid) ?? message.from_jid
+    : message.from_jid;
+  return formatGroupSenderLabel(jid, pushName);
 }
 
-export const WhatsappMessageBubble: React.FC<Props> = ({ message, isGroupChat }) => {
+function resolveQuotedPreview(
+  message: WhatsappMessageRow,
+  quotedMessage?: WhatsappMessageRow | null,
+  quotedPreview?: string | null,
+): string | null {
+  if (quotedMessage) return messagePreviewText(quotedMessage);
+  if (quotedPreview?.trim()) return quotedPreview.trim();
+  const fromRaw = extractReplyToFromRaw(message.raw);
+  if (fromRaw?.body?.trim()) return fromRaw.body.trim();
+  if (message.quoted_message_id) return 'Mensaje citado';
+  return null;
+}
+
+export const WhatsappMessageBubble: React.FC<Props> = ({
+  message,
+  isGroupChat,
+  quotedMessage,
+  quotedPreview,
+  onReply,
+  onForward,
+}) => {
   const isOut = message.from_me;
   const type = (message.type ?? 'text').toLowerCase();
   const isMedia = type !== 'text' && type !== 'chat';
@@ -185,59 +281,140 @@ export const WhatsappMessageBubble: React.FC<Props> = ({ message, isGroupChat })
     message.caption?.trim() ||
     rawText ||
     '';
-  const groupSender = isGroupChat && !isOut ? senderLabel(message) : null;
+  const groupSender = isGroupChat && !isOut ? senderLabel(message, isGroupChat) : null;
+  const quoteText = resolveQuotedPreview(message, quotedMessage, quotedPreview);
+  const canForward = !!message.waha_message_id;
+  const hasActions = !!(onReply || onForward);
+
+  const bubble = (
+    <div
+      className={`group/bubble relative max-w-[65%] rounded-lg p-2 text-sm shadow-sm ${
+        isOut
+          ? `rounded-tr-none ${waTheme.bubbleOut} text-[#111b21] dark:text-emerald-50`
+          : `rounded-tl-none ${waTheme.bubbleIn} text-[#111b21] dark:text-zinc-100`
+      }`}
+    >
+      {hasActions ? (
+        <>
+          <MessageActions
+            message={message}
+            canForward={canForward}
+            onReply={onReply}
+            onForward={onForward}
+            className={`absolute top-1 hidden group-hover/bubble:flex ${
+              isOut ? 'left-0 -translate-x-full pr-1' : 'right-0 translate-x-full pl-1'
+            }`}
+          />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className={`absolute top-0.5 h-6 w-6 rounded-full opacity-70 hover:opacity-100 group-hover/bubble:opacity-100 md:hidden ${
+                  isOut ? 'left-0.5' : 'right-0.5'
+                }`}
+                title="Acciones"
+              >
+                <ChevronDown className="h-3.5 w-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align={isOut ? 'end' : 'start'}>
+              {onReply ? (
+                <DropdownMenuItem onSelect={() => onReply(message)}>
+                  <Reply className="mr-2 h-4 w-4" />
+                  Responder
+                </DropdownMenuItem>
+              ) : null}
+              {onForward ? (
+                <DropdownMenuItem
+                  disabled={!canForward}
+                  onSelect={() => onForward(message)}
+                >
+                  <Forward className="mr-2 h-4 w-4" />
+                  Reenviar
+                </DropdownMenuItem>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </>
+      ) : null}
+
+      {groupSender ? (
+        <p className="mb-0.5 text-[11px] font-semibold text-sky-600 dark:text-sky-400">
+          {groupSender}
+        </p>
+      ) : null}
+      {quoteText ? <QuoteBlock preview={quoteText} isOut={isOut} /> : null}
+      {isMedia ? (
+        <div className="mb-1">
+          <MediaContent message={message} />
+          {message.caption ? (
+            <p className="mt-1 whitespace-pre-wrap break-words text-sm">
+              {message.caption}
+            </p>
+          ) : rawText ? (
+            <p className="mt-1 whitespace-pre-wrap break-words text-sm">{rawText}</p>
+          ) : null}
+        </div>
+      ) : (
+        <p className="whitespace-pre-wrap break-words pr-12">
+          {textLine ? (
+            textLine
+          ) : (
+            <span className="text-zinc-400 dark:text-zinc-500 italic">
+              Sin texto (revisa que el webhook esté actualizado)
+            </span>
+          )}
+        </p>
+      )}
+      <div
+        className={`pointer-events-none float-right ml-2 mt-0.5 flex items-center gap-1 text-[10px] ${
+          isOut
+            ? 'text-[#667781] dark:text-emerald-100/70'
+            : 'text-[#667781] dark:text-zinc-400'
+        }`}
+      >
+        <span>{time}</span>
+        {isOut ? (
+          <span title={ackLabel(message.ack)}>
+            <AckIcon ack={message.ack} />
+          </span>
+        ) : null}
+      </div>
+    </div>
+  );
+
+  if (!hasActions) {
+    return (
+      <div className={`flex w-full ${isOut ? 'justify-end' : 'justify-start'}`}>
+        {bubble}
+      </div>
+    );
+  }
 
   return (
     <div className={`flex w-full ${isOut ? 'justify-end' : 'justify-start'}`}>
-      <div
-        className={`group relative max-w-[78%] rounded-xl px-2.5 py-1.5 text-sm shadow-sm md:max-w-[65%] ${
-          isOut
-            ? 'rounded-tr-sm bg-[#d9fdd3] text-zinc-900 dark:bg-emerald-900 dark:text-emerald-50'
-            : 'rounded-tl-sm bg-white text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100'
-        }`}
-      >
-        {groupSender ? (
-          <p className="mb-0.5 text-[11px] font-semibold text-sky-600 dark:text-sky-400">
-            {groupSender}
-          </p>
-        ) : null}
-        {isMedia ? (
-          <div className="mb-1">
-            <MediaContent message={message} />
-            {message.caption ? (
-              <p className="mt-1 whitespace-pre-wrap break-words text-sm">
-                {message.caption}
-              </p>
-            ) : rawText ? (
-              <p className="mt-1 whitespace-pre-wrap break-words text-sm">{rawText}</p>
-            ) : null}
-          </div>
-        ) : (
-          <p className="whitespace-pre-wrap break-words pr-12">
-            {textLine ? (
-              textLine
-            ) : (
-              <span className="text-zinc-400 dark:text-zinc-500 italic">
-                Sin texto (revisa que el webhook esté actualizado)
-              </span>
-            )}
-          </p>
-        )}
-        <div
-          className={`pointer-events-none float-right ml-2 mt-0.5 flex items-center gap-1 text-[10px] ${
-            isOut
-              ? 'text-emerald-900/60 dark:text-emerald-100/70'
-              : 'text-zinc-500 dark:text-zinc-400'
-          }`}
-        >
-          <span>{time}</span>
-          {isOut ? (
-            <span title={ackLabel(message.ack)}>
-              <AckIcon ack={message.ack} />
-            </span>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>{bubble}</ContextMenuTrigger>
+        <ContextMenuContent className="w-48">
+          {onReply ? (
+            <ContextMenuItem onSelect={() => onReply(message)}>
+              <Reply className="mr-2 h-4 w-4" />
+              Responder
+            </ContextMenuItem>
           ) : null}
-        </div>
-      </div>
+          {onForward ? (
+            <ContextMenuItem
+              disabled={!canForward}
+              onSelect={() => onForward(message)}
+            >
+              <Forward className="mr-2 h-4 w-4" />
+              Reenviar
+            </ContextMenuItem>
+          ) : null}
+        </ContextMenuContent>
+      </ContextMenu>
     </div>
   );
 };

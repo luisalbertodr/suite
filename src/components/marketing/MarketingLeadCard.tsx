@@ -44,6 +44,7 @@ interface MarketingLeadCardProps {
   noteCount: number;
   notePreviews: MarketingLeadNotePreview[];
   isDragging: boolean;
+  isUnread?: boolean;
   onClick: () => void;
   onOpenNotes: () => void;
   onPromote: () => void;
@@ -83,6 +84,40 @@ const NOTE_KIND_LABELS: Record<string, string> = {
 
 const truncate = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
 
+function waAutomationBadge(
+  status: string | null | undefined,
+  error: string | null | undefined,
+): { label: string; title: string; className: string } | null {
+  switch (status) {
+    case 'awaiting_reply':
+      return {
+        label: 'WA · esperando 1/2',
+        title: 'Mensaje inicial enviado; pendiente de respuesta 1 o 2',
+        className: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
+      };
+    case 'completed':
+      return {
+        label: 'WA · respondido',
+        title: 'Flujo automático completado',
+        className: 'bg-sky-500/15 text-sky-700 dark:text-sky-300',
+      };
+    case 'failed':
+      return {
+        label: 'WA · error',
+        title: error?.trim() || 'Falló el envío automático de WhatsApp',
+        className: 'bg-rose-500/15 text-rose-700 dark:text-rose-300',
+      };
+    case 'skipped':
+      return {
+        label: 'WA · omitido',
+        title: error?.trim() || 'Sin teléfono o mensajes no configurados',
+        className: 'bg-zinc-500/15 text-zinc-600 dark:text-zinc-300',
+      };
+    default:
+      return null;
+  }
+}
+
 const CounterBadge: React.FC<{ count: number; className?: string }> = ({ count, className }) => (
   <span
     className={[
@@ -103,6 +138,7 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
   noteCount,
   notePreviews,
   isDragging,
+  isUnread = false,
   onClick,
   onOpenNotes,
   onPromote,
@@ -119,6 +155,7 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
   const isWon = (lead.win_status ?? '').toUpperCase() === 'GANADO';
   const isLost = (lead.win_status ?? '').toUpperCase() === 'PERDIDO';
   const tags = Array.isArray(lead.tags) ? lead.tags.filter(Boolean) : [];
+  const waBadge = waAutomationBadge(lead.wa_automation_status, lead.wa_automation_error);
 
   const stopPropagation = (e: React.MouseEvent) => e.stopPropagation();
 
@@ -167,8 +204,14 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
               ? 'border-emerald-300/70 bg-emerald-50/60 dark:border-emerald-700/40 dark:bg-emerald-950/30'
               : 'border-border bg-card',
           isDragging ? 'opacity-50 ring-2 ring-primary/60' : 'opacity-100',
+          isUnread && !isDragging ? 'ring-2 ring-rose-400/70 dark:ring-rose-500/50' : '',
         ].join(' ')}
       >
+        {isUnread ? (
+          <span className="absolute right-2 top-2 z-10 rounded-full bg-rose-500 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white shadow-sm">
+            Nuevo
+          </span>
+        ) : null}
         <div
           className="absolute left-0 top-0 h-full w-1 rounded-l-xl"
           style={{ backgroundColor: stageColor }}
@@ -219,6 +262,18 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
                       </span>
                     </TooltipTrigger>
                     <TooltipContent>Asignado a: {lead.assigned_to}</TooltipContent>
+                  </Tooltip>
+                ) : null}
+                {waBadge ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span
+                        className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ${waBadge.className}`}
+                      >
+                        {waBadge.label}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>{waBadge.title}</TooltipContent>
                   </Tooltip>
                 ) : null}
               </div>

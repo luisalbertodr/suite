@@ -146,6 +146,19 @@ export const useMarketingLeadNotesIndex = () => {
     staleTime: 45_000,
     queryFn: async (): Promise<MarketingLeadNotesIndex> => {
       if (!companyId) return { counts: {}, previews: {} };
+
+      const { data: leads, error: leadsErr } = await supabase
+        .from('marketing_leads')
+        .select('id, external_created_at, created_at')
+        .eq('company_id', companyId)
+        .is('archived_at', null);
+      if (leadsErr) throw leadsErr;
+
+      const noteCutoffByLead = new Map<string, string>();
+      for (const l of leads ?? []) {
+        noteCutoffByLead.set(l.id, l.external_created_at ?? l.created_at);
+      }
+
       const { data, error } = await supabase
         .from('marketing_lead_notes')
         .select('id, lead_id, body, kind, created_at, next_action_at')
@@ -157,6 +170,8 @@ export const useMarketingLeadNotesIndex = () => {
       const previews: Record<string, MarketingLeadNotePreview[]> = {};
       for (const row of data ?? []) {
         if (!row.lead_id) continue;
+        const cutoff = noteCutoffByLead.get(row.lead_id);
+        if (cutoff && row.created_at < cutoff) continue;
         counts[row.lead_id] = (counts[row.lead_id] ?? 0) + 1;
         if (!previews[row.lead_id]) previews[row.lead_id] = [];
         if (previews[row.lead_id].length < PREVIEW_LIMIT) {

@@ -229,6 +229,7 @@ export const useMetaConfig = () => {
       queryClient.invalidateQueries({ queryKey: ['marketing-leads', companyId] });
       queryClient.invalidateQueries({ queryKey: ['marketing-lead-notes-index', companyId] });
       queryClient.invalidateQueries({ queryKey: ['marketing-lead-notes-counts', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['marketing-unread-count'] });
     },
   });
 

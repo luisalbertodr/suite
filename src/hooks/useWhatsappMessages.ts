@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
@@ -7,8 +7,30 @@ import type { Database } from '@/integrations/supabase/types';
 
 export type WhatsappMessageRow = Database['public']['Tables']['whatsapp_messages']['Row'];
 
+/** Evita burbujas duplicadas cuando webhook y send crean dos filas del mismo envío. */
+function dedupeWhatsappMessages(rows: WhatsappMessageRow[]): WhatsappMessageRow[] {
+  const byKey = new Map<string, WhatsappMessageRow>();
+  for (const m of rows) {
+    const suffix = m.waha_message_id?.includes('_')
+      ? m.waha_message_id.split('_').pop()
+      : m.waha_message_id;
+    const key = suffix
+      ? `id:${suffix}`
+      : `fb:${m.chat_id}:${m.from_me}:${m.body ?? ''}:${m.timestamp}`;
+    const prev = byKey.get(key);
+    if (!prev) {
+      byKey.set(key, m);
+      continue;
+    }
+    if (!prev.waha_message_id && m.waha_message_id) byKey.set(key, m);
+  }
+  return [...byKey.values()].sort((a, b) =>
+    a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0,
+  );
+}
+
 export type SendMessageInput =
-  | { chat_id: string; type: 'text'; text: string }
+  | { chat_id: string; type: 'text'; text: string; reply_to_message_id?: string }
   | {
       chat_id: string;
       type: 'image' | 'video' | 'audio' | 'document' | 'voice';
@@ -16,29 +38,38 @@ export type SendMessageInput =
       mime_type: string;
       filename: string;
       caption?: string;
+      reply_to_message_id?: string;
     };
 
-export const useWhatsappMessages = (chatId: string | null) => {
+export const useWhatsappMessages = (
+  chatId: string | null,
+  relatedChatIds: string[] = [],
+) => {
   const queryClient = useQueryClient();
   const { companyId, loading: companyLoading } = useCompanyFilter();
 
-  const enabled = !!companyId && !companyLoading && !!chatId;
-  const key = ['whatsapp-messages', companyId, chatId] as const;
+  const chatIds = useMemo(() => {
+    if (!chatId) return [];
+    return Array.from(new Set([chatId, ...relatedChatIds]));
+  }, [chatId, relatedChatIds]);
+
+  const enabled = !!companyId && !companyLoading && chatIds.length > 0;
+  const key = ['whatsapp-messages', companyId, chatIds.slice().sort().join('|')] as const;
 
   const messagesQuery = useQuery({
     queryKey: key,
     enabled,
     queryFn: async (): Promise<WhatsappMessageRow[]> => {
-      if (!companyId || !chatId) return [];
+      if (!companyId || chatIds.length === 0) return [];
       const { data, error } = await supabase
         .from('whatsapp_messages')
         .select('*')
         .eq('company_id', companyId)
-        .eq('chat_id', chatId)
+        .in('chat_id', chatIds)
         .order('timestamp', { ascending: true })
         .limit(500);
       if (error) throw error;
-      return data ?? [];
+      return dedupeWhatsappMessages(data ?? []);
     },
   });
 
@@ -53,7 +84,7 @@ export const useWhatsappMessages = (chatId: string | null) => {
   useEffect(() => {
     if (!enabled) return;
     const channel = supabase
-      .channel(`whatsapp_messages:${companyId}:${chatId}:${channelIdRef.current}`)
+      .channel(`whatsapp_messages:${companyId}:${chatIds.join('|')}:${channelIdRef.current}`)
       .on(
         'postgres_changes',
         {
@@ -62,31 +93,50 @@ export const useWhatsappMessages = (chatId: string | null) => {
           table: 'whatsapp_messages',
           filter: `company_id=eq.${companyId}`,
         },
-        (payload) => {
-          const row = (payload.new ?? payload.old) as { chat_id?: string } | undefined;
-          if (row?.chat_id === chatId) invalidate();
+        () => {
+          invalidate();
         },
       )
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [companyId, chatId, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [companyId, chatIds.join('|'), enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const refreshFromWaha = useMutation({
     mutationFn: async () => {
-      if (!chatId) throw new Error('Sin chat seleccionado');
-      return invokeWhatsappProxy<{ ok: boolean; count: number }>({
-        action: 'messages.list',
-        chat_id: chatId,
-        limit: 100,
-      });
+      if (chatIds.length === 0) throw new Error('Sin chat seleccionado');
+      if (!companyId) throw new Error('Sin empresa activa');
+      let total = 0;
+      for (const id of chatIds) {
+        const res = await invokeWhatsappProxy<{ ok: boolean; count: number }>({
+          action: 'messages.list',
+          chat_id: id,
+          limit: 200,
+          company_id: companyId,
+        });
+        total += res.count ?? 0;
+      }
+      return { ok: true, count: total };
     },
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate();
+      queryClient.invalidateQueries({ queryKey: ['whatsapp-chats', companyId] });
+    },
   });
+
+  // Respaldo si Realtime o el webhook fallan: sincroniza con Waha periódicamente.
+  useEffect(() => {
+    if (!enabled) return;
+    const timer = window.setInterval(() => {
+      refreshFromWaha.mutate(undefined, { onError: () => undefined });
+    }, 8000);
+    return () => window.clearInterval(timer);
+  }, [enabled, chatIds.join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sendMessage = useMutation({
     mutationFn: async (input: SendMessageInput) => {
+      if (!companyId) throw new Error('Sin empresa activa');
       return invokeWhatsappProxy<{
         ok: boolean;
         waha_message_id?: string;
@@ -96,26 +146,29 @@ export const useWhatsappMessages = (chatId: string | null) => {
       }>({
         action: 'messages.send',
         ...input,
+        company_id: companyId,
       });
     },
-    onSuccess: (data) => {
-      // Optimistic: si el backend devolvió la fila insertada, la añadimos a
-      // la caché en local sin esperar a Realtime.
-      if (data?.message) {
-        const targetKey = data.chat_id_was_migrated && data.chat_id
-          ? (['whatsapp-messages', companyId, data.chat_id] as const)
-          : key;
-        queryClient.setQueryData<WhatsappMessageRow[] | undefined>(
-          targetKey,
-          (prev) => {
-            const list = prev ?? [];
-            if (list.some((m) => m.id === data.message!.id)) return list;
-            return [...list, data.message!].sort((a, b) =>
-              a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0,
-            );
-          },
-        );
-      }
+    onSuccess: () => {
+      invalidate();
+      queryClient.invalidateQueries({ queryKey: ['whatsapp-chats', companyId] });
+    },
+  });
+
+  const forwardMessage = useMutation({
+    mutationFn: async (input: { chat_id: string; message_id: string }) => {
+      if (!companyId) throw new Error('Sin empresa activa');
+      return invokeWhatsappProxy<{
+        ok: boolean;
+        waha_message_id?: string;
+        chat_id?: string;
+      }>({
+        action: 'messages.forward',
+        ...input,
+        company_id: companyId,
+      });
+    },
+    onSuccess: () => {
       invalidate();
       queryClient.invalidateQueries({ queryKey: ['whatsapp-chats', companyId] });
     },
@@ -129,5 +182,6 @@ export const useWhatsappMessages = (chatId: string | null) => {
     refetch: messagesQuery.refetch,
     refreshFromWaha,
     sendMessage,
+    forwardMessage,
   };
 };

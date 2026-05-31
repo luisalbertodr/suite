@@ -134,6 +134,50 @@ export const normalizeMetaFieldKey = (name: string): string =>
     .replace(/\p{M}/gu, '')
     .replace(/\s+/g, '_');
 
+const YES_NO_ANSWER_RE =
+  /^(si|sí|yes|no|true|false|1|0|ok|vale|confirmo|acepto|de_acuerdo)$/i;
+
+/** Respuestas sí/no de preguntas tipo «¿quieres agendar?» — no son fecha de cita. */
+export function isYesNoOnlyAnswer(value: string | null | undefined): boolean {
+  if (value == null) return true;
+  const s = String(value)
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+  if (!s) return true;
+  if (YES_NO_ANSWER_RE.test(s)) return true;
+  return s.length <= 2;
+}
+
+/** Pregunta de intención de cita (el valor suele ser sí/no, no un slot). */
+export function metaFieldKeyIsBookingIntentQuestion(keyNorm: string): boolean {
+  if (!keyNorm) return false;
+  return /quiero_agendar|desea_agendar|deseas_agendar|want_to_book|wish_to_book|agendar_mi_cita|agendar.*cuanto_antes|solicitar.*cita.*cuanto/.test(
+    keyNorm,
+  );
+}
+
+function labelLooksLikeBookingIntentQuestion(label: string | null | undefined): boolean {
+  if (!label) return false;
+  const key = normalizeMetaFieldKey(label);
+  return metaFieldKeyIsBookingIntentQuestion(key);
+}
+
+export function sanitizeExtractedAppointment(
+  extracted: ExtractedLeadAppointment,
+): ExtractedLeadAppointment {
+  const label = extracted.label?.trim() ?? '';
+  if (labelLooksLikeBookingIntentQuestion(label) || isYesNoOnlyAnswer(label)) {
+    return { label: null, atIso: null };
+  }
+  if (extracted.atIso && !label) return extracted;
+  if (extracted.atIso && label && !valueLooksLikeScheduleDateTime(label)) {
+    return { label: null, atIso: null };
+  }
+  return extracted;
+}
+
 /** Indica si el nombre del campo sugiere fecha/hora de cita agendada (Lead Ads / formularios personalizados). */
 export function metaFieldKeyIndicatesAppointment(keyNorm: string): boolean {
   if (!keyNorm) return false;
@@ -454,7 +498,11 @@ export function extractAppointmentFromMetaFieldData(
     const key = normalizeMetaFieldKey(f?.name ?? '');
     if (!metaFieldKeyIndicatesAppointment(key)) continue;
     const v = (f.values ?? []).map((x) => String(x).trim()).find(Boolean);
-    if (v) pushHit(key, v);
+    if (!v || isYesNoOnlyAnswer(v)) continue;
+    if (metaFieldKeyIsBookingIntentQuestion(key) && !valueLooksLikeScheduleDateTime(v, base)) {
+      continue;
+    }
+    pushHit(key, v);
   }
 
   // 2) Claves ambiguas sólo si el valor parece fecha/slot
@@ -462,8 +510,10 @@ export function extractAppointmentFromMetaFieldData(
     for (const f of fields) {
       const key = normalizeMetaFieldKey(f?.name ?? '');
       if (!metaFieldKeyMightHoldScheduleValue(key)) continue;
+      if (metaFieldKeyIsBookingIntentQuestion(key)) continue;
       const v = (f.values ?? []).map((x) => String(x).trim()).find(Boolean);
       if (!v) continue;
+      if (isYesNoOnlyAnswer(v)) continue;
       if (!valueLooksLikeScheduleDateTime(v, base)) continue;
       pushHit(key, v);
     }
@@ -488,10 +538,10 @@ export function extractAppointmentFromMetaFieldData(
 
   if (!(atIso || label) && opts?.createsAppointment) {
     const fb = scanAllFieldValuesForAppointmentFallback(fields, base);
-    if (fb.atIso || fb.label) return fb;
+    if (fb.atIso || fb.label) return sanitizeExtractedAppointment(fb);
   }
 
-  return { label, atIso };
+  return sanitizeExtractedAppointment({ label, atIso });
 }
 
 export type ResolvedLeadAppointment = {
@@ -527,8 +577,9 @@ export function resolveLeadAppointmentParts(lead: {
   }
   if (!atIso && extracted.atIso) atIso = extracted.atIso;
 
-  const label =
+  let label =
     (lead.appointment_label?.trim() || null) ?? (extracted.label ?? null);
 
-  return { atIso, label };
+  const sanitized = sanitizeExtractedAppointment({ atIso, label });
+  return sanitized;
 }

@@ -2150,6 +2150,42 @@ export type Database = {
           },
         ]
       }
+      marketing_lead_views: {
+        Row: {
+          company_id: string
+          lead_id: string
+          user_id: string
+          viewed_at: string
+        }
+        Insert: {
+          company_id: string
+          lead_id: string
+          user_id: string
+          viewed_at?: string
+        }
+        Update: {
+          company_id?: string
+          lead_id?: string
+          user_id?: string
+          viewed_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "marketing_lead_views_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketing_lead_views_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "marketing_leads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       marketing_lead_stages: {
         Row: {
           color: string
@@ -2219,15 +2255,21 @@ export type Database = {
           id: string
           last_contacted_at: string | null
           last_name: string | null
+          meta_form_id: string | null
           notes: string | null
           phone: string | null
           phone_norm: string | null
           position_in_stage: number
           source: string
           stage_id: string | null
+          stripe_deposit_paid_at: string | null
           tags: string[]
           updated_at: string
           value: number
+          wa_automation_completed_at: string | null
+          wa_automation_error: string | null
+          wa_automation_initial_sent_at: string | null
+          wa_automation_status: string
           win_status: string | null
         }
         Insert: {
@@ -2248,14 +2290,20 @@ export type Database = {
           id?: string
           last_contacted_at?: string | null
           last_name?: string | null
+          meta_form_id?: string | null
           notes?: string | null
           phone?: string | null
           position_in_stage?: number
           source?: string
           stage_id?: string | null
+          stripe_deposit_paid_at?: string | null
           tags?: string[]
           updated_at?: string
           value?: number
+          wa_automation_completed_at?: string | null
+          wa_automation_error?: string | null
+          wa_automation_initial_sent_at?: string | null
+          wa_automation_status?: string
           win_status?: string | null
         }
         Update: {
@@ -2276,14 +2324,20 @@ export type Database = {
           id?: string
           last_contacted_at?: string | null
           last_name?: string | null
+          meta_form_id?: string | null
           notes?: string | null
           phone?: string | null
           position_in_stage?: number
           source?: string
           stage_id?: string | null
+          stripe_deposit_paid_at?: string | null
           tags?: string[]
           updated_at?: string
           value?: number
+          wa_automation_completed_at?: string | null
+          wa_automation_error?: string | null
+          wa_automation_initial_sent_at?: string | null
+          wa_automation_status?: string
           win_status?: string | null
         }
         Relationships: [
@@ -2383,6 +2437,13 @@ export type Database = {
           last_sync_message: string | null
           last_sync_status: string | null
           updated_at: string
+          whatsapp_automation_enabled: boolean
+          whatsapp_initial_message: string | null
+          whatsapp_reply_1_message: string | null
+          whatsapp_reply_2_message: string | null
+          whatsapp_reply_invalid_message: string | null
+          stripe_deposit_enabled: boolean
+          stripe_deposit_amount_cents: number | null
         }
         Insert: {
           appointment_stage_id?: string | null
@@ -2400,6 +2461,13 @@ export type Database = {
           last_sync_message?: string | null
           last_sync_status?: string | null
           updated_at?: string
+          whatsapp_automation_enabled?: boolean
+          whatsapp_initial_message?: string | null
+          whatsapp_reply_1_message?: string | null
+          whatsapp_reply_2_message?: string | null
+          whatsapp_reply_invalid_message?: string | null
+          stripe_deposit_enabled?: boolean
+          stripe_deposit_amount_cents?: number | null
         }
         Update: {
           appointment_stage_id?: string | null
@@ -2417,6 +2485,13 @@ export type Database = {
           last_sync_message?: string | null
           last_sync_status?: string | null
           updated_at?: string
+          whatsapp_automation_enabled?: boolean
+          whatsapp_initial_message?: string | null
+          whatsapp_reply_1_message?: string | null
+          whatsapp_reply_2_message?: string | null
+          whatsapp_reply_invalid_message?: string | null
+          stripe_deposit_enabled?: boolean
+          stripe_deposit_amount_cents?: number | null
         }
         Relationships: [
           {
@@ -3191,6 +3266,138 @@ export type Database = {
             columns: ["customer_id"]
             isOneToOne: false
             referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      stripe_config: {
+        Row: {
+          company_id: string
+          confirmed_stage_id: string | null
+          created_at: string
+          currency: string
+          default_deposit_amount_cents: number
+          enabled: boolean
+          last_webhook_at: string | null
+          payment_success_whatsapp_message: string | null
+          public_app_url: string | null
+          publishable_key: string | null
+          secret_key: string | null
+          updated_at: string
+          webhook_secret: string | null
+        }
+        Insert: {
+          company_id: string
+          confirmed_stage_id?: string | null
+          created_at?: string
+          currency?: string
+          default_deposit_amount_cents?: number
+          enabled?: boolean
+          last_webhook_at?: string | null
+          payment_success_whatsapp_message?: string | null
+          public_app_url?: string | null
+          publishable_key?: string | null
+          secret_key?: string | null
+          updated_at?: string
+          webhook_secret?: string | null
+        }
+        Update: {
+          company_id?: string
+          confirmed_stage_id?: string | null
+          created_at?: string
+          currency?: string
+          default_deposit_amount_cents?: number
+          enabled?: boolean
+          last_webhook_at?: string | null
+          payment_success_whatsapp_message?: string | null
+          public_app_url?: string | null
+          publishable_key?: string | null
+          secret_key?: string | null
+          updated_at?: string
+          webhook_secret?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stripe_config_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stripe_config_confirmed_stage_id_fkey"
+            columns: ["confirmed_stage_id"]
+            isOneToOne: false
+            referencedRelation: "marketing_lead_stages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      stripe_deposit_sessions: {
+        Row: {
+          amount_cents: number
+          checkout_url: string | null
+          company_id: string
+          created_at: string
+          currency: string
+          expires_at: string | null
+          id: string
+          marketing_lead_id: string | null
+          metadata: Json
+          paid_at: string | null
+          public_token: string
+          status: string
+          stripe_checkout_session_id: string | null
+          stripe_payment_intent_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          amount_cents: number
+          checkout_url?: string | null
+          company_id: string
+          created_at?: string
+          currency?: string
+          expires_at?: string | null
+          id?: string
+          marketing_lead_id?: string | null
+          metadata?: Json
+          paid_at?: string | null
+          public_token: string
+          status?: string
+          stripe_checkout_session_id?: string | null
+          stripe_payment_intent_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          amount_cents?: number
+          checkout_url?: string | null
+          company_id?: string
+          created_at?: string
+          currency?: string
+          expires_at?: string | null
+          id?: string
+          marketing_lead_id?: string | null
+          metadata?: Json
+          paid_at?: string | null
+          public_token?: string
+          status?: string
+          stripe_checkout_session_id?: string | null
+          stripe_payment_intent_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stripe_deposit_sessions_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stripe_deposit_sessions_marketing_lead_id_fkey"
+            columns: ["marketing_lead_id"]
+            isOneToOne: false
+            referencedRelation: "marketing_leads"
             referencedColumns: ["id"]
           },
         ]
@@ -4098,9 +4305,30 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      stripe_config_safe: {
+        Row: {
+          company_id: string
+          confirmed_stage_id: string | null
+          created_at: string
+          currency: string
+          default_deposit_amount_cents: number
+          enabled: boolean
+          has_secret_key: boolean
+          has_webhook_secret: boolean
+          last_webhook_at: string | null
+          payment_success_whatsapp_message: string | null
+          public_app_url: string | null
+          publishable_key: string | null
+          updated_at: string
+        }
+        Relationships: []
+      }
     }
     Functions: {
+      count_marketing_unviewed_leads: {
+        Args: { p_company_ids?: string[] | null }
+        Returns: number
+      }
       create_superuser: {
         Args: { p_email: string; p_password: string }
         Returns: string

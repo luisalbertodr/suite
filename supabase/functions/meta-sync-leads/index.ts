@@ -8,6 +8,10 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import {
+  sendInitialAutomationForLead,
+  type MetaFormAutomation,
+} from '../_shared/marketingWhatsappAutomation.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -169,6 +173,53 @@ function normalizeMetaFieldKey(name: string): string {
     .normalize('NFD')
     .replace(/\p{M}/gu, '')
     .replace(/\s+/g, '_');
+}
+
+const YES_NO_ANSWER_RE =
+  /^(si|sí|yes|no|true|false|1|0|ok|vale|confirmo|acepto|de_acuerdo)$/i;
+
+function isYesNoOnlyAnswer(value: string | null | undefined): boolean {
+  if (value == null) return true;
+  const s = String(value)
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+  if (!s) return true;
+  if (YES_NO_ANSWER_RE.test(s)) return true;
+  return s.length <= 2;
+}
+
+function metaFieldKeyIsBookingIntentQuestion(keyNorm: string): boolean {
+  if (!keyNorm) return false;
+  return /quiero_agendar|desea_agendar|deseas_agendar|want_to_book|wish_to_book|agendar_mi_cita|agendar.*cuanto_antes|solicitar.*cita.*cuanto/.test(
+    keyNorm,
+  );
+}
+
+function labelLooksLikeBookingIntentQuestion(label: string | null | undefined): boolean {
+  if (!label) return false;
+  return metaFieldKeyIsBookingIntentQuestion(normalizeMetaFieldKey(label));
+}
+
+function sanitizeExtractedAppointment(extracted: {
+  label: string | null;
+  atIso: string | null;
+}): { label: string | null; atIso: string | null } {
+  const label = extracted.label?.trim() ?? '';
+  if (labelLooksLikeBookingIntentQuestion(label) || isYesNoOnlyAnswer(label)) {
+    return { label: null, atIso: null };
+  }
+  if (extracted.atIso && label && !valueLooksLikeScheduleDateTime(label)) {
+    return { label: null, atIso: null };
+  }
+  return extracted;
+}
+
+function tagsFromMetaFormName(formName: string | null | undefined): string[] {
+  const n = String(formName ?? '').trim();
+  if (!n) return [];
+  return [n.toLowerCase()];
 }
 
 function metaFieldKeyIndicatesAppointment(keyNorm: string): boolean {
@@ -443,6 +494,10 @@ function extractAppointmentFromMetaFieldsCore(
     if (!metaFieldKeyIndicatesAppointment(key)) continue;
     const raw = Array.isArray(f.values) ? f.values : [];
     const v = raw.map((x) => String(x).trim()).find((s) => s.length > 0);
+    if (!v || isYesNoOnlyAnswer(v)) continue;
+    if (metaFieldKeyIsBookingIntentQuestion(key) && !valueLooksLikeScheduleDateTime(v, base)) {
+      continue;
+    }
     if (v) hits.push({ key, value: v });
   }
 
@@ -450,9 +505,11 @@ function extractAppointmentFromMetaFieldsCore(
     for (const f of fields) {
       const key = normalizeMetaFieldKey(f?.name ?? '');
       if (!metaFieldKeyMightHoldScheduleValue(key)) continue;
+      if (metaFieldKeyIsBookingIntentQuestion(key)) continue;
       const raw = Array.isArray(f.values) ? f.values : [];
       const v = raw.map((x) => String(x).trim()).find((s) => s.length > 0);
-      if (!v || !valueLooksLikeScheduleDateTime(v, base)) continue;
+      if (!v || isYesNoOnlyAnswer(v)) continue;
+      if (!valueLooksLikeScheduleDateTime(v, base)) continue;
       hits.push({ key, value: v });
     }
   }
@@ -469,7 +526,7 @@ function extractAppointmentFromMetaFieldsCore(
     }
   }
 
-  return { label, atIso };
+  return sanitizeExtractedAppointment({ label, atIso });
 }
 
 /** Si el formulario tiene "Con reservas Meta", escanea todos los valores (slots sin clave reconocible). */
@@ -486,7 +543,7 @@ function extractAppointmentFromMetaFields(
   if (core.atIso || core.label) return core;
   if (form?.creates_appointment) {
     const fb = scanAllFieldValuesForAppointmentFallback(fields, base);
-    if (fb.atIso || fb.label) return fb;
+    if (fb.atIso || fb.label) return sanitizeExtractedAppointment(fb);
   }
   return core;
 }
@@ -1003,6 +1060,7 @@ serve(async (req) => {
             external_created_at: newer ? lead.created_time : prev.external_created_at,
             appointment_at: apptExtract.atIso,
             appointment_label: apptExtract.label,
+            tags: newer ? tagsFromMetaFormName(form.form_name) : (prev.tags as string[] | undefined) ?? [],
           };
           consumedByBatchMerge = true;
         }
@@ -1038,6 +1096,7 @@ serve(async (req) => {
           rows.push({
             company_id: companyId,
             stage_id: stageId,
+            meta_form_id: form.id,
             external_id: lead.id,
             source,
             form_name: form.form_name ?? null,
@@ -1050,6 +1109,7 @@ serve(async (req) => {
             external_created_at: lead.created_time ?? null,
             appointment_at: apptExtract.atIso,
             appointment_label: apptExtract.label,
+            tags: tagsFromMetaFormName(form.form_name),
           });
           rowsMergedFd.push(mergeLeadFieldData([], lead.field_data));
           if (n9) pendingRowIndexByPhone9.set(n9, rows.length - 1);
@@ -1085,6 +1145,35 @@ serve(async (req) => {
           }
         } else {
           inserted += ins?.length ?? 0;
+          if (form.whatsapp_automation_enabled && ins?.length) {
+            for (let j = 0; j < ins.length; j++) {
+              const leadId = ins[j]?.id as string | undefined;
+              if (!leadId) continue;
+              const srcRow = rows[i + j];
+              try {
+                await sendInitialAutomationForLead(
+                  admin,
+                  companyId,
+                  leadId,
+                  {
+                    phone: srcRow.phone as string | null,
+                    first_name: srcRow.first_name as string | null,
+                    last_name: srcRow.last_name as string | null,
+                    email: srcRow.email as string | null,
+                    campaign: srcRow.campaign as string | null,
+                    form_name: srcRow.form_name as string | null,
+                    appointment_at: srcRow.appointment_at as string | null,
+                    appointment_label: srcRow.appointment_label as string | null,
+                    source: srcRow.source as string | null,
+                    meta_form_id: form.id,
+                  },
+                  form as MetaFormAutomation,
+                );
+              } catch (autoErr) {
+                console.error('meta-sync WhatsApp automation failed:', autoErr);
+              }
+            }
+          }
         }
       }
 
@@ -1129,10 +1218,15 @@ serve(async (req) => {
           patch.external_created_at = b.externalCreatedAt;
           patch.source = b.source;
           patch.field_data = mergeLeadFieldData(existingFd, parsed.extras as MetaFieldDatum[]);
+          patch.tags = tagsFromMetaFormName(b.formName ?? row.form_name);
           if (hasApptNew) {
             patch.appointment_at = apptNew.atIso;
             patch.appointment_label = apptNew.label;
             patch.stage_id = targetAppointment;
+          } else if (rowHadAppt) {
+            patch.appointment_at = null;
+            patch.appointment_label = null;
+            patch.stage_id = targetIntake;
           }
         } else if (row.external_id == null) {
           patch.external_id = b.externalId;

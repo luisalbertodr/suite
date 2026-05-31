@@ -1,7 +1,51 @@
 // Helpers compartidos por los componentes de WhatsApp.
 
+/** Paleta y clases Tailwind alineadas con WhatsApp Web. */
+export const waTheme = {
+  appBg: 'bg-[#eae6df]',
+  sidebarBg: 'bg-white dark:bg-zinc-950',
+  headerBg: 'bg-[#f0f2f5] dark:bg-zinc-900',
+  border: 'border-[#e9edef] dark:border-zinc-800',
+  textMuted: 'text-[#667781] dark:text-zinc-400',
+  textIcon: 'text-[#54656f] dark:text-zinc-400',
+  chatBg: 'bg-[#efeae2] dark:bg-zinc-900',
+  chatActive: 'bg-[#f0f2f5] dark:bg-zinc-800',
+  chatHover: 'hover:bg-[#f5f6f6] dark:hover:bg-zinc-900/80',
+  bubbleOut: 'bg-[#d9fdd3] dark:bg-emerald-900',
+  bubbleIn: 'bg-white dark:bg-zinc-800',
+  searchBg: 'bg-[#f0f2f5] dark:bg-zinc-900',
+  inputBg: 'bg-white dark:bg-zinc-800',
+} as const;
+
+export const WA_CHAT_WALLPAPER =
+  "url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')";
+
+export interface MetaLeadInfo {
+  name: string;
+  campaign: string | null;
+  formName: string | null;
+  source: string | null;
+  externalCreatedAt: string | null;
+}
+
+export function formatMetaLeadLabel(meta: MetaLeadInfo): string {
+  const label = meta.campaign?.trim() || meta.formName?.trim();
+  if (label) return `Lead Meta · ${label}`;
+  return 'Lead Meta';
+}
+
+export function isRecentMetaLead(
+  externalCreatedAt: string | null | undefined,
+): boolean {
+  if (!externalCreatedAt) return false;
+  const d = new Date(externalCreatedAt);
+  if (Number.isNaN(d.getTime())) return false;
+  return Date.now() - d.getTime() <= 48 * 60 * 60 * 1000;
+}
+
 export function jidToDisplay(jid: string | null | undefined): string {
   if (!jid) return '';
+  if (isLidJid(jid)) return '';
   const at = jid.indexOf('@');
   const local = at >= 0 ? jid.slice(0, at) : jid;
   if (!local) return jid;
@@ -10,8 +54,120 @@ export function jidToDisplay(jid: string | null | undefined): string {
   return local;
 }
 
+export function isPhoneJid(jid: string | null | undefined): boolean {
+  return !!jid && /@(c\.us|s\.whatsapp\.net)$/i.test(jid);
+}
+
+export function isLidJid(jid: string | null | undefined): boolean {
+  return !!jid && /@lid$/i.test(jid);
+}
+
 export function isGroupJid(jid: string | null | undefined): boolean {
   return !!jid && /@g\.us$/i.test(jid);
+}
+
+/** Chats de sistema de WhatsApp (estados, newsletters…) — no son conversaciones 1:1. */
+export function isSystemChatJid(jid: string | null | undefined): boolean {
+  if (!jid) return false;
+  const j = jid.toLowerCase();
+  if (j === 'status@broadcast') return true;
+  if (j.endsWith('@broadcast')) return true;
+  if (j.endsWith('@newsletter')) return true;
+  return false;
+}
+
+/** Prefiere JID con teléfono real (@c.us / @s.whatsapp.net) frente a @lid o @g.us. */
+export function pickBestSenderJid(
+  ...candidates: (string | null | undefined)[]
+): string | null {
+  const list = candidates.filter(
+    (c): c is string => typeof c === 'string' && c.trim().length > 0,
+  );
+  const phone = list.find(isPhoneJid);
+  if (phone) return phone;
+  const nonGroupNonLid = list.find((j) => !isGroupJid(j) && !isLidJid(j));
+  if (nonGroupNonLid) return nonGroupNonLid;
+  const nonGroup = list.find((j) => !isGroupJid(j));
+  return nonGroup ?? list[0] ?? null;
+}
+
+export function extractPushNameFromRaw(raw: unknown): string | null {
+  const r = raw as Record<string, unknown> | null | undefined;
+  if (!r) return null;
+  const data = r._data as Record<string, unknown> | undefined;
+  // Waha NOWEB: el nombre del contacto suele estar en _data, no en la raíz.
+  for (const v of [data?.pushName, data?.notifyName, r.pushName, r.notifyName]) {
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return null;
+}
+
+/** Extrae el remitente real en mensajes de grupo (participant / participantAlt). */
+export function resolveGroupSenderJidFromRaw(
+  raw: unknown,
+  fromJid: string | null | undefined,
+): string | null {
+  const r = raw as Record<string, unknown> | null | undefined;
+  const topKey = r?.key as Record<string, unknown> | undefined;
+  const data = r?._data as Record<string, unknown> | undefined;
+  const nestedKey = data?.key as Record<string, unknown> | undefined;
+  return pickBestSenderJid(
+    nestedKey?.participantAlt as string,
+    nestedKey?.participant as string,
+    topKey?.participantAlt as string,
+    topKey?.participant as string,
+    data?.author as string,
+    r?.author as string,
+    fromJid && isPhoneJid(fromJid) ? fromJid : null,
+    fromJid && !isGroupJid(fromJid) ? fromJid : null,
+  );
+}
+
+/** Etiqueta legible para el remitente en burbujas de grupo. */
+export function formatGroupSenderLabel(
+  fromJid: string | null | undefined,
+  pushName: string | null | undefined,
+): string | null {
+  const name = pushName?.trim() || null;
+  const phone = fromJid && isPhoneJid(fromJid) ? jidToDisplay(fromJid) : null;
+  if (name && phone) return `${name} · ${phone}`;
+  if (name) return name;
+  if (phone) return phone;
+  if (fromJid && isLidJid(fromJid)) {
+    const suffix = fromJid.split('@')[0]?.slice(-4);
+    return suffix ? `Contacto ···${suffix}` : 'Contacto';
+  }
+  return fromJid ? jidToDisplay(fromJid) || fromJid : null;
+}
+
+export function extractPhoneDigitsFromJid(jid: string | null | undefined): string | null {
+  if (!jid || isLidJid(jid) || isGroupJid(jid)) return null;
+  const local = jid.split('@')[0] ?? '';
+  const digits = local.replace(/[^0-9]/g, '');
+  return digits.length >= 6 ? digits : null;
+}
+
+/** True si dos JIDs apuntan al mismo contacto (mismo número de teléfono). */
+export function jidsSameContact(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const da = extractPhoneDigitsFromJid(a);
+  const db = extractPhoneDigitsFromJid(b);
+  return !!(da && db && da === db);
+}
+
+export function displayNameForChat(
+  chatId: string,
+  name: string | null | undefined,
+  fallback?: string | null,
+): string {
+  const n = name?.trim() || fallback?.trim();
+  if (n) return n;
+  if (isLidJid(chatId)) {
+    const suffix = chatId.split('@')[0]?.slice(-4);
+    return suffix ? `Contacto ···${suffix}` : 'Contacto';
+  }
+  return jidToDisplay(chatId) || chatId;
 }
 
 export function formatChatListTime(iso: string | null | undefined): string {
@@ -83,15 +239,32 @@ export function dayKey(iso: string | null | undefined): string {
 }
 
 /** Lee texto del `raw` JSON (Baileys/NOWEB del webhook) si `body` quedó vacío. */
-/** URL HTTP de sticker/imagen en el payload Baileys (si Waha la expone). */
+export function isExternalWhatsappCdnUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  try {
+    const h = new URL(url).hostname.toLowerCase();
+    return h.includes('whatsapp.net') || h.includes('fbcdn.net');
+  } catch {
+    return false;
+  }
+}
+
+/** URL HTTP de sticker/imagen en el payload Baileys/Waha (si está expuesta). */
 export function extractMediaUrlFromWahaMessageRaw(raw: unknown): string | null {
   if (!raw || typeof raw !== 'object') return null;
   const root = raw as Record<string, unknown>;
-  const msg = root.message;
-  if (!msg || typeof msg !== 'object') return null;
+
+  const topMedia = root.media;
+  if (topMedia && typeof topMedia === 'object') {
+    const url = (topMedia as Record<string, unknown>).url;
+    if (typeof url === 'string' && (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/'))) {
+      return url;
+    }
+  }
+
   const unwrap = (m: Record<string, unknown>, depth: number): Record<string, unknown> => {
     if (depth > 8) return m;
-    for (const key of ['ephemeralMessage', 'viewOnceMessage', 'viewOnceMessageV2'] as const) {
+    for (const key of ['ephemeralMessage', 'viewOnceMessage', 'viewOnceMessageV2', 'documentWithCaptionMessage', 'editedMessage'] as const) {
       const w = m[key];
       if (w && typeof w === 'object') {
         const inner = (w as Record<string, unknown>).message;
@@ -100,15 +273,23 @@ export function extractMediaUrlFromWahaMessageRaw(raw: unknown): string | null {
     }
     return m;
   };
-  const u = unwrap(msg as Record<string, unknown>, 0);
-  const sm = u.stickerMessage;
-  if (sm && typeof sm === 'object') {
-    const url = (sm as Record<string, unknown>).url;
-    if (typeof url === 'string' && (url.startsWith('http://') || url.startsWith('https://'))) {
-      return url;
+
+  const tryMsg = (msg: unknown): string | null => {
+    if (!msg || typeof msg !== 'object') return null;
+    const u = unwrap(msg as Record<string, unknown>, 0);
+    for (const key of ['stickerMessage', 'imageMessage', 'videoMessage'] as const) {
+      const node = u[key];
+      if (node && typeof node === 'object') {
+        const url = (node as Record<string, unknown>).url;
+        if (typeof url === 'string' && (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/'))) {
+          return url;
+        }
+      }
     }
-  }
-  return null;
+    return null;
+  };
+
+  return tryMsg(root.message) ?? tryMsg((root._data as Record<string, unknown> | undefined)?.message);
 }
 
 export function extractBodyFromWahaMessageRaw(raw: unknown): string | null {
@@ -203,4 +384,67 @@ export function ackLabel(ack: number): string {
     default:
       return '';
   }
+}
+
+type MessagePreviewSource = {
+  type?: string | null;
+  body?: string | null;
+  caption?: string | null;
+  media_filename?: string | null;
+  raw?: unknown;
+  waha_message_id?: string | null;
+};
+
+export function messagePreviewText(m: MessagePreviewSource): string {
+  const type = (m.type ?? 'text').toLowerCase();
+  if (type === 'text' || type === 'chat') {
+    return m.body?.trim() || extractBodyFromWahaMessageRaw(m.raw) || 'Mensaje';
+  }
+  if (type === 'image') return m.caption?.trim() || '📷 Imagen';
+  if (type === 'video') return m.caption?.trim() || '🎬 Vídeo';
+  if (type === 'audio' || type === 'voice' || type === 'ptt') return '🎤 Audio';
+  if (type === 'sticker') return '🎭 Sticker';
+  if (type === 'document') return m.media_filename?.trim() || '📎 Documento';
+  return `[${type}]`;
+}
+
+export function extractReplyToFromRaw(
+  raw: unknown,
+): { id?: string; body?: string } | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const root = raw as Record<string, unknown>;
+  const replyTo = root.replyTo ?? root.quotedMsg;
+  if (!replyTo || typeof replyTo !== 'object') return null;
+  const rt = replyTo as Record<string, unknown>;
+  const id =
+    typeof rt.id === 'string'
+      ? rt.id
+      : rt.id && typeof rt.id === 'object'
+        ? ((rt.id as Record<string, unknown>)._serialized as string | undefined) ??
+          ((rt.id as Record<string, unknown>).id as string | undefined)
+        : undefined;
+  const body =
+    typeof rt.body === 'string'
+      ? rt.body
+      : typeof rt.text === 'string'
+        ? rt.text
+        : undefined;
+  return { id, body };
+}
+
+export function findMessageByWahaId<T extends { waha_message_id?: string | null }>(
+  messages: T[],
+  wahaId: string | null | undefined,
+): T | undefined {
+  if (!wahaId) return undefined;
+  const exact = messages.find((m) => m.waha_message_id === wahaId);
+  if (exact) return exact;
+  const suffix = wahaId.includes('_') ? wahaId.split('_').pop() : wahaId;
+  if (!suffix) return undefined;
+  return messages.find((m) => {
+    if (!m.waha_message_id) return false;
+    if (m.waha_message_id === wahaId) return true;
+    if (m.waha_message_id.endsWith(`_${suffix}`)) return true;
+    return m.waha_message_id.split('_').pop() === suffix;
+  });
 }

@@ -1,10 +1,10 @@
-import React, { useEffect, useMemo, useRef } from 'react';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { RefreshCw, MoreVertical, UserCheck, UserPlus, Link as LinkIcon } from 'lucide-react';
+import { RefreshCw, MoreVertical, UserCheck, UserPlus, Link as LinkIcon, Megaphone } from 'lucide-react';
 import { WhatsappAvatar } from './WhatsappAvatar';
 import { WhatsappMessageBubble } from './WhatsappMessageBubble';
 import { WhatsappMessageInput } from './WhatsappMessageInput';
+import { WhatsappForwardDialog } from './WhatsappForwardDialog';
 import { WhatsappLinkPopover } from './WhatsappLinkPopover';
 import {
   useWhatsappMessages,
@@ -12,44 +12,98 @@ import {
   type SendMessageInput,
 } from '@/hooks/useWhatsappMessages';
 import { useToast } from '@/hooks/use-toast';
-import { dayKey, formatDateHeader, isGroupJid, jidToDisplay } from './whatsappUtils';
+import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import {
+  dayKey,
+  formatDateHeader,
+  formatMetaLeadLabel,
+  displayNameForChat,
+  findMessageByWahaId,
+  isGroupJid,
+  isSystemChatJid,
+  isRecentMetaLead,
+  jidToDisplay,
+  jidsSameContact,
+  isPhoneJid,
+  WA_CHAT_WALLPAPER,
+  waTheme,
+  type MetaLeadInfo,
+} from './whatsappUtils';
 import type { WhatsappChatRow } from '@/hooks/useWhatsappChats';
+import { useWhatsappChats } from '@/hooks/useWhatsappChats';
 
 interface Props {
   chat: WhatsappChatRow;
   customerName?: string;
+  isLinkedCustomer?: boolean;
   leadName?: string;
+  leadMeta?: MetaLeadInfo;
+  leadNameById?: Record<string, string>;
   onMarkRead?: (chatId: string) => void;
+  onCreateCustomer?: () => void;
 }
 
 export const WhatsappChatView: React.FC<Props> = ({
   chat,
   customerName,
+  isLinkedCustomer,
   leadName,
+  leadMeta,
+  leadNameById = {},
   onMarkRead,
+  onCreateCustomer,
 }) => {
   const { toast } = useToast();
+  const { companyId, loading: companyLoading } = useCompanyFilter();
+  const { chats } = useWhatsappChats();
+  const relatedChatIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const c of chats) {
+      if (isSystemChatJid(c.chat_id)) continue;
+      if (c.chat_id === chat.chat_id) continue;
+      if (jidsSameContact(c.chat_id, chat.chat_id)) ids.add(c.chat_id);
+      if (
+        chat.customer_id &&
+        c.customer_id &&
+        c.customer_id === chat.customer_id &&
+        (jidsSameContact(c.chat_id, chat.chat_id) || isPhoneJid(c.chat_id) || isPhoneJid(chat.chat_id))
+      ) {
+        ids.add(c.chat_id);
+      }
+    }
+    return Array.from(ids);
+  }, [chats, chat.chat_id, chat.customer_id]);
   const {
     messages,
     isLoading,
     refreshFromWaha,
     sendMessage,
-  } = useWhatsappMessages(chat.chat_id);
+    forwardMessage,
+  } = useWhatsappMessages(chat.chat_id, relatedChatIds);
   const scrollRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const [replyTo, setReplyTo] = useState<WhatsappMessageRow | null>(null);
+  const [forwardMessageRow, setForwardMessageRow] = useState<WhatsappMessageRow | null>(null);
+  const [forwardOpen, setForwardOpen] = useState(false);
+
+  useEffect(() => {
+    setReplyTo(null);
+    setForwardMessageRow(null);
+    setForwardOpen(false);
+  }, [chat.chat_id]);
 
   // Cuando entramos al chat, marcamos como leído y pedimos mensajes frescos.
   useEffect(() => {
-    if (!chat.chat_id) return;
+    if (!chat.chat_id || companyLoading || !companyId) return;
     if ((chat.unread_count ?? 0) > 0) onMarkRead?.(chat.chat_id);
     // Trae mensajes frescos al abrir el chat (refresh silencioso)
     refreshFromWaha.mutate(undefined, { onError: () => undefined });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chat.chat_id]);
+  }, [chat.chat_id, companyId, companyLoading]);
 
   // Auto-scroll al final cuando llegan mensajes
   useEffect(() => {
-    endRef.current?.scrollIntoView({ block: 'end', behavior: 'auto' });
+    endRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
   }, [messages.length]);
 
   const grouped = useMemo(() => {
@@ -70,6 +124,7 @@ export const WhatsappChatView: React.FC<Props> = ({
     try {
       const real = { ...input, chat_id: chat.chat_id } as SendMessageInput;
       await sendMessage.mutateAsync(real);
+      setReplyTo(null);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'No se pudo enviar';
       toast({ title: 'Error', description: msg, variant: 'destructive' });
@@ -77,12 +132,50 @@ export const WhatsappChatView: React.FC<Props> = ({
     }
   };
 
-  const displayName = chat.name ?? jidToDisplay(chat.chat_id);
+  const handleForward = async (destinationChatId: string) => {
+    if (!forwardMessageRow?.waha_message_id) {
+      toast({
+        title: 'No se puede reenviar',
+        description: 'Este mensaje no tiene identificador de Waha.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    try {
+      await forwardMessage.mutateAsync({
+        chat_id: destinationChatId,
+        message_id: forwardMessageRow.waha_message_id,
+      });
+      toast({ title: 'Mensaje reenviado' });
+      setForwardMessageRow(null);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'No se pudo reenviar';
+      toast({ title: 'Error', description: msg, variant: 'destructive' });
+      throw e;
+    }
+  };
+
+  const displayName = displayNameForChat(chat.chat_id, chat.name, leadName);
   const isGroup = chat.is_group || isGroupJid(chat.chat_id);
+  const phoneLabel = !isGroup ? jidToDisplay(chat.chat_id) : '';
+  const showPhoneInline =
+    phoneLabel &&
+    phoneLabel !== displayName &&
+    !displayName.includes(phoneLabel);
+  const isCustomer = isLinkedCustomer ?? !!chat.customer_id;
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[url('data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22120%22 height=%22120%22 fill=%22none%22><circle cx=%2260%22 cy=%2260%22 r=%221%22 fill=%22%23000%22 opacity=%220.05%22/></svg>')] bg-[#efeae2] dark:bg-zinc-900">
-      <div className="flex items-center justify-between gap-3 border-b border-zinc-200 bg-zinc-50 px-4 py-2 dark:border-zinc-800 dark:bg-zinc-950">
+    <div
+      className={`flex h-full min-h-0 flex-col overflow-hidden ${waTheme.chatBg}`}
+      style={{
+        backgroundImage: WA_CHAT_WALLPAPER,
+        backgroundBlendMode: 'overlay',
+        backgroundSize: 'auto',
+      }}
+    >
+      <div
+        className={`z-10 flex h-[60px] shrink-0 items-center justify-between gap-3 border-b px-4 ${waTheme.headerBg} ${waTheme.border}`}
+      >
         <div className="flex min-w-0 items-center gap-3">
           <WhatsappAvatar
             name={displayName}
@@ -91,23 +184,51 @@ export const WhatsappChatView: React.FC<Props> = ({
             className="h-10 w-10"
           />
           <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+            <p className="truncate text-sm font-medium text-[#111b21] dark:text-zinc-100">
               {displayName}
+              {showPhoneInline ? (
+                <span className={`font-normal ${waTheme.textMuted}`}> · {phoneLabel}</span>
+              ) : null}
             </p>
-            <div className="flex items-center gap-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+            <div className={`flex flex-wrap items-center gap-1.5 text-xs ${waTheme.textMuted}`}>
               <span className="truncate" title={chat.chat_id}>
                 {isGroup
                   ? `Grupo · ${jidToDisplay(chat.chat_id)}`
-                  : jidToDisplay(chat.chat_id)}
+                  : showPhoneInline
+                    ? null
+                    : phoneLabel || chat.chat_id}
               </span>
-              {customerName ? (
-                <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+              {leadMeta ? (
+                <span
+                  className={`inline-flex max-w-full items-center gap-0.5 truncate rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                    isRecentMetaLead(leadMeta.externalCreatedAt)
+                      ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200'
+                      : 'bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300'
+                  }`}
+                  title={formatMetaLeadLabel(leadMeta)}
+                >
+                  <Megaphone className="h-3 w-3 shrink-0" />
+                  {formatMetaLeadLabel(leadMeta)}
+                </span>
+              ) : customerName ? (
+                <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
                   <UserCheck className="h-3 w-3" /> {customerName}
                 </span>
               ) : leadName ? (
-                <span className="inline-flex items-center gap-0.5 rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 dark:bg-sky-950 dark:text-sky-300">
+                <span className="inline-flex items-center gap-0.5 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-medium text-sky-700 dark:bg-sky-950 dark:text-sky-300">
                   <UserPlus className="h-3 w-3" /> {leadName}
                 </span>
+              ) : !isGroup && !isCustomer && onCreateCustomer ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-6 px-2 text-[10px] text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300"
+                  onClick={onCreateCustomer}
+                >
+                  <UserPlus className="mr-1 h-3 w-3" />
+                  Crear cliente
+                </Button>
               ) : null}
             </div>
           </div>
@@ -121,7 +242,7 @@ export const WhatsappChatView: React.FC<Props> = ({
             <Button
               variant="ghost"
               size="icon"
-              className="h-9 w-9"
+              className={`h-9 w-9 ${waTheme.textIcon}`}
               title="Vincular con cliente o lead"
             >
               <LinkIcon className="h-4 w-4" />
@@ -130,7 +251,7 @@ export const WhatsappChatView: React.FC<Props> = ({
           <Button
             variant="ghost"
             size="icon"
-            className="h-9 w-9"
+            className={`h-9 w-9 ${waTheme.textIcon}`}
             onClick={() => refreshFromWaha.mutate()}
             disabled={refreshFromWaha.isPending}
             title="Recargar mensajes"
@@ -142,7 +263,7 @@ export const WhatsappChatView: React.FC<Props> = ({
           <Button
             variant="ghost"
             size="icon"
-            className="h-9 w-9"
+            className={`h-9 w-9 ${waTheme.textIcon}`}
             title="Más opciones"
             disabled
           >
@@ -151,9 +272,8 @@ export const WhatsappChatView: React.FC<Props> = ({
         </div>
       </div>
 
-      <div ref={scrollRef} className="min-h-0 flex-1">
-        <ScrollArea className="h-full">
-          <div className="space-y-2 px-4 py-4">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          <div className="flex flex-col space-y-3 p-6">
             {isLoading && messages.length === 0 ? (
               <p className="py-10 text-center text-xs text-muted-foreground">
                 Cargando mensajes…
@@ -175,6 +295,16 @@ export const WhatsappChatView: React.FC<Props> = ({
                       key={m.id}
                       message={m}
                       isGroupChat={isGroup}
+                      quotedMessage={
+                        m.quoted_message_id
+                          ? findMessageByWahaId(messages, m.quoted_message_id)
+                          : undefined
+                      }
+                      onReply={(msg) => setReplyTo(msg)}
+                      onForward={(msg) => {
+                        setForwardMessageRow(msg);
+                        setForwardOpen(true);
+                      }}
                     />
                   ))}
                 </div>
@@ -182,12 +312,24 @@ export const WhatsappChatView: React.FC<Props> = ({
             )}
             <div ref={endRef} />
           </div>
-        </ScrollArea>
       </div>
 
       <WhatsappMessageInput
         sending={sendMessage.isPending}
+        replyTo={replyTo}
+        onClearReply={() => setReplyTo(null)}
         onSend={onSend}
+      />
+
+      <WhatsappForwardDialog
+        open={forwardOpen}
+        onOpenChange={setForwardOpen}
+        message={forwardMessageRow}
+        chats={chats}
+        currentChatId={chat.chat_id}
+        leadNameById={leadNameById}
+        forwarding={forwardMessage.isPending}
+        onForward={handleForward}
       />
     </div>
   );

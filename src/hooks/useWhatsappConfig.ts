@@ -7,7 +7,9 @@ import type { Database } from '@/integrations/supabase/types';
 export type WhatsappConfigRow = Database['public']['Tables']['whatsapp_config']['Row'];
 export type WhatsappConfigUpdate = Database['public']['Tables']['whatsapp_config']['Update'];
 
-export type WhatsappProxyAction =
+export type WhatsappProxyAction = {
+  company_id?: string;
+} & (
   | { action: 'session.status' }
   | { action: 'session.start' }
   | { action: 'session.stop' }
@@ -18,6 +20,14 @@ export type WhatsappProxyAction =
   | { action: 'chats.list'; limit?: number; offset?: number }
   | { action: 'messages.list'; chat_id: string; limit?: number; download_media?: boolean }
   | {
+      action: 'messages.sync_history';
+      limit_per_chat?: number;
+      max_chats?: number;
+      offset?: number;
+      refresh_chats?: boolean;
+      download_media?: boolean;
+    }
+  | {
       action: 'messages.send';
       chat_id: string;
       type: 'text' | 'image' | 'video' | 'audio' | 'document' | 'voice';
@@ -26,7 +36,9 @@ export type WhatsappProxyAction =
       media_base64?: string;
       mime_type?: string;
       filename?: string;
+      reply_to_message_id?: string;
     }
+  | { action: 'messages.forward'; chat_id: string; message_id: string }
   | { action: 'chat.mark_read'; chat_id: string }
   | { action: 'chat.ensure'; chat_id: string; name?: string | null }
   | {
@@ -35,13 +47,21 @@ export type WhatsappProxyAction =
       customer_id?: string | null;
       marketing_lead_id?: string | null;
     }
-  | { action: 'chat.search_link'; q: string; limit?: number };
+  | { action: 'chat.search_link'; q: string; limit?: number }
+  | { action: 'media.download'; url?: string; chat_id?: string; message_id?: string }
+);
 
 export async function invokeWhatsappProxy<T = unknown>(
   payload: WhatsappProxyAction,
 ): Promise<T> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('No hay sesión activa');
+
+  const storedCompanyId = sessionStorage.getItem('current_company_id');
+  const requestBody: WhatsappProxyAction =
+    payload.company_id || !storedCompanyId
+      ? payload
+      : { ...payload, company_id: storedCompanyId };
 
   // Usamos fetch directo en lugar de supabase.functions.invoke para no perder
   // el cuerpo de la respuesta en códigos 4xx/5xx (algunas versiones de
@@ -60,7 +80,7 @@ export async function invokeWhatsappProxy<T = unknown>(
         apikey:
           (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ?? '',
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(requestBody),
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Error de red';
@@ -91,6 +111,53 @@ export async function invokeWhatsappProxy<T = unknown>(
     throw new Error(serverMessage);
   }
   return body as T;
+}
+
+/** Descarga binarios (stickers, imágenes…) vía whatsapp-proxy → Waha. */
+export async function downloadWhatsappMedia(input: {
+  url?: string | null;
+  chat_id?: string;
+  message_id?: string | null;
+  company_id?: string;
+}): Promise<Blob> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('No hay sesión activa');
+
+  const storedCompanyId = sessionStorage.getItem('current_company_id');
+  const payload = {
+    action: 'media.download' as const,
+    url: input.url ?? undefined,
+    chat_id: input.chat_id,
+    message_id: input.message_id ?? undefined,
+    company_id: input.company_id ?? storedCompanyId ?? undefined,
+  };
+
+  const baseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined) ?? '';
+  if (!baseUrl) throw new Error('Falta VITE_SUPABASE_URL');
+  const endpoint = `${baseUrl.replace(/\/+$/, '')}/functions/v1/whatsapp-proxy`;
+
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.access_token}`,
+      apikey: (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ?? '',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = text;
+    try {
+      const j = JSON.parse(text) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      // ignore
+    }
+    throw new Error(msg || `HTTP ${res.status}`);
+  }
+  return res.blob();
 }
 
 const DEFAULTS: Omit<WhatsappConfigUpdate, 'company_id'> = {
@@ -177,7 +244,14 @@ export const useWhatsappConfig = () => {
 
   const sessionStatus = useMutation({
     mutationFn: async () =>
-      invokeWhatsappProxy<{ ok: boolean; status?: string; me?: unknown; error?: string }>({
+      invokeWhatsappProxy<{
+        ok: boolean;
+        status?: string;
+        me?: unknown;
+        error?: string;
+        webhooks_configured?: boolean;
+        noweb_store_enabled?: boolean;
+      }>({
         action: 'session.status',
       }),
     onSuccess: invalidate,
@@ -206,7 +280,13 @@ export const useWhatsappConfig = () => {
 
   const configureWebhook = useMutation({
     mutationFn: async (input?: { webhook_url?: string }) =>
-      invokeWhatsappProxy<{ ok: boolean; webhook_url: string; events: string[] }>({
+      invokeWhatsappProxy<{
+        ok: boolean;
+        webhook_url: string;
+        events: string[];
+        webhooks_configured?: boolean;
+        noweb_store_enabled?: boolean;
+      }>({
         action: 'session.configure_webhook',
         ...(input?.webhook_url ? { webhook_url: input.webhook_url } : {}),
       }),

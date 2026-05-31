@@ -8,6 +8,7 @@ import {
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
@@ -42,6 +43,8 @@ import {
   AlertTriangle,
   ListChecks,
   RotateCcw,
+  MessageSquare,
+  CreditCard,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -56,6 +59,8 @@ import {
 } from '@/hooks/useMetaConfig';
 import { useMarketingStages } from '@/hooks/useMarketingStages';
 import { MarketingImportDialog } from './marketing/MarketingImportDialog';
+import { WHATSAPP_MESSAGE_TEMPLATE_VARS } from '@/lib/whatsappMessageTemplates';
+import { centsToEurosInput, eurosToCents } from '@/hooks/useStripeConfig';
 
 const NONE_STAGE_VALUE = '__none__';
 
@@ -90,6 +95,21 @@ const formatRelative = (iso: string | null | undefined): string => {
   const days = Math.round(hours / 24);
   return `hace ${days} d`;
 };
+
+function saveFormWhatsappField(
+  form: MetaFormRow,
+  field:
+    | 'whatsapp_initial_message'
+    | 'whatsapp_reply_1_message'
+    | 'whatsapp_reply_2_message'
+    | 'whatsapp_reply_invalid_message',
+  value: string,
+  updateForm: ReturnType<typeof useMetaConfig>['updateForm'],
+) {
+  const next = value.trim() || null;
+  if (next === (form[field] ?? null)) return;
+  updateForm.mutate({ id: form.id, values: { [field]: next } });
+}
 
 export const MetaConfig: React.FC = () => {
   const { toast } = useToast();
@@ -494,6 +514,174 @@ export const MetaConfig: React.FC = () => {
             />
           </div>
         </div>
+
+        <div className="mt-4 space-y-3 rounded-xl border border-emerald-200/80 bg-emerald-50/40 p-4 dark:border-emerald-900 dark:bg-emerald-950/20">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2">
+              <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700 dark:text-emerald-400" />
+              <div>
+                <p className="text-sm font-medium">WhatsApp automático</p>
+                <p className="text-[11px] text-muted-foreground">
+                  Al importar un lead nuevo se envía el mensaje inicial. Cuando responda{' '}
+                  <strong>1</strong> o <strong>2</strong>, se envía la respuesta configurada.
+                  Requiere WhatsApp conectado.
+                </p>
+              </div>
+            </div>
+            <Switch
+              checked={form.whatsapp_automation_enabled ?? false}
+              onCheckedChange={(v) =>
+                updateForm.mutate({
+                  id: form.id,
+                  values: { whatsapp_automation_enabled: v },
+                })
+              }
+            />
+          </div>
+
+          {form.whatsapp_automation_enabled ? (
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-1 md:col-span-2 rounded-lg border bg-white/60 p-3 dark:bg-zinc-950/40">
+                <p className="text-[11px] font-medium text-foreground">Variables disponibles</p>
+                <p className="text-[10px] text-muted-foreground">
+                  Escríbelas entre llaves en cualquier mensaje. Si un dato no existe, se deja vacío.
+                </p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {WHATSAPP_MESSAGE_TEMPLATE_VARS.map((v) => (
+                    <span
+                      key={v.key}
+                      title={v.description}
+                      className="cursor-help rounded bg-emerald-100/80 px-1.5 py-0.5 font-mono text-[10px] text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200"
+                    >
+                      {`{${v.key}}`}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-1 md:col-span-2">
+                <Label className="text-[11px]">Mensaje inicial (presentación + pide 1 o 2)</Label>
+                <Textarea
+                  key={`${form.id}-initial-${form.whatsapp_initial_message ?? ''}`}
+                  defaultValue={form.whatsapp_initial_message ?? ''}
+                  rows={4}
+                  className="text-xs"
+                  placeholder="Hola {nombre}, gracias por tu interés en {oferta}. Responde 1 para… o 2 para…"
+                  onBlur={(e) =>
+                    saveFormWhatsappField(
+                      form,
+                      'whatsapp_initial_message',
+                      e.target.value,
+                      updateForm,
+                    )
+                  }
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-[11px]">Respuesta si eligen 1</Label>
+                <Textarea
+                  key={`${form.id}-r1-${form.whatsapp_reply_1_message ?? ''}`}
+                  defaultValue={form.whatsapp_reply_1_message ?? ''}
+                  rows={3}
+                  className="text-xs"
+                  placeholder="Perfecto {nombre}. Sobre {oferta} te contamos que…"
+                  onBlur={(e) =>
+                    saveFormWhatsappField(
+                      form,
+                      'whatsapp_reply_1_message',
+                      e.target.value,
+                      updateForm,
+                    )
+                  }
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-[11px]">Respuesta si eligen 2</Label>
+                <Textarea
+                  key={`${form.id}-r2-${form.whatsapp_reply_2_message ?? ''}`}
+                  defaultValue={form.whatsapp_reply_2_message ?? ''}
+                  rows={3}
+                  className="text-xs"
+                  placeholder="Entendido {nombre}. Para {formulario} la opción 2 implica…"
+                  onBlur={(e) =>
+                    saveFormWhatsappField(
+                      form,
+                      'whatsapp_reply_2_message',
+                      e.target.value,
+                      updateForm,
+                    )
+                  }
+                />
+              </div>
+              <div className="space-y-1 md:col-span-2">
+                <Label className="text-[11px]">
+                  Respuesta si no es 1 ni 2 (opcional)
+                </Label>
+                <Textarea
+                  key={`${form.id}-inv-${form.whatsapp_reply_invalid_message ?? ''}`}
+                  defaultValue={form.whatsapp_reply_invalid_message ?? ''}
+                  rows={2}
+                  className="text-xs"
+                  placeholder="Por favor, responde solo con 1 o 2."
+                  onBlur={(e) =>
+                    saveFormWhatsappField(
+                      form,
+                      'whatsapp_reply_invalid_message',
+                      e.target.value,
+                      updateForm,
+                    )
+                  }
+                />
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="mt-4 space-y-3 rounded-lg border border-violet-200/60 bg-violet-50/40 p-3 dark:border-violet-900/40 dark:bg-violet-950/20">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2">
+              <CreditCard className="mt-0.5 h-4 w-4 text-violet-600" />
+              <div>
+                <p className="text-xs font-medium">Señal Stripe en este formulario</p>
+                <p className="text-[10px] text-muted-foreground">
+                  Incluye {'{link_pago}'} y {'{importe_senal}'} en los mensajes WhatsApp. Requiere
+                  Stripe activo en Configuración → Stripe.
+                </p>
+              </div>
+            </div>
+            <Switch
+              checked={form.stripe_deposit_enabled ?? false}
+              onCheckedChange={(v) =>
+                updateForm.mutate({
+                  id: form.id,
+                  values: { stripe_deposit_enabled: v },
+                })
+              }
+            />
+          </div>
+          {form.stripe_deposit_enabled ? (
+            <div className="space-y-1 max-w-xs">
+              <Label className="text-[11px]">Importe señal (€) — vacío = default global</Label>
+              <Input
+                key={`${form.id}-stripe-${form.stripe_deposit_amount_cents ?? ''}`}
+                inputMode="decimal"
+                defaultValue={centsToEurosInput(form.stripe_deposit_amount_cents)}
+                className="text-xs"
+                placeholder="50"
+                onBlur={(e) => {
+                  const raw = e.target.value.trim();
+                  updateForm.mutate({
+                    id: form.id,
+                    values: {
+                      stripe_deposit_amount_cents: raw
+                        ? eurosToCents(raw)
+                        : null,
+                    },
+                  });
+                }}
+              />
+            </div>
+          ) : null}
+        </div>
       </div>
     );
   };
@@ -724,7 +912,7 @@ export const MetaConfig: React.FC = () => {
                 Añade aquí los IDs de cada formulario de Meta. Los leads se reparten
                 automáticamente en "Nuevo Formulario" o, si el lead agendó una cita
                 (o el formulario es de tipo "Genera cita"), en "Formulario+Agenda
-                ficticia".
+                ficticia". Puedes configurar mensajes WhatsApp automáticos por formulario.
               </CardDescription>
             </div>
           </div>

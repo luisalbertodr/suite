@@ -17,6 +17,7 @@ import RecursosCabinasPage from '@/pages/RecursosCabinasPage';
 import AsistenciaPage from '@/pages/AsistenciaPage';
 import MarketingPage from '@/pages/MarketingPage';
 import WhatsappPage from '@/pages/WhatsappPage';
+import DepositPaymentPage from '@/pages/DepositPaymentPage';
 import SuperuserPage from '@/pages/SuperuserPage';
 import SuperuserManagementPage from '@/pages/SuperuserManagementPage';
 
@@ -78,6 +79,8 @@ function App() {
         <Route path="/whatsapp" element={
           <ProtectedLayout><WhatsappPage /></ProtectedLayout>
         } />
+        <Route path="/pago/:token/exito" element={<DepositPaymentPage />} />
+        <Route path="/pago/:token" element={<DepositPaymentPage />} />
         <Route path="/superuser" element={<SuperuserPage />} />
         <Route path="/superuser-management" element={
           <SuperuserProtectedRoute>

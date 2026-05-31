@@ -49,6 +49,10 @@ import {
   type MetaSyncResponse,
 } from '@/hooks/useMetaConfig';
 import { useWorkCenter } from '@/hooks/useWorkCenter';
+import {
+  useMarketingLeadViewedSet,
+  useMarkMarketingLeadViewed,
+} from '@/hooks/useMarketingUnread';
 import { BillingEntityTabs, type BillingEntityTabValue } from '@/components/BillingEntityTabs';
 
 type SortField =
@@ -150,6 +154,8 @@ export const Marketing: React.FC = () => {
   const { data: notesIndex } = useMarketingLeadNotesIndex();
   const { index: customerIndex } = useCustomerLookup();
   const { config: metaConfig, forms: metaForms, syncNow } = useMetaConfig();
+  const { viewedLeadIds } = useMarketingLeadViewedSet(scopeCompanyId ?? null);
+  const markLeadViewed = useMarkMarketingLeadViewed();
 
   const [search, setSearch] = useState('');
   const [sortField, setSortField] = useState<SortField>('external_created_at');
@@ -333,13 +339,29 @@ export const Marketing: React.FC = () => {
     setOpenStagesManager(true);
   }, []);
 
-  const handleLeadClick = useCallback((lead: MarketingLead) => {
-    setActiveLead(lead);
-  }, []);
+  const markViewed = useCallback(
+    (lead: MarketingLead) => {
+      if (!lead.company_id || viewedLeadIds.has(lead.id)) return;
+      markLeadViewed.mutate({ leadId: lead.id, companyId: lead.company_id });
+    },
+    [viewedLeadIds, markLeadViewed],
+  );
 
-  const handleLeadOpenNotes = useCallback((lead: MarketingLead) => {
-    setNotesLead(lead);
-  }, []);
+  const handleLeadClick = useCallback(
+    (lead: MarketingLead) => {
+      markViewed(lead);
+      setActiveLead(lead);
+    },
+    [markViewed],
+  );
+
+  const handleLeadOpenNotes = useCallback(
+    (lead: MarketingLead) => {
+      markViewed(lead);
+      setNotesLead(lead);
+    },
+    [markViewed],
+  );
 
   const handleLeadPromote = useCallback((lead: MarketingLead) => {
     setPromoteLead(lead);
@@ -547,6 +569,7 @@ export const Marketing: React.FC = () => {
                   matchedCustomerByLead={matchedCustomerByLead}
                   noteCountByLead={notesIndex?.counts ?? {}}
                   notePreviewsByLead={notesIndex?.previews ?? {}}
+                  viewedLeadIds={viewedLeadIds}
                   collapsed={collapsedStageIds.has(stage.id)}
                   onToggleCollapsed={() => toggleStageColumnCollapsed(stage.id)}
                   onLeadClick={handleLeadClick}
@@ -572,7 +595,7 @@ export const Marketing: React.FC = () => {
                       <div
                         key={lead.id}
                         className="cursor-pointer rounded-lg border bg-card p-2 text-xs hover:bg-accent"
-                        onClick={() => setActiveLead(lead)}
+                        onClick={() => handleLeadClick(lead)}
                       >
                         <p className="font-semibold">
                           {[lead.first_name, lead.last_name].filter(Boolean).join(' ') || 'Sin nombre'}

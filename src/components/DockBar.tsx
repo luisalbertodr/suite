@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { Home, Calendar, ShoppingBag, Receipt, Users, Package, Building2, Settings, MapPin, Megaphone, MessageCircle } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useWhatsappUnread } from '@/hooks/useWhatsappUnread';
+import { useMarketingUnread } from '@/hooks/useMarketingUnread';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 
 const dockItems = [
@@ -23,15 +24,17 @@ export const DockBar: React.FC = () => {
   const location = useLocation();
   const { hasPermission } = usePermissions();
   const canSeeWhatsapp = hasPermission('whatsapp', 'read');
+  const canSeeMarketing = hasPermission('marketing', 'read');
   const { total: whatsappUnread } = useWhatsappUnread();
+  const { total: marketingUnread } = useMarketingUnread();
 
   const visibleItems = dockItems.filter(item =>
     hasPermission(item.permission.resource, item.permission.action)
   );
 
-  // Solo mostramos el badge en WhatsApp y si el usuario tiene permiso.
   const badgeForItem = (path: string): number => {
     if (path === '/whatsapp' && canSeeWhatsapp) return whatsappUnread;
+    if (path === '/marketing' && canSeeMarketing) return marketingUnread;
     return 0;
   };
 

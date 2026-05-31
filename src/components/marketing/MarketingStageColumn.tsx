@@ -23,6 +23,7 @@ interface MarketingStageColumnProps {
   matchedCustomerByLead: Map<string, CustomerLookupRow | null>;
   noteCountByLead: Record<string, number>;
   notePreviewsByLead: Record<string, MarketingLeadNotePreview[]>;
+  viewedLeadIds: Set<string>;
   onLeadClick: (lead: MarketingLead) => void;
   onLeadOpenNotes: (lead: MarketingLead) => void;
   onLeadPromote: (lead: MarketingLead) => void;
@@ -57,6 +58,7 @@ export const MarketingStageColumn = memo(function MarketingStageColumn({
   matchedCustomerByLead,
   noteCountByLead,
   notePreviewsByLead,
+  viewedLeadIds,
   onLeadClick,
   onLeadOpenNotes,
   onLeadPromote,
@@ -213,6 +215,7 @@ export const MarketingStageColumn = memo(function MarketingStageColumn({
               noteCount={noteCountByLead[lead.id] ?? 0}
               notePreviews={notePreviewsByLead[lead.id] ?? []}
               isDragging={draggedLeadId === lead.id}
+              isUnread={!viewedLeadIds.has(lead.id)}
               onClick={() => onLeadClick(lead)}
               onOpenNotes={() => onLeadOpenNotes(lead)}
               onPromote={() => onLeadPromote(lead)}
