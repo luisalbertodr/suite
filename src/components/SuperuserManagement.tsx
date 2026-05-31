@@ -17,6 +17,7 @@ import { ChangePasswordModal } from './ChangePasswordModal';
 import { useNavigate } from 'react-router-dom';
 import { invokeMain } from '@/lib/invokeMain';
 import { WorkCenterPanel } from './WorkCenterPanel';
+import { MENU_PERMISSIONS } from '@/lib/menuPermissions';
 
 interface Company {
   id: string;
@@ -56,32 +57,6 @@ interface UserWithDetails {
     };
   }>;
 }
-
-interface MenuPermission {
-  resource: string;
-  action: string;
-  label: string;
-  description: string;
-}
-
-const MENU_PERMISSIONS: MenuPermission[] = [
-  { resource: 'dashboard', action: 'read', label: 'Dashboard', description: 'Ver el panel principal' },
-  { resource: 'customers', action: 'read', label: 'Clientes', description: 'Ver y gestionar clientes' },
-  { resource: 'articles', action: 'read', label: 'Artículos', description: 'Ver y gestionar productos' },
-  { resource: 'planillas', action: 'read', label: 'Planillas', description: 'Ver y gestionar planillas' },
-  { resource: 'quotes', action: 'read', label: 'Presupuestos', description: 'Ver y gestionar presupuestos' },
-  { resource: 'presupuestos_n', action: 'read', label: 'PresupuestosN', description: 'Ver y gestionar presupuestos N' },
-  { resource: 'invoices', action: 'read', label: 'Facturas', description: 'Ver y gestionar facturas' },
-  { resource: 'delivery_notes', action: 'read', label: 'Alb. Entrada', description: 'Ver y gestionar albaranes de entrada' },
-  { resource: 'delivery_notes_out', action: 'read', label: 'Alb. Salida', description: 'Ver y gestionar albaranes de salida' },
-  { resource: 'suppliers', action: 'read', label: 'Proveedores', description: 'Ver y gestionar proveedores' },
-  { resource: 'sales', action: 'read', label: 'TPV', description: 'Acceso al terminal de punto de venta' },
-  { resource: 'agenda', action: 'read', label: 'Agenda', description: 'Ver y gestionar citas' },
-  { resource: 'documents', action: 'read', label: 'Gestión Documental', description: 'Gestionar documentos' },
-  { resource: 'reports', action: 'read', label: 'Reportes', description: 'Ver reportes y estadísticas' },
-  { resource: 'companies', action: 'read', label: 'Empresas', description: 'Gestionar información de empresas' },
-  { resource: 'settings', action: 'read', label: 'Configuración', description: 'Acceso a configuración del sistema' }
-];
 
 export const SuperuserManagement: React.FC = () => {
   const navigate = useNavigate();
@@ -394,7 +369,6 @@ export const SuperuserManagement: React.FC = () => {
           <Shield className="w-8 h-8 text-red-600" />
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Panel de Superusuario</h1>
-            <p className="text-gray-600">Gestión de empresas y usuarios del sistema</p>
           </div>
         </div>
         

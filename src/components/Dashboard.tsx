@@ -51,36 +51,35 @@ export const Dashboard: React.FC = () => {
   ];
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-foreground">Dashboard</h1>
-          <p className="text-muted-foreground">Resumen de la clínica</p>
+    <div className="space-y-4">
+      <Tabs defaultValue="resumen" className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <h1 className="text-2xl font-bold text-foreground shrink-0">Dashboard</h1>
+          <div className="flex flex-wrap items-center gap-2 ml-auto">
+            <TabsList className="h-9">
+              <TabsTrigger value="resumen" className="text-sm px-3">
+                <TrendingUp className="w-4 h-4 mr-1.5" />
+                Resumen
+              </TabsTrigger>
+              <TabsTrigger value="reportes" className="text-sm px-3">
+                <BarChart3 className="w-4 h-4 mr-1.5" />
+                Reportes
+              </TabsTrigger>
+            </TabsList>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="inline-flex items-center px-3 py-1.5 text-sm bg-card border rounded-lg hover:bg-muted transition-colors h-9"
+            >
+              <RefreshCw className="w-4 h-4 mr-1.5" /> Actualizar
+            </button>
+            <span className="text-xs text-muted-foreground hidden sm:block tabular-nums">
+              {new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+            </span>
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          <button onClick={() => window.location.reload()}
-            className="inline-flex items-center px-3 py-2 text-sm bg-card border rounded-lg hover:bg-muted transition-colors">
-            <RefreshCw className="w-4 h-4 mr-2" /> Actualizar
-          </button>
-          <span className="text-xs text-muted-foreground hidden sm:block">
-            {new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-          </span>
-        </div>
-      </div>
 
-      <Tabs defaultValue="resumen">
-        <TabsList>
-          <TabsTrigger value="resumen">
-            <TrendingUp className="w-4 h-4 mr-1.5" />
-            Resumen
-          </TabsTrigger>
-          <TabsTrigger value="reportes">
-            <BarChart3 className="w-4 h-4 mr-1.5" />
-            Reportes
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="resumen" className="space-y-6 mt-4">
+        <TabsContent value="resumen" className="space-y-6 mt-0">
           {/* Stats Cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             {statsCards.map((stat, i) => {
@@ -179,8 +178,8 @@ export const Dashboard: React.FC = () => {
           </div>
         </TabsContent>
 
-        <TabsContent value="reportes" className="mt-4">
-          <Reportes />
+        <TabsContent value="reportes" className="mt-0">
+          <Reportes embedded />
         </TabsContent>
       </Tabs>
     </div>

@@ -18,12 +18,26 @@ export type WhatsappProxyAction = {
   | { action: 'session.configure_webhook'; webhook_url?: string }
   | { action: 'system.ping' }
   | { action: 'chats.list'; limit?: number; offset?: number }
-  | { action: 'messages.list'; chat_id: string; limit?: number; download_media?: boolean }
+  | {
+      action: 'messages.list';
+      chat_id: string;
+      limit?: number;
+      offset?: number;
+      download_media?: boolean;
+    }
+  | {
+      action: 'messages.sync_chat_history';
+      chat_id: string;
+      force?: boolean;
+      offset?: number;
+      download_media?: boolean;
+    }
   | {
       action: 'messages.sync_history';
       limit_per_chat?: number;
       max_chats?: number;
       offset?: number;
+      message_offset?: number;
       refresh_chats?: boolean;
       download_media?: boolean;
     }
@@ -48,6 +62,8 @@ export type WhatsappProxyAction = {
       marketing_lead_id?: string | null;
     }
   | { action: 'chat.search_link'; q: string; limit?: number }
+  | { action: 'pictures.sync_batch'; chat_ids?: string[]; limit?: number }
+  | { action: 'groups.sync_name'; chat_id: string }
   | { action: 'media.download'; url?: string; chat_id?: string; message_id?: string }
 );
 

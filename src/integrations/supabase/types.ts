@@ -4089,6 +4089,7 @@ export type Database = {
           company_id: string
           created_at: string
           customer_id: string | null
+          history_synced_at: string | null
           id: string
           is_group: boolean
           last_message_at: string | null
@@ -4096,6 +4097,7 @@ export type Database = {
           last_message_preview: string | null
           marketing_lead_id: string | null
           name: string | null
+          oldest_message_at: string | null
           pinned: boolean
           profile_picture_url: string | null
           raw: Json | null
@@ -4108,6 +4110,7 @@ export type Database = {
           company_id: string
           created_at?: string
           customer_id?: string | null
+          history_synced_at?: string | null
           id?: string
           is_group?: boolean
           last_message_at?: string | null
@@ -4115,6 +4118,7 @@ export type Database = {
           last_message_preview?: string | null
           marketing_lead_id?: string | null
           name?: string | null
+          oldest_message_at?: string | null
           pinned?: boolean
           profile_picture_url?: string | null
           raw?: Json | null
@@ -4127,6 +4131,7 @@ export type Database = {
           company_id?: string
           created_at?: string
           customer_id?: string | null
+          history_synced_at?: string | null
           id?: string
           is_group?: boolean
           last_message_at?: string | null
@@ -4134,6 +4139,7 @@ export type Database = {
           last_message_preview?: string | null
           marketing_lead_id?: string | null
           name?: string | null
+          oldest_message_at?: string | null
           pinned?: boolean
           profile_picture_url?: string | null
           raw?: Json | null

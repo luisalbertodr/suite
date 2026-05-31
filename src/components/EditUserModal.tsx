@@ -10,6 +10,7 @@ import { useToast } from '@/hooks/use-toast';
 import { invokeMain } from '@/lib/invokeMain';
 import { supabase } from '@/lib/supabase';
 import { useRoles } from '@/hooks/useRoles';
+import { MENU_PERMISSIONS } from '@/lib/menuPermissions';
 
 interface Company {
   id: string;
@@ -43,25 +44,6 @@ interface EditUserModalProps {
   onUserUpdated: () => void;
   multiCompany?: boolean;
 }
-
-const MENU_PERMISSIONS = [
-  { resource: 'dashboard', action: 'read', label: 'Dashboard' },
-  { resource: 'customers', action: 'read', label: 'Clientes' },
-  { resource: 'articles', action: 'read', label: 'Artículos' },
-  { resource: 'planillas', action: 'read', label: 'Planillas' },
-  { resource: 'quotes', action: 'read', label: 'Presupuestos' },
-  { resource: 'presupuestos_n', action: 'read', label: 'PresupuestosN' },
-  { resource: 'invoices', action: 'read', label: 'Facturas' },
-  { resource: 'delivery_notes', action: 'read', label: 'Alb. Entrada' },
-  { resource: 'delivery_notes_out', action: 'read', label: 'Alb. Salida' },
-  { resource: 'suppliers', action: 'read', label: 'Proveedores' },
-  { resource: 'sales', action: 'read', label: 'TPV' },
-  { resource: 'agenda', action: 'read', label: 'Agenda' },
-  { resource: 'documents', action: 'read', label: 'Gestión Documental' },
-  { resource: 'reports', action: 'read', label: 'Reportes' },
-  { resource: 'companies', action: 'read', label: 'Empresas' },
-  { resource: 'settings', action: 'read', label: 'Configuración' }
-];
 
 export const EditUserModal: React.FC<EditUserModalProps> = ({
   user,

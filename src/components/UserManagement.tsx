@@ -229,7 +229,6 @@ export const UserManagement = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Gestión de Usuarios</h1>
-          <p className="text-gray-600">Administra usuarios y roles de tu empresa</p>
         </div>
         <div className="flex items-center gap-2">
           {hasPermission('users', 'create') && (

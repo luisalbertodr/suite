@@ -251,9 +251,9 @@ export const ArticleBonoDefinitionBlock = forwardRef<ArticleBonoDefinitionBlockR
     return (
       <Card className="border-blue-100 bg-blue-50/40">
         <CardHeader className="py-3">
-          <CardTitle className="text-base">Composición del bono (legacy / incluida en el precio)</CardTitle>
+          <CardTitle className="text-base">Definir tipo de bono (composición)</CardTitle>
           <p className="text-sm text-muted-foreground">
-            Servicios del desglose importado desde el sistema anterior, y productos o familias adicionales sin coste extra en el precio del bono.
+            Define aquí el tipo de bono: servicios incluidos, productos o familias cubiertas. Este tipo podrá asignarse a clientes desde su ficha (Bonos activos).
           </p>
         </CardHeader>
         <CardContent className="space-y-3">

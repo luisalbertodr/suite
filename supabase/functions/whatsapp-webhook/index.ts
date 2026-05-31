@@ -142,6 +142,29 @@ function extractContactPushName(
   return null;
 }
 
+function extractGroupNameFromPayload(payload: WahaMessagePayload): string | null {
+  const r = payload as Record<string, unknown>;
+  const data = asRecord(payload._data);
+  for (const v of [
+    r.subject,
+    r.name,
+    data?.subject,
+    data?.name,
+    data?.formattedTitle,
+  ]) {
+    if (typeof v === 'string' && v.trim() && !v.includes('@')) return v.trim();
+  }
+  for (const nestedKey of ['_chat', 'groupMetadata', 'chat']) {
+    const nested = asRecord(r[nestedKey] ?? data?.[nestedKey]);
+    if (!nested) continue;
+    for (const key of ['subject', 'name', 'formattedTitle']) {
+      const v = nested[key];
+      if (typeof v === 'string' && v.trim() && !v.includes('@')) return v.trim();
+    }
+  }
+  return null;
+}
+
 function isGroupJid(jid: string | null | undefined): boolean {
   return !!jid && /@g\.us$/i.test(jid);
 }
@@ -357,6 +380,19 @@ async function migrateChatIfNeeded(
         last_message_from_me: useSourcePreview
           ? source.last_message_from_me
           : target.last_message_from_me,
+        history_synced_at: source.history_synced_at ?? target.history_synced_at,
+        oldest_message_at: (() => {
+          const a = source.oldest_message_at
+            ? new Date(source.oldest_message_at).getTime()
+            : null;
+          const b = target.oldest_message_at
+            ? new Date(target.oldest_message_at).getTime()
+            : null;
+          if (a != null && b != null) {
+            return new Date(Math.min(a, b)).toISOString();
+          }
+          return source.oldest_message_at ?? target.oldest_message_at;
+        })(),
       })
       .eq('id', target.id);
     await admin.from('whatsapp_chats').delete().eq('id', source.id);
@@ -827,6 +863,19 @@ async function handleMessage(
     }
   }
 
+  if (m.isGroup) {
+    const groupName = extractGroupNameFromPayload(payload);
+    const existingName = existingChat?.name?.trim() ?? '';
+    const needsName =
+      !existingName ||
+      existingName.includes('@') ||
+      /^\+?\d{10,}$/.test(existingName) ||
+      existingName === 'Grupo';
+    if (groupName && needsName) {
+      updates.name = groupName;
+    }
+  }
+
   const { error: chatErr } = await admin
     .from('whatsapp_chats')
     .upsert(updates, { onConflict: 'company_id,chat_id', ignoreDuplicates: false });
@@ -1000,6 +1049,33 @@ serve(async (req) => {
           .update({ archived: !!p.archived })
           .eq('company_id', companyId)
           .eq('chat_id', p.chatId);
+      }
+    } else if (
+      event === 'group.v2.update' ||
+      event === 'group.update' ||
+      event === 'group.v2.join'
+    ) {
+      const p = asRecord(envelope.payload);
+      const group = asRecord(p?.group) ?? p;
+      const groupId = String(group?.id ?? p?.id ?? p?.groupId ?? '');
+      let subject: string | null = null;
+      for (const key of ['subject', 'name', 'formattedTitle']) {
+        const v = group?.[key] ?? p?.[key];
+        if (typeof v === 'string' && v.trim() && !v.includes('@')) {
+          subject = v.trim();
+          break;
+        }
+      }
+      if (groupId && subject && isGroupJid(groupId)) {
+        await admin
+          .from('whatsapp_chats')
+          .update({
+            name: subject,
+            is_group: true,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('company_id', companyId)
+          .eq('chat_id', groupId);
       }
     }
     // Eventos desconocidos: 200 OK silencioso (Waha no reintenta).

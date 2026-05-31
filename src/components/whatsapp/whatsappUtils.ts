@@ -95,9 +95,164 @@ export function extractPushNameFromRaw(raw: unknown): string | null {
   const r = raw as Record<string, unknown> | null | undefined;
   if (!r) return null;
   const data = r._data as Record<string, unknown> | undefined;
-  // Waha NOWEB: el nombre del contacto suele estar en _data, no en la raíz.
-  for (const v of [data?.pushName, data?.notifyName, r.pushName, r.notifyName]) {
-    if (typeof v === 'string' && v.trim()) return v.trim();
+  const topKey = r.key as Record<string, unknown> | undefined;
+  const nestedKey = data?.key as Record<string, unknown> | undefined;
+  // Waha NOWEB: pushName/notifyName del remitente (incl. grupos) suele estar en _data.
+  for (const v of [
+    data?.pushName,
+    data?.notifyName,
+    nestedKey?.pushName,
+    nestedKey?.notifyName,
+    topKey?.pushName,
+    topKey?.notifyName,
+    r.pushName,
+    r.notifyName,
+    r.author,
+    data?.author,
+  ]) {
+    if (typeof v === 'string' && v.trim() && !v.includes('@')) return v.trim();
+  }
+  return null;
+}
+
+function looksLikeJid(value: string): boolean {
+  return value.includes('@') || /^\+\d{10,}$/.test(value);
+}
+
+/** Nombre usable en UI (no JID, no teléfono crudo, no placeholder genérico). */
+export function isGoodChatDisplayName(name: string | null | undefined): boolean {
+  if (!name?.trim()) return false;
+  const n = name.trim();
+  if (looksLikeJid(n)) return false;
+  if (n === 'Grupo') return false;
+  return true;
+}
+
+/** True si el chat de grupo ya tiene nombre resoluble (BD o raw de WAHA). */
+export function hasResolvedGroupName(
+  name: string | null | undefined,
+  chatRaw?: unknown,
+): boolean {
+  if (isGoodChatDisplayName(name)) return true;
+  return !!extractGroupNameFromChatRaw(chatRaw);
+}
+
+/** Nombre del grupo desde el raw del chat (subject / formattedTitle de Baileys). */
+export function extractGroupNameFromChatRaw(raw: unknown): string | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  for (const key of ['subject', 'name', 'formattedTitle']) {
+    const v = r[key];
+    if (typeof v === 'string' && v.trim() && !looksLikeJid(v.trim())) return v.trim();
+  }
+  for (const nestedKey of ['_chat', 'groupMetadata', 'chat']) {
+    const nested = r[nestedKey];
+    if (!nested || typeof nested !== 'object') continue;
+    const n = nested as Record<string, unknown>;
+    for (const key of ['subject', 'name', 'formattedTitle']) {
+      const v = n[key];
+      if (typeof v === 'string' && v.trim() && !looksLikeJid(v.trim())) return v.trim();
+    }
+  }
+  return null;
+}
+
+export function formatPhoneDigits(digits: string | null | undefined): string {
+  if (!digits) return '';
+  const d = digits.replace(/\D/g, '');
+  if (d.length < 6) return '';
+  return `+${d}`;
+}
+
+/** Teléfono legible para un chat (incl. @lid vía chats relacionados o mensajes). */
+export function resolvePhoneLabelForChat(
+  chatId: string,
+  options?: {
+    relatedChatIds?: string[];
+    messageFromJids?: (string | null | undefined)[];
+    customerPhone?: string | null;
+  },
+): string {
+  if (isGroupJid(chatId)) return '';
+  const direct = jidToDisplay(chatId);
+  if (direct) return direct;
+
+  for (const id of options?.relatedChatIds ?? []) {
+    const p = jidToDisplay(id);
+    if (p) return p;
+  }
+
+  for (const jid of options?.messageFromJids ?? []) {
+    const resolved = jid
+      ? resolveGroupSenderJidFromRaw(null, jid) ?? jid
+      : null;
+    const p = jidToDisplay(resolved);
+    if (p) return p;
+  }
+
+  if (options?.customerPhone) {
+    const formatted = formatPhoneDigits(options.customerPhone);
+    if (formatted) return formatted;
+  }
+
+  return '';
+}
+
+/** Directorio jid → etiqueta para mostrar remitentes en grupos. */
+export function buildGroupSenderDirectory(
+  messages: Array<{
+    from_jid?: string | null;
+    raw?: unknown;
+    from_me?: boolean;
+  }>,
+): Record<string, string> {
+  const acc = new Map<string, { name?: string; phone?: string }>();
+
+  for (const m of messages) {
+    if (m.from_me) continue;
+    const jid =
+      resolveGroupSenderJidFromRaw(m.raw, m.from_jid) ?? m.from_jid ?? null;
+    if (!jid || isGroupJid(jid)) continue;
+
+    const pushName = extractPushNameFromRaw(m.raw);
+    const phone = isPhoneJid(jid) ? jidToDisplay(jid) : undefined;
+    const prev = acc.get(jid) ?? {};
+    if (pushName && !prev.name) prev.name = pushName;
+    if (phone && !prev.phone) prev.phone = phone;
+    acc.set(jid, prev);
+
+    if (isLidJid(jid)) {
+      const short = jid.split('@')[0] ?? '';
+      if (short) {
+        const prevShort = acc.get(short) ?? {};
+        if (pushName && !prevShort.name) prevShort.name = pushName;
+        acc.set(short, prevShort);
+      }
+    }
+  }
+
+  const out: Record<string, string> = {};
+  for (const [jid, info] of acc) {
+    const label = formatGroupSenderLabel(
+      isLidJid(jid) ? `${jid.split('@')[0]}@lid` : jid,
+      info.name,
+    );
+    out[jid] = label ?? info.name ?? info.phone ?? 'Participante';
+  }
+  return out;
+}
+
+export function lookupGroupSenderLabel(
+  directory: Record<string, string>,
+  fromJid: string | null | undefined,
+  raw: unknown,
+): string | null {
+  const jid = resolveGroupSenderJidFromRaw(raw, fromJid) ?? fromJid;
+  if (!jid) return null;
+  if (directory[jid]) return directory[jid];
+  if (isLidJid(jid)) {
+    const short = jid.split('@')[0] ?? '';
+    if (short && directory[short]) return directory[short];
   }
   return null;
 }
@@ -160,14 +315,20 @@ export function displayNameForChat(
   chatId: string,
   name: string | null | undefined,
   fallback?: string | null,
+  chatRaw?: unknown,
 ): string {
-  const n = name?.trim() || fallback?.trim();
-  if (n) return n;
+  const isGroup = isGroupJid(chatId);
+  const fromRaw = isGroup ? extractGroupNameFromChatRaw(chatRaw) : null;
+  const goodName = isGoodChatDisplayName(name) ? name!.trim() : null;
+  const n = fromRaw || goodName || fallback?.trim();
+  if (n && !looksLikeJid(n)) return n;
+  if (isGroup) return 'Grupo';
   if (isLidJid(chatId)) {
     const suffix = chatId.split('@')[0]?.slice(-4);
     return suffix ? `Contacto ···${suffix}` : 'Contacto';
   }
-  return jidToDisplay(chatId) || chatId;
+  const phone = jidToDisplay(chatId);
+  return phone || chatId;
 }
 
 export function formatChatListTime(iso: string | null | undefined): string {

@@ -244,7 +244,6 @@ export const AlbaranesSalida: React.FC = () => {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Albaranes de Salida</h1>
-          <p className="text-gray-600 mt-2">Gestión de albaranes de despacho de mercancía</p>
         </div>
         <Button 
           onClick={() => setShowForm(true)}

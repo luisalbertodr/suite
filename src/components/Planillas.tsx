@@ -91,9 +91,6 @@ export const Planillas: React.FC = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Planillas</h1>
-          <p className="text-gray-600 mt-1">
-            Gestione las planillas de carga masiva de artículos
-          </p>
         </div>
         <button
           onClick={() => setShowForm(true)}

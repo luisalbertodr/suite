@@ -76,13 +76,27 @@ type ActionBody = {
   | { action: 'session.configure_webhook'; webhook_url?: string }
   | { action: 'system.ping' }
   | { action: 'chats.list'; limit?: number; offset?: number }
-  | { action: 'messages.list'; chat_id: string; limit?: number; download_media?: boolean }
+  | {
+      action: 'messages.list';
+      chat_id: string;
+      limit?: number;
+      offset?: number;
+      download_media?: boolean;
+    }
   | {
       action: 'messages.sync_history';
       limit_per_chat?: number;
       max_chats?: number;
       offset?: number;
+      message_offset?: number;
       refresh_chats?: boolean;
+      download_media?: boolean;
+    }
+  | {
+      action: 'messages.sync_chat_history';
+      chat_id: string;
+      force?: boolean;
+      offset?: number;
       download_media?: boolean;
     }
   | SendBody
@@ -97,6 +111,7 @@ type ActionBody = {
       marketing_lead_id?: string | null;
     }
   | { action: 'chat.search_link'; q: string; limit?: number }
+  | { action: 'pictures.sync_batch'; chat_ids?: string[]; limit?: number }
 );
 
 const json = (body: unknown, status = 200) =>
@@ -457,6 +472,19 @@ async function migrateChatIfNeeded(
         last_message_from_me: useSourcePreview
           ? source.last_message_from_me
           : target.last_message_from_me,
+        history_synced_at: source.history_synced_at ?? target.history_synced_at,
+        oldest_message_at: (() => {
+          const a = source.oldest_message_at
+            ? new Date(source.oldest_message_at).getTime()
+            : null;
+          const b = target.oldest_message_at
+            ? new Date(target.oldest_message_at).getTime()
+            : null;
+          if (a != null && b != null) {
+            return new Date(Math.min(a, b)).toISOString();
+          }
+          return source.oldest_message_at ?? target.oldest_message_at;
+        })(),
       })
       .eq('id', target.id);
     await admin.from('whatsapp_chats').delete().eq('id', source.id);
@@ -541,14 +569,16 @@ async function fetchWahaChatMessages(
   chatId: string,
   limit: number,
   downloadMedia: boolean,
+  offset = 0,
 ): Promise<WahaMsg[]> {
   const dlFlag = downloadMedia ? 'true' : 'false';
+  const offsetParam = offset > 0 ? `&offset=${offset}` : '';
   const newPath = `/api/messages?session=${encodeURIComponent(
     sessionName,
-  )}&chatId=${encodeURIComponent(chatId)}&limit=${limit}&downloadMedia=${dlFlag}`;
+  )}&chatId=${encodeURIComponent(chatId)}&limit=${limit}&downloadMedia=${dlFlag}${offsetParam}`;
   const oldPath = `/api/${encodeURIComponent(sessionName)}/chats/${encodeURIComponent(
     chatId,
-  )}/messages?limit=${limit}&downloadMedia=${dlFlag}`;
+  )}/messages?limit=${limit}&downloadMedia=${dlFlag}${offsetParam}`;
 
   try {
     return await wahaJson<WahaMsg[]>(cfg, newPath);
@@ -569,6 +599,235 @@ async function fetchWahaChatMessages(
   }
 }
 
+function resolveWahaChatName(c: Record<string, unknown>): string | null {
+  for (const key of ['name', 'subject', 'formattedTitle']) {
+    const v = c[key];
+    if (typeof v === 'string' && v.trim() && !v.includes('@')) return v.trim();
+  }
+  for (const nestedKey of ['_chat', 'groupMetadata', 'chat']) {
+    const nested = c[nestedKey];
+    if (!nested || typeof nested !== 'object') continue;
+    const n = nested as Record<string, unknown>;
+    for (const key of ['subject', 'name', 'formattedTitle']) {
+      const v = n[key];
+      if (typeof v === 'string' && v.trim() && !v.includes('@')) return v.trim();
+    }
+  }
+  return null;
+}
+
+function isGoodChatDisplayName(name: string | null | undefined): boolean {
+  if (!name?.trim()) return false;
+  const n = name.trim();
+  if (n.includes('@')) return false;
+  if (/^\+?\d{10,}$/.test(n)) return false;
+  if (n === 'Grupo') return false;
+  return true;
+}
+
+async function fetchWahaGroupSubject(
+  cfg: WhatsappConfig,
+  sessionName: string,
+  groupId: string,
+): Promise<string | null> {
+  try {
+    const data = await wahaJson<Record<string, unknown>>(
+      cfg,
+      `/api/${encodeURIComponent(sessionName)}/groups/${encodeURIComponent(groupId)}`,
+    );
+    for (const key of ['subject', 'name', 'formattedTitle']) {
+      const v = data[key];
+      if (typeof v === 'string' && isGoodChatDisplayName(v)) return v.trim();
+    }
+    const group = data.group;
+    if (group && typeof group === 'object') {
+      const g = group as Record<string, unknown>;
+      for (const key of ['subject', 'name', 'formattedTitle']) {
+        const v = g[key];
+        if (typeof v === 'string' && isGoodChatDisplayName(v)) return v.trim();
+      }
+    }
+  } catch (e) {
+    if (e instanceof WahaError && (e.status === 404 || e.status === 400)) return null;
+    console.warn('fetchWahaGroupSubject:', groupId, e);
+  }
+  return null;
+}
+
+const WAHA_AVATAR_BUCKET = 'whatsapp-avatars';
+const WAHA_PICTURES_PER_REQUEST = 1;
+
+function isPersistedAvatarUrl(url: string | null | undefined): boolean {
+  return !!url && url.includes(`/storage/v1/object/public/${WAHA_AVATAR_BUCKET}/`);
+}
+
+function safeChatStorageKey(chatId: string): string {
+  return chatId.replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+function resolveWahaChatPicture(c: Record<string, unknown>): string | null {
+  const direct = c.picture;
+  if (typeof direct === 'string' && direct.trim()) return direct.trim();
+  for (const nestedKey of ['_chat', 'groupMetadata']) {
+    const nested = c[nestedKey];
+    if (!nested || typeof nested !== 'object') continue;
+    const n = nested as Record<string, unknown>;
+    for (const key of ['picture', 'imgUrl', 'profilePictureUrl']) {
+      const v = n[key];
+      if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+  }
+  return null;
+}
+
+async function fetchWahaChatPictureUrl(
+  cfg: WhatsappConfig,
+  sessionName: string,
+  chatId: string,
+): Promise<string | null> {
+  const path = `/api/${encodeURIComponent(sessionName)}/chats/${encodeURIComponent(
+    chatId,
+  )}/picture`;
+  try {
+    const data = await wahaJson<{ url?: string | null }>(cfg, path);
+    if (typeof data.url === 'string' && data.url.trim()) return data.url.trim();
+  } catch (e) {
+    if (e instanceof WahaError && (e.status === 404 || e.status === 400)) return null;
+    console.warn('fetchWahaChatPictureUrl:', chatId, e);
+  }
+  return null;
+}
+
+async function downloadPictureBytes(
+  cfg: WhatsappConfig,
+  pictureUrl: string,
+): Promise<{ buf: ArrayBuffer; contentType: string | null } | null> {
+  try {
+    if (isExternalCdnMediaUrl(pictureUrl)) {
+      const resp = await fetch(pictureUrl);
+      if (!resp.ok) return null;
+      return {
+        buf: await resp.arrayBuffer(),
+        contentType: resp.headers.get('content-type'),
+      };
+    }
+    return await fetchWahaMediaBytes(cfg, pictureUrl);
+  } catch {
+    return null;
+  }
+}
+
+async function persistChatProfilePicture(
+  admin: ReturnType<typeof createClient>,
+  cfg: WhatsappConfig,
+  companyId: string,
+  sessionName: string,
+  chatId: string,
+  hintUrl?: string | null,
+): Promise<string | null> {
+  if (isPersistedAvatarUrl(hintUrl)) return hintUrl ?? null;
+
+  let pictureUrl = await fetchWahaChatPictureUrl(cfg, sessionName, chatId);
+  if (!pictureUrl && hintUrl?.trim()) pictureUrl = hintUrl.trim();
+  if (!pictureUrl) return null;
+
+  const downloaded = await downloadPictureBytes(cfg, pictureUrl);
+  if (!downloaded || downloaded.buf.byteLength === 0) {
+    return isExternalCdnMediaUrl(pictureUrl) ? null : pictureUrl;
+  }
+
+  const ct = (downloaded.contentType ?? '').toLowerCase();
+  const ext = ct.includes('png')
+    ? 'png'
+    : ct.includes('webp')
+      ? 'webp'
+      : ct.includes('gif')
+        ? 'gif'
+        : 'jpg';
+  const path = `${companyId}/${safeChatStorageKey(chatId)}.${ext}`;
+
+  const { error: upErr } = await admin.storage
+    .from(WAHA_AVATAR_BUCKET)
+    .upload(path, downloaded.buf, {
+      contentType: downloaded.contentType ?? 'image/jpeg',
+      upsert: true,
+    });
+  if (upErr) {
+    console.warn('persistChatProfilePicture upload:', chatId, upErr.message);
+    return null;
+  }
+
+  const { data: pub } = admin.storage.from(WAHA_AVATAR_BUCKET).getPublicUrl(path);
+  return pub.publicUrl ?? null;
+}
+
+async function syncChatProfilePictures(
+  admin: ReturnType<typeof createClient>,
+  cfg: WhatsappConfig,
+  companyId: string,
+  sessionName: string,
+  chatIds: string[],
+  maxCount = WAHA_PICTURES_PER_REQUEST,
+): Promise<number> {
+  let synced = 0;
+  for (const chatId of chatIds) {
+    if (synced >= maxCount) break;
+    if (isSystemChatJid(chatId)) continue;
+
+    const { data: row } = await admin
+      .from('whatsapp_chats')
+      .select('profile_picture_url')
+      .eq('company_id', companyId)
+      .eq('chat_id', chatId)
+      .maybeSingle();
+    if (isPersistedAvatarUrl(row?.profile_picture_url)) continue;
+
+    try {
+      const url = await persistChatProfilePicture(
+        admin,
+        cfg,
+        companyId,
+        sessionName,
+        chatId,
+        row?.profile_picture_url,
+      );
+      if (!url) continue;
+
+      await admin
+        .from('whatsapp_chats')
+        .update({ profile_picture_url: url, updated_at: new Date().toISOString() })
+        .eq('company_id', companyId)
+        .eq('chat_id', chatId);
+      if (isPersistedAvatarUrl(url)) synced += 1;
+    } catch (e) {
+      console.warn('syncChatProfilePictures:', chatId, e);
+    }
+  }
+  return synced;
+}
+
+async function fetchWahaChatsOverview(
+  cfg: WhatsappConfig,
+  sessionName: string,
+  limit: number,
+  offset: number,
+): Promise<Array<Record<string, unknown>>> {
+  const paths = [
+    `/api/${encodeURIComponent(sessionName)}/chats/overview?limit=${limit}&offset=${offset}`,
+    `/api/${encodeURIComponent(sessionName)}/chats?limit=${limit}&offset=${offset}`,
+  ];
+  let lastErr: unknown;
+  for (const path of paths) {
+    try {
+      const data = await wahaJson<Array<Record<string, unknown>>>(cfg, path);
+      return Array.isArray(data) ? data : [];
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr;
+}
+
 async function syncChatMessagesFromWaha(
   admin: ReturnType<typeof createClient>,
   cfg: WhatsappConfig,
@@ -577,11 +836,19 @@ async function syncChatMessagesFromWaha(
   chatId: string,
   limit: number,
   downloadMedia = false,
+  offset = 0,
 ): Promise<number> {
   if (isSystemChatJid(chatId)) return 0;
   let data: WahaMsg[] = [];
   try {
-    data = await fetchWahaChatMessages(cfg, sessionName, chatId, limit, downloadMedia);
+    data = await fetchWahaChatMessages(
+      cfg,
+      sessionName,
+      chatId,
+      limit,
+      downloadMedia,
+      offset,
+    );
   } catch (e) {
     if (!(e instanceof WahaError)) throw e;
     if (e.status === 401 || e.status === 403) throw e;
@@ -599,7 +866,14 @@ async function syncChatMessagesFromWaha(
 
     if (warmupOk) {
       try {
-        data = await fetchWahaChatMessages(cfg, sessionName, chatId, limit, downloadMedia);
+        data = await fetchWahaChatMessages(
+          cfg,
+          sessionName,
+          chatId,
+          limit,
+          downloadMedia,
+          offset,
+        );
       } catch (e3) {
         if (e3 instanceof WahaError && (e3.status === 401 || e3.status === 403)) {
           throw e3;
@@ -659,6 +933,105 @@ async function syncChatMessagesFromWaha(
   return data.length;
 }
 
+const WAHA_HISTORY_PAGE_SIZE = 200;
+/** Páginas por petición HTTP (evita 504 del gateway ~60s). */
+const WAHA_HISTORY_PAGES_PER_REQUEST = 2;
+const WAHA_HISTORY_MAX_PAGES = 50;
+
+type SyncHistoryChunkResult = {
+  count: number;
+  offset: number;
+  has_more: boolean;
+  synced: boolean;
+};
+
+async function markChatHistorySynced(
+  admin: ReturnType<typeof createClient>,
+  companyId: string,
+  chatId: string,
+  storageChatId?: string | null,
+): Promise<void> {
+  const chatIds = Array.from(
+    new Set([chatId, storageChatId].filter((id): id is string => !!id)),
+  );
+  const { data: oldest } = await admin
+    .from('whatsapp_messages')
+    .select('timestamp')
+    .eq('company_id', companyId)
+    .in('chat_id', chatIds)
+    .order('timestamp', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  const payload = {
+    history_synced_at: new Date().toISOString(),
+    oldest_message_at: oldest?.timestamp ?? null,
+    updated_at: new Date().toISOString(),
+  };
+
+  for (const id of chatIds) {
+    await admin
+      .from('whatsapp_chats')
+      .update(payload)
+      .eq('company_id', companyId)
+      .eq('chat_id', id);
+  }
+}
+
+async function syncFullChatHistoryFromWaha(
+  admin: ReturnType<typeof createClient>,
+  cfg: WhatsappConfig,
+  companyId: string,
+  sessionName: string,
+  chatId: string,
+  downloadMedia = false,
+  startOffset = 0,
+  maxPages = WAHA_HISTORY_PAGES_PER_REQUEST,
+): Promise<SyncHistoryChunkResult> {
+  if (isSystemChatJid(chatId)) {
+    return { count: 0, offset: startOffset, has_more: false, synced: true };
+  }
+
+  let total = 0;
+  let offset = Math.max(startOffset, 0);
+  let hasMore = false;
+
+  for (let page = 0; page < maxPages && page < WAHA_HISTORY_MAX_PAGES; page++) {
+    const count = await syncChatMessagesFromWaha(
+      admin,
+      cfg,
+      companyId,
+      sessionName,
+      chatId,
+      WAHA_HISTORY_PAGE_SIZE,
+      downloadMedia,
+      offset,
+    );
+    total += count;
+    if (count === 0 || count < WAHA_HISTORY_PAGE_SIZE) {
+      hasMore = false;
+      break;
+    }
+    offset += WAHA_HISTORY_PAGE_SIZE;
+    hasMore = true;
+    if (page + 1 >= maxPages) break;
+  }
+
+  const synced = !hasMore;
+  if (synced) {
+    const storageChatId = await resolveChatIdForStorage(
+      admin,
+      companyId,
+      chatId,
+      null,
+      isGroupJid(chatId),
+    );
+    await markChatHistorySynced(admin, companyId, chatId, storageChatId);
+  }
+
+  return { count: total, offset, has_more: hasMore, synced };
+}
+
 const WEBHOOK_EVENTS = [
   'message',
   'message.any',
@@ -668,6 +1041,8 @@ const WEBHOOK_EVENTS = [
   'session.status',
   'engine.event',
   'chat.archive',
+  'group.v2.update',
+  'group.v2.join',
 ];
 
 function buildWebhookUrl(
@@ -1223,27 +1598,9 @@ serve(async (req) => {
       case 'chats.list': {
         const limit = Math.min(Math.max(Number(body.limit ?? 100), 1), 200);
         const offset = Math.max(Number(body.offset ?? 0), 0);
-        let data: Array<{
-          id: string;
-          name?: string;
-          isGroup?: boolean;
-          unreadCount?: number;
-          archived?: boolean;
-          pinned?: boolean;
-          timestamp?: number;
-          lastMessage?: {
-            body?: string;
-            fromMe?: boolean;
-            timestamp?: number;
-            type?: string;
-          };
-          picture?: string | null;
-        }> = [];
+        let data: Array<Record<string, unknown>> = [];
         try {
-          data = await wahaJson<typeof data>(
-            cfg,
-            `/api/${encodeURIComponent(sessionName)}/chats?limit=${limit}&offset=${offset}`,
-          );
+          data = await fetchWahaChatsOverview(cfg, sessionName, limit, offset);
         } catch (e) {
           if (e instanceof WahaError) {
             // Auth: error real
@@ -1259,25 +1616,53 @@ serve(async (req) => {
         }
 
         if (Array.isArray(data) && data.length > 0) {
-          data = data.filter((c) => !isSystemChatJid(c.id));
-          const rows = data.map((c) => ({
-            company_id: companyId,
-            chat_id: c.id,
-            name: c.name ?? null,
-            is_group: !!c.isGroup || /@g\.us$/i.test(c.id),
-            profile_picture_url: c.picture ?? null,
-            last_message_preview: c.lastMessage?.body ?? null,
-            last_message_at: c.lastMessage?.timestamp
-              ? new Date(c.lastMessage.timestamp * 1000).toISOString()
-              : c.timestamp
-                ? new Date(c.timestamp * 1000).toISOString()
-                : null,
-            last_message_from_me: !!c.lastMessage?.fromMe,
-            unread_count: Number(c.unreadCount ?? 0) || 0,
-            pinned: !!c.pinned,
-            archived: !!c.archived,
-            raw: c as unknown,
-          }));
+          data = data.filter((c) => !isSystemChatJid(String(c.id ?? '')));
+          const chatIds = data.map((c) => String(c.id ?? ''));
+          const existingById = new Map<string, string | null>();
+          if (chatIds.length > 0) {
+            const { data: existingRows } = await admin
+              .from('whatsapp_chats')
+              .select('chat_id, name')
+              .eq('company_id', companyId)
+              .in('chat_id', chatIds);
+            for (const row of existingRows ?? []) {
+              existingById.set(row.chat_id, row.name);
+            }
+          }
+
+          const rows = data.map((c) => {
+            const id = String(c.id ?? '');
+            const resolvedName = resolveWahaChatName(c);
+            const lastMessage = c.lastMessage as Record<string, unknown> | undefined;
+            let chatName =
+              resolvedName ??
+              (typeof c.name === 'string' && isGoodChatDisplayName(c.name) ? c.name.trim() : null);
+            if (!chatName) {
+              const prev = existingById.get(id);
+              if (isGoodChatDisplayName(prev)) chatName = prev!.trim();
+            }
+            const row: Record<string, unknown> = {
+              company_id: companyId,
+              chat_id: id,
+              is_group: !!c.isGroup || /@g\.us$/i.test(id),
+              profile_picture_url: resolveWahaChatPicture(c) ??
+                (typeof c.picture === 'string' ? c.picture : null),
+              last_message_preview:
+                typeof lastMessage?.body === 'string' ? lastMessage.body : null,
+              last_message_at: lastMessage?.timestamp
+                ? new Date(Number(lastMessage.timestamp) * 1000).toISOString()
+                : c.timestamp
+                  ? new Date(Number(c.timestamp) * 1000).toISOString()
+                  : null,
+              last_message_from_me: !!lastMessage?.fromMe,
+              unread_count: Number(c.unreadCount ?? 0) || 0,
+              pinned: !!c.pinned,
+              archived: !!c.archived,
+              raw: c as unknown,
+            };
+            if (chatName) row.name = chatName;
+            return row;
+          });
           await admin
             .from('whatsapp_chats')
             .upsert(rows, { onConflict: 'company_id,chat_id' });
@@ -1286,11 +1671,12 @@ serve(async (req) => {
           // serie para no saturar PG, pero sin frenar la respuesta más de unos
           // milisegundos por chat.
           for (const c of data) {
-            if (isSystemChatJid(c.id)) continue;
+            const chatId = String(c.id ?? '');
+            if (isSystemChatJid(chatId)) continue;
             try {
               await admin.rpc('whatsapp_auto_link_chat', {
                 p_company_id: companyId,
-                p_chat_id: c.id,
+                p_chat_id: chatId,
               });
             } catch {
               // Ignorar: solo es una mejora opcional
@@ -1301,7 +1687,8 @@ serve(async (req) => {
       }
 
       case 'messages.list': {
-        const limit = Math.min(Math.max(Number(body.limit ?? 50), 1), 200);
+        const limit = Math.min(Math.max(Number(body.limit ?? 100), 1), 200);
+        const offset = Math.max(Number(body.offset ?? 0), 0);
         const chatId = body.chat_id;
         if (!chatId) return err('Falta chat_id');
         const count = await syncChatMessagesFromWaha(
@@ -1312,29 +1699,69 @@ serve(async (req) => {
           chatId,
           limit,
           !!body.download_media,
+          offset,
         );
-        return json({ ok: true, count });
+        return json({ ok: true, count, offset, has_more: count >= limit });
+      }
+
+      case 'messages.sync_chat_history': {
+        const chatId = body.chat_id;
+        if (!chatId) return err('Falta chat_id');
+        const force = !!body.force;
+        const startOffset = Math.max(Number(body.offset ?? 0), 0);
+
+        if (!force && startOffset === 0) {
+          const { data: chatRow } = await admin
+            .from('whatsapp_chats')
+            .select('history_synced_at')
+            .eq('company_id', companyId)
+            .eq('chat_id', chatId)
+            .maybeSingle();
+          if (chatRow?.history_synced_at) {
+            const count = await syncChatMessagesFromWaha(
+              admin,
+              cfg,
+              companyId,
+              sessionName,
+              chatId,
+              WAHA_HISTORY_PAGE_SIZE,
+              !!body.download_media,
+              0,
+            );
+            return json({
+              ok: true,
+              count,
+              offset: 0,
+              has_more: false,
+              synced: true,
+              already_synced: true,
+            });
+          }
+        }
+
+        const result = await syncFullChatHistoryFromWaha(
+          admin,
+          cfg,
+          companyId,
+          sessionName,
+          chatId,
+          !!body.download_media,
+          startOffset,
+        );
+        return json({ ok: true, ...result, synced: result.synced });
       }
 
       case 'messages.sync_history': {
-        const limitPerChat = Math.min(
-          Math.max(Number(body.limit_per_chat ?? 200), 1),
-          200,
-        );
-        const maxChats = Math.min(Math.max(Number(body.max_chats ?? 30), 1), 80);
-        const offset = Math.max(Number(body.offset ?? 0), 0);
+        const messageOffset = Math.max(Number(body.message_offset ?? 0), 0);
         const refreshChats = body.refresh_chats !== false;
 
-        if (refreshChats && offset === 0) {
+        if (refreshChats && messageOffset === 0) {
           try {
-            const chatData = await wahaJson<Array<{ id: string }>>(
-              cfg,
-              `/api/${encodeURIComponent(sessionName)}/chats?limit=150&offset=0`,
-            );
-            if (Array.isArray(chatData) && chatData.length > 0) {
+            const chatData = await fetchWahaChatsOverview(cfg, sessionName, 150, 0);
+            if (chatData.length > 0) {
               const rows = chatData.map((c) => ({
                 company_id: companyId,
-                chat_id: c.id,
+                chat_id: String(c.id ?? ''),
               }));
               await admin
                 .from('whatsapp_chats')
@@ -1350,46 +1777,80 @@ serve(async (req) => {
           .select('chat_id')
           .eq('company_id', companyId)
           .eq('archived', false)
+          .is('history_synced_at', null)
           .order('last_message_at', { ascending: false, nullsFirst: false })
-          .range(offset, offset + maxChats - 1);
+          .limit(1);
         if (chatErr) throw chatErr;
 
-        let totalMessages = 0;
-        let chatsWithMessages = 0;
-        const warnings: string[] = [];
-
-        for (const row of chatRows ?? []) {
-          if (isSystemChatJid(row.chat_id)) continue;
-          try {
-            const count = await syncChatMessagesFromWaha(
-              admin,
-              cfg,
-              companyId,
-              sessionName,
-              row.chat_id,
-              limitPerChat,
-              !!body.download_media,
-            );
-            totalMessages += count;
-            if (count > 0) chatsWithMessages += 1;
-          } catch (e) {
-            const msg = e instanceof Error ? e.message : 'error';
-            if (warnings.length < 15) warnings.push(`${row.chat_id}: ${msg}`);
-          }
+        const row = chatRows?.[0];
+        if (!row || isSystemChatJid(row.chat_id)) {
+          return json({
+            ok: true,
+            messages: 0,
+            chats_processed: 0,
+            chats_synced: 0,
+            chats_with_messages: 0,
+            next_offset: null,
+            message_offset: null,
+          });
         }
 
-        const processed = chatRows?.length ?? 0;
-        const nextOffset =
-          processed >= maxChats ? offset + maxChats : null;
+        const warnings: string[] = [];
+        try {
+          const result = await syncFullChatHistoryFromWaha(
+            admin,
+            cfg,
+            companyId,
+            sessionName,
+            row.chat_id,
+            !!body.download_media,
+            messageOffset,
+          );
 
-        return json({
-          ok: true,
-          messages: totalMessages,
-          chats_processed: processed,
-          chats_with_messages: chatsWithMessages,
-          next_offset: nextOffset,
-          warnings: warnings.length ? warnings : undefined,
-        });
+          if (result.has_more) {
+            return json({
+              ok: true,
+              messages: result.count,
+              chats_processed: 1,
+              chats_synced: 0,
+              chats_with_messages: result.count > 0 ? 1 : 0,
+              next_offset: 0,
+              message_offset: result.offset,
+              warnings: warnings.length ? warnings : undefined,
+            });
+          }
+
+          const { count: remaining } = await admin
+            .from('whatsapp_chats')
+            .select('chat_id', { count: 'exact', head: true })
+            .eq('company_id', companyId)
+            .eq('archived', false)
+            .is('history_synced_at', null);
+
+          return json({
+            ok: true,
+            messages: result.count,
+            chats_processed: 1,
+            chats_synced: 1,
+            chats_with_messages: result.count > 0 ? 1 : 0,
+            next_offset: (remaining ?? 0) > 0 ? 0 : null,
+            message_offset: null,
+            warnings: warnings.length ? warnings : undefined,
+          });
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : 'error';
+          warnings.push(`${row.chat_id}: ${msg}`);
+          return json({
+            ok: true,
+            messages: 0,
+            chats_processed: 0,
+            chats_synced: 0,
+            chats_with_messages: 0,
+            next_offset: null,
+            message_offset: null,
+            warnings,
+          });
+        }
       }
 
       case 'messages.send': {
@@ -1643,6 +2104,55 @@ serve(async (req) => {
           chat_id: chatId,
           timestamp: ts,
         });
+      }
+
+      case 'groups.sync_name': {
+        const chatId = typeof body.chat_id === 'string' ? body.chat_id.trim() : '';
+        if (!chatId || !isGroupJid(chatId)) {
+          return json({ ok: true, updated: false });
+        }
+        const subject = await fetchWahaGroupSubject(cfg, sessionName, chatId);
+        if (!subject) {
+          return json({ ok: true, updated: false });
+        }
+        await admin
+          .from('whatsapp_chats')
+          .update({ name: subject, updated_at: new Date().toISOString() })
+          .eq('company_id', companyId)
+          .eq('chat_id', chatId);
+        return json({ ok: true, updated: true, name: subject });
+      }
+
+      case 'pictures.sync_batch': {
+        const limit = Math.min(Math.max(Number(body.limit ?? 1), 1), 3);
+        let chatIds: string[] = Array.isArray(body.chat_ids)
+          ? body.chat_ids.filter((id): id is string => typeof id === 'string' && !!id)
+          : [];
+
+        if (chatIds.length === 0) {
+          const { data: rows, error: qErr } = await admin
+            .from('whatsapp_chats')
+            .select('chat_id, profile_picture_url')
+            .eq('company_id', companyId)
+            .eq('archived', false)
+            .order('last_message_at', { ascending: false, nullsFirst: false })
+            .limit(limit * 2);
+          if (qErr) throw qErr;
+          chatIds = (rows ?? [])
+            .filter((r) => !isPersistedAvatarUrl(r.profile_picture_url))
+            .slice(0, limit)
+            .map((r) => r.chat_id);
+        }
+
+        const count = await syncChatProfilePictures(
+          admin,
+          cfg,
+          companyId,
+          sessionName,
+          chatIds,
+          limit,
+        );
+        return json({ ok: true, count, requested: chatIds.length });
       }
 
       case 'media.download': {

@@ -23,7 +23,6 @@ export const RecursosCabinas: React.FC = () => {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Recursos y Cabinas</h1>
-        <p className="text-sm text-muted-foreground mt-1">Gestiona las salas y equipamiento de la clínica</p>
       </div>
 
       <Tabs defaultValue="cabinas">

@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import React, { useState } from 'react';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -17,7 +17,18 @@ import { supabase } from '@/lib/supabase';
 import { useQuery } from '@tanstack/react-query';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { useWorkCenter } from '@/hooks/useWorkCenter';
+import { fetchCatalogCustomers } from '@/lib/customerSearch';
 import { CustomerSelector } from '@/components/forms/CustomerSelector';
+
+const REPORT_SELECT_CONTENT_CLASS = 'z-[200]';
+
+const MONTH_OPTIONS = Array.from({ length: 12 }, (_, i) => ({
+  value: i + 1,
+  label: format(new Date(2024, i, 1), 'MMMM', { locale: es }),
+}));
+
+const nativeSelectClass =
+  'flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2';
 
 interface Report {
   id: string;
@@ -51,24 +62,17 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
   const [showFilters, setShowFilters] = useState(true);
   const [showResults, setShowResults] = useState(false);
   const [filters, setFilters] = useState<FilterValues>({});
-  const [loading, setLoading] = useState(false);
   const { companyId, loading: companyLoading } = useCompanyFilter();
-  const { isMultiEntity, billingCompanies, companyLabels } = useWorkCenter();
+  const { isMultiEntity, billingCompanies, companyLabels, operationalCompanyId } = useWorkCenter();
+  const catalogCompanyId = operationalCompanyId ?? companyId;
 
-  // Consultas para obtener datos reales para los filtros
   const { data: customers } = useQuery({
-    queryKey: ['customers', companyId, 'reporte-modal'],
+    queryKey: ['customers', catalogCompanyId, 'reporte-modal'],
     queryFn: async () => {
-      if (!companyId) return [];
-      const { data, error } = await supabase
-        .from('customers')
-        .select('id, name, email, tax_id, phone')
-        .eq('company_id', companyId)
-        .order('name');
-      if (error) throw error;
-      return data;
+      if (!catalogCompanyId) return [];
+      return fetchCatalogCustomers(supabase, catalogCompanyId);
     },
-    enabled: !!companyId && !companyLoading,
+    enabled: !!catalogCompanyId && !companyLoading,
   });
 
   const { data: suppliers } = useQuery({
@@ -84,17 +88,18 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
   });
 
   const { data: families } = useQuery({
-    queryKey: ['article-families'],
+    queryKey: ['article-families', catalogCompanyId],
     queryFn: async () => {
+      if (!catalogCompanyId) return [];
       const { data, error } = await supabase
-        .from('articles')
-        .select('familia')
-        .order('familia');
+        .from('article_families')
+        .select('name')
+        .eq('company_id', catalogCompanyId)
+        .order('name');
       if (error) throw error;
-      // Obtener familias únicas
-      const uniqueFamilies = [...new Set(data?.map(item => item.familia))];
-      return uniqueFamilies;
+      return (data ?? []).map((f) => f.name as string);
     },
+    enabled: !!catalogCompanyId && !companyLoading,
   });
 
   const quickDateRanges = [
@@ -150,11 +155,7 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
     setFilters(prev => ({ ...prev, fechaDesde, fechaHasta }));
   };
 
-  const handleGenerateReport = async () => {
-    setLoading(true);
-    // Simular carga
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    setLoading(false);
+  const handleGenerateReport = () => {
     setShowFilters(false);
     setShowResults(true);
   };
@@ -170,6 +171,7 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
 
   const renderFilterInput = (filterType: string) => {
     switch (filterType) {
+      case "periodo":
       case "fechas":
         return (
           <div className="space-y-4">
@@ -244,27 +246,30 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
 
       case "cliente":
         return (
-          <div className="space-y-2">
-            <CustomerSelector
-              label="Cliente"
-              customers={customers}
-              value={filters.cliente ?? 'todos'}
-              onChange={(value) => setFilters((prev) => ({ ...prev, cliente: value || 'todos' }))}
-              allowEmptyOption={false}
-              topOptions={[{ value: 'todos', label: 'Todos los clientes' }]}
-            />
-          </div>
+          <CustomerSelector
+            customers={customers}
+            value={filters.cliente ?? 'todos'}
+            onChange={(value) =>
+              setFilters((prev) => ({ ...prev, cliente: value === '' ? 'todos' : value }))
+            }
+            label="Cliente"
+            htmlFor="reporte-cliente"
+            topOptions={[{ value: 'todos', label: 'Todos los clientes' }]}
+            allowEmptyOption={false}
+            emptyOptionLabel="Todos los clientes"
+          />
         );
 
+      case "estado":
       case "estado-pago":
         return (
           <div className="space-y-2">
             <Label>Estado de Pago</Label>
-            <Select onValueChange={(value) => setFilters(prev => ({ ...prev, estado: value }))}>
+            <Select modal={false} onValueChange={(value) => setFilters(prev => ({ ...prev, estado: value }))}>
               <SelectTrigger>
                 <SelectValue placeholder="Seleccionar estado" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className={REPORT_SELECT_CONTENT_CLASS}>
                 {estadosFactura.map((estado) => (
                   <SelectItem key={estado.value} value={estado.value}>
                     {estado.label}
@@ -300,11 +305,11 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
         return (
           <div className="space-y-2">
             <Label>Familia de Artículos</Label>
-            <Select onValueChange={(value) => setFilters(prev => ({ ...prev, familia: value }))}>
+            <Select modal={false} onValueChange={(value) => setFilters(prev => ({ ...prev, familia: value }))}>
               <SelectTrigger>
                 <SelectValue placeholder="Seleccionar familia" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className={REPORT_SELECT_CONTENT_CLASS}>
                 <SelectItem value="todas">Todas las familias</SelectItem>
                 {families?.map((familia) => (
                   <SelectItem key={familia} value={familia}>
@@ -320,11 +325,11 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
         return (
           <div className="space-y-2">
             <Label>Proveedor</Label>
-            <Select onValueChange={(value) => setFilters(prev => ({ ...prev, proveedor: value }))}>
+            <Select modal={false} onValueChange={(value) => setFilters(prev => ({ ...prev, proveedor: value }))}>
               <SelectTrigger>
                 <SelectValue placeholder="Seleccionar proveedor" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className={REPORT_SELECT_CONTENT_CLASS}>
                 <SelectItem value="todos">Todos los proveedores</SelectItem>
                 {suppliers?.map((supplier) => (
                   <SelectItem key={supplier.id} value={supplier.id}>
@@ -342,13 +347,14 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
           <div className="space-y-2">
             <Label>Empresa emisora</Label>
             <Select
+              modal={false}
               value={filters.empresaEmisora ?? 'all'}
               onValueChange={(value) => setFilters((prev) => ({ ...prev, empresaEmisora: value }))}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Todas las empresas" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className={REPORT_SELECT_CONTENT_CLASS}>
                 <SelectItem value="all">Todas (centro laboral)</SelectItem>
                 {billingCompanies.map((c) => (
                   <SelectItem key={c.id} value={c.id}>
@@ -357,6 +363,160 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
                 ))}
               </SelectContent>
             </Select>
+          </div>
+        );
+
+      case "dias-inactividad":
+      case "dias-pendiente":
+      case "dias-sin-movimiento":
+        return (
+          <div className="space-y-2">
+            <Label>Días</Label>
+            <Input
+              type="number"
+              min={1}
+              placeholder="90"
+              value={String(filters[filterType] ?? filters.diasInactividad ?? '')}
+              onChange={(e) => setFilters((prev) => ({
+                ...prev,
+                [filterType]: Number(e.target.value),
+                diasInactividad: Number(e.target.value),
+                diasSinMovimiento: Number(e.target.value),
+              }))}
+            />
+          </div>
+        );
+
+      case "num-clientes":
+      case "ranking":
+        return (
+          <div className="space-y-2">
+            <Label>Cantidad</Label>
+            <Input
+              type="number"
+              min={1}
+              placeholder="10"
+              value={String(filters.numClientes ?? filters.ranking ?? '')}
+              onChange={(e) => setFilters((prev) => ({
+                ...prev,
+                numClientes: Number(e.target.value),
+                ranking: Number(e.target.value),
+              }))}
+            />
+          </div>
+        );
+
+      case "año-fiscal":
+      case "año":
+        return (
+          <div className="space-y-2">
+            <Label>Año</Label>
+            <Input
+              type="number"
+              min={2000}
+              max={2100}
+              value={String(filters.año ?? filters['año-fiscal'] ?? new Date().getFullYear())}
+              onChange={(e) => {
+                const y = Number(e.target.value);
+                setFilters((prev) => ({
+                  ...prev,
+                  año: y,
+                  fechaDesde: new Date(y, 0, 1),
+                  fechaHasta: new Date(y, 11, 31),
+                }));
+              }}
+            />
+          </div>
+        );
+
+      case "trimestre": {
+        const year = Number(filters.año ?? new Date().getFullYear());
+        return (
+          <div className="space-y-2">
+            <Label>Trimestre</Label>
+            <Select
+              modal={false}
+              onValueChange={(value) => {
+                const q = Number(value);
+                const startMonth = (q - 1) * 3;
+                setFilters((prev) => ({
+                  ...prev,
+                  trimestre: q,
+                  fechaDesde: new Date(year, startMonth, 1),
+                  fechaHasta: new Date(year, startMonth + 3, 0),
+                }));
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Seleccionar trimestre" />
+              </SelectTrigger>
+              <SelectContent className={REPORT_SELECT_CONTENT_CLASS}>
+                {[1, 2, 3, 4].map((q) => (
+                  <SelectItem key={q} value={String(q)}>{`T${q} ${year}`}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        );
+      }
+
+      case "mes": {
+        const year = Number(filters.año ?? new Date().getFullYear());
+        return (
+          <div className="space-y-2">
+            <Label htmlFor="reporte-mes">Mes</Label>
+            <select
+              id="reporte-mes"
+              className={nativeSelectClass}
+              value={filters.mes ? String(filters.mes) : ''}
+              onChange={(e) => {
+                const m = Number(e.target.value);
+                if (!m) return;
+                setFilters((prev) => ({
+                  ...prev,
+                  mes: m,
+                  año: year,
+                  fechaDesde: new Date(year, m - 1, 1),
+                  fechaHasta: new Date(year, m, 0),
+                }));
+              }}
+            >
+              <option value="">Seleccionar mes</option>
+              {MONTH_OPTIONS.map(({ value, label }) => (
+                <option key={value} value={String(value)}>
+                  {label.charAt(0).toUpperCase() + label.slice(1)}
+                </option>
+              ))}
+            </select>
+          </div>
+        );
+      }
+
+      case "stock-minimo":
+      case "incluir-proyecciones":
+      case "valoracion":
+        return (
+          <div className="flex items-center space-x-2 pt-6">
+            <Checkbox
+              id={filterType}
+              checked={Boolean(filters[filterType])}
+              onCheckedChange={(checked) => setFilters((prev) => ({ ...prev, [filterType]: checked }))}
+            />
+            <Label htmlFor={filterType}>Activar filtro</Label>
+          </div>
+        );
+
+      case "serie-factura":
+      case "articulo":
+      case "comercial":
+      case "tipo-movimiento":
+        return (
+          <div className="space-y-2">
+            <Label className="capitalize">{filterType.replace(/-/g, ' ')}</Label>
+            <Input
+              value={String(filters[filterType] ?? '')}
+              onChange={(e) => setFilters((prev) => ({ ...prev, [filterType]: e.target.value }))}
+            />
           </div>
         );
 
@@ -383,6 +543,7 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
             <Filter className="w-5 h-5" />
             <span>{report.title} - Filtros</span>
           </DialogTitle>
+          <DialogDescription className="sr-only">{report.description}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-6">
@@ -432,10 +593,9 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
               </Button>
               <Button 
                 onClick={handleGenerateReport}
-                disabled={loading}
                 className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700"
               >
-                {loading ? "Generando..." : "Generar Reporte"}
+                Generar Reporte
               </Button>
             </div>
           </div>

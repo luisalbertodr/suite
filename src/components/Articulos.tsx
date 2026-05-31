@@ -171,7 +171,6 @@ export const Articulos: React.FC = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-foreground">Artículos</h1>
-          <p className="text-muted-foreground">Gestión de inventario y productos</p>
         </div>
         <div className="flex space-x-3">
           <button
@@ -563,6 +562,7 @@ export const Articulos: React.FC = () => {
       {showForm && (
         <ArticleForm
           article={selectedArticle}
+          initialArticleKind={selectedArticle ? undefined : activeKind}
           onClose={handleCloseForm}
           onSave={handleSaveArticle}
         />

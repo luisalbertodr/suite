@@ -10,6 +10,7 @@ import {
   isRecentMetaLead,
   jidToDisplay,
   displayNameForChat,
+  resolvePhoneLabelForChat,
   waTheme,
   type MetaLeadInfo,
 } from './whatsappUtils';
@@ -26,6 +27,7 @@ interface Props {
   customerNameById?: Record<string, string>;
   customerIdByChatId?: Record<string, string>;
   customerNameByChatId?: Record<string, string>;
+  phoneLabelByChatId?: Record<string, string>;
   leadNameById?: Record<string, string>;
   leadMetaById?: Record<string, MetaLeadInfo>;
   sessionPushName?: string | null;
@@ -53,6 +55,7 @@ export const WhatsappChatList: React.FC<Props> = ({
   customerNameById,
   customerIdByChatId,
   customerNameByChatId,
+  phoneLabelByChatId = {},
   leadNameById,
   leadMetaById,
   sessionPushName,
@@ -161,8 +164,14 @@ export const WhatsappChatList: React.FC<Props> = ({
               const displayName = displayNameForChat(
                 c.chat_id,
                 customerName || c.name || leadName,
+                leadName,
+                c.raw,
               );
-              const phoneLabel = !isGroup ? jidToDisplay(c.chat_id) : '';
+              const phoneLabel = isGroup
+                ? ''
+                : resolvePhoneLabelForChat(c.chat_id) ||
+                  phoneLabelByChatId[c.chat_id] ||
+                  '';
               const showPhoneInline =
                 phoneLabel &&
                 phoneLabel !== displayName &&
@@ -250,7 +259,7 @@ export const WhatsappChatList: React.FC<Props> = ({
                       ) : null}
                       {isGroup ? (
                         <p className={`truncate text-[10px] ${waTheme.textMuted}`}>
-                          Grupo · {jidToDisplay(c.chat_id)}
+                          Grupo de WhatsApp
                         </p>
                       ) : null}
                       <div className="mt-0.5 flex items-center gap-1.5">

@@ -103,8 +103,8 @@ export const useDashboardData = () => {
         }),
       ]);
 
-      let aptRows: Array<{ created_at: string; title?: string | null; description?: string | null }> = [];
-      for (const select of ['description, created_at', 'created_at', 'title, created_at'] as const) {
+      let aptRows: Array<{ created_at: string; client_name?: string | null; description?: string | null }> = [];
+      for (const select of ['client_name, description, created_at', 'description, created_at', 'created_at'] as const) {
         const aptRes = await supabase
           .from('agenda_appointments')
           .select(select)
@@ -115,6 +115,10 @@ export const useDashboardData = () => {
           aptRows = (aptRes.data || []) as typeof aptRows;
           break;
         }
+        if (aptRes.error.code === '57014' || aptRes.status === 500) {
+          console.warn('agenda_appointments activity query failed:', aptRes.error.message);
+          break;
+        }
         if (!isSchemaColumnError(aptRes.error)) break;
       }
 
@@ -123,7 +127,7 @@ export const useDashboardData = () => {
       }));
       aptRows.forEach((a) => activities.push({
         type: 'cita',
-        description: `Cita: ${a.title || a.description || 'Nueva cita'}`,
+        description: `Cita: ${a.client_name || a.description || 'Nueva cita'}`,
         time: getTimeAgo(a.created_at),
       }));
       cusRes.data?.forEach((c: { name: string; created_at: string }) => activities.push({

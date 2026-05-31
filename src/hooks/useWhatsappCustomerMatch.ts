@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import {
   extractPhoneDigitsFromJid,
+  formatPhoneDigits,
   isGroupJid,
 } from '@/components/whatsapp/whatsappUtils';
 import type { WhatsappChatRow } from '@/hooks/useWhatsappChats';
@@ -15,8 +16,8 @@ function phoneLast9(digits: string | null | undefined): string | null {
   return d.slice(-9);
 }
 
-/** Resuelve últimos 9 dígitos por chat (JID @c.us o mensajes entrantes para @lid). */
-async function resolvePhoneLast9ByChat(
+/** Resuelve teléfono formateado (+…) por chat (JID @c.us o mensajes entrantes para @lid). */
+async function resolvePhoneLabelByChat(
   companyId: string,
   chats: WhatsappChatRow[],
 ): Promise<Map<string, string>> {
@@ -24,11 +25,11 @@ async function resolvePhoneLast9ByChat(
   const needMessages: string[] = [];
 
   for (const c of chats) {
-    if (c.customer_id || c.is_group || isGroupJid(c.chat_id)) continue;
+    if (c.is_group || isGroupJid(c.chat_id)) continue;
     const fromJid = extractPhoneDigitsFromJid(c.chat_id);
-    const last9 = phoneLast9(fromJid);
-    if (last9) {
-      out.set(c.chat_id, last9);
+    const formatted = formatPhoneDigits(fromJid);
+    if (formatted) {
+      out.set(c.chat_id, formatted);
     } else {
       needMessages.push(c.chat_id);
     }
@@ -50,9 +51,9 @@ async function resolvePhoneLast9ByChat(
   const seen = new Set<string>();
   for (const row of rows ?? []) {
     if (seen.has(row.chat_id)) continue;
-    const last9 = phoneLast9(extractPhoneDigitsFromJid(row.from_jid));
-    if (last9) {
-      out.set(row.chat_id, last9);
+    const formatted = formatPhoneDigits(extractPhoneDigitsFromJid(row.from_jid));
+    if (formatted) {
+      out.set(row.chat_id, formatted);
       seen.add(row.chat_id);
     }
   }
@@ -88,15 +89,24 @@ export function useWhatsappCustomerMatch(chats: WhatsappChatRow[]) {
         return {
           customerIdByChatId: {} as Record<string, string>,
           customerNameByChatId: {} as Record<string, string>,
+          phoneLabelByChatId: {} as Record<string, string>,
         };
       }
 
-      const phoneByChat = await resolvePhoneLast9ByChat(companyId, unlinkedChats);
-      const suffixes = [...new Set(phoneByChat.values())];
+      const phoneByChat = await resolvePhoneLabelByChat(companyId, unlinkedChats);
+      const suffixes = [...new Set(
+        [...phoneByChat.values()].map((p) => phoneLast9(p.replace(/\D/g, ''))).filter(Boolean),
+      )] as string[];
+      const phoneLabelByChatId: Record<string, string> = {};
+      for (const [chatId, label] of phoneByChat) {
+        phoneLabelByChatId[chatId] = label;
+      }
+
       if (suffixes.length === 0) {
         return {
           customerIdByChatId: {},
           customerNameByChatId: {},
+          phoneLabelByChatId,
         };
       }
 
@@ -118,20 +128,23 @@ export function useWhatsappCustomerMatch(chats: WhatsappChatRow[]) {
       const customerIdByChatId: Record<string, string> = {};
       const customerNameByChatId: Record<string, string> = {};
       for (const [chatId, last9] of phoneByChat) {
-        const hit = byNorm.get(last9);
+        const norm = phoneLast9(last9.replace(/\D/g, ''));
+        if (!norm) continue;
+        const hit = byNorm.get(norm);
         if (hit) {
           customerIdByChatId[chatId] = hit.id;
           customerNameByChatId[chatId] = hit.name;
         }
       }
 
-      return { customerIdByChatId, customerNameByChatId };
+      return { customerIdByChatId, customerNameByChatId, phoneLabelByChatId };
     },
   });
 
   return {
     customerIdByChatId: matchQuery.data?.customerIdByChatId ?? {},
     customerNameByChatId: matchQuery.data?.customerNameByChatId ?? {},
+    phoneLabelByChatId: matchQuery.data?.phoneLabelByChatId ?? {},
     isMatching: matchQuery.isFetching,
   };
 }

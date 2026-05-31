@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import React, { useState } from 'react';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -18,11 +18,10 @@ import {
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { Bar, BarChart, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { supabase } from '@/lib/supabase';
+import { fetchReportData, resolveBillingScope, REPORT_ROW_KEYS, formatReportCell, type ReportFilters } from '@/lib/reportData';
 import { useQuery } from '@tanstack/react-query';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { useWorkCenter } from '@/hooks/useWorkCenter';
-import { fetchSalesWithoutInvoiceRows } from '@/lib/salesRevenue';
 
 interface Report {
   id: string;
@@ -55,539 +54,26 @@ export const ReporteResults: React.FC<ReporteResultsProps> = ({ report, filters,
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(10);
   const { companyId, loading: companyLoading } = useCompanyFilter();
-  const { isMultiEntity, billingCompanies, companyLabels } = useWorkCenter();
+  const { isMultiEntity, billingCompanies, operationalCompanyId } = useWorkCenter();
+  const catalogCompanyId = operationalCompanyId ?? companyId;
 
-  const applyBillingCompanyScope = <T extends { eq: (col: string, val: string) => T; or: (filter: string) => T }>(
-    query: T,
-    column = 'company_id',
-  ): T => {
-    const billingFilter = filters.empresaEmisora as string | undefined;
-    if (billingFilter && billingFilter !== 'all') {
-      return query.eq(column, billingFilter);
-    }
-    if (isMultiEntity && billingCompanies.length > 1) {
-      const ids = billingCompanies.map((c) => c.id).join(',');
-      if (column === 'company_id') {
-        return query.or(`host_company_id.eq.${companyId},${column}.in.(${ids})`) as T;
-      }
-      return query.or(`${column}.in.(${ids})`) as T;
-    }
-    return query.eq(column, companyId!);
-  };
+  const billingCompanyIds = resolveBillingScope(
+    companyId,
+    billingCompanies,
+    isMultiEntity,
+    filters.empresaEmisora as string | undefined,
+  );
 
-  // Consulta para obtener datos según el tipo de reporte
   const { data: reportData, isLoading } = useQuery({
-    queryKey: ['report-data', companyId, report.id, filters],
+    queryKey: ['report-data', companyId, catalogCompanyId, report.id, filters, billingCompanyIds.join(',')],
     queryFn: async () => {
-      if (!companyId) return [];
-      switch (report.id) {
-        case "facturas-cobrar":
-          return await fetchFacturasPorCobrar();
-        case "facturacion-mensual":
-          return await fetchFacturacionMensual();
-        case "facturacion-cliente":
-          return await fetchFacturacionPorCliente();
-        case "ventas-articulo":
-          return await fetchVentasPorArticulo();
-        case "listado-clientes":
-          return await fetchListadoClientes();
-        case "clientes-inactivos":
-          return await fetchClientesInactivos();
-        case "stock-actual":
-          return await fetchStockActual();
-        case "facturas-pagar":
-          return await fetchFacturasPorPagar();
-        case "presupuestos-aceptados":
-          return await fetchPresupuestosAceptados();
-        case "presupuestos-pendientes":
-          return await fetchPresupuestosPendientes();
-        case "ratio-conversion":
-          return await fetchRatioConversion();
-        default:
-          return [];
-      }
+      if (!companyId || !catalogCompanyId) return [];
+      return fetchReportData(report.id, { billingCompanyIds, catalogCompanyId }, filters as ReportFilters);
     },
-    enabled: !!companyId && !companyLoading,
+    enabled: !!companyId && !!catalogCompanyId && !companyLoading,
   });
 
-  const fetchFacturasPorCobrar = async () => {
-    console.log('Filtros aplicados:', filters); // Para debug
-    
-    let query = supabase
-      .from('invoices')
-      .select(`
-        id,
-        number,
-        issue_date,
-        due_date,
-        total_amount,
-        paid_status,
-        customers:customer_id (name)
-      `)
-      .eq('paid_status', false);
-
-    query = applyBillingCompanyScope(query);
-
-    // Aplicar filtro por cliente si está seleccionado
-    if (filters.cliente && filters.cliente !== "todos") {
-      console.log('Aplicando filtro por cliente:', filters.cliente);
-      query = query.eq('customer_id', filters.cliente);
-    }
-
-    // Aplicar filtros por fecha
-    if (filters.fechaDesde) {
-      query = query.gte('issue_date', format(filters.fechaDesde, 'yyyy-MM-dd'));
-    }
-    if (filters.fechaHasta) {
-      query = query.lte('issue_date', format(filters.fechaHasta, 'yyyy-MM-dd'));
-    }
-
-    const { data, error } = await query;
-    if (error) {
-      console.error('Error al obtener facturas por cobrar:', error);
-      throw error;
-    }
-
-    console.log('Datos obtenidos:', data); // Para debug
-
-    return data?.map(invoice => ({
-      numero: invoice.number,
-      cliente: invoice.customers?.name || 'N/A',
-      fechaEmision: format(new Date(invoice.issue_date), 'dd/MM/yyyy'),
-      vencimiento: format(new Date(invoice.due_date), 'dd/MM/yyyy'),
-      importe: invoice.total_amount,
-      diasVencido: Math.floor((new Date().getTime() - new Date(invoice.due_date).getTime()) / (1000 * 60 * 60 * 24))
-    })) || [];
-  };
-
-  const fetchFacturacionMensual = async () => {
-    console.log('Filtros aplicados para facturación mensual:', filters); // Para debug
-    
-    let query = supabase
-      .from('invoices')
-      .select(`
-        issue_date, 
-        total_amount, 
-        number,
-        customers:customer_id (name)
-      `)
-      .order('issue_date', { ascending: false });
-
-    query = applyBillingCompanyScope(query);
-
-    // Aplicar filtro por cliente si está seleccionado
-    if (filters.cliente && filters.cliente !== "todos") {
-      console.log('Aplicando filtro por cliente en facturación mensual:', filters.cliente);
-      query = query.eq('customer_id', filters.cliente);
-    }
-
-    // Aplicar filtros por fecha
-    if (filters.fechaDesde) {
-      query = query.gte('issue_date', format(filters.fechaDesde, 'yyyy-MM-dd'));
-    }
-    if (filters.fechaHasta) {
-      query = query.lte('issue_date', format(filters.fechaHasta, 'yyyy-MM-dd'));
-    }
-
-    const { data, error } = await query;
-    if (error) {
-      console.error('Error al obtener facturación mensual:', error);
-      throw error;
-    }
-
-    const fromIso = filters.fechaDesde
-      ? new Date(format(filters.fechaDesde, 'yyyy-MM-dd')).toISOString()
-      : undefined;
-    const toIso = filters.fechaHasta
-      ? new Date(format(filters.fechaHasta, 'yyyy-MM-dd') + 'T23:59:59').toISOString()
-      : undefined;
-    const customerFilter = filters.cliente && filters.cliente !== 'todos' ? filters.cliente : undefined;
-
-    const tpvRows = await fetchSalesWithoutInvoiceRows(companyId!, fromIso, toIso, customerFilter);
-
-    console.log('Datos de facturación mensual obtenidos:', data); // Para debug
-
-    // Agrupar por mes (facturas + tickets TPV sin factura)
-    const monthlyData = (data ?? []).reduce((acc: Record<string, { totalFacturado: number; numFacturas: number; numTickets: number; cliente: string }>, invoice) => {
-      const month = format(new Date(invoice.issue_date), 'MMMM yyyy', { locale: es });
-      if (!acc[month]) {
-        acc[month] = { 
-          totalFacturado: 0, 
-          numFacturas: 0,
-          numTickets: 0,
-          cliente: invoice.customers?.name || 'N/A'
-        };
-      }
-      acc[month].totalFacturado += Number(invoice.total_amount);
-      acc[month].numFacturas += 1;
-      return acc;
-    }, {});
-
-    tpvRows.forEach((sale) => {
-      const month = format(new Date(sale.created_at), 'MMMM yyyy', { locale: es });
-      if (!monthlyData[month]) {
-        monthlyData[month] = {
-          totalFacturado: 0,
-          numFacturas: 0,
-          numTickets: 0,
-          cliente: sale.customer_name || 'N/A',
-        };
-      }
-      monthlyData[month].totalFacturado += Number(sale.total_amount ?? 0);
-      monthlyData[month].numTickets += 1;
-    });
-
-    return Object.entries(monthlyData).map(([mes, data]) => ({
-      mes,
-      cliente: data.cliente,
-      totalFacturado: data.totalFacturado,
-      numFacturas: data.numFacturas,
-      numTickets: data.numTickets,
-      variacion: 'N/A' // Se podría calcular comparando con el mes anterior
-    }));
-  };
-
-  const fetchFacturacionPorCliente = async () => {
-    let query = supabase
-      .from('invoices')
-      .select(`
-        total_amount,
-        customers:customer_id (name)
-      `);
-
-    query = applyBillingCompanyScope(query);
-
-    const { data, error } = await query;
-
-    if (error) throw error;
-
-    const tpvRows = await fetchSalesWithoutInvoiceRows(companyId!);
-
-    // Agrupar por cliente (facturas + TPV sin factura)
-    const clientData = (data ?? []).reduce((acc: Record<string, { totalFacturado: number; numFacturas: number; numTickets: number }>, invoice) => {
-      const clientName = invoice.customers?.name || 'Cliente Desconocido';
-      if (!acc[clientName]) {
-        acc[clientName] = { totalFacturado: 0, numFacturas: 0, numTickets: 0 };
-      }
-      acc[clientName].totalFacturado += Number(invoice.total_amount);
-      acc[clientName].numFacturas += 1;
-      return acc;
-    }, {});
-
-    tpvRows.forEach((sale) => {
-      const clientName = sale.customer_name || 'Cliente Desconocido';
-      if (!clientData[clientName]) {
-        clientData[clientName] = { totalFacturado: 0, numFacturas: 0, numTickets: 0 };
-      }
-      clientData[clientName].totalFacturado += Number(sale.total_amount ?? 0);
-      clientData[clientName].numTickets += 1;
-    });
-
-    return Object.entries(clientData).map(([cliente, data]) => ({
-      cliente,
-      totalFacturado: data.totalFacturado,
-      numFacturas: data.numFacturas,
-      numTickets: data.numTickets,
-      promedio: data.numFacturas + data.numTickets > 0
-        ? data.totalFacturado / (data.numFacturas + data.numTickets)
-        : 0,
-    }));
-  };
-
-  const fetchVentasPorArticulo = async () => {
-    const { data, error } = await supabase
-      .from('sale_items')
-      .select(`
-        quantity,
-        unit_price,
-        total_price,
-        description,
-        articles:article_id (descripcion, precio_compra)
-      `);
-
-    if (error) throw error;
-
-    // Agrupar por artículo
-    const articleData = data?.reduce((acc: any, item) => {
-      const articleName = item.articles?.descripcion || item.description;
-      if (!acc[articleName]) {
-        acc[articleName] = { 
-          cantidad: 0, 
-          importe: 0, 
-          costoCompra: item.articles?.precio_compra || 0 
-        };
-      }
-      acc[articleName].cantidad += Number(item.quantity);
-      acc[articleName].importe += Number(item.total_price);
-      return acc;
-    }, {});
-
-    return Object.entries(articleData || {}).map(([articulo, data]: [string, any]) => ({
-      articulo,
-      cantidad: data.cantidad,
-      importe: data.importe,
-      margen: data.importe - (data.costoCompra * data.cantidad)
-    }));
-  };
-
-  const fetchListadoClientes = async () => {
-    const { data, error } = await supabase
-      .from('customers')
-      .select('*')
-      .order('name');
-
-    if (error) throw error;
-
-    return data?.map(customer => ({
-      cliente: customer.name,
-      contacto: customer.email || customer.phone || 'N/A',
-      ultimaCompra: 'N/A', // Se necesitaría una consulta adicional
-      totalFacturado: 'N/A', // Se necesitaría una consulta adicional
-      estado: 'Activo'
-    })) || [];
-  };
-
-  const fetchClientesInactivos = async () => {
-    // Obtener clientes que no han tenido facturas en los últimos 90 días
-    const fecha90DiasAtras = new Date();
-    fecha90DiasAtras.setDate(fecha90DiasAtras.getDate() - 90);
-
-    const { data: activeCustomers } = await supabase
-      .from('invoices')
-      .select('customer_id')
-      .gte('issue_date', format(fecha90DiasAtras, 'yyyy-MM-dd'));
-
-    const activeCustomerIds = activeCustomers?.map(inv => inv.customer_id) || [];
-
-    const { data, error } = await supabase
-      .from('customers')
-      .select('*')
-      .not('id', 'in', `(${activeCustomerIds.join(',')})`);
-
-    if (error) throw error;
-
-    return data?.map(customer => ({
-      cliente: customer.name,
-      ultimaFactura: 'Más de 90 días',
-      diasInactivo: '90+',
-      totalHistorico: 'N/A'
-    })) || [];
-  };
-
-  const fetchStockActual = async () => {
-    const { data, error } = await supabase
-      .from('articles')
-      .select('codigo, descripcion, stock_actual, stock_minimo, precio_compra')
-      .order('descripcion');
-
-    if (error) throw error;
-
-    return data?.map(article => ({
-      articulo: article.descripcion,
-      stockActual: article.stock_actual,
-      stockMinimo: article.stock_minimo,
-      valorStock: article.stock_actual * Number(article.precio_compra || 0)
-    })) || [];
-  };
-
-  const fetchFacturasPorPagar = async () => {
-    // Como no tenemos una tabla de facturas de proveedores, usaremos delivery_notes
-    const { data, error } = await supabase
-      .from('delivery_notes')
-      .select(`
-        id,
-        number,
-        issue_date,
-        total_amount,
-        suppliers:supplier_id (name)
-      `)
-      .eq('status', 'pending');
-
-    if (error) throw error;
-
-    return data?.map(note => ({
-      proveedor: note.suppliers?.name || 'N/A',
-      factura: note.number,
-      fecha: format(new Date(note.issue_date), 'dd/MM/yyyy'),
-      vencimiento: format(new Date(note.issue_date), 'dd/MM/yyyy'), // Assuming same date for now
-      importe: note.total_amount
-    })) || [];
-  };
-
-  const fetchPresupuestosAceptados = async () => {
-    console.log('Filtros aplicados para presupuestos aceptados:', filters);
-    
-    let query = supabase
-      .from('quotes')
-      .select(`
-        id,
-        number,
-        issue_date,
-        total_amount,
-        status,
-        invoiced,
-        customers:customer_id (name)
-      `)
-      .eq('status', 'accepted');
-
-    // Aplicar filtro por cliente si está seleccionado
-    if (filters.cliente && filters.cliente !== "todos") {
-      console.log('Aplicando filtro por cliente en presupuestos aceptados:', filters.cliente);
-      query = query.eq('customer_id', filters.cliente);
-    }
-
-    // Aplicar filtros por fecha
-    if (filters.fechaDesde) {
-      query = query.gte('issue_date', format(filters.fechaDesde, 'yyyy-MM-dd'));
-    }
-    if (filters.fechaHasta) {
-      query = query.lte('issue_date', format(filters.fechaHasta, 'yyyy-MM-dd'));
-    }
-
-    // Aplicar filtro por estado si está especificado
-    if (filters.estado && filters.estado !== "todos") {
-      if (filters.estado === "facturado") {
-        query = query.eq('invoiced', true);
-      } else if (filters.estado === "pendiente-facturar") {
-        query = query.eq('invoiced', false);
-      }
-    }
-
-    const { data, error } = await query;
-    if (error) {
-      console.error('Error al obtener presupuestos aceptados:', error);
-      throw error;
-    }
-
-    console.log('Datos de presupuestos aceptados obtenidos:', data);
-
-    return data?.map(quote => ({
-      numero: quote.number,
-      cliente: quote.customers?.name || 'N/A',
-      fecha: format(new Date(quote.issue_date), 'dd/MM/yyyy'),
-      importe: quote.total_amount,
-      estado: quote.invoiced ? 'Facturado' : 'Pendiente de Facturar'
-    })) || [];
-  };
-
-  const fetchPresupuestosPendientes = async () => {
-    console.log('Filtros aplicados para presupuestos pendientes:', filters);
-    
-    let query = supabase
-      .from('quotes')
-      .select(`
-        id,
-        number,
-        issue_date,
-        valid_until,
-        total_amount,
-        status,
-        customers:customer_id (name)
-      `)
-      .eq('status', 'sent');
-
-    // Aplicar filtro por cliente si está seleccionado
-    if (filters.cliente && filters.cliente !== "todos") {
-      console.log('Aplicando filtro por cliente en presupuestos pendientes:', filters.cliente);
-      query = query.eq('customer_id', filters.cliente);
-    }
-
-    // Aplicar filtros por fecha
-    if (filters.fechaDesde) {
-      query = query.gte('issue_date', format(filters.fechaDesde, 'yyyy-MM-dd'));
-    }
-    if (filters.fechaHasta) {
-      query = query.lte('issue_date', format(filters.fechaHasta, 'yyyy-MM-dd'));
-    }
-
-    const { data, error } = await query;
-    if (error) {
-      console.error('Error al obtener presupuestos pendientes:', error);
-      throw error;
-    }
-
-    console.log('Datos de presupuestos pendientes obtenidos:', data);
-
-    return data?.map(quote => {
-      const fechaEnvio = new Date(quote.issue_date);
-      const fechaVencimiento = new Date(quote.valid_until);
-      const hoy = new Date();
-      const diasPendiente = Math.floor((hoy.getTime() - fechaEnvio.getTime()) / (1000 * 60 * 60 * 24));
-      const vencido = hoy > fechaVencimiento;
-
-      return {
-        numero: quote.number,
-        cliente: quote.customers?.name || 'N/A',
-        diasPendiente: diasPendiente,
-        importe: quote.total_amount,
-        acciones: vencido ? 'Vencido' : 'Vigente'
-      };
-    }) || [];
-  };
-
-  const fetchRatioConversion = async () => {
-    console.log('Filtros aplicados para ratio de conversión:', filters);
-    
-    let query = supabase
-      .from('quotes')
-      .select(`
-        id,
-        issue_date,
-        status,
-        total_amount,
-        customers:customer_id (name)
-      `);
-
-    // Aplicar filtro por cliente si está seleccionado
-    if (filters.cliente && filters.cliente !== "todos") {
-      console.log('Aplicando filtro por cliente en ratio de conversión:', filters.cliente);
-      query = query.eq('customer_id', filters.cliente);
-    }
-
-    // Aplicar filtros por fecha
-    if (filters.fechaDesde) {
-      query = query.gte('issue_date', format(filters.fechaDesde, 'yyyy-MM-dd'));
-    }
-    if (filters.fechaHasta) {
-      query = query.lte('issue_date', format(filters.fechaHasta, 'yyyy-MM-dd'));
-    }
-
-    const { data, error } = await query;
-    if (error) {
-      console.error('Error al obtener ratio de conversión:', error);
-      throw error;
-    }
-
-    console.log('Datos de ratio de conversión obtenidos:', data);
-
-    // Agrupar por período (mes)
-    const monthlyData = data?.reduce((acc: any, quote) => {
-      const month = format(new Date(quote.issue_date), 'MMMM yyyy', { locale: es });
-      if (!acc[month]) {
-        acc[month] = { 
-          enviados: 0, 
-          aceptados: 0,
-          totalImporte: 0,
-          cliente: quote.customers?.name || 'Varios'
-        };
-      }
-      acc[month].enviados += 1;
-      if (quote.status === 'accepted') {
-        acc[month].aceptados += 1;
-        acc[month].totalImporte += Number(quote.total_amount);
-      }
-      return acc;
-    }, {});
-
-    return Object.entries(monthlyData || {}).map(([periodo, data]: [string, any]) => ({
-      periodo,
-      enviados: data.enviados,
-      aceptados: data.aceptados,
-      conversion: data.enviados > 0 ? ((data.aceptados / data.enviados) * 100).toFixed(1) + '%' : '0%'
-    }));
-  };
-
-  const filteredData = reportData?.filter((item: any) =>
+  const filteredData = reportData?.filter((item: Record<string, unknown>) =>
     Object.values(item).some(value => 
       value?.toString().toLowerCase().includes(searchTerm.toLowerCase())
     )
@@ -628,15 +114,15 @@ export const ReporteResults: React.FC<ReporteResultsProps> = ({ report, filters,
     // Aquí implementarías las acciones específicas
   };
 
-  const renderTableRow = (item: any, index: number) => {
-    const keys = Object.keys(item);
+  const rowKeys = REPORT_ROW_KEYS[report.id] ?? [];
+
+  const renderTableRow = (item: Record<string, unknown>, index: number) => {
+    const keys = rowKeys.length > 0 ? rowKeys : Object.keys(item);
     return (
       <TableRow key={index}>
-        {keys.map((key, cellIndex) => (
-          <TableCell key={cellIndex} className={cellIndex === 0 ? "font-medium" : ""}>
-            {key === 'importe' || key === 'totalFacturado' || key === 'valorStock' || key === 'promedio'
-              ? `€${Number(item[key]).toFixed(2)}` 
-              : item[key]}
+        {keys.map((key) => (
+          <TableCell key={key} className={key === keys[0] ? 'font-medium' : ''}>
+            {formatReportCell(key, item[key])}
           </TableCell>
         ))}
         <TableCell className="text-right">
@@ -665,6 +151,10 @@ export const ReporteResults: React.FC<ReporteResultsProps> = ({ report, filters,
     return (
       <Dialog open={true} onOpenChange={onBack}>
         <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="sr-only">Cargando reporte</DialogTitle>
+            <DialogDescription className="sr-only">Cargando datos del reporte</DialogDescription>
+          </DialogHeader>
           <div className="flex items-center justify-center py-8">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
             <span className="ml-3">Cargando datos del reporte...</span>
@@ -700,6 +190,7 @@ export const ReporteResults: React.FC<ReporteResultsProps> = ({ report, filters,
               </Button>
             </div>
           </DialogTitle>
+          <DialogDescription className="sr-only">{report.description}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-6">

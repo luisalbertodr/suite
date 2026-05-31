@@ -1,12 +1,18 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { invokeWhatsappProxy } from '@/hooks/useWhatsappConfig';
-import { isSystemChatJid } from '@/components/whatsapp/whatsappUtils';
+import {
+  isSystemChatJid,
+  isGroupJid,
+  hasResolvedGroupName,
+} from '@/components/whatsapp/whatsappUtils';
 import type { Database } from '@/integrations/supabase/types';
 
 export type WhatsappChatRow = Database['public']['Tables']['whatsapp_chats']['Row'];
+
+const BG_SYNC_INTERVAL_MS = 4000;
 
 export const useWhatsappChats = () => {
   const queryClient = useQueryClient();
@@ -72,31 +78,56 @@ export const useWhatsappChats = () => {
     onSuccess: invalidate,
   });
 
+  const syncHistoryChunk = useMutation({
+    mutationFn: async (messageOffset = 0) => {
+      if (!companyId) throw new Error('Sin empresa activa');
+      return invokeWhatsappProxy<{
+        ok: boolean;
+        messages: number;
+        next_offset: number | null;
+        message_offset?: number | null;
+        warnings?: string[];
+      }>({
+        action: 'messages.sync_history',
+        company_id: companyId,
+        message_offset: messageOffset,
+        refresh_chats: false,
+      });
+    },
+    onSuccess: () => {
+      invalidate();
+      queryClient.invalidateQueries({ queryKey: ['whatsapp-messages', companyId] });
+    },
+  });
+
   const syncHistoryFromWaha = useMutation({
     mutationFn: async () => {
       if (!companyId) throw new Error('Sin empresa activa');
-      let offset = 0;
+      let messageOffset = 0;
       let totalMessages = 0;
       let iterations = 0;
-      while (iterations < 30) {
+      while (iterations < 120) {
         const res = await invokeWhatsappProxy<{
           ok: boolean;
           messages: number;
           next_offset: number | null;
+          message_offset?: number | null;
           warnings?: string[];
         }>({
           action: 'messages.sync_history',
           company_id: companyId,
-          limit_per_chat: 200,
-          max_chats: 25,
-          offset,
-          refresh_chats: offset === 0,
+          message_offset: messageOffset,
+          refresh_chats: messageOffset === 0 && iterations === 0,
         });
         totalMessages += res.messages ?? 0;
-        if (res.next_offset == null) {
+        if (res.message_offset != null) {
+          messageOffset = res.message_offset;
+        } else {
+          messageOffset = 0;
+        }
+        if (res.next_offset == null && res.message_offset == null) {
           return { ok: true, messages: totalMessages, warnings: res.warnings };
         }
-        offset = res.next_offset;
         iterations += 1;
       }
       return { ok: true, messages: totalMessages };
@@ -107,12 +138,124 @@ export const useWhatsappChats = () => {
     },
   });
 
-  const refreshAllFromWaha = useMutation({
-    mutationFn: async () => {
-      await refreshFromWaha.mutateAsync();
-      return syncHistoryFromWaha.mutateAsync();
+  const syncPicturesFromWaha = useMutation({
+    mutationFn: async (chatIds?: string[]) => {
+      if (!companyId) throw new Error('Sin empresa activa');
+      return invokeWhatsappProxy<{ ok: boolean; count: number }>({
+        action: 'pictures.sync_batch',
+        company_id: companyId,
+        chat_ids: chatIds?.slice(0, 1),
+        limit: 1,
+      });
     },
+    onSuccess: invalidate,
   });
+
+  const syncGroupNameFromWaha = useMutation({
+    mutationFn: async (chatId: string) => {
+      if (!companyId) throw new Error('Sin empresa activa');
+      return invokeWhatsappProxy<{ ok: boolean; updated?: boolean; name?: string }>({
+        action: 'groups.sync_name',
+        company_id: companyId,
+        chat_id: chatId,
+      });
+    },
+    onSuccess: invalidate,
+  });
+
+  const refreshAllFromWaha = useMutation({
+    mutationFn: async () => refreshFromWaha.mutateAsync(),
+  });
+
+  const bgMessageOffsetRef = useRef(0);
+  const bgBusyRef = useRef(false);
+  const unsyncedCount = (chatsQuery.data ?? []).filter((c) => !c.history_synced_at).length;
+  const missingPictureChatIds = useMemo(
+    () =>
+      (chatsQuery.data ?? [])
+        .filter(
+          (c) =>
+            !c.profile_picture_url?.includes('/storage/v1/object/public/whatsapp-avatars/'),
+        )
+        .map((c) => c.chat_id),
+    [chatsQuery.data],
+  );
+  const missingGroupNameChatIds = useMemo(
+    () =>
+      (chatsQuery.data ?? [])
+        .filter(
+          (c) =>
+            (c.is_group || isGroupJid(c.chat_id)) &&
+            !hasResolvedGroupName(c.name, c.raw),
+        )
+        .map((c) => c.chat_id),
+    [chatsQuery.data],
+  );
+
+  useEffect(() => {
+    if (!companyId) return;
+
+    const runNext = () => {
+      if (bgBusyRef.current) return;
+      if (
+        syncHistoryChunk.isPending ||
+        syncGroupNameFromWaha.isPending ||
+        syncPicturesFromWaha.isPending ||
+        refreshFromWaha.isPending
+      ) {
+        return;
+      }
+
+      if (unsyncedCount > 0) {
+        bgBusyRef.current = true;
+        syncHistoryChunk.mutate(bgMessageOffsetRef.current, {
+          onSuccess: (res) => {
+            if (res.message_offset != null) {
+              bgMessageOffsetRef.current = res.message_offset;
+            } else {
+              bgMessageOffsetRef.current = 0;
+            }
+          },
+          onSettled: () => {
+            bgBusyRef.current = false;
+          },
+          onError: () => undefined,
+        });
+        return;
+      }
+
+      const nextGroup = missingGroupNameChatIds[0];
+      if (nextGroup) {
+        bgBusyRef.current = true;
+        syncGroupNameFromWaha.mutate(nextGroup, {
+          onSettled: () => {
+            bgBusyRef.current = false;
+          },
+          onError: () => undefined,
+        });
+        return;
+      }
+
+      const nextPicture = missingPictureChatIds[0];
+      if (nextPicture) {
+        bgBusyRef.current = true;
+        syncPicturesFromWaha.mutate([nextPicture], {
+          onSettled: () => {
+            bgBusyRef.current = false;
+          },
+          onError: () => undefined,
+        });
+      }
+    };
+
+    const timer = setInterval(runNext, BG_SYNC_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [
+    companyId,
+    unsyncedCount,
+    missingGroupNameChatIds.join('|'),
+    missingPictureChatIds.join('|'),
+  ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const markRead = useMutation({
     mutationFn: async (chatId: string) => {
@@ -135,6 +278,8 @@ export const useWhatsappChats = () => {
     refreshFromWaha,
     syncHistoryFromWaha,
     refreshAllFromWaha,
+    syncPicturesFromWaha,
+    syncGroupNameFromWaha,
     markRead,
   };
 };

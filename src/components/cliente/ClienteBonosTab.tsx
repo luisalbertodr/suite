@@ -170,10 +170,32 @@ const emptyForm = (): BonoFormState => ({
   precio_total: 0,
   sesiones_totales: 1,
   fecha_vencimiento: '',
-  bonus_definition_id: 'none',
+  bonus_definition_id: '',
   coverage_items: [],
   payment_mode: 'full',
 });
+
+const applyDefinitionToForm = (selected: any): Partial<BonoFormState> => {
+  const mappedItems: CoverageItem[] = (selected.bonus_definition_items ?? [])
+    .filter((it: any) => it?.notes !== 'legacy-bonus-article')
+    .map((it: any) => ({
+      coverage_type: it.coverage_type,
+      article_id: it.article_id ?? null,
+      family_code: it.family_code ?? null,
+      covered_quantity: Number(it.covered_quantity ?? 1),
+      label: it?.articles
+        ? `${it.articles.codigo ? `${it.articles.codigo} - ` : ''}${it.articles.descripcion}`
+        : (it.family_code ? `Familia ${it.family_code}` : 'Cobertura'),
+    }));
+  return {
+    bonus_definition_id: String(selected.id),
+    nombre: selected.name ?? '',
+    descripcion: selected.description ?? '',
+    precio_total: Number(selected.default_price ?? 0),
+    sesiones_totales: Number(selected.default_total_sessions ?? 1),
+    coverage_items: mappedItems,
+  };
+};
 
 const bonoToForm = (bono: BonusRow): BonoFormState => ({
   nombre: bono.nombre ?? '',
@@ -455,7 +477,7 @@ export const ClienteBonosTab: React.FC<Props> = ({ customerId }) => {
       queryClient.invalidateQueries({ queryKey: ['customer_day_timeline', customerId] });
       setShowNewForm(false);
       resetForm();
-      toast({ title: editingId ? 'Bono actualizado' : 'Bono creado' });
+      toast({ title: editingId ? 'Bono actualizado' : 'Bono asignado al cliente' });
     },
     onError: () => toast({ title: 'Error', variant: 'destructive' }),
   });
@@ -535,65 +557,89 @@ export const ClienteBonosTab: React.FC<Props> = ({ customerId }) => {
     onError: (e) => toast({ title: (e as Error).message, variant: 'destructive' }),
   });
 
-  const renderBonoForm = (opts: { onCancel: () => void; submitLabel: string; embedded?: boolean }) => (
+  const renderBonoForm = (opts: {
+    onCancel: () => void;
+    submitLabel: string;
+    embedded?: boolean;
+    mode?: 'assign' | 'edit';
+  }) => {
+    const isAssign = opts.mode === 'assign';
+    const hasDefinition = Boolean(form.bonus_definition_id && form.bonus_definition_id !== 'none');
+
+    return (
     <div className={cn('space-y-4', opts.embedded && 'pt-3 border-t')}>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <Label>Plantilla legacy</Label>
+        <div className={isAssign ? 'md:col-span-2' : undefined}>
+          <Label>{isAssign ? 'Tipo de bono *' : 'Tipo de bono (plantilla)'}</Label>
           <Select
-            value={form.bonus_definition_id}
+            value={hasDefinition ? form.bonus_definition_id : undefined}
             onValueChange={(v) => {
               const selected = definitions?.find((d: any) => d.id === v);
-              if (!selected || v === 'none') {
-                setForm((prev) => ({ ...prev, bonus_definition_id: 'none' }));
+              if (!selected) {
+                if (!isAssign) {
+                  setForm((prev) => ({ ...prev, bonus_definition_id: 'none' }));
+                }
                 return;
               }
-              const mappedItems: CoverageItem[] = (selected.bonus_definition_items ?? []).map((it: any) => ({
-                coverage_type: it.coverage_type,
-                article_id: it.article_id ?? null,
-                family_code: it.family_code ?? null,
-                covered_quantity: Number(it.covered_quantity ?? 1),
-                label: it?.articles
-                  ? `${it.articles.codigo ? `${it.articles.codigo} - ` : ''}${it.articles.descripcion}`
-                  : (it.family_code ? `Familia ${it.family_code}` : 'Cobertura legacy'),
-              }));
-              setForm((prev) => ({
-                ...prev,
-                bonus_definition_id: v,
-                nombre: selected.name ?? prev.nombre,
-                descripcion: selected.description ?? prev.descripcion,
-                precio_total: Number(selected.default_price ?? prev.precio_total),
-                sesiones_totales: Number(selected.default_total_sessions ?? prev.sesiones_totales),
-                coverage_items: mappedItems,
-              }));
+              setForm((prev) => ({ ...prev, ...applyDefinitionToForm(selected) }));
             }}
           >
             <SelectTrigger>
-              <SelectValue placeholder="Selecciona una plantilla" />
+              <SelectValue placeholder={isAssign ? 'Selecciona un tipo de bono' : 'Sin plantilla'} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="none">Sin plantilla</SelectItem>
+              {!isAssign && <SelectItem value="none">Sin plantilla</SelectItem>}
               {(definitions ?? []).map((d: any) => (
                 <SelectItem key={d.id} value={d.id}>
-                  {d.name}
+                  {d.name}{d.code ? ` (${d.code})` : ''}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
+          {isAssign && !(definitions ?? []).length && (
+            <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
+              No hay tipos de bono definidos. Créalos en Artículos → Bonos → Nuevo artículo (categoría Bono).
+            </p>
+          )}
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <Label>Nombre *</Label>
-          <Input value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} placeholder="Ej: Bono 10 sesiones" />
+      {isAssign && hasDefinition && (
+        <div className="rounded-lg border bg-muted/30 p-3 space-y-1 text-sm">
+          <p className="font-medium">{form.nombre}</p>
+          {form.descripcion && <p className="text-muted-foreground text-xs">{form.descripcion}</p>}
+          <p className="text-xs text-muted-foreground">
+            {form.precio_total.toFixed(2)} € · {form.sesiones_totales} sesiones
+            {form.coverage_items.length > 0 && ` · ${coverageSummary(form.coverage_items)}`}
+          </p>
         </div>
+      )}
+      <div className="grid grid-cols-2 gap-4">
+        {!isAssign && (
+          <div>
+            <Label>Nombre *</Label>
+            <Input value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} placeholder="Ej: Bono 10 sesiones" />
+          </div>
+        )}
         <div>
           <Label>Precio Total (€)</Label>
-          <Input type="number" value={form.precio_total} onChange={(e) => setForm({ ...form, precio_total: Number(e.target.value) })} />
+          <Input
+            type="number"
+            value={form.precio_total}
+            onChange={(e) => setForm({ ...form, precio_total: Number(e.target.value) })}
+            readOnly={isAssign}
+            className={isAssign ? 'bg-muted' : undefined}
+          />
         </div>
         <div>
           <Label>Sesiones Totales</Label>
-          <Input type="number" min="1" value={form.sesiones_totales} onChange={(e) => setForm({ ...form, sesiones_totales: Number(e.target.value) })} />
+          <Input
+            type="number"
+            min="1"
+            value={form.sesiones_totales}
+            onChange={(e) => setForm({ ...form, sesiones_totales: Number(e.target.value) })}
+            readOnly={isAssign}
+            className={isAssign ? 'bg-muted' : undefined}
+          />
         </div>
         <div>
           <Label>Fecha Vencimiento</Label>
@@ -614,16 +660,19 @@ export const ClienteBonosTab: React.FC<Props> = ({ customerId }) => {
             </SelectContent>
           </Select>
         </div>
-        <div>
-          <Label>Descripción</Label>
-          <Input value={form.descripcion} onChange={(e) => setForm({ ...form, descripcion: e.target.value })} placeholder="Opcional" />
-        </div>
+        {!isAssign && (
+          <div>
+            <Label>Descripción</Label>
+            <Input value={form.descripcion} onChange={(e) => setForm({ ...form, descripcion: e.target.value })} placeholder="Opcional" />
+          </div>
+        )}
       </div>
       {form.payment_mode === 'split_60_40' && (
         <p className="text-xs text-muted-foreground">
           Se cobrará ahora el 60% ({(Number(form.precio_total || 0) * 0.6).toFixed(2)} €) y el 40% ({(Number(form.precio_total || 0) * 0.4).toFixed(2)} €) al llegar a mitad de sesiones.
         </p>
       )}
+      {!isAssign && (
       <div className="space-y-2">
         <Label>Cobertura del bono</Label>
         {!form.coverage_items.length ? (
@@ -768,8 +817,21 @@ export const ClienteBonosTab: React.FC<Props> = ({ customerId }) => {
           <Plus className="w-3.5 h-3.5 mr-1" /> Añadir componente
         </Button>
       </div>
+      )}
       <div className="flex gap-2">
-        <Button onClick={() => saveMutation.mutate()} disabled={!form.nombre || saveMutation.isPending}>
+        <Button
+          onClick={() => {
+            if (isAssign && !hasDefinition) {
+              toast({ title: 'Selecciona un tipo de bono', variant: 'destructive' });
+              return;
+            }
+            saveMutation.mutate();
+          }}
+          disabled={
+            saveMutation.isPending ||
+            (isAssign ? !hasDefinition : !form.nombre)
+          }
+        >
           {opts.submitLabel}
         </Button>
         <Button variant="outline" onClick={opts.onCancel} disabled={saveMutation.isPending}>
@@ -777,7 +839,8 @@ export const ClienteBonosTab: React.FC<Props> = ({ customerId }) => {
         </Button>
       </div>
     </div>
-  );
+    );
+  };
 
   const renderBonoCard = (bono: BonusRow) => {
     const remaining = bonoRemainingSessions(bono);
@@ -905,6 +968,7 @@ export const ClienteBonosTab: React.FC<Props> = ({ customerId }) => {
                 onCancel: cancelEditing,
                 submitLabel: 'Guardar cambios',
                 embedded: true,
+                mode: 'edit',
               })}
             </>
           )}
@@ -919,7 +983,7 @@ export const ClienteBonosTab: React.FC<Props> = ({ customerId }) => {
         <h3 className="text-lg font-semibold">Bonos y Sesiones</h3>
         <Button size="sm" onClick={openNew} disabled={Boolean(editingId)}>
           {showNewForm ? <X className="w-4 h-4 mr-1" /> : <Plus className="w-4 h-4 mr-1" />}
-          {showNewForm ? 'Cancelar' : 'Nuevo Bono'}
+          {showNewForm ? 'Cancelar' : 'Asignar Bono'}
         </Button>
       </div>
 
@@ -928,7 +992,8 @@ export const ClienteBonosTab: React.FC<Props> = ({ customerId }) => {
           <CardContent className="pt-4 pb-4">
             {renderBonoForm({
               onCancel: () => { setShowNewForm(false); resetForm(); },
-              submitLabel: 'Crear Bono',
+              submitLabel: 'Asignar Bono',
+              mode: 'assign',
             })}
           </CardContent>
         </Card>

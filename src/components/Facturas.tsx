@@ -271,7 +271,6 @@ export const Facturas: React.FC = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Facturas</h1>
-          <p className="text-gray-600">Gestiona tus facturas y su integración con Verifactu</p>
         </div>
         <Button onClick={() => setShowForm(true)}>
           <Plus className="w-4 h-4 mr-2" />

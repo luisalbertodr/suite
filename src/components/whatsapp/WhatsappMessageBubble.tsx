@@ -21,6 +21,7 @@ import {
   formatGroupSenderLabel,
   isExternalWhatsappCdnUrl,
   messagePreviewText,
+  lookupGroupSenderLabel,
   resolveGroupSenderJidFromRaw,
   waTheme,
 } from './whatsappUtils';
@@ -42,6 +43,7 @@ import { Button } from '@/components/ui/button';
 interface Props {
   message: WhatsappMessageRow;
   isGroupChat?: boolean;
+  senderDirectory?: Record<string, string>;
   quotedMessage?: WhatsappMessageRow | null;
   quotedPreview?: string | null;
   onReply?: (message: WhatsappMessageRow) => void;
@@ -241,12 +243,18 @@ function MediaContent({ message }: { message: WhatsappMessageRow }) {
   );
 }
 
-function senderLabel(message: WhatsappMessageRow, isGroupChat?: boolean): string | null {
+function senderLabel(
+  message: WhatsappMessageRow,
+  isGroupChat?: boolean,
+  senderDirectory?: Record<string, string>,
+): string | null {
   if (message.from_me) return null;
   const pushName = extractPushNameFromRaw(message.raw);
   const jid = isGroupChat
     ? resolveGroupSenderJidFromRaw(message.raw, message.from_jid) ?? message.from_jid
     : message.from_jid;
+  const fromDirectory = lookupGroupSenderLabel(senderDirectory ?? {}, jid, message.raw);
+  if (fromDirectory) return fromDirectory;
   return formatGroupSenderLabel(jid, pushName);
 }
 
@@ -266,6 +274,7 @@ function resolveQuotedPreview(
 export const WhatsappMessageBubble: React.FC<Props> = ({
   message,
   isGroupChat,
+  senderDirectory,
   quotedMessage,
   quotedPreview,
   onReply,
@@ -281,7 +290,9 @@ export const WhatsappMessageBubble: React.FC<Props> = ({
     message.caption?.trim() ||
     rawText ||
     '';
-  const groupSender = isGroupChat && !isOut ? senderLabel(message, isGroupChat) : null;
+  const groupSender = isGroupChat && !isOut
+    ? senderLabel(message, isGroupChat, senderDirectory)
+    : null;
   const quoteText = resolveQuotedPreview(message, quotedMessage, quotedPreview);
   const canForward = !!message.waha_message_id;
   const hasActions = !!(onReply || onForward);

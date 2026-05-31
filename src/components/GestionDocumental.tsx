@@ -260,7 +260,6 @@ export const GestionDocumental: React.FC = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Gestión Documental</h1>
-          <p className="text-gray-600">Organiza y gestiona todos tus documentos</p>
         </div>
         <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}>
           <DialogTrigger asChild>

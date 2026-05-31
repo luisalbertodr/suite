@@ -34,7 +34,7 @@ interface Report {
   columns: string[];
 }
 
-export const Reportes: React.FC = () => {
+export const Reportes: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const [selectedReport, setSelectedReport] = useState<Report | null>(null);
   const [showModal, setShowModal] = useState(false);
 
@@ -238,13 +238,12 @@ export const Reportes: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Reportes</h1>
-          <p className="text-gray-600 mt-2">Centro de reportes y análisis empresarial</p>
+    <div className={embedded ? 'space-y-6' : 'space-y-6'}>
+      {!embedded && (
+        <div className="flex justify-between items-center">
+          <h1 className="text-3xl font-bold text-foreground">Reportes</h1>
         </div>
-      </div>
+      )}
 
       <div className="space-y-8">
         {reportCategories.map((category) => {
@@ -255,7 +254,7 @@ export const Reportes: React.FC = () => {
                 <div className={`p-2 rounded-lg bg-gradient-to-r ${category.color}`}>
                   <CategoryIcon className="w-6 h-6 text-white" />
                 </div>
-                <h2 className="text-2xl font-semibold text-gray-900">{category.title}</h2>
+                <h2 className="text-xl font-semibold text-foreground">{category.title}</h2>
               </div>
               
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -274,18 +273,18 @@ export const Reportes: React.FC = () => {
                         </CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <p className="text-gray-600 text-sm mb-3">{report.description}</p>
+                        <p className="text-muted-foreground text-sm mb-3">{report.description}</p>
                         <div className="flex flex-wrap gap-1">
                           {report.columns.slice(0, 3).map((column, index) => (
                             <span 
                               key={index}
-                              className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded"
+                              className="px-2 py-1 bg-muted text-muted-foreground text-xs rounded"
                             >
                               {column}
                             </span>
                           ))}
                           {report.columns.length > 3 && (
-                            <span className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded">
+                            <span className="px-2 py-1 bg-muted text-muted-foreground text-xs rounded">
                               +{report.columns.length - 3} más
                             </span>
                           )}

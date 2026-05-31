@@ -38,10 +38,11 @@ export const Whatsapp: React.FC = () => {
     sessionStatus,
     configureWebhook,
   } = useWhatsappConfig();
-  const { chats, refreshAllFromWaha, markRead } = useWhatsappChats();
+  const { chats, refreshAllFromWaha, refreshFromWaha, markRead } = useWhatsappChats();
   const { ensureChat } = useWhatsappChatLink();
   const { customerNameById, leadNameById, leadMetaById } = useWhatsappLinkLookup(chats);
-  const { customerIdByChatId, customerNameByChatId } = useWhatsappCustomerMatch(chats);
+  const { customerIdByChatId, customerNameByChatId, phoneLabelByChatId } =
+    useWhatsappCustomerMatch(chats);
   useWhatsappAutoRelink(chats);
 
   const resolveCustomerId = (chat: WhatsappChatRow) =>
@@ -209,13 +210,13 @@ export const Whatsapp: React.FC = () => {
           onRefresh={() => {
             refreshAllFromWaha.mutate(undefined, {
               onSuccess: (res) => {
-                const n = res?.messages ?? 0;
+                const n = res?.count ?? 0;
                 toast({
-                  title: 'Histórico sincronizado',
+                  title: 'Chats actualizados',
                   description:
                     n > 0
-                      ? `${n} mensajes importados desde Waha.`
-                      : 'Chats actualizados. No había mensajes nuevos en Waha.',
+                      ? `${n} conversaciones sincronizadas desde Waha. El historial se importa en segundo plano.`
+                      : 'Lista de chats actualizada. El historial se importa en segundo plano.',
                 });
               },
               onError: (e) => {
@@ -233,6 +234,7 @@ export const Whatsapp: React.FC = () => {
           customerNameById={customerNameById}
           customerIdByChatId={customerIdByChatId}
           customerNameByChatId={customerNameByChatId}
+          phoneLabelByChatId={phoneLabelByChatId}
           leadNameById={leadNameById}
           leadMetaById={leadMetaById}
           sessionPushName={config.me_pushname}
@@ -243,7 +245,7 @@ export const Whatsapp: React.FC = () => {
           {showConnectionPanel ? (
             <WhatsappSessionPanel
               config={config}
-              onConnected={() => refreshAllFromWaha.mutate()}
+              onConnected={() => refreshFromWaha.mutate()}
             />
           ) : selectedChat ? (
               <WhatsappChatView
@@ -261,6 +263,7 @@ export const Whatsapp: React.FC = () => {
                     : undefined
                 }
                 leadNameById={leadNameById}
+                phoneLabelByChatId={phoneLabelByChatId}
                 onMarkRead={(id) => markRead.mutate(id)}
                 onCreateCustomer={
                   resolveCustomerId(selectedChat)
@@ -293,7 +296,7 @@ export const Whatsapp: React.FC = () => {
           defaultCountryCode={config.default_country_code}
           onCreated={(jid) => {
             setSelectedChatId(jid);
-            refreshAllFromWaha.mutate();
+            refreshFromWaha.mutate();
           }}
         />
         <WhatsappCreateCustomerDialog

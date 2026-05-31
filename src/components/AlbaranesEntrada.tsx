@@ -311,7 +311,6 @@ export const AlbaranesEntrada: React.FC = () => {
         <div className="flex justify-between items-center">
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Albaranes de Entrada</h1>
-            <p className="text-gray-600 mt-2">Gestión de albaranes de recepción de mercancía</p>
           </div>
           <div className="flex space-x-2">
             <Button 

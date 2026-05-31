@@ -511,12 +511,6 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ onBack }) => {
               Historial de Ventas
             </h1>
 
-            <p className="text-sm text-gray-600 mt-1">
-
-              Por defecto últimos 30 días · {PAGE_SIZE} por página · Ticket = cobro TPV; factura = documento fiscal (se emite automáticamente si hay cliente vinculado)
-
-            </p>
-
           </div>
 
         </div>

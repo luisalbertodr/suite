@@ -128,7 +128,6 @@ export const Empresas: React.FC = () => {
             <Building2 className="w-8 h-8 mr-3 text-blue-600" />
             Mi Empresa
           </h1>
-          <p className="text-gray-600 mt-2">Información de tu empresa</p>
         </div>
         {company && (
           <Button 

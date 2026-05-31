@@ -19,12 +19,16 @@ import {
   formatMetaLeadLabel,
   displayNameForChat,
   findMessageByWahaId,
+  buildGroupSenderDirectory,
   isGroupJid,
+  isLidJid,
   isSystemChatJid,
   isRecentMetaLead,
   jidToDisplay,
   jidsSameContact,
   isPhoneJid,
+  resolveGroupSenderJidFromRaw,
+  resolvePhoneLabelForChat,
   WA_CHAT_WALLPAPER,
   waTheme,
   type MetaLeadInfo,
@@ -39,6 +43,7 @@ interface Props {
   leadName?: string;
   leadMeta?: MetaLeadInfo;
   leadNameById?: Record<string, string>;
+  phoneLabelByChatId?: Record<string, string>;
   onMarkRead?: (chatId: string) => void;
   onCreateCustomer?: () => void;
 }
@@ -50,6 +55,7 @@ export const WhatsappChatView: React.FC<Props> = ({
   leadName,
   leadMeta,
   leadNameById = {},
+  phoneLabelByChatId = {},
   onMarkRead,
   onCreateCustomer,
 }) => {
@@ -76,10 +82,13 @@ export const WhatsappChatView: React.FC<Props> = ({
   const {
     messages,
     isLoading,
+    isSyncingHistory,
     refreshFromWaha,
     sendMessage,
     forwardMessage,
-  } = useWhatsappMessages(chat.chat_id, relatedChatIds);
+  } = useWhatsappMessages(chat.chat_id, relatedChatIds, {
+    historySyncedAt: chat.history_synced_at,
+  });
   const scrollRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const [replyTo, setReplyTo] = useState<WhatsappMessageRow | null>(null);
@@ -92,14 +101,11 @@ export const WhatsappChatView: React.FC<Props> = ({
     setForwardOpen(false);
   }, [chat.chat_id]);
 
-  // Cuando entramos al chat, marcamos como leído y pedimos mensajes frescos.
+  // Cuando entramos al chat, marcamos como leído (la sync la gestiona useWhatsappMessages).
   useEffect(() => {
     if (!chat.chat_id || companyLoading || !companyId) return;
     if ((chat.unread_count ?? 0) > 0) onMarkRead?.(chat.chat_id);
-    // Trae mensajes frescos al abrir el chat (refresh silencioso)
-    refreshFromWaha.mutate(undefined, { onError: () => undefined });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chat.chat_id, companyId, companyLoading]);
+  }, [chat.chat_id, chat.unread_count, companyId, companyLoading, onMarkRead]);
 
   // Auto-scroll al final cuando llegan mensajes
   useEffect(() => {
@@ -155,13 +161,60 @@ export const WhatsappChatView: React.FC<Props> = ({
     }
   };
 
-  const displayName = displayNameForChat(chat.chat_id, chat.name, leadName);
+  const displayName = displayNameForChat(
+    chat.chat_id,
+    chat.name,
+    leadName ?? customerName,
+    chat.raw,
+  );
   const isGroup = chat.is_group || isGroupJid(chat.chat_id);
-  const phoneLabel = !isGroup ? jidToDisplay(chat.chat_id) : '';
+
+  const relatedPhoneChatIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const c of chats) {
+      if (c.chat_id === chat.chat_id) continue;
+      if (jidsSameContact(c.chat_id, chat.chat_id)) ids.push(c.chat_id);
+      if (
+        chat.customer_id &&
+        c.customer_id === chat.customer_id &&
+        (isPhoneJid(c.chat_id) || jidsSameContact(c.chat_id, chat.chat_id))
+      ) {
+        ids.push(c.chat_id);
+      }
+    }
+    return ids;
+  }, [chats, chat.chat_id, chat.customer_id]);
+
+  const messageFromJids = useMemo(
+    () =>
+      messages
+        .filter((m) => !m.from_me)
+        .map((m) => resolveGroupSenderJidFromRaw(m.raw, m.from_jid) ?? m.from_jid),
+    [messages],
+  );
+
+  const phoneLabel = useMemo(() => {
+    if (isGroup) return '';
+    return (
+      resolvePhoneLabelForChat(chat.chat_id, {
+        relatedChatIds: relatedPhoneChatIds,
+        messageFromJids,
+      }) ||
+      phoneLabelByChatId[chat.chat_id] ||
+      ''
+    );
+  }, [isGroup, chat.chat_id, relatedPhoneChatIds, messageFromJids, phoneLabelByChatId]);
+
   const showPhoneInline =
-    phoneLabel &&
+    !!phoneLabel &&
     phoneLabel !== displayName &&
     !displayName.includes(phoneLabel);
+
+  const groupSenderDirectory = useMemo(
+    () => (isGroup ? buildGroupSenderDirectory(messages) : {}),
+    [isGroup, messages],
+  );
+
   const isCustomer = isLinkedCustomer ?? !!chat.customer_id;
 
   return (
@@ -191,13 +244,13 @@ export const WhatsappChatView: React.FC<Props> = ({
               ) : null}
             </p>
             <div className={`flex flex-wrap items-center gap-1.5 text-xs ${waTheme.textMuted}`}>
-              <span className="truncate" title={chat.chat_id}>
-                {isGroup
-                  ? `Grupo · ${jidToDisplay(chat.chat_id)}`
-                  : showPhoneInline
-                    ? null
-                    : phoneLabel || chat.chat_id}
-              </span>
+              {!isGroup && showPhoneInline ? null : (
+                <span className="truncate" title={chat.chat_id}>
+                  {isGroup
+                    ? 'Grupo de WhatsApp'
+                    : phoneLabel || (isLidJid(chat.chat_id) ? null : jidToDisplay(chat.chat_id))}
+                </span>
+              )}
               {leadMeta ? (
                 <span
                   className={`inline-flex max-w-full items-center gap-0.5 truncate rounded-full px-2 py-0.5 text-[10px] font-medium ${
@@ -252,9 +305,9 @@ export const WhatsappChatView: React.FC<Props> = ({
             variant="ghost"
             size="icon"
             className={`h-9 w-9 ${waTheme.textIcon}`}
-            onClick={() => refreshFromWaha.mutate()}
+            onClick={() => refreshFromWaha.mutate('full')}
             disabled={refreshFromWaha.isPending}
-            title="Recargar mensajes"
+            title="Recargar historial desde Waha"
           >
             <RefreshCw
               className={`h-4 w-4 ${refreshFromWaha.isPending ? 'animate-spin' : ''}`}
@@ -276,7 +329,9 @@ export const WhatsappChatView: React.FC<Props> = ({
           <div className="flex flex-col space-y-3 p-6">
             {isLoading && messages.length === 0 ? (
               <p className="py-10 text-center text-xs text-muted-foreground">
-                Cargando mensajes…
+                {isSyncingHistory
+                  ? 'Importando historial desde Waha…'
+                  : 'Cargando mensajes…'}
               </p>
             ) : grouped.length === 0 ? (
               <p className="py-10 text-center text-xs text-muted-foreground">
@@ -295,6 +350,7 @@ export const WhatsappChatView: React.FC<Props> = ({
                       key={m.id}
                       message={m}
                       isGroupChat={isGroup}
+                      senderDirectory={groupSenderDirectory}
                       quotedMessage={
                         m.quoted_message_id
                           ? findMessageByWahaId(messages, m.quoted_message_id)

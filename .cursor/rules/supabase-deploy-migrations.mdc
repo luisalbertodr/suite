@@ -1,0 +1,46 @@
+---
+description: Aplicar migraciones SQL y despliegue de Edge Functions al terminar cambios
+globs: supabase/**/*
+alwaysApply: false
+---
+
+# Despliegue automático (Supabase self-hosted)
+
+Tras crear o modificar archivos en `supabase/migrations/` o
+`supabase/functions/`, **aplica el despliegue en el servidor** siempre que
+haya acceso SSH (host `suite-supabase` / `root@192.168.99.110`).
+
+## Migraciones SQL
+
+```powershell
+cd C:\Users\OportoW11\Suite\suite
+.\scripts\deploy-migration.ps1 <nombre_archivo>.sql
+```
+
+- Una migración por ejecución.
+- Verifica salida `OK` y `Migración ... aplicada`.
+- No marques como hecho si `scp` o `psql` fallan.
+
+## Edge Functions
+
+```powershell
+cd C:\Users\OportoW11\Suite\suite
+.\scripts\deploy-edge-functions.ps1 whatsapp-proxy whatsapp-webhook
+# o
+.\scripts\deploy-edge-functions.ps1 -AllWhatsapp
+```
+
+- Confirma `Despliegue completado` y que el contenedor `supabase-edge-functions` arranca sin `SyntaxError`.
+- Si cambias `_shared`, el script ya lo sube al desplegar funciones.
+
+## Cuándo no desplegar
+
+- Solo lectura / preguntas sin cambios en `supabase/`.
+- SSH no disponible: informa al usuario con los comandos exactos.
+- Migración ya aplicada (duplicado en `schema_migrations`): no re-ejecutar el SQL.
+
+## Orden recomendado
+
+1. Migración SQL (si hay cambios de esquema).
+2. Edge Functions (si dependen del nuevo esquema).
+3. Verificación breve (columna nueva, grep del cambio, smoke test HTTP).

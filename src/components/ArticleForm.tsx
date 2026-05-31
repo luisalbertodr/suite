@@ -18,9 +18,11 @@ interface ArticleFormProps {
   article?: Article | null;
   onClose: () => void;
   onSave: () => void;
+  /** Al crear desde la pestaña Bonos/Servicios/Productos en Artículos */
+  initialArticleKind?: 'producto' | 'servicio' | 'bono';
 }
 
-export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSave }) => {
+export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSave, initialArticleKind }) => {
   const { createArticle, updateArticle, generateCode } = useArticles();
   const { companyId } = useCompanyFilter();
   const { recursos } = useRecursos();
@@ -114,6 +116,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
           // Generate code ONLY ONCE
           const defaultCode = generateCode('Varios');
           console.log('Generated code for new article (ONCE):', defaultCode);
+          const kind = initialArticleKind ?? 'producto';
           
           setFormData({
             codigo: defaultCode,
@@ -129,7 +132,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
             talla: '',
             color: '',
             tipo_producto: 'standard',
-            article_kind: 'producto',
+            article_kind: kind,
             duration_minutes: 0,
             estado: 'activo',
             iva_percentage: 21
