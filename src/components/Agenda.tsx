@@ -1369,7 +1369,6 @@ export const Agenda: React.FC = () => {
           employeeId={selectedSlot.employeeId}
           time={selectedSlot.time}
           employees={allEmployees}
-          customers={agendaCustomers}
           cabinas={cabinas.data || []}
           recursos={recursos.data || []}
           dayAppointments={appointments}

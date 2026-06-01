@@ -4,6 +4,10 @@ import { supabase } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { useWorkCenter } from '@/hooks/useWorkCenter';
+import {
+  parseMissingTableColumn,
+  sanitizeAgendaAppointmentWritePayload,
+} from '@/lib/agendaAppointmentWrite';
 
 export interface AgendaAppointment {
   id: string;
@@ -90,21 +94,10 @@ const nullIfBlank = (value: unknown) => {
   return s ? s : null;
 };
 
-const parseMissingColumnFromPostgrestError = (
-  error: { code?: string; message?: string } | null | undefined
-): string | null => {
-  if (!error) return null;
-  if (error.code !== '42703' && error.code !== 'PGRST204') return null;
-  const msg = String(error.message || '');
-  // Ej: Could not find the 'title' column of 'agenda_appointments' in the schema cache
-  const m = msg.match(/'([^']+)' column of 'agenda_appointments'/i);
-  return m?.[1] ?? null;
-};
-
 async function insertAgendaAppointmentWithFallback(
   payload: Record<string, unknown>
 ) {
-  let candidate = { ...payload };
+  let candidate = sanitizeAgendaAppointmentWritePayload(payload);
   // Evita bucles infinitos si el esquema devuelve varios faltantes.
   for (let i = 0; i < 8; i += 1) {
     const result = await supabase
@@ -113,7 +106,7 @@ async function insertAgendaAppointmentWithFallback(
       .select()
       .single();
     if (!result.error) return result;
-    const missing = parseMissingColumnFromPostgrestError(result.error);
+    const missing = parseMissingTableColumn(result.error, 'agenda_appointments');
     if (!missing || !(missing in candidate)) return result;
     const { [missing]: _drop, ...rest } = candidate;
     candidate = rest;
@@ -139,7 +132,7 @@ async function updateAgendaAppointmentWithFallback(
   id: string,
   payload: Record<string, unknown>
 ) {
-  let candidate = { ...payload };
+  let candidate = sanitizeAgendaAppointmentWritePayload(payload);
   for (let i = 0; i < 8; i += 1) {
     const result = await supabase
       .from('agenda_appointments')
@@ -148,7 +141,7 @@ async function updateAgendaAppointmentWithFallback(
       .select()
       .single();
     if (!result.error) return result;
-    const missing = parseMissingColumnFromPostgrestError(result.error);
+    const missing = parseMissingTableColumn(result.error, 'agenda_appointments');
     if (!missing || !(missing in candidate)) return result;
     const { [missing]: _drop, ...rest } = candidate;
     candidate = rest;
@@ -242,7 +235,6 @@ export const useAgendaAppointments = (date?: string) => {
         ...appointment,
         customer_id: nullIfBlank((appointment as Record<string, unknown>).customer_id),
         employee_id: nullIfBlank((appointment as Record<string, unknown>).employee_id),
-        title: titleValue || clientNameValue || 'Cita',
         client_name: clientNameValue || titleValue || 'Cita',
         ...(appointmentDate ? { appointment_date: appointmentDate } : {}),
         company_id: scopeCompanyId,
@@ -282,10 +274,7 @@ export const useAgendaAppointments = (date?: string) => {
           customer_id: nullIfBlank((updates as Record<string, unknown>).customer_id),
           employee_id: nullIfBlank((updates as Record<string, unknown>).employee_id),
           ...(titleValue || clientNameValue
-            ? {
-                title: titleValue || clientNameValue,
-                client_name: clientNameValue || titleValue,
-              }
+            ? { client_name: clientNameValue || titleValue }
             : {}),
           ...(appointmentDate ? { appointment_date: appointmentDate } : {}),
         }

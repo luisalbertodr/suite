@@ -18,7 +18,6 @@ import { toRecursoCatalogEntries } from '@/lib/agendaRecursoMatch';
 import { appointmentItemLineTotal } from '@/lib/agendaAppointmentPricing';
 import { appointmentChargeableTotal, canChargeAppointment } from '@/lib/appointmentSales';
 import { AppointmentClientePicker, type AppointmentClientPick } from '@/components/forms/AppointmentClientePicker';
-import type { CustomerSearchRow } from '@/lib/customerSearch';
 import { useCustomerActiveBonos } from '@/hooks/useCustomerActiveBonos';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
@@ -51,7 +50,6 @@ interface AppointmentFormProps {
   employeeId: string;
   time: string;
   employees: Employee[];
-  customers: CustomerSearchRow[];
   cabinas?: any[];
   recursos?: any[];
   dayAppointments?: Appointment[];
@@ -64,7 +62,6 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
   employeeId,
   time,
   employees,
-  customers,
   cabinas = [],
   recursos = [],
   dayAppointments = [],
@@ -274,7 +271,7 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
               <User className="w-4 h-4" /> Nueva Cita
             </CardTitle>
             <div className="flex-1 min-w-0">
-              <AppointmentClientePicker customers={customers} value={clientPick} onChange={setClientPick} />
+              <AppointmentClientePicker lazySearch value={clientPick} onChange={setClientPick} />
             </div>
             <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0 mt-0.5" onClick={onCancel}>
               <X className="w-4 h-4" />
@@ -338,6 +335,7 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
               cabinasCatalog={cabinas}
               appointmentDate={formData.date}
               dayAppointments={dayAppointments}
+              articlePicker="by-family"
               compactHeader
             />
 

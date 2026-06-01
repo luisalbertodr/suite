@@ -4,7 +4,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AppointmentSelectContent } from '@/components/AppointmentSelectContent';
-import { GripVertical, Plus, Trash2, Clock, CreditCard, AlertTriangle } from 'lucide-react';
+import { GripVertical, Plus, Trash2, Clock, CreditCard, AlertTriangle, Gift } from 'lucide-react';
+import { bonoSessionsDisplay } from '@/lib/bonoSessionsDisplay';
+import { cn } from '@/lib/utils';
 import type { Appointment, AppointmentItemDraft, AppointmentItemKind, BonusPaymentMode } from '@/types/agenda';
 import {
   buildAppointmentTimeSegments,
@@ -22,6 +24,10 @@ import {
 import { findItemResourceConflicts, segmentsToConflictProbes } from '@/lib/agendaResourceConflicts';
 import { appointmentItemLineTotal, appointmentItemsTotal, formatAppointmentItemAmount, isBonoSessionItem } from '@/lib/agendaAppointmentPricing';
 import { AppointmentItemTimeline } from '@/components/AppointmentItemTimeline';
+import {
+  AppointmentArticleFamilyPicker,
+  type AppointmentArticleOption,
+} from '@/components/forms/AppointmentArticleFamilyPicker';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { useCustomerActiveBonos, type CustomerActiveBono } from '@/hooks/useCustomerActiveBonos';
 import { useQuery } from '@tanstack/react-query';
@@ -52,6 +58,10 @@ export interface AppointmentItemsEditorProps {
   dayAppointments?: Appointment[];
   excludeAppointmentId?: string;
   compactHeader?: boolean;
+  /** Edición de cita: sin cantidad (siempre 1) y un solo campo de importe por slot. */
+  compactSlots?: boolean;
+  /** Nueva cita: artículos por familia (sin cargar todo el catálogo). */
+  articlePicker?: 'all' | 'by-family';
 }
 
 export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
@@ -65,13 +75,22 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
   dayAppointments = [],
   excludeAppointmentId,
   compactHeader = false,
+  compactSlots = false,
+  articlePicker = 'all',
 }) => {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [articleCache, setArticleCache] = useState<Map<string, AppointmentArticleOption>>(new Map());
   const { companyId } = useCompanyFilter();
+  const useFamilyPicker = articlePicker === 'by-family';
+
+  const selectedArticleIds = useMemo(
+    () => items.map((it) => it.article_id).filter(Boolean) as string[],
+    [items],
+  );
 
   const { data: articles = [] } = useQuery({
     queryKey: ['appointment-item-articles', companyId],
-    enabled: !!companyId,
+    enabled: !!companyId && !useFamilyPicker,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('articles')
@@ -93,6 +112,20 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
     },
   });
 
+  const { data: pinnedArticles = [] } = useQuery({
+    queryKey: ['appointment-pinned-articles', companyId, selectedArticleIds.join('|')],
+    enabled: useFamilyPicker && !!companyId && selectedArticleIds.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('articles')
+        .select('id,codigo,descripcion,precio,duration_minutes,article_kind,estado,familia,recurso_id')
+        .in('id', selectedArticleIds);
+      if (error) throw error;
+      return (data ?? []) as AppointmentArticleOption[];
+    },
+    staleTime: 60_000,
+  });
+
   const { data: activeBonos = [] } = useCustomerActiveBonos(customerId);
 
   const legacyVouchers = useMemo(
@@ -101,18 +134,15 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
   );
 
   const articleById = useMemo(() => {
-    const m = new Map<string, (typeof articles)[number]>();
-    for (const a of articles) m.set(a.id, a);
+    const m = new Map<string, AppointmentArticleOption>();
+    if (useFamilyPicker) {
+      for (const a of articleCache.values()) m.set(a.id, a);
+      for (const a of pinnedArticles) m.set(a.id, a);
+    } else {
+      for (const a of articles) m.set(a.id, a);
+    }
     return m;
-  }, [articles]);
-
-  const voucherCoveragePreview = useCallback((bono: CustomerActiveBono) => {
-    return (bono.coverage_items ?? []).map((it) => ({
-      label: it.label,
-      qty: it.covered_quantity,
-      remaining: it.remaining,
-    }));
-  }, []);
+  }, [articles, articleCache, pinnedArticles, useFamilyPicker]);
 
   const normalizeKind = (value: string | null | undefined): string => {
     return String(value || '')
@@ -175,9 +205,31 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
 
   const updateAt = useCallback(
     (index: number, patch: Partial<AppointmentItemDraft>) => {
-      onChange(items.map((it, i) => (i === index ? { ...it, ...patch } : it)));
+      const normalized = compactSlots ? { ...patch, quantity: 1 } : patch;
+      onChange(items.map((it, i) => (i === index ? { ...it, ...normalized } : it)));
     },
-    [items, onChange]
+    [items, onChange, compactSlots]
+  );
+
+  const renderTimeSlotPriceInput = (
+    index: number,
+    item: AppointmentItemDraft,
+    inputClassName?: string,
+  ) => (
+    <div className="relative shrink-0">
+      <Input
+        type="number"
+        min={0}
+        step={0.01}
+        className={cn('h-7 text-xs pl-1 pr-5 tabular-nums shrink-0', inputClassName ?? 'w-[4.25rem]')}
+        title="Importe EUR"
+        value={item.unit_price ?? 0}
+        onChange={(e) => updateAt(index, { unit_price: parseFloat(e.target.value) || 0 })}
+      />
+      <span className="absolute right-1 inset-y-0 flex items-center text-[10px] text-muted-foreground pointer-events-none">
+        €
+      </span>
+    </div>
   );
 
   const handleKindChange = useCallback(
@@ -257,9 +309,12 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
   const totalPreview = appointmentItemsTotal(items);
 
   const applyArticleAt = useCallback(
-    (index: number, articleId: string) => {
-      const a = articleById.get(articleId);
+    (index: number, articleId: string, articleOverride?: AppointmentArticleOption) => {
+      const a = articleOverride ?? articleById.get(articleId);
       if (!a) return;
+      if (useFamilyPicker && articleOverride) {
+        setArticleCache((prev) => new Map(prev).set(a.id, a));
+      }
       const nextKind: AppointmentItemKind =
         a.article_kind === 'service' ? 'service' : a.article_kind === 'product' ? 'product' : 'other';
       const nextLabel = `${a.codigo ? `${a.codigo} - ` : ''}${a.descripcion}`.trim();
@@ -288,8 +343,47 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
         recurso_id: a.recurso_id ?? autoRecurso,
       });
     },
-    [articleById, items, updateAt, recursosCatalog]
+    [articleById, items, updateAt, recursosCatalog, useFamilyPicker]
   );
+
+  const renderArticlePicker = (index: number, item: AppointmentItemDraft) => {
+    if (useFamilyPicker) {
+      return (
+        <AppointmentArticleFamilyPicker
+          value={item.article_id ?? null}
+          itemKind={item.kind}
+          selectedLabel={item.label?.trim() || undefined}
+          onSelect={(a) => applyArticleAt(index, a.id, a)}
+          onClear={() => updateAt(index, { article_id: null, label: '' })}
+        />
+      );
+    }
+    const filteredArticles = articles.filter((a) => articleMatchesItemKind(item.kind, a));
+    return (
+      <Select
+        value={item.article_id ?? 'none'}
+        onValueChange={(v) => {
+          if (v === 'none') {
+            updateAt(index, { article_id: null, label: '' });
+            return;
+          }
+          applyArticleAt(index, v);
+        }}
+      >
+        <SelectTrigger className="h-7 min-w-0 flex-1 text-[11px] px-1.5">
+          <SelectValue placeholder="Seleccionar artículo" />
+        </SelectTrigger>
+        <AppointmentSelectContent>
+          <SelectItem value="none">Sin artículo</SelectItem>
+          {filteredArticles.map((a) => (
+            <SelectItem key={a.id} value={a.id}>
+              {`${a.codigo ? `${a.codigo} - ` : ''}${a.descripcion}`.trim()}
+            </SelectItem>
+          ))}
+        </AppointmentSelectContent>
+      </Select>
+    );
+  };
 
   const useVoucherAt = useCallback(
     (index: number, voucher: CustomerActiveBono) => {
@@ -386,52 +480,59 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
         compact={compactHeader}
       />
       {!!customerId && activeBonos.length > 0 && (
-        <div className="rounded border bg-background/80 p-2 space-y-2">
-          <p className="text-[11px] font-medium text-foreground">Bonos activos con sesiones</p>
+        <div className="rounded border border-emerald-200/60 dark:border-emerald-800/50 bg-emerald-50/50 dark:bg-emerald-950/25 p-1.5 space-y-1">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400 px-0.5">
+            Bonos activos
+          </p>
           {activeBonos.map((bono) => {
-            const lines = voucherCoveragePreview(bono);
-            const usableLines = lines.filter((ln) => ln.remaining > 0);
+            const { remaining, total } = bonoSessionsDisplay(bono);
+            const usableLines = bono.coverage_items.filter((ln) => ln.remaining > 0);
             return (
-              <div key={bono.id} className="rounded border border-emerald-200/70 bg-emerald-50/40 dark:bg-emerald-950/20 p-1.5 space-y-1">
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
-                  <span className="font-medium text-foreground">{bono.nombre}</span>
-                  <span className="text-emerald-700 dark:text-emerald-400 tabular-nums">
-                    {bono.remaining} ses. pendientes
+              <div
+                key={bono.id}
+                className={cn(
+                  'flex items-center gap-1.5 min-h-8 px-1.5 py-1 rounded-md border text-[11px] leading-tight min-w-0',
+                  'border-emerald-300/70 bg-emerald-50/80 dark:bg-emerald-950/35 dark:border-emerald-700/50',
+                )}
+                title={`${remaining} sesión${remaining === 1 ? '' : 'es'} disponible${remaining === 1 ? '' : 's'} de ${total}`}
+              >
+                <Gift className="w-3.5 h-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                <span className="font-medium truncate min-w-0 flex-1 text-foreground">{bono.nombre}</span>
+                {bono.legacy_codboncli && (
+                  <span className="hidden sm:inline shrink-0 font-mono text-[9px] text-muted-foreground">
+                    {bono.legacy_codboncli}
                   </span>
-                  {bono.legacy_codboncli && (
-                    <span className="font-mono text-[10px] text-muted-foreground">#{bono.legacy_codboncli}</span>
-                  )}
-                  {!usableLines.length && (
+                )}
+                <span className="shrink-0 tabular-nums font-semibold text-emerald-700 dark:text-emerald-300 whitespace-nowrap">
+                  {remaining}/{total} ses.
+                </span>
+                <div className="flex items-center gap-0.5 shrink-0 max-w-[42%] overflow-x-auto">
+                  {usableLines.length > 0 ? (
+                    usableLines.map((ln) => (
+                      <Button
+                        key={`${bono.id}-${ln.index}`}
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="h-6 px-1.5 text-[10px] shrink-0"
+                        onClick={() => addBonoSession(bono, ln.index)}
+                        title={ln.label}
+                      >
+                        + {ln.label.length > 16 ? `${ln.label.slice(0, 14)}…` : ln.label}
+                      </Button>
+                    ))
+                  ) : (
                     <Button
                       type="button"
-                      variant="outline"
+                      variant="secondary"
                       size="sm"
-                      className="h-6 text-[10px] px-2 ml-auto"
+                      className="h-6 px-1.5 text-[10px] shrink-0"
                       onClick={() => addBonoSession(bono)}
                     >
-                      Usar sesión
+                      + Sesión
                     </Button>
                   )}
                 </div>
-                {bono.coverage_items.filter((ln) => ln.remaining > 0).length > 0 && (
-                  <div className="flex flex-wrap gap-1">
-                    {bono.coverage_items
-                      .filter((ln) => ln.remaining > 0)
-                      .map((ln) => (
-                        <Button
-                          key={`${bono.id}-${ln.index}`}
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          className="h-6 text-[10px] px-2"
-                          onClick={() => addBonoSession(bono, ln.index)}
-                        >
-                          {ln.label.length > 32 ? `${ln.label.slice(0, 30)}…` : ln.label}
-                          {' '}({ln.remaining}/{ln.covered_quantity})
-                        </Button>
-                      ))}
-                  </div>
-                )}
               </div>
             );
           })}
@@ -445,7 +546,6 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
           </div>
           {items.map((item, index) => {
             if (!item.occupies_time || Number(item.duration_minutes || 0) <= 0) return null;
-            const filteredArticles = articles.filter((a) => articleMatchesItemKind(item.kind, a));
             const seg = timeSegments.find((s) => s.clientKey === item.clientKey);
             const conflicts = itemConflicts.get(item.clientKey) ?? [];
             return (
@@ -500,28 +600,7 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
                   <SelectItem value="other">Otro</SelectItem>
                 </AppointmentSelectContent>
               </Select>
-              <Select
-                value={item.article_id ?? 'none'}
-                onValueChange={(v) => {
-                  if (v === 'none') {
-                    updateAt(index, { article_id: null, label: '' });
-                    return;
-                  }
-                  applyArticleAt(index, v);
-                }}
-              >
-                <SelectTrigger className="h-7 min-w-0 flex-1 text-[11px] px-1.5">
-                  <SelectValue placeholder="Seleccionar artículo" />
-                </SelectTrigger>
-                <AppointmentSelectContent>
-                  <SelectItem value="none">Sin artículo</SelectItem>
-                  {filteredArticles.map((a) => (
-                    <SelectItem key={a.id} value={a.id}>
-                      {`${a.codigo ? `${a.codigo} - ` : ''}${a.descripcion}`.trim()}
-                    </SelectItem>
-                  ))}
-                </AppointmentSelectContent>
-              </Select>
+              {renderArticlePicker(index, item)}
             </div>
             <div className="flex items-center gap-0.5 h-7 mt-0.5 flex-nowrap overflow-x-auto">
                 <Input
@@ -551,15 +630,10 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
                       <SelectItem value="40">40%</SelectItem>
                     </AppointmentSelectContent>
                   </Select>
-                  <Input
-                    type="number"
-                    min={0}
-                    step={0.01}
-                    className="h-7 w-14 text-xs px-1 shrink-0"
-                    value={item.unit_price ?? 0}
-                    onChange={(e) => updateAt(index, { unit_price: parseFloat(e.target.value) || 0 })}
-                  />
+                  {renderTimeSlotPriceInput(index, item, 'w-14')}
                 </>
+              ) : compactSlots ? (
+                renderTimeSlotPriceInput(index, item, 'w-16')
               ) : (
                 <>
                   <Input
@@ -570,19 +644,12 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
                     value={item.quantity ?? 1}
                     onChange={(e) => updateAt(index, { quantity: parseFloat(e.target.value) || 0 })}
                   />
-                  <Input
-                    type="number"
-                    min={0}
-                    step={0.01}
-                    className="h-7 w-14 text-xs px-1 shrink-0"
-                    value={item.unit_price ?? 0}
-                    onChange={(e) => updateAt(index, { unit_price: parseFloat(e.target.value) || 0 })}
-                  />
+                  {renderTimeSlotPriceInput(index, item, 'w-14')}
+                  <span className="text-[10px] tabular-nums shrink-0 w-[44px] text-right font-medium text-emerald-700">
+                    {formatAppointmentItemAmount(item)}
+                  </span>
                 </>
               )}
-              <span className="text-[10px] tabular-nums shrink-0 w-[44px] text-right font-medium text-emerald-700">
-                {formatAppointmentItemAmount(item)}
-              </span>
               {cabinasCatalog.filter((c) => c.activa !== false).length > 0 && (
                 <Select
                   value={item.cabina_id || 'none'}
@@ -688,7 +755,9 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
           </div>
           {items.map((item, index) => {
             if (item.occupies_time && Number(item.duration_minutes || 0) > 0) return null;
-            const filteredArticles = articles.filter((a) => articleMatchesItemKind(item.kind, a));
+            const filteredArticles = useFamilyPicker
+              ? []
+              : articles.filter((a) => articleMatchesItemKind(item.kind, a));
             return (
           <div
             key={item.clientKey}
@@ -739,43 +808,27 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
               className="h-7 min-w-[100px] flex-1 text-xs px-1.5"
               placeholder="Nombre"
               value={item.label}
-              list={`appointment-item-pay-${index}`}
+              list={useFamilyPicker ? undefined : `appointment-item-pay-${index}`}
               onChange={(e) => {
                 const val = e.target.value;
                 updateAt(index, { label: val });
+                if (useFamilyPicker) return;
                 const exact = filteredArticles.find(
                   (a) => `${a.codigo ? `${a.codigo} - ` : ''}${a.descripcion}`.trim().toLowerCase() === val.trim().toLowerCase()
                 );
                 if (exact) applyArticleAt(index, exact.id);
               }}
             />
-            <Select
-              value={item.article_id ?? 'none'}
-              onValueChange={(v) => {
-                if (v === 'none') {
-                  updateAt(index, { article_id: null });
-                  return;
-                }
-                applyArticleAt(index, v);
-              }}
-            >
-              <SelectTrigger className="h-7 w-[120px] text-[11px] px-1.5">
-                <SelectValue placeholder="Artículo" />
-              </SelectTrigger>
-              <AppointmentSelectContent>
-                <SelectItem value="none">Sin artículo</SelectItem>
+            <div className={useFamilyPicker ? 'min-w-[120px] max-w-[45%]' : undefined}>
+              {renderArticlePicker(index, item)}
+            </div>
+            {!useFamilyPicker && (
+              <datalist id={`appointment-item-pay-${index}`}>
                 {filteredArticles.map((a) => (
-                  <SelectItem key={a.id} value={a.id}>
-                    {`${a.codigo ? `${a.codigo} - ` : ''}${a.descripcion}`.trim()}
-                  </SelectItem>
+                  <option key={a.id} value={`${a.codigo ? `${a.codigo} - ` : ''}${a.descripcion}`.trim()} />
                 ))}
-              </AppointmentSelectContent>
-            </Select>
-            <datalist id={`appointment-item-pay-${index}`}>
-              {filteredArticles.map((a) => (
-                <option key={a.id} value={`${a.codigo ? `${a.codigo} - ` : ''}${a.descripcion}`.trim()} />
-              ))}
-            </datalist>
+              </datalist>
+            )}
             {item.kind === 'bonus' ? (
               <div className="flex items-center gap-1">
                 <Select
@@ -801,6 +854,16 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
                   onChange={(e) => updateAt(index, { unit_price: parseFloat(e.target.value) || 0 })}
                 />
               </div>
+            ) : compactSlots ? (
+              <Input
+                type="number"
+                min={0}
+                step={0.01}
+                className="h-7 w-16 text-xs px-1"
+                title="Importe EUR"
+                value={item.unit_price ?? 0}
+                onChange={(e) => updateAt(index, { unit_price: parseFloat(e.target.value) || 0 })}
+              />
             ) : (
               <div className="flex items-center gap-1">
                 <Input
@@ -819,11 +882,11 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
                   value={item.unit_price ?? 0}
                   onChange={(e) => updateAt(index, { unit_price: parseFloat(e.target.value) || 0 })}
                 />
+                <span className="text-[10px] tabular-nums min-w-[55px] text-right font-medium text-emerald-700">
+                  {formatAppointmentItemAmount(item)}
+                </span>
               </div>
             )}
-            <span className="text-[10px] tabular-nums min-w-[55px] text-right font-medium text-emerald-700">
-              {formatAppointmentItemAmount(item)}
-            </span>
             <Button
               type="button"
               variant="ghost"

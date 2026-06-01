@@ -15,14 +15,24 @@ import { AGENDA_APPOINTMENT_SELECT_Z } from '@/lib/agendaResourceColors';
 import { Check, ChevronsUpDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatCustomerPhoneLabels } from '@/lib/legacyCustomerPhones';
-import { filterCustomersBySearch, type CustomerSearchRow } from '@/lib/customerSearch';
+import {
+  CUSTOMER_SEARCH_MIN_CHARS,
+  filterCustomersBySearch,
+  isCustomerSearchQueryReady,
+  type CustomerSearchRow,
+} from '@/lib/customerSearch';
+import { useCustomerSearch } from '@/hooks/useCustomerSearch';
+import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 
 export type AppointmentClientPick =
   | { kind: 'customer'; customerId: string; displayName: string }
   | { kind: 'manual'; name: string };
 
 type Props = {
-  customers: CustomerSearchRow[];
+  /** Listado local (edición). Si `lazySearch`, no se usa hasta tener búsqueda remota. */
+  customers?: CustomerSearchRow[];
+  /** Búsqueda en servidor solo tras escribir ≥3 caracteres (nueva cita). */
+  lazySearch?: boolean;
   value: AppointmentClientPick | null;
   onChange: (next: AppointmentClientPick | null) => void;
   disabled?: boolean;
@@ -34,14 +44,26 @@ function pickLabel(p: AppointmentClientPick | null): string {
   return p.displayName;
 }
 
-export const AppointmentClientePicker: React.FC<Props> = ({ customers, value, onChange, disabled }) => {
+export const AppointmentClientePicker: React.FC<Props> = ({
+  customers = [],
+  lazySearch = false,
+  value,
+  onChange,
+  disabled,
+}) => {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const { companyId } = useCompanyFilter();
+  const remote = useCustomerSearch(lazySearch ? companyId : null, search);
 
-  const filtered = useMemo(() => filterCustomersBySearch(customers, search), [customers, search]);
+  const filtered = useMemo(() => {
+    if (lazySearch) return remote.customers;
+    return filterCustomersBySearch(customers, search);
+  }, [lazySearch, remote.customers, customers, search]);
 
+  const searchReady = !lazySearch || remote.isReady;
   const manualPreview = search.trim();
-  const showManualRow = manualPreview.length > 0;
+  const showManualRow = searchReady && manualPreview.length > 0;
 
   return (
     <div>
@@ -68,11 +90,23 @@ export const AppointmentClientePicker: React.FC<Props> = ({ customers, value, on
         <PopoverContent className={cn('p-0 w-[var(--radix-popover-trigger-width)] min-w-[280px]', AGENDA_APPOINTMENT_SELECT_Z)} align="start">
           <Command shouldFilter={false}>
             <CommandInput
-              placeholder="Nombre, apellidos, DNI, teléfono o email…"
+              placeholder={
+                lazySearch
+                  ? `Mín. ${CUSTOMER_SEARCH_MIN_CHARS} letras o números…`
+                  : 'Nombre, apellidos, DNI, teléfono o email…'
+              }
               value={search}
               onValueChange={setSearch}
             />
             <CommandList>
+              {lazySearch && !isCustomerSearchQueryReady(search) ? (
+                <p className="py-6 text-center text-xs text-muted-foreground px-3">
+                  Escribe al menos {CUSTOMER_SEARCH_MIN_CHARS} letras o {CUSTOMER_SEARCH_MIN_CHARS} números para buscar.
+                </p>
+              ) : lazySearch && remote.isLoading ? (
+                <p className="py-6 text-center text-xs text-muted-foreground">Buscando…</p>
+              ) : (
+                <>
               <CommandEmpty>No se encontraron clientes.</CommandEmpty>
               <CommandGroup>
                 {filtered.map((customer) => (
@@ -127,6 +161,8 @@ export const AppointmentClientePicker: React.FC<Props> = ({ customers, value, on
                       </span>
                     </CommandItem>
                   </CommandGroup>
+                </>
+              )}
                 </>
               )}
             </CommandList>

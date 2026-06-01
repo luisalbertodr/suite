@@ -3,6 +3,9 @@ import { supabase } from '@/lib/supabase';
 import type { AppointmentItemDraft, AppointmentItemKind, BonusPaymentMode } from '@/types/agenda';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { repairLegacyDunasoftAppointmentItems } from '@/lib/legacyAppointmentItems';
+import { parseMissingTableColumn } from '@/lib/agendaAppointmentWrite';
+
+const APPOINTMENT_ITEM_PRICING_COLUMNS = ['quantity', 'unit_price', 'bonus_payment_mode'] as const;
 
 export const appointmentItemsQueryKey = (appointmentId: string) =>
   ['appointment-items', appointmentId] as const;
@@ -15,15 +18,7 @@ const nullIfBlank = (value: unknown) => {
 
 const extractMissingAppointmentItemsColumn = (
   error: { code?: string; message?: string } | null | undefined
-): string | null => {
-  if (!error) return null;
-  const msg = String(error.message || '');
-  const m1 = msg.match(/'([^']+)' column of 'appointment_items'/i);
-  if (m1?.[1]) return m1[1];
-  const m2 = msg.match(/column\s+appointment_items\.([a-zA-Z0-9_]+)/i);
-  if (m2?.[1]) return m2[1];
-  return null;
-};
+): string | null => parseMissingTableColumn(error, 'appointment_items');
 
 function mapRowToDraft(row: {
   id: string;
@@ -123,14 +118,30 @@ function inferItemPriceFromLabel(
 
 function isMissingPricingColumnError(error: { code?: string; message?: string } | null | undefined): boolean {
   if (!error) return false;
-  if (error.code === '42703') return true;
+  if (error.code === '42703' || error.code === 'PGRST204') return true;
+  const missing = extractMissingAppointmentItemsColumn(error);
+  if (
+    missing &&
+    (APPOINTMENT_ITEM_PRICING_COLUMNS as readonly string[]).includes(missing)
+  ) {
+    return true;
+  }
   const msg = String(error.message || '').toLowerCase();
   return (
     msg.includes('appointment_items.quantity') ||
     msg.includes('appointment_items.unit_price') ||
-    msg.includes('appointment_items.bonus_payment_mode') ||
-    (msg.includes('column') && msg.includes('does not exist') && msg.includes('appointment_items'))
+    msg.includes('appointment_items.bonus_payment_mode')
   );
+}
+
+function stripPricingColumnsFromRows(
+  rows: Array<Record<string, unknown>>
+): Array<Record<string, unknown>> {
+  return rows.map((row) => {
+    const next = { ...row };
+    for (const col of APPOINTMENT_ITEM_PRICING_COLUMNS) delete next[col];
+    return next;
+  });
 }
 
 export async function fetchAppointmentItems(
@@ -303,14 +314,20 @@ export async function syncAppointmentItems(
     })
   );
 
-  const rowsBase = appointmentItemsPricingColumnsMissing === true ? fallbackRows : rows;
-  let candidateRows = rowsBase as Array<Record<string, unknown>>;
+  let candidateRows = (
+    appointmentItemsPricingColumnsMissing === true ? fallbackRows : rows
+  ) as Array<Record<string, unknown>>;
 
-  for (let i = 0; i < 10; i += 1) {
+  for (let i = 0; i < 12; i += 1) {
     const ins = await supabase.from('appointment_items').insert(candidateRows);
     if (!ins.error) {
       if (candidateRows === rows) appointmentItemsPricingColumnsMissing = false;
       return;
+    }
+    if (isMissingPricingColumnError(ins.error)) {
+      appointmentItemsPricingColumnsMissing = true;
+      candidateRows = stripPricingColumnsFromRows(candidateRows);
+      continue;
     }
     const missing = extractMissingAppointmentItemsColumn(ins.error);
     if (!missing) throw ins.error;
@@ -320,7 +337,6 @@ export async function syncAppointmentItems(
       const { [missing]: _drop, ...rest } = r;
       return rest;
     });
-    if (isMissingPricingColumnError(ins.error)) appointmentItemsPricingColumnsMissing = true;
   }
   throw new Error('No se pudo guardar appointment_items por incompatibilidad de columnas.');
 }

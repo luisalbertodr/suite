@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import type { PostgrestError } from '@supabase/supabase-js';
+import { bonoSessionsDisplay } from '@/lib/bonoSessionsDisplay';
 
 export type ActiveBonoCoverageLine = {
   index: number;
@@ -67,20 +68,22 @@ async function fetchVoucherBonos(companyId: string, customerId: string): Promise
 
   return (data || [])
     .map((v: any) => {
-      const remaining = Math.max(0, Number(v.total_sessions || 0) - Number(v.used_sessions || 0));
-      return {
+      const coverage_items = parseCoverage(v.coverage_items);
+      const sesiones_totales = Number(v.total_sessions || 0);
+      const sesiones_usadas = Number(v.used_sessions || 0);
+      const base = {
         id: String(v.id),
         nombre: v.voucher_code || v.articles?.descripcion || 'Bono',
         legacy_codboncli: null,
-        sesiones_totales: Number(v.total_sessions || 0),
-        sesiones_usadas: Number(v.used_sessions || 0),
-        remaining,
-        coverage_items: parseCoverage(v.coverage_items),
+        sesiones_totales,
+        sesiones_usadas,
+        coverage_items,
         storage: 'customer_vouchers' as const,
         article_id: v.article_id ? String(v.article_id) : null,
         article_price: Math.max(0, Number(v.articles?.precio || 0)),
         article_duration: Math.max(0, Number(v.articles?.duration_minutes || 0)),
       };
+      return { ...base, remaining: bonoSessionsDisplay(base).remaining };
     })
     .filter((b) => b.remaining > 0);
 }
@@ -100,17 +103,19 @@ export async function fetchCustomerActiveBonos(
   if (!bonosError) {
     return (bonosRows || [])
       .map((row: any) => {
-        const remaining = Math.max(0, Number(row.sesiones_totales ?? 0) - Number(row.sesiones_usadas ?? 0));
-        return {
+        const coverage_items = parseCoverage(row.coverage_items);
+        const sesiones_totales = Number(row.sesiones_totales ?? 0);
+        const sesiones_usadas = Number(row.sesiones_usadas ?? 0);
+        const base = {
           id: String(row.id),
           nombre: row.nombre ?? 'Bono',
           legacy_codboncli: row.legacy_codboncli ?? null,
-          sesiones_totales: Number(row.sesiones_totales ?? 0),
-          sesiones_usadas: Number(row.sesiones_usadas ?? 0),
-          remaining,
-          coverage_items: parseCoverage(row.coverage_items),
+          sesiones_totales,
+          sesiones_usadas,
+          coverage_items,
           storage: 'bonos' as const,
         };
+        return { ...base, remaining: bonoSessionsDisplay(base).remaining };
       })
       .filter((b) => b.remaining > 0);
   }

@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
-import { X, Save, User, Trash2, ArrowLeft } from 'lucide-react';
+import { X, Save, Trash2, ArrowLeft } from 'lucide-react';
 import { AppointmentItemsEditor } from '@/components/AppointmentItemsEditor';
 import { AppointmentCustomerSummaryBar } from '@/components/AppointmentCustomerSummaryBar';
 import { AppointmentSelectContent } from '@/components/AppointmentSelectContent';
@@ -22,7 +22,6 @@ import { toRecursoCatalogEntries } from '@/lib/agendaRecursoMatch';
 import { appointmentItemsTotal } from '@/lib/agendaAppointmentPricing';
 import { appointmentChargeableTotal, canChargeAppointment, summarizeAppointmentChargeState } from '@/lib/appointmentSales';
 import { useAppointmentSales } from '@/hooks/useAppointmentSale';
-import { AppointmentClientePicker, type AppointmentClientPick } from '@/components/forms/AppointmentClientePicker';
 import type { CustomerSearchRow } from '@/lib/customerSearch';
 import { useCustomerActiveBonos } from '@/hooks/useCustomerActiveBonos';
 import { supabase } from '@/lib/supabase';
@@ -70,13 +69,6 @@ interface EditAppointmentFormProps {
   returnCustomerId?: string | null;
   onReturnToCustomerHistory?: () => void;
   onHistoryAppointmentClick?: (appointmentId: string, dateYmd: string) => void;
-}
-
-function initialClientPick(apt: Appointment, custs: CustomerSearchRow[]): AppointmentClientPick | null {
-  return resolveAppointmentClientPick(apt.clientName, custs, {
-    customerId: apt.customerId,
-    legacyCodcli: apt.legacyClientCode,
-  });
 }
 
 function defaultLabelFromDescription(description: string): string {
@@ -154,9 +146,6 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
   );
 
   const { requireOrToast: requirePermissionOrToast } = usePermissionGuard();
-  const [clientPick, setClientPick] = useState<AppointmentClientPick | null>(() =>
-    initialClientPick(appointment, customers)
-  );
   const [showCustomerHistory, setShowCustomerHistory] = useState(false);
   const [customerHistoryTab, setCustomerHistoryTab] = useState<'timeline' | 'vouchers' | 'ficha'>('ficha');
 
@@ -175,24 +164,11 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
   const [notifyMsg, setNotifyMsg] = useState('');
 
   useLayoutEffect(() => {
-    setClientPick(initialClientPick(appointment, customers));
-  }, [appointment.id, customers, appointment.customerId, appointment.legacyClientCode, appointment.clientName]);
-
-  useEffect(() => {
-    if (customers.length === 0) return;
-    const resolved = initialClientPick(appointment, customers);
-    if (!resolved || resolved.kind !== 'customer') return;
-    setClientPick((prev) => {
-      if (prev?.kind === 'customer' && prev.customerId === resolved.customerId) return prev;
-      if (!prev || prev.kind === 'manual') return resolved;
-      return prev;
-    });
-  }, [customers, appointment]);
-
-  useLayoutEffect(() => {
     if (itemsLoading || loadedItems === undefined) return;
-    if (loadedItems.length > 0) setItems(removeRedundantProducts(loadedItems));
-    else setItems(seedItemsFromAppointment(appointment));
+    const normalizeQty = (list: AppointmentItemDraft[]) =>
+      list.map((it) => ({ ...it, quantity: 1 }));
+    if (loadedItems.length > 0) setItems(normalizeQty(removeRedundantProducts(loadedItems)));
+    else setItems(normalizeQty(seedItemsFromAppointment(appointment)));
   }, [itemsLoading, loadedItems, appointment]);
 
   const articleIdsForItems = useMemo(
@@ -268,9 +244,18 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
   });
 
   const recursosCatalog = useMemo(() => toRecursoCatalogEntries(recursos), [recursos]);
-  const selectedCustomerId = clientPick?.kind === 'customer'
-    ? clientPick.customerId
-    : (appointment.customerId ?? null);
+  const resolvedClient = useMemo(
+    () =>
+      resolveAppointmentClientPick(appointment.clientName, customers, {
+        customerId: appointment.customerId,
+        legacyCodcli: appointment.legacyClientCode,
+      }),
+    [appointment.clientName, appointment.customerId, appointment.legacyClientCode, customers],
+  );
+
+  const selectedCustomerId =
+    appointment.customerId ??
+    (resolvedClient?.kind === 'customer' ? resolvedClient.customerId : null);
   const legacyCodcli = appointment.legacyClientCode?.trim() || null;
 
   const { data: selectedCustomer } = useQuery({
@@ -316,15 +301,6 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
   const summaryCustomer = selectedCustomer ?? customerByLegacy ?? null;
   const effectiveCustomerId = selectedCustomerId ?? summaryCustomer?.id ?? null;
 
-  useEffect(() => {
-    if (!customerByLegacy || selectedCustomerId) return;
-    setClientPick({
-      kind: 'customer',
-      customerId: customerByLegacy.id,
-      displayName: String(customerByLegacy.name ?? appointment.clientName),
-    });
-  }, [customerByLegacy, selectedCustomerId, appointment.clientName]);
-
   const { data: activeBonos = [] } = useCustomerActiveBonos(effectiveCustomerId);
   const activeVouchersCount = activeBonos.length;
 
@@ -344,26 +320,29 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
     },
   });
 
+  const handleItemsChange = (next: AppointmentItemDraft[]) => {
+    setItems(next.map((it) => ({ ...it, quantity: 1 })));
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!clientPick) return;
-    const clientName = clientPick.kind === 'customer' ? clientPick.displayName : clientPick.name;
-    if (!clientName.trim()) return;
+    const clientName = (appointment.clientName || summaryCustomer?.name || '').trim();
+    if (!clientName) return;
     const endTime = calcEndFromStart(formData.startTime, effectiveDurationMinutes(items));
     onSave({
       ...appointment,
       ...formData,
-      clientName: clientName.trim(),
-      customerId: clientPick.kind === 'customer' ? clientPick.customerId : null,
+      clientName,
+      customerId: appointment.customerId ?? effectiveCustomerId ?? null,
       endTime,
-    }, items);
+    }, items.map((it) => ({ ...it, quantity: 1 })));
   };
 
   return (
     <div className={`fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center ${AGENDA_APPOINTMENT_MODAL_Z} px-4 pt-3 pb-28 sm:pb-24 sm:p-4`}>
       <Card className="w-full max-w-lg max-h-[calc(100dvh-7rem)] overflow-y-auto">
         <CardHeader className="pb-3">
-          <div className="flex items-start gap-2">
+          <div className="flex items-center gap-2">
             {returnCustomerId && onReturnToCustomerHistory && (
               <Button
                 type="button"
@@ -376,13 +355,40 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                 Historial
               </Button>
             )}
-            <CardTitle className="text-base flex items-center gap-2 shrink-0 pt-1">
-              <User className="w-4 h-4" /> Editar Cita
-            </CardTitle>
-            <div className="flex-1 min-w-0">
-              <AppointmentClientePicker customers={customers} value={clientPick} onChange={setClientPick} />
+            <CardTitle className="text-base shrink-0">Cita</CardTitle>
+            <div className="flex flex-1 min-w-0 items-center gap-1.5">
+              <Input
+                type="date"
+                aria-label="Fecha"
+                value={formData.date}
+                onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                className="h-8 min-w-0 flex-1 text-xs px-2"
+              />
+              <Input
+                type="time"
+                aria-label="Hora inicio"
+                className="h-8 w-[5.25rem] shrink-0 text-xs px-1.5 tabular-nums"
+                value={formData.startTime}
+                onChange={(e) => setFormData({ ...formData, startTime: e.target.value })}
+              />
+              <Select
+                value={formData.employeeId}
+                onValueChange={(v) => setFormData({ ...formData, employeeId: v })}
+              >
+                <SelectTrigger
+                  className="h-8 min-w-0 flex-1 text-xs"
+                  title={hasMixedBillingServices ? 'Servicios de distintas empresas en la misma cita' : 'Empleada'}
+                >
+                  <SelectValue placeholder="Empleada" />
+                </SelectTrigger>
+                <AppointmentSelectContent>
+                  {eligibleEmployees.map((e) => (
+                    <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>
+                  ))}
+                </AppointmentSelectContent>
+              </Select>
             </div>
-            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0 mt-0.5" onClick={onCancel} title="Cerrar y volver a la agenda">
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0" onClick={onCancel} title="Cerrar y volver a la agenda">
               <X className="w-4 h-4" />
             </Button>
           </div>
@@ -412,42 +418,13 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                   : undefined}
               />
             )}
-            <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
-              <div>
-                <Label className="text-xs">Fecha</Label>
-                <Input type="date" value={formData.date} onChange={(e) => setFormData({ ...formData, date: e.target.value })} />
-              </div>
-              <div>
-                <Label className="text-xs">Hora inicio</Label>
-                <Input
-                  type="time"
-                  value={formData.startTime}
-                  onChange={(e) => setFormData({ ...formData, startTime: e.target.value })}
-                />
-              </div>
-              <div>
-                <Label className="text-xs">Empleada</Label>
-                {hasMixedBillingServices && (
-                  <p className="text-[10px] text-amber-600 mb-1">
-                    Servicios de distintas empresas en la misma cita.
-                  </p>
-                )}
-                <Select value={formData.employeeId} onValueChange={(v) => setFormData({ ...formData, employeeId: v })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <AppointmentSelectContent>
-                    {eligibleEmployees.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}
-                  </AppointmentSelectContent>
-                </Select>
-              </div>
-            </div>
-
             {itemsLoading || loadedItems === undefined ? (
               <Skeleton className="h-28 w-full rounded-md" />
             ) : (
               <AppointmentItemsEditor
                 startTime={formData.startTime}
                 items={items}
-                onChange={setItems}
+                onChange={handleItemsChange}
                 customerId={effectiveCustomerId}
                 recursosCatalog={recursosCatalog}
                 cabinasCatalog={cabinas}
@@ -455,6 +432,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                 dayAppointments={dayAppointments}
                 excludeAppointmentId={appointment.id}
                 compactHeader
+                compactSlots
               />
             )}
 
@@ -514,7 +492,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                         : 'Cobrar en TPV'}
                   </Button>
                 )}
-                <Button type="submit" size="sm" disabled={!clientPick}><Save className="w-4 h-4 mr-1" /> Guardar</Button>
+                <Button type="submit" size="sm"><Save className="w-4 h-4 mr-1" /> Guardar</Button>
               </div>
             </div>
             {showNotify && onNotify && (

@@ -3,8 +3,6 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Progress } from '@/components/ui/progress';
-import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
@@ -13,6 +11,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { bonoSessionsDisplay } from '@/lib/bonoSessionsDisplay';
 import type { PostgrestError } from '@supabase/supabase-js';
 
 interface Props {
@@ -115,25 +114,6 @@ const fmtShortDate = (value: string | null | undefined) => {
 const toDateInputValue = (value: string | null | undefined) =>
   value ? String(value).slice(0, 10) : '';
 
-const coverageSummary = (items: CoverageItem[]) =>
-  items
-    .map((it) => {
-      const used = Number(it.used_quantity ?? 0);
-      const qty = Number(it.covered_quantity ?? 0);
-      const remaining = Math.max(0, qty - used);
-      const short = it.label.length > 28 ? `${it.label.slice(0, 26)}…` : it.label;
-      return `${short} (${remaining}/${qty})`;
-    })
-    .join(' · ');
-
-const bonoRemainingSessions = (b: BonusRow) =>
-  Math.max(0, Number(b.sesiones_totales ?? 0) - Number(b.sesiones_usadas ?? 0));
-
-const bonoSessionsLabel = (b: BonusRow) => {
-  const total = Math.max(0, Number(b.sesiones_totales ?? 0));
-  return `${bonoRemainingSessions(b)}/${total}`;
-};
-
 const isBonoExpired = (b: BonusRow) => {
   if (!b.fecha_vencimiento) return false;
   const vence = new Date(String(b.fecha_vencimiento).slice(0, 10) + 'T23:59:59');
@@ -142,14 +122,31 @@ const isBonoExpired = (b: BonusRow) => {
 
 const isBonoUsable = (b: BonusRow) => {
   if (String(b.estado).toLowerCase() === 'completado') return false;
-  if (bonoRemainingSessions(b) <= 0) return false;
+  if (
+    bonoSessionsDisplay({
+      sesiones_totales: b.sesiones_totales,
+      sesiones_usadas: b.sesiones_usadas,
+      coverage_items: b.coverage_items,
+    }).remaining <= 0
+  ) {
+    return false;
+  }
   if (isBonoExpired(b)) return false;
   return true;
 };
 
 const bonoInactiveLabel = (b: BonusRow) => {
   if (isBonoExpired(b)) return 'Vencido';
-  if (String(b.estado).toLowerCase() === 'completado' || bonoRemainingSessions(b) <= 0) return 'Agotado';
+  if (
+    String(b.estado).toLowerCase() === 'completado' ||
+    bonoSessionsDisplay({
+      sesiones_totales: b.sesiones_totales,
+      sesiones_usadas: b.sesiones_usadas,
+      coverage_items: b.coverage_items,
+    }).remaining <= 0
+  ) {
+    return 'Agotado';
+  }
   return 'No utilizable';
 };
 
@@ -842,138 +839,121 @@ export const ClienteBonosTab: React.FC<Props> = ({ customerId }) => {
     );
   };
 
-  const renderBonoCard = (bono: BonusRow) => {
-    const remaining = bonoRemainingSessions(bono);
-    const total = Math.max(0, Number(bono.sesiones_totales ?? 0));
-    const progress = total > 0 ? ((total - remaining) / total) * 100 : 100;
+  const renderBonoCard = (bono: BonusRow, section: 'vigente' | 'historico') => {
+    const { remaining, total } = bonoSessionsDisplay({
+      sesiones_totales: bono.sesiones_totales,
+      sesiones_usadas: bono.sesiones_usadas,
+      coverage_items: bono.coverage_items,
+    });
     const usable = isBonoUsable(bono);
     const isEditing = editingId === bono.id;
-    const compra = fmtShortDate(bono.fecha_compra);
     const vence = fmtShortDate(bono.fecha_vencimiento);
     const pending40 =
       bono.payment_mode === 'split_60_40' &&
       !bono.second_payment_paid &&
       (bono.second_payment_due_at_used_sessions ?? 0) <= bono.sesiones_usadas;
+    const sessionsTitle = `${remaining} sesión${remaining === 1 ? '' : 'es'} disponible${remaining === 1 ? '' : 's'} de ${total}`;
+
+    if (isEditing) {
+      return (
+        <Card key={bono.id} className="overflow-hidden ring-1 ring-primary/40">
+          <CardContent className="p-2.5 sm:p-3">
+            <div className="flex items-center gap-2 text-sm leading-tight mb-2">
+              <Gift className="w-3.5 h-3.5 shrink-0 text-primary" />
+              <span className="font-medium truncate">Editando: {bono.nombre}</span>
+            </div>
+            {renderBonoForm({
+              onCancel: cancelEditing,
+              submitLabel: 'Guardar cambios',
+              embedded: true,
+              mode: 'edit',
+            })}
+          </CardContent>
+        </Card>
+      );
+    }
+
+    const isVigente = section === 'vigente';
 
     return (
-      <Card
+      <div
         key={bono.id}
         className={cn(
-          'overflow-hidden',
-          !usable && !isEditing && 'opacity-70',
-          isEditing && 'ring-1 ring-primary/40',
+          'flex items-center gap-1.5 sm:gap-2 min-h-9 px-2 sm:px-2.5 py-1.5 rounded-md border text-xs sm:text-sm leading-tight min-w-0',
+          isVigente
+            ? 'border-emerald-300/70 bg-emerald-50/80 dark:bg-emerald-950/35 dark:border-emerald-700/50 shadow-sm'
+            : 'border-border/30 bg-muted/15 text-muted-foreground opacity-55',
         )}
+        title={sessionsTitle}
       >
-        <CardContent className="p-2.5 sm:p-3">
-          {!isEditing ? (
-            <>
-              <div className="flex items-center gap-2 min-w-0 text-sm leading-tight">
-                <Gift className="w-3.5 h-3.5 shrink-0 text-primary" />
-                <span className="font-medium truncate min-w-0">{bono.nombre}</span>
-                <Badge
-                  variant={usable ? 'default' : 'secondary'}
-                  className={cn(
-                    'shrink-0 h-5 px-1.5 text-[10px] font-normal',
-                    usable && 'bg-green-100 text-green-800 hover:bg-green-100',
-                  )}
-                >
-                  {usable ? 'Vigente' : bonoInactiveLabel(bono)}
-                </Badge>
-                {bono.legacy_codboncli && (
-                  <span className="hidden sm:inline shrink-0 text-[10px] font-mono text-muted-foreground">
-                    #{bono.legacy_codboncli}
-                  </span>
-                )}
-                <div className="ml-auto flex items-center gap-1.5 shrink-0">
-                  <span className="font-semibold tabular-nums">{bono.precio_total.toFixed(2)} €</span>
-                  <span
-                    className={cn(
-                      'text-xs tabular-nums font-medium',
-                      usable ? 'text-emerald-700 dark:text-emerald-400' : 'text-muted-foreground',
-                    )}
-                    title={`${remaining} sesión${remaining === 1 ? '' : 'es'} disponible${remaining === 1 ? '' : 's'} de ${total}`}
-                  >
-                    {bonoSessionsLabel(bono)}
-                  </span>
-                  <Progress value={progress} className="w-14 h-1.5 hidden sm:block" />
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-7 w-7"
-                    onClick={() => openEdit(bono)}
-                    disabled={Boolean(editingId && editingId !== bono.id)}
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Button>
-                  {usable && (
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-7 w-7"
-                      onClick={() => usarSesionMutation.mutate(bono.id)}
-                      disabled={usarSesionMutation.isPending}
-                      title="Usar sesión"
-                    >
-                      <Play className="h-3.5 w-3.5" />
-                    </Button>
-                  )}
-                </div>
-              </div>
-              <div className="mt-1 pl-5 sm:pl-[1.375rem] text-[11px] leading-snug text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                {bono.coverage_items.length > 0 ? (
-                  <span className="min-w-0">{coverageSummary(bono.coverage_items)}</span>
-                ) : (
-                  <span className="text-amber-700 dark:text-amber-400">Sin detalle de servicios</span>
-                )}
-                {(compra || vence) && (
-                  <span className="shrink-0">
-                    {[compra && `Compra ${compra}`, vence && `Vence ${vence}`].filter(Boolean).join(' · ')}
-                  </span>
-                )}
-                <span className="shrink-0 tabular-nums">
-                  Pagado {Number(bono.paid_amount || 0).toFixed(2)}/{Number(bono.precio_total || 0).toFixed(2)} €
-                  {bono.payment_mode === 'split_60_40' ? ' · 60/40' : ''}
-                </span>
-                {bono.legacy_codboncli && (
-                  <span className="sm:hidden shrink-0 font-mono">#{bono.legacy_codboncli}</span>
-                )}
-                {usable && pending40 && (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    className="h-5 px-2 text-[10px]"
-                    onClick={() => cobrarPendienteMutation.mutate(bono.id)}
-                    disabled={cobrarPendienteMutation.isPending}
-                  >
-                    Cobrar 40%
-                  </Button>
-                )}
-                {usable && bono.payment_mode === 'split_60_40' && !bono.second_payment_paid && !pending40 && (
-                  <span className="text-amber-700">
-                    40% al usar {bono.second_payment_due_at_used_sessions} ses.
-                  </span>
-                )}
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="flex items-center gap-2 text-sm leading-tight mb-1">
-                <Gift className="w-3.5 h-3.5 shrink-0 text-primary" />
-                <span className="font-medium">Editando: {bono.nombre}</span>
-                <Badge variant="outline" className="h-5 px-1.5 text-[10px] font-normal">
-                  {usable ? 'Vigente' : bonoInactiveLabel(bono)}
-                </Badge>
-              </div>
-              {renderBonoForm({
-                onCancel: cancelEditing,
-                submitLabel: 'Guardar cambios',
-                embedded: true,
-                mode: 'edit',
-              })}
-            </>
+        <Gift
+          className={cn(
+            'w-3.5 h-3.5 shrink-0',
+            isVigente ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground',
           )}
-        </CardContent>
-      </Card>
+        />
+        <span className={cn('font-medium truncate min-w-0 flex-1', isVigente && 'text-foreground')}>
+          {bono.nombre}
+        </span>
+        {bono.legacy_codboncli && (
+          <span className="hidden md:inline shrink-0 font-mono text-[10px] opacity-80">
+            {bono.legacy_codboncli}
+          </span>
+        )}
+        <span
+          className={cn(
+            'shrink-0 tabular-nums font-semibold whitespace-nowrap',
+            isVigente ? 'text-emerald-700 dark:text-emerald-300' : 'text-muted-foreground',
+          )}
+        >
+          {remaining}/{total} ses.
+        </span>
+        {vence && (
+          <span className="hidden sm:inline shrink-0 text-[10px] whitespace-nowrap opacity-80">
+            {isVigente ? `→ ${vence}` : vence}
+          </span>
+        )}
+        {!isVigente && (
+          <span className="shrink-0 text-[10px] uppercase tracking-wide font-medium">
+            {bonoInactiveLabel(bono)}
+          </span>
+        )}
+        {isVigente && pending40 && (
+          <Button
+            size="sm"
+            variant="secondary"
+            className="h-6 px-1.5 text-[10px] shrink-0"
+            onClick={() => cobrarPendienteMutation.mutate(bono.id)}
+            disabled={cobrarPendienteMutation.isPending}
+          >
+            40%
+          </Button>
+        )}
+        <div className="flex items-center shrink-0 ml-0.5">
+          <Button
+            size="icon"
+            variant="ghost"
+            className={cn('h-7 w-7', !isVigente && 'h-6 w-6 opacity-70')}
+            onClick={() => openEdit(bono)}
+            disabled={Boolean(editingId && editingId !== bono.id)}
+            title="Editar"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
+          {usable && (
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-7 w-7"
+              onClick={() => usarSesionMutation.mutate(bono.id)}
+              disabled={usarSesionMutation.isPending}
+              title="Usar sesión"
+            >
+              <Play className="h-3.5 w-3.5" />
+            </Button>
+          )}
+        </div>
+      </div>
     );
   };
 
@@ -1004,21 +984,25 @@ export const ClienteBonosTab: React.FC<Props> = ({ customerId }) => {
       ) : !bonos?.length ? (
         <div className="text-center py-8 text-muted-foreground">No hay bonos</div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-3">
           {bonosVigentes.length > 0 && (
-            <section className="space-y-1.5">
+            <section className="space-y-1">
               <h4 className="text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400 px-0.5">
-                Vigentes · sesiones pendientes ({bonosVigentes.length})
+                Vigentes ({bonosVigentes.length})
               </h4>
-              {bonosVigentes.map(renderBonoCard)}
+              <div className="space-y-1">
+                {bonosVigentes.map((b) => renderBonoCard(b, 'vigente'))}
+              </div>
             </section>
           )}
           {bonosHistorico.length > 0 && (
-            <section className="space-y-1.5">
-              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground px-0.5">
-                Histórico · no utilizables ({bonosHistorico.length})
+            <section className="space-y-1">
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground/80 px-0.5">
+                Histórico ({bonosHistorico.length})
               </h4>
-              {bonosHistorico.map(renderBonoCard)}
+              <div className="space-y-0.5">
+                {bonosHistorico.map((b) => renderBonoCard(b, 'historico'))}
+              </div>
             </section>
           )}
           {bonosVigentes.length === 0 && bonosHistorico.length === 0 && (
