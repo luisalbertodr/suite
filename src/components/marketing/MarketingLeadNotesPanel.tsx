@@ -103,10 +103,18 @@ export const MarketingLeadNotesPanel: React.FC<MarketingLeadNotesPanelProps> = (
     }
   };
 
-  const sortedNotes = useMemo(
-    () => [...notes].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
-    [notes],
-  );
+  const sortedNotes = useMemo(() => {
+    const seen = new Set<string>();
+    const unique = notes.filter((n) => {
+      const key = `${n.body.trim().toLowerCase()}\0${n.created_at}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    return unique.sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    );
+  }, [notes]);
 
   return (
     <div className={compact ? 'space-y-2' : 'space-y-3'}>

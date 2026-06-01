@@ -6,7 +6,7 @@ import { ArrowLeft, Edit, FileText, Mail, Receipt, Truck } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
 import { useNavigate } from 'react-router-dom';
-import { useUserAppearance } from '@/hooks/useUserAppearance';
+import { useWorkCenterBranding } from '@/hooks/useWorkCenterBranding';
 
 interface PresupuestoNViewProps {
   presupuestoId: string;
@@ -60,7 +60,7 @@ export const PresupuestoNView: React.FC<PresupuestoNViewProps> = ({
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
   const navigate = useNavigate();
-  const { logoUrl, loading: logoLoading } = useUserAppearance();
+  const { logoUrl, isLoading: logoLoading } = useWorkCenterBranding();
 
   useEffect(() => {
     const fetchData = async () => {

@@ -6,9 +6,11 @@ alwaysApply: false
 
 # Despliegue automático (Supabase self-hosted)
 
+> Infraestructura completa, SSH y frontend: ver regla `production-deploy.mdc`.
+
 Tras crear o modificar archivos en `supabase/migrations/` o
 `supabase/functions/`, **aplica el despliegue en el servidor** siempre que
-haya acceso SSH (host `suite-supabase` / `root@192.168.99.110`).
+haya acceso SSH (host `suite-supabase` / `192.168.99.110`).
 
 ## Migraciones SQL
 

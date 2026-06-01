@@ -82,7 +82,7 @@ export const MarketingStageColumn = memo(function MarketingStageColumn({
       className={[
         'flex h-full shrink-0 flex-col rounded-2xl border border-border/60',
         'bg-muted/40 transition-[width] duration-200',
-        collapsed ? 'w-[52px] overflow-hidden' : 'w-[260px]',
+        collapsed ? 'w-[52px] overflow-hidden' : compact ? 'w-[228px]' : 'w-[260px]',
         isDropTarget ? 'border-primary bg-primary/5 ring-2 ring-primary/20' : '',
       ].join(' ')}
       onDragOver={(e) => onStageDragOver(e, stage.id)}
@@ -207,7 +207,12 @@ export const MarketingStageColumn = memo(function MarketingStageColumn({
           </div>
 
           <TooltipProvider delayDuration={300}>
-            <div className="flex-1 space-y-2 overflow-y-auto px-2 pb-3 scrollbar-kanban min-h-0 contain-paint">
+            <div
+              className={[
+                'flex-1 overflow-y-auto px-2 pb-3 scrollbar-kanban min-h-0 contain-paint',
+                compact ? 'space-y-1' : 'space-y-2',
+              ].join(' ')}
+            >
               {leads.length === 0 ? (
                 <div className="rounded-md border border-dashed border-border/70 px-3 py-6 text-center text-xs text-muted-foreground">
                   Arrastra aquí

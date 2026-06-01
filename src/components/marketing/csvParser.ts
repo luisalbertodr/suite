@@ -3,6 +3,7 @@ import type {
   TuPartnerLeadNote,
   TuPartnerLeadsPayload,
 } from '@/hooks/useMarketingLeads';
+import { parseLooseDate } from '@/hooks/useMarketingLeads';
 
 /**
  * Parser CSV RFC 4180 compatible:
@@ -99,18 +100,38 @@ const splitTags = (raw: string): string[] => {
     .filter((t) => t.length > 0);
 };
 
-const splitNotes = (raw: string, createdAt: string | null): TuPartnerLeadNote[] => {
+/** Línea con fecha al inicio: "01/06/2025 - texto" o "2025-06-01: texto" */
+const NOTE_LINE_WITH_DATE_RE =
+  /^(\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}|\d{4}[/.-]\d{1,2}[/.-]\d{1,2})(?:\s*[-–:]\s*|\s+)(.+)$/;
+
+const splitNotes = (raw: string, leadCreatedAt: string | null): TuPartnerLeadNote[] => {
   if (!raw || !raw.trim()) return [];
   const lines = raw
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter((l) => l.length > 0);
   if (lines.length === 0) return [];
-  return lines.map((body) => ({
-    body,
-    createdAt: createdAt ?? undefined,
-    kind: 'note',
-  }));
+
+  const seen = new Set<string>();
+  const out: TuPartnerLeadNote[] = [];
+
+  for (const line of lines) {
+    const dated = line.match(NOTE_LINE_WITH_DATE_RE);
+    let body = line;
+    let createdAt: string | undefined;
+    if (dated) {
+      createdAt = parseLooseDate(dated[1]) ?? undefined;
+      body = dated[2].trim();
+    } else if (lines.length === 1 && leadCreatedAt) {
+      createdAt = parseLooseDate(leadCreatedAt) ?? undefined;
+    }
+    if (!body) continue;
+    const key = body.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ body, createdAt, kind: 'note' });
+  }
+  return out;
 };
 
 const toNumber = (raw: string): number | undefined => {

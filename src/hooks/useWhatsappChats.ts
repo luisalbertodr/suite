@@ -21,6 +21,7 @@ export const useWhatsappChats = () => {
   const chatsQuery = useQuery({
     queryKey: ['whatsapp-chats', companyId],
     enabled: !!companyId && !companyLoading,
+    staleTime: 5_000,
     queryFn: async (): Promise<WhatsappChatRow[]> => {
       if (!companyId) return [];
       const { data, error } = await supabase
@@ -96,7 +97,6 @@ export const useWhatsappChats = () => {
     },
     onSuccess: () => {
       invalidate();
-      queryClient.invalidateQueries({ queryKey: ['whatsapp-messages', companyId] });
     },
   });
 
@@ -134,7 +134,6 @@ export const useWhatsappChats = () => {
     },
     onSuccess: () => {
       invalidate();
-      queryClient.invalidateQueries({ queryKey: ['whatsapp-messages', companyId] });
     },
   });
 

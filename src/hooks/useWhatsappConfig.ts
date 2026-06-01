@@ -53,6 +53,7 @@ export type WhatsappProxyAction = {
       reply_to_message_id?: string;
     }
   | { action: 'messages.forward'; chat_id: string; message_id: string }
+  | { action: 'messages.delete'; chat_id: string; message_id: string }
   | { action: 'chat.mark_read'; chat_id: string }
   | { action: 'chat.ensure'; chat_id: string; name?: string | null }
   | {
@@ -65,6 +66,7 @@ export type WhatsappProxyAction = {
   | { action: 'pictures.sync_batch'; chat_ids?: string[]; limit?: number }
   | { action: 'groups.sync_name'; chat_id: string }
   | { action: 'media.download'; url?: string; chat_id?: string; message_id?: string }
+  | { action: 'data.purge'; logout_waha?: boolean }
 );
 
 export async function invokeWhatsappProxy<T = unknown>(
@@ -332,6 +334,24 @@ export const useWhatsappConfig = () => {
       }),
   });
 
+  const purgeHistory = useMutation({
+    mutationFn: async (logoutWaha = true) =>
+      invokeWhatsappProxy<{
+        ok: boolean;
+        messages_deleted: number;
+        chats_deleted: number;
+        avatars_removed: number;
+      }>({
+        action: 'data.purge',
+        logout_waha: logoutWaha,
+      }),
+    onSuccess: () => {
+      invalidate();
+      queryClient.invalidateQueries({ queryKey: ['whatsapp-chats'] });
+      queryClient.invalidateQueries({ queryKey: ['whatsapp-messages'] });
+    },
+  });
+
   return {
     config: configQuery.data ?? null,
     isLoading: configQuery.isLoading,
@@ -346,5 +366,6 @@ export const useWhatsappConfig = () => {
     fetchQr,
     configureWebhook,
     ping,
+    purgeHistory,
   };
 };

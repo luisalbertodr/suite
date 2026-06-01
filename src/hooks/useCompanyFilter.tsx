@@ -161,6 +161,14 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
 
         if (cancelled) return;
         setAccessibleCompanies(companies);
+        if (activeId) {
+          const { error: syncError } = await supabase.rpc('set_active_company_id', {
+            p_company_id: activeId,
+          });
+          if (syncError) {
+            debugLog('set_active_company_id on setup failed:', syncError.message);
+          }
+        }
         setCompanyId(activeId);
         if (activeId) {
           persistActiveCompany(activeId, user.id);

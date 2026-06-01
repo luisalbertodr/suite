@@ -7,6 +7,16 @@ import { WhatsappMessageInput } from './WhatsappMessageInput';
 import { WhatsappForwardDialog } from './WhatsappForwardDialog';
 import { WhatsappLinkPopover } from './WhatsappLinkPopover';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   useWhatsappMessages,
   type WhatsappMessageRow,
   type SendMessageInput,
@@ -34,9 +44,9 @@ import {
   type MetaLeadInfo,
 } from './whatsappUtils';
 import type { WhatsappChatRow } from '@/hooks/useWhatsappChats';
-import { useWhatsappChats } from '@/hooks/useWhatsappChats';
 
 interface Props {
+  chats: WhatsappChatRow[];
   chat: WhatsappChatRow;
   customerName?: string;
   isLinkedCustomer?: boolean;
@@ -49,6 +59,7 @@ interface Props {
 }
 
 export const WhatsappChatView: React.FC<Props> = ({
+  chats,
   chat,
   customerName,
   isLinkedCustomer,
@@ -61,7 +72,6 @@ export const WhatsappChatView: React.FC<Props> = ({
 }) => {
   const { toast } = useToast();
   const { companyId, loading: companyLoading } = useCompanyFilter();
-  const { chats } = useWhatsappChats();
   const relatedChatIds = useMemo(() => {
     const ids = new Set<string>();
     for (const c of chats) {
@@ -82,10 +92,13 @@ export const WhatsappChatView: React.FC<Props> = ({
   const {
     messages,
     isLoading,
+    isError,
+    error,
     isSyncingHistory,
     refreshFromWaha,
     sendMessage,
     forwardMessage,
+    deleteMessage,
   } = useWhatsappMessages(chat.chat_id, relatedChatIds, {
     historySyncedAt: chat.history_synced_at,
   });
@@ -94,11 +107,13 @@ export const WhatsappChatView: React.FC<Props> = ({
   const [replyTo, setReplyTo] = useState<WhatsappMessageRow | null>(null);
   const [forwardMessageRow, setForwardMessageRow] = useState<WhatsappMessageRow | null>(null);
   const [forwardOpen, setForwardOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<WhatsappMessageRow | null>(null);
 
   useEffect(() => {
     setReplyTo(null);
     setForwardMessageRow(null);
     setForwardOpen(false);
+    setDeleteTarget(null);
   }, [chat.chat_id]);
 
   // Cuando entramos al chat, marcamos como leído (la sync la gestiona useWhatsappMessages).
@@ -135,6 +150,21 @@ export const WhatsappChatView: React.FC<Props> = ({
       const msg = e instanceof Error ? e.message : 'No se pudo enviar';
       toast({ title: 'Error', description: msg, variant: 'destructive' });
       throw e;
+    }
+  };
+
+  const handleDeleteForEveryone = async () => {
+    if (!deleteTarget?.waha_message_id) return;
+    try {
+      await deleteMessage.mutateAsync({
+        chat_id: chat.chat_id,
+        message_id: deleteTarget.waha_message_id,
+      });
+      toast({ title: 'Mensaje eliminado para todos' });
+      setDeleteTarget(null);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'No se pudo eliminar el mensaje';
+      toast({ title: 'Error', description: msg, variant: 'destructive' });
     }
   };
 
@@ -327,16 +357,44 @@ export const WhatsappChatView: React.FC<Props> = ({
 
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           <div className="flex flex-col space-y-3 p-6">
-            {isLoading && messages.length === 0 ? (
+            {isError && messages.length === 0 ? (
+              <div className="py-10 text-center space-y-3">
+                <p className="text-xs text-destructive">
+                  {error?.message ?? 'No se pudieron cargar los mensajes.'}
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => refreshFromWaha.mutate('full')}
+                >
+                  Reintentar
+                </Button>
+              </div>
+            ) : isLoading && messages.length === 0 ? (
               <p className="py-10 text-center text-xs text-muted-foreground">
                 {isSyncingHistory
                   ? 'Importando historial desde Waha…'
                   : 'Cargando mensajes…'}
               </p>
             ) : grouped.length === 0 ? (
-              <p className="py-10 text-center text-xs text-muted-foreground">
-                Aún no hay mensajes en esta conversación.
-              </p>
+              <div className="py-10 text-center space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  {isSyncingHistory || refreshFromWaha.isPending
+                    ? 'Importando historial desde Waha…'
+                    : 'Aún no hay mensajes en esta conversación.'}
+                </p>
+                {!isSyncingHistory && !refreshFromWaha.isPending && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => refreshFromWaha.mutate('full')}
+                  >
+                    Importar desde Waha
+                  </Button>
+                )}
+              </div>
             ) : (
               grouped.map((g) => (
                 <div key={g.day} className="space-y-1">
@@ -361,6 +419,7 @@ export const WhatsappChatView: React.FC<Props> = ({
                         setForwardMessageRow(msg);
                         setForwardOpen(true);
                       }}
+                      onDeleteForEveryone={(msg) => setDeleteTarget(msg)}
                     />
                   ))}
                 </div>
@@ -387,6 +446,36 @@ export const WhatsappChatView: React.FC<Props> = ({
         forwarding={forwardMessage.isPending}
         onForward={handleForward}
       />
+
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar para todos?</AlertDialogTitle>
+            <AlertDialogDescription>
+              El mensaje se borrará en WhatsApp para todos los participantes del chat.
+              Esta acción no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteMessage.isPending}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleteMessage.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                void handleDeleteForEveryone();
+              }}
+            >
+              {deleteMessage.isPending ? 'Eliminando…' : 'Eliminar para todos'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

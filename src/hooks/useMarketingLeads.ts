@@ -726,7 +726,19 @@ export const useMarketingLeads = (scopeCompanyId?: string | null) => {
         }
       }
 
-      // 6) Insertar notas (si vienen)
+      // 6) Insertar notas (si vienen), sin duplicar cuerpos ya guardados
+      const { data: existingNoteRows, error: existingNotesErr } = await supabase
+        .from('marketing_lead_notes')
+        .select('lead_id, body')
+        .eq('company_id', companyId);
+      if (existingNotesErr) throw existingNotesErr;
+
+      const existingNoteKeys = new Set<string>();
+      for (const row of existingNoteRows ?? []) {
+        if (!row.lead_id || !row.body) continue;
+        existingNoteKeys.add(`${row.lead_id}\0${row.body.trim()}`);
+      }
+
       const notesRows: Array<{
         company_id: string;
         lead_id: string;
@@ -750,11 +762,15 @@ export const useMarketingLeads = (scopeCompanyId?: string | null) => {
         const leadId = resolveLeadId(p);
         if (!leadId) continue;
         for (const n of p.notes) {
-          if (!n.body) continue;
+          const body = n.body?.trim();
+          if (!body) continue;
+          const dedupeKey = `${leadId}\0${body}`;
+          if (existingNoteKeys.has(dedupeKey)) continue;
+          existingNoteKeys.add(dedupeKey);
           notesRows.push({
             company_id: companyId,
             lead_id: leadId,
-            body: n.body,
+            body,
             kind: n.kind || 'note',
             ...(n.created_at ? { created_at: n.created_at } : {}),
           });

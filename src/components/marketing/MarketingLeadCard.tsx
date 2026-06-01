@@ -77,16 +77,19 @@ const formatNoteDate = (iso: string): string => {
   return dateTimeFormatter.format(d);
 };
 
-const NOTE_KIND_LABELS: Record<string, string> = {
-  note: 'Nota',
-  call: 'Llamada',
-  whatsapp: 'WhatsApp',
-  email: 'Email',
-  rejection: 'Rechazo',
-  reschedule: 'Reagendar',
-};
-
 const truncate = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
+
+const currencyFormatter = new Intl.NumberFormat('es-ES', {
+  style: 'currency',
+  currency: 'EUR',
+  maximumFractionDigits: 0,
+});
+
+const formatLeadValue = (value: number | null | undefined): string | null => {
+  const n = Number(value ?? 0);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return currencyFormatter.format(n);
+};
 
 function waAutomationBadge(
   status: string | null | undefined,
@@ -210,16 +213,23 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
       String(lead.source ?? '').toLowerCase(),
     );
 
+  const valueLabel = formatLeadValue(lead.value);
+  const iconBtnClass = compact ? 'h-6 w-6' : 'h-7 w-7';
+  const iconClass = compact ? 'h-3.5 w-3.5' : 'h-3.5 w-3.5';
+  const cardFields = compact
+    ? visibleFields.filter((f) => f.field_key !== 'email' && f.field_key !== 'value')
+    : visibleFields;
+
   const cardShell = (
       <div
         draggable
         onDragStart={(e) => onDragStart(e, lead)}
         onDragEnd={onDragEnd}
         onClick={onClick}
-        style={{ contentVisibility: 'auto', containIntrinsicSize: compact ? '0 72px' : '0 160px' }}
+        style={{ contentVisibility: 'auto', containIntrinsicSize: compact ? '0 88px' : '0 160px' }}
         className={[
-          'group relative cursor-pointer rounded-xl border shadow-sm',
-          compact ? '' : 'transition-all hover:shadow-md hover:-translate-y-0.5',
+          'group relative cursor-pointer rounded-lg border shadow-sm',
+          compact ? '' : 'rounded-xl transition-all hover:shadow-md hover:-translate-y-0.5',
           isWon
             ? 'border-amber-300/70 bg-amber-50/70 dark:border-amber-700/50 dark:bg-amber-950/30'
             : isLinked
@@ -238,18 +248,26 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
           className="absolute left-0 top-0 h-full w-1 rounded-l-xl"
           style={{ backgroundColor: stageColor }}
         />
-        <div className={compact ? 'p-2 pl-3' : 'p-3 pl-4'}>
-          <div className="flex items-start justify-between gap-2">
+        <div className={compact ? 'p-1.5 pl-2.5' : 'p-3 pl-4'}>
+          <div className="flex items-start justify-between gap-1.5">
             <div className="min-w-0 flex-1">
-              <h4 className="truncate text-sm font-semibold text-foreground">
+              <h4
+                className={[
+                  'truncate font-semibold text-foreground',
+                  compact ? 'text-sm leading-snug' : 'text-sm',
+                ].join(' ')}
+              >
                 {fullName}
-                {createdAtLabel ? (
+                {!compact && createdAtLabel ? (
                   <span className="text-muted-foreground font-normal"> · {createdAtLabel}</span>
                 ) : null}
               </h4>
+              {compact && createdAtLabel ? (
+                <p className="truncate text-[11px] text-muted-foreground">{createdAtLabel}</p>
+              ) : null}
               {compact ? (
-                <p className="truncate text-[10px] text-muted-foreground">
-                  {[lead.phone, lead.email].filter(Boolean).join(' · ') || '—'}
+                <p className="truncate text-[11px] text-muted-foreground leading-snug">
+                  {lead.phone || '—'}
                 </p>
               ) : null}
               <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
@@ -328,26 +346,61 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
                 ) : null}
               </div>
             </div>
-            <GripVertical className={`h-4 w-4 shrink-0 text-muted-foreground/50 ${compact ? 'opacity-40' : 'opacity-0 transition-opacity group-hover:opacity-100'}`} />
+            <div className="flex shrink-0 items-center gap-0.5">
+              {compact && valueLabel ? (
+                <span
+                  className="max-w-[72px] truncate text-[11px] font-semibold tabular-nums text-foreground"
+                  title={valueLabel}
+                >
+                  {valueLabel}
+                </span>
+              ) : null}
+              <GripVertical
+                className={[
+                  'h-4 w-4 shrink-0 text-muted-foreground/50',
+                  compact ? 'opacity-50' : 'opacity-0 transition-opacity group-hover:opacity-100',
+                ].join(' ')}
+              />
+            </div>
           </div>
 
-          {!compact ? (
-          <dl className="mt-2 space-y-1 text-[11px]">
-            {visibleFields.map((field) => {
-              const raw = readLeadField(lead, field.field_key);
-              if (!shouldShowLeadCardField(lead, field, raw)) return null;
-              const formatted = formatLeadFieldValue(raw, field.field_type);
-              if (isMarketingNoiseText(formatted, lead)) return null;
-              return (
-                <div key={field.id} className="flex items-baseline justify-between gap-2">
-                  <dt className="shrink-0 text-muted-foreground">{field.display_label}:</dt>
-                  <dd className="min-w-0 truncate font-medium text-foreground" title={formatted}>
-                    {formatted}
-                  </dd>
-                </div>
-              );
-            })}
-          </dl>
+          {cardFields.length > 0 ? (
+            compact ? (
+              <div className="mt-0.5 space-y-0 text-[11px] leading-snug">
+                {cardFields.map((field) => {
+                  const raw = readLeadField(lead, field.field_key);
+                  if (!shouldShowLeadCardField(lead, field, raw)) return null;
+                  const formatted = formatLeadFieldValue(raw, field.field_type);
+                  if (isMarketingNoiseText(formatted, lead)) return null;
+                  return (
+                    <p
+                      key={field.id}
+                      className="truncate font-medium text-foreground"
+                      title={formatted}
+                    >
+                      {formatted}
+                    </p>
+                  );
+                })}
+              </div>
+            ) : (
+              <dl className="mt-2 space-y-1 text-[11px]">
+                {cardFields.map((field) => {
+                  const raw = readLeadField(lead, field.field_key);
+                  if (!shouldShowLeadCardField(lead, field, raw)) return null;
+                  const formatted = formatLeadFieldValue(raw, field.field_type);
+                  if (isMarketingNoiseText(formatted, lead)) return null;
+                  return (
+                    <div key={field.id} className="flex items-baseline justify-between gap-2">
+                      <dt className="shrink-0 text-muted-foreground">{field.display_label}:</dt>
+                      <dd className="min-w-0 truncate font-medium text-foreground" title={formatted}>
+                        {formatted}
+                      </dd>
+                    </div>
+                  );
+                })}
+              </dl>
+            )
           ) : null}
 
           {!compact && showAppointmentBadge ? (
@@ -376,32 +429,32 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
           ) : null}
 
           <div
-            className={`flex flex-wrap items-center justify-end gap-1 ${compact ? 'mt-1.5' : 'mt-3'}`}
+            className={`flex flex-wrap items-center justify-end gap-0.5 ${compact ? 'mt-1' : 'mt-3'}`}
             onClick={stopPropagation}
           >
-            {!compact && phoneHref ? (
+            {phoneHref ? (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button asChild variant="ghost" size="icon" className="h-7 w-7">
+                  <Button asChild variant="ghost" size="icon" className={iconBtnClass}>
                     <a href={phoneHref} aria-label="Llamar">
-                      <Phone className="h-3.5 w-3.5" />
+                      <Phone className={iconClass} />
                     </a>
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>Llamar</TooltipContent>
               </Tooltip>
             ) : null}
-            {!compact && lead.phone ? (
+            {lead.phone ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-7 w-7 text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700 dark:hover:bg-emerald-950"
+                    className={`${iconBtnClass} text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700 dark:hover:bg-emerald-950`}
                     aria-label="WhatsApp"
                     onClick={handleWhatsappClick}
                   >
-                    <MessageCircle className="h-3.5 w-3.5" />
+                    <MessageCircle className={iconClass} />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
@@ -409,12 +462,12 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
                 </TooltipContent>
               </Tooltip>
             ) : null}
-            {!compact && emailHref ? (
+            {emailHref ? (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button asChild variant="ghost" size="icon" className="h-7 w-7">
+                  <Button asChild variant="ghost" size="icon" className={iconBtnClass}>
                     <a href={emailHref} aria-label="Email">
-                      <Mail className="h-3.5 w-3.5" />
+                      <Mail className={iconClass} />
                     </a>
                   </Button>
                 </TooltipTrigger>
@@ -422,35 +475,19 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
               </Tooltip>
             ) : null}
 
-            {compact ? (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="relative h-6 w-6"
-                aria-label="Notas"
-                title={noteCount > 0 ? `${noteCount} notas` : 'Notas'}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onOpenNotes();
-                }}
-              >
-                <StickyNote className="h-3 w-3" />
-                {noteCount > 0 ? <CounterBadge count={noteCount} /> : null}
-              </Button>
-            ) : (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="relative h-7 w-7"
+                  className={`relative ${iconBtnClass}`}
                   aria-label="Notas"
                   onClick={(e) => {
                     e.stopPropagation();
                     onOpenNotes();
                   }}
                 >
-                  <StickyNote className="h-3.5 w-3.5" />
+                  <StickyNote className={iconClass} />
                   {noteCount > 0 ? <CounterBadge count={noteCount} /> : null}
                 </Button>
               </TooltipTrigger>
@@ -464,10 +501,7 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
                     </p>
                     {notePreviews.slice(0, 3).map((n) => (
                       <div key={n.id} className="border-l-2 border-amber-400 pl-2 text-[10px]">
-                        <p className="font-medium">
-                          {NOTE_KIND_LABELS[n.kind] ?? n.kind}{' '}
-                          <span className="text-muted-foreground">· {formatNoteDate(n.created_at)}</span>
-                        </p>
+                        <p className="text-muted-foreground tabular-nums">{formatNoteDate(n.created_at)}</p>
                         <p className="whitespace-pre-wrap break-words text-foreground/80">
                           {truncate(n.body, 140)}
                         </p>
@@ -477,22 +511,21 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
                 )}
               </TooltipContent>
             </Tooltip>
-            )}
 
-            {!compact && tags.length > 0 ? (
+            {tags.length > 0 ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="relative h-7 w-7 text-sky-600"
+                    className={`relative ${iconBtnClass} text-sky-600`}
                     aria-label="Etiquetas"
                     onClick={(e) => {
                       e.stopPropagation();
                       onClick();
                     }}
                   >
-                    <Tag className="h-3.5 w-3.5" />
+                    <Tag className={iconClass} />
                     <CounterBadge count={tags.length} className="bg-sky-500" />
                   </Button>
                 </TooltipTrigger>
@@ -512,54 +545,50 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
               </Tooltip>
             ) : null}
 
-            {!compact && !isLinked ? (
+            {!isLinked ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-7 w-7 text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700 dark:hover:bg-emerald-950"
+                    className={`${iconBtnClass} text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700 dark:hover:bg-emerald-950`}
                     aria-label="Crear cliente"
                     onClick={(e) => {
                       e.stopPropagation();
                       onPromote();
                     }}
                   >
-                    <UserPlus className="h-3.5 w-3.5" />
+                    <UserPlus className={iconClass} />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>Crear cliente desde lead</TooltipContent>
               </Tooltip>
             ) : null}
 
-            {!compact ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7"
+                  className={iconBtnClass}
                   aria-label="Cita"
                   onClick={(e) => {
                     e.stopPropagation();
                     navigate(`/agenda?fromLead=${encodeURIComponent(lead.id)}`);
                   }}
                 >
-                  <Calendar className="h-3.5 w-3.5" />
+                  <Calendar className={iconClass} />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Cita (abrir agenda)</TooltipContent>
             </Tooltip>
-            ) : null}
           </div>
         </div>
       </div>
   );
 
-  if (compact) return cardShell;
-
   return (
-    <TooltipProvider delayDuration={250}>
+    <TooltipProvider delayDuration={compact ? 400 : 250}>
       {cardShell}
     </TooltipProvider>
   );

@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { invokeWhatsappProxy } from '@/hooks/useWhatsappConfig';
+import { jidsSameContact } from '@/components/whatsapp/whatsappUtils';
 import type { Database } from '@/integrations/supabase/types';
 
 export type WhatsappMessageRow = Database['public']['Tables']['whatsapp_messages']['Row'];
@@ -17,6 +18,12 @@ type SyncChatHistoryResponse = {
 };
 
 export type WhatsappSyncMode = 'auto' | 'full' | 'recent';
+
+/** Columnas para listado en UI (sin `raw` JSONB → evita 504 en PostgREST). */
+const MESSAGE_LIST_COLUMNS =
+  'id,company_id,chat_id,waha_message_id,from_jid,from_me,type,body,caption,media_url,media_mime_type,media_filename,media_size,ack,quoted_message_id,timestamp,created_at,updated_at';
+
+const MESSAGE_PAGE_SIZE = 250;
 
 async function syncChatHistoryChunk(
   companyId: string,
@@ -123,21 +130,32 @@ export const useWhatsappMessages = (
   const messagesQuery = useQuery({
     queryKey: key,
     enabled,
+    staleTime: 15_000,
+    refetchOnWindowFocus: false,
+    retry: 1,
     queryFn: async (): Promise<WhatsappMessageRow[]> => {
       if (!companyId || chatIds.length === 0) return [];
       const { data, error } = await supabase
         .from('whatsapp_messages')
-        .select('*')
+        .select(MESSAGE_LIST_COLUMNS)
         .eq('company_id', companyId)
         .in('chat_id', chatIds)
-        .order('timestamp', { ascending: true })
-        .limit(5000);
+        .order('timestamp', { ascending: false })
+        .limit(MESSAGE_PAGE_SIZE);
       if (error) throw error;
-      return dedupeWhatsappMessages(data ?? []);
+      const rows = (data ?? []) as WhatsappMessageRow[];
+      return dedupeWhatsappMessages([...rows].reverse());
     },
   });
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: key });
+  const invalidateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const invalidate = () => {
+    if (invalidateTimerRef.current) clearTimeout(invalidateTimerRef.current);
+    invalidateTimerRef.current = setTimeout(() => {
+      invalidateTimerRef.current = null;
+      queryClient.invalidateQueries({ queryKey: key });
+    }, 400);
+  };
 
   const channelIdRef = useRef<string>('');
   if (!channelIdRef.current) {
@@ -163,6 +181,7 @@ export const useWhatsappMessages = (
       )
       .subscribe();
     return () => {
+      if (invalidateTimerRef.current) clearTimeout(invalidateTimerRef.current);
       supabase.removeChannel(channel);
     };
   }, [companyId, chatIds.join('|'), enabled]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -178,35 +197,50 @@ export const useWhatsappMessages = (
       }
 
       const force = mode === 'full';
-      const count = await syncChatHistoryPaginated(
-        companyId,
-        chatIds,
-        force,
-        () => invalidate(),
-      );
+      const count = await syncChatHistoryPaginated(companyId, chatIds, force);
       return { ok: true, count, mode: force ? ('full' as const) : ('auto' as const) };
     },
-    onSuccess: () => {
+    onSuccess: (res) => {
       invalidate();
-      queryClient.invalidateQueries({ queryKey: ['whatsapp-chats', companyId] });
+      if ((res.count ?? 0) > 0 || res.mode === 'full') {
+        queryClient.invalidateQueries({ queryKey: ['whatsapp-chats', companyId] });
+      }
     },
   });
 
   const openSyncKeyRef = useRef('');
+  const forceRetryRef = useRef(false);
   useEffect(() => {
     if (!enabled) return;
-    const syncKey = `${chatIds.join('|')}|${historySyncedAt ?? 'pending'}`;
+    const syncKey = chatIds.slice().sort().join('|');
     if (openSyncKeyRef.current === syncKey) return;
     openSyncKeyRef.current = syncKey;
-    refreshFromWaha.mutate('auto', { onError: () => undefined });
-  }, [enabled, chatIds.join('|'), historySyncedAt]); // eslint-disable-line react-hooks/exhaustive-deps
+    forceRetryRef.current = false;
+    refreshFromWaha.mutate('auto', {
+      onSuccess: (res) => {
+        if ((res.count ?? 0) > 0) return;
+        if (historySyncedAt) return;
+        if (forceRetryRef.current) return;
+        forceRetryRef.current = true;
+        refreshFromWaha.mutate('full', { onError: () => undefined });
+      },
+      onError: () => {
+        if (historySyncedAt) return;
+        if (forceRetryRef.current) return;
+        forceRetryRef.current = true;
+        refreshFromWaha.mutate('full', { onError: () => undefined });
+      },
+    });
+  }, [enabled, chatIds.join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Respaldo si Realtime o el webhook fallan: solo mensajes recientes.
+  // Respaldo si Realtime o el webhook fallan: solo mensajes recientes (pestaña visible).
   useEffect(() => {
     if (!enabled || !historySyncedAt) return;
-    const timer = window.setInterval(() => {
+    const tick = () => {
+      if (document.visibilityState !== 'visible') return;
       refreshFromWaha.mutate('recent', { onError: () => undefined });
-    }, 8000);
+    };
+    const timer = window.setInterval(tick, 30_000);
     return () => window.clearInterval(timer);
   }, [enabled, chatIds.join('|'), historySyncedAt]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -250,15 +284,38 @@ export const useWhatsappMessages = (
     },
   });
 
+  const deleteMessage = useMutation({
+    mutationFn: async (input: { chat_id: string; message_id: string }) => {
+      if (!companyId) throw new Error('Sin empresa activa');
+      return invokeWhatsappProxy<{
+        ok: boolean;
+        waha_message_id?: string;
+        chat_id?: string;
+      }>({
+        action: 'messages.delete',
+        ...input,
+        company_id: companyId,
+      });
+    },
+    onSuccess: () => {
+      invalidate();
+      queryClient.invalidateQueries({ queryKey: ['whatsapp-chats', companyId] });
+    },
+  });
+
   return {
     messages: messagesQuery.data ?? [],
     isLoading: messagesQuery.isLoading,
-    isSyncingHistory: refreshFromWaha.isPending && !historySyncedAt,
+    isSyncingHistory:
+      refreshFromWaha.isPending &&
+      !historySyncedAt &&
+      (messagesQuery.data?.length ?? 0) === 0,
     isError: messagesQuery.isError,
     error: messagesQuery.error as Error | null,
     refetch: messagesQuery.refetch,
     refreshFromWaha,
     sendMessage,
     forwardMessage,
+    deleteMessage,
   };
 };

@@ -51,6 +51,7 @@ import {
   compareLeads,
   collectDistinctValues,
 } from './marketing/marketingFilterUtils';
+import { useMarketingInvoicedValueSync } from '@/hooks/useMarketingInvoicedValueSync';
 
 const COLLAPSED_STAGES_STORAGE_KEY = 'marketing-kanban-collapsed-stage-ids';
 const COMPACT_CARDS_STORAGE_KEY = 'marketing-kanban-compact-cards';
@@ -100,7 +101,8 @@ export const Marketing: React.FC = () => {
   const [filters, setFilters] = useState<MarketingFilters>(DEFAULT_MARKETING_FILTERS);
   const [compactCards, setCompactCards] = useState(() => {
     try {
-      return localStorage.getItem(COMPACT_CARDS_STORAGE_KEY) === '1';
+      const stored = localStorage.getItem(COMPACT_CARDS_STORAGE_KEY);
+      return stored === null ? true : stored === '1';
     } catch {
       return true;
     }
@@ -210,14 +212,32 @@ export const Marketing: React.FC = () => {
     });
   }, [metaConfig, metaForms, syncNow, toastMetaSyncResult, toast]);
 
+  const matchLeadToCustomer = useCallback(
+    (lead: Pick<MarketingLead, 'id' | 'phone' | 'email' | 'customer_id'>) => {
+      if (lead.customer_id) {
+        const linked = customerIndex.customers.find((c) => c.id === lead.customer_id);
+        if (linked) return linked;
+      }
+      return customerIndex.match({ phone: lead.phone, email: lead.email });
+    },
+    [customerIndex],
+  );
+
   const { matchedCustomerByLead } = useMemo(() => {
     const map = new Map<string, CustomerLookupRow | null>();
     for (const lead of leads) {
-      const m = customerIndex.match({ phone: lead.phone, email: lead.email });
-      map.set(lead.id, m);
+      map.set(lead.id, matchLeadToCustomer(lead));
     }
     return { matchedCustomerByLead: map };
-  }, [leads, customerIndex]);
+  }, [leads, matchLeadToCustomer]);
+
+  const { runSync: syncPresentadaInvoicedValues } = useMarketingInvoicedValueSync({
+    companyId,
+    stages,
+    leads,
+    matchCustomer: matchLeadToCustomer,
+    enabled: !companyLoading && !leadsLoading && !stagesLoading,
+  });
 
   const filteredLeads = useMemo(() => {
     return leads.filter((l) => {
@@ -388,6 +408,18 @@ export const Marketing: React.FC = () => {
 
   const handleManualRefresh = async () => {
     await refetch();
+    try {
+      const invoiced = await syncPresentadaInvoicedValues();
+      if (invoiced.updated > 0) {
+        toast({
+          title: 'Valores actualizados',
+          description: `${invoiced.updated} tarjeta(s) en «${invoiced.stageName}» con importe facturado.`,
+        });
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Error al sincronizar facturación';
+      toast({ title: 'Facturación → Marketing', description: message, variant: 'destructive' });
+    }
     if (metaConfig?.enabled && metaConfig.access_token && metaForms.some((f) => f.enabled)) {
       syncNow.mutate(undefined, {
         onSuccess: toastMetaSyncResult,

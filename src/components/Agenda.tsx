@@ -1257,14 +1257,11 @@ export const Agenda: React.FC = () => {
             <CalendarIcon className="w-5 h-5 text-sky-500" />
             Agenda
           </h1>
-          <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-[10px] text-muted-foreground">
-            <span className="text-emerald-600">Verde: cobrada TPV</span>
-            <span className="text-sky-600">Azul: facturada</span>
-            <span className="text-amber-600">Ámbar: pendiente cobro</span>
-            {isMultiEntity && agendaBillingView !== 'all' && (
-              <span className="text-violet-600">Las citas mixtas (estética + medicina) solo se ven en «Ambas empresas»</span>
-            )}
-          </div>
+          {isMultiEntity && agendaBillingView !== 'all' && (
+            <p className="mt-1 text-[10px] text-muted-foreground text-violet-600 dark:text-violet-400">
+              Las citas mixtas (estética + medicina) solo se ven en «Ambas empresas»
+            </p>
+          )}
         </div>
 
         <div className="flex flex-nowrap items-center gap-1.5 min-w-0">

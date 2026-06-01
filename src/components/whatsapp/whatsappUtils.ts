@@ -554,10 +554,20 @@ type MessagePreviewSource = {
   media_filename?: string | null;
   raw?: unknown;
   waha_message_id?: string | null;
+  from_me?: boolean;
 };
+
+export function isMessageRevoked(m: { type?: string | null }): boolean {
+  return (m.type ?? '').toLowerCase() === 'revoked';
+}
+
+export function revokedMessageLabel(fromMe: boolean): string {
+  return fromMe ? 'Eliminaste este mensaje' : 'Este mensaje fue eliminado';
+}
 
 export function messagePreviewText(m: MessagePreviewSource): string {
   const type = (m.type ?? 'text').toLowerCase();
+  if (type === 'revoked') return revokedMessageLabel(!!m.from_me);
   if (type === 'text' || type === 'chat') {
     return m.body?.trim() || extractBodyFromWahaMessageRaw(m.raw) || 'Mensaje';
   }

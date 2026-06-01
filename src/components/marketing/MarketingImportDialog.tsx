@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
+import { findMarketingIntakeStage } from '@/lib/marketingIntakeStage';
 import {
   parseMetaLeadPayload,
   parseTuPartnerPayload,
@@ -70,8 +71,7 @@ export const MarketingImportDialog: React.FC<MarketingImportDialogProps> = ({
 
   const defaultStageId = useMemo(() => {
     if (stageId) return stageId;
-    const intake = stages.find((s) => s.is_default_intake);
-    return intake?.id ?? stages[0]?.id ?? '';
+    return findMarketingIntakeStage(stages)?.id ?? '';
   }, [stages, stageId]);
 
   const preview = useMemo<Preview>(() => {

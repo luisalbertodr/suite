@@ -1,0 +1,151 @@
+---
+description: Infraestructura producción, SSH, despliegue frontend, Supabase y scripts operativos
+alwaysApply: true
+---
+
+# Despliegue y operaciones en producción (Suite / Lipoout)
+
+Working directory local: `C:\Users\OportoW11\Suite\suite`
+
+Este proyecto **no usa Supabase Cloud**. Backend y frontend van en servidores distintos.
+
+## Arquitectura
+
+| Rol | Host | SSH alias | URL / ruta |
+|-----|------|-----------|------------|
+| **Supabase** (API, Postgres, Auth, Edge Functions) | `192.168.99.110` | `suite-supabase` | `https://supabase.lipoout.com` |
+| **Frontend** (aaPanel, estático Vite/React) | `192.168.99.112` | `suite-web` | `https://suite.lipoout.com` → `/www/wwwroot/suite.lipoout.com` |
+
+Contenedores clave en Supabase (110):
+- Postgres: `supabase-db`
+- Edge runtime: `supabase-edge-functions`
+- Volumen funciones: `/root/supabase-project/volumes/functions`
+- URL funciones: `https://supabase.lipoout.com/functions/v1/<nombre>`
+
+## SSH (obligatorio para automatizar)
+
+- Clave: `%USERPROFILE%\.ssh\suite_deploy`
+- Configuración única: `.\scripts\setup-ssh-deploy.ps1`
+- Incluir aaPanel: `.\scripts\setup-ssh-deploy.ps1 -IncludeWeb`
+- **Ejecutar `scp`/`ssh` desde PowerShell en Windows**, nunca dentro de una sesión SSH (bash come las `\`).
+
+Variables opcionales:
+- `$env:SUITE_SSH_HOST` → default `suite-supabase`
+- `$env:SUITE_WEB_SSH_HOST` → default `suite-web`
+- `$env:SUITE_WEB_ROOT` → default `/www/wwwroot/suite.lipoout.com`
+- `$env:SUITE_WEB_DOMAIN` → default `suite.lipoout.com`
+- `$env:SUITE_FUNCTIONS_PATH` → default `/root/supabase-project/volumes/functions`
+- `$env:SUITE_EDGE_CONTAINER` → default `supabase-edge-functions`
+- `$env:SUITE_DB_CONTAINER` → default `supabase-db`
+
+## Comportamiento del agente tras cambios
+
+Cuando el usuario pida desplegar o hayas modificado código que afecte producción, **ejecuta los scripts** (no solo documentes comandos) si hay acceso SSH.
+
+### Orden recomendado (si aplica todo)
+
+1. **Migración SQL** (`supabase/migrations/`)
+2. **Edge Functions** (`supabase/functions/`) — especialmente si dependen del esquema
+3. **Frontend** (`src/`, assets, `.env` con `VITE_*`)
+
+### Cuándo NO desplegar
+
+- Solo lectura o preguntas sin cambios.
+- SSH no disponible: informar con comandos exactos.
+- Migración ya en `supabase_migrations.schema_migrations`: no re-ejecutar.
+
+## Scripts de despliegue (PowerShell)
+
+Todos desde la raíz del repo:
+
+```powershell
+cd C:\Users\OportoW11\Suite\suite
+```
+
+### Frontend → aaPanel (112)
+
+```powershell
+.\scripts\deploy-frontend.ps1              # build + subida + verificación HTTP
+.\scripts\deploy-frontend.ps1 -SkipBuild   # sube dist/ existente
+.\scripts\deploy-frontend.ps1 -Backup        # backup remoto antes de subir
+.\scripts\deploy-frontend.ps1 -DryRun        # solo build
+.\scripts\deploy-frontend.ps1 -SkipVerify    # sin comprobar https://suite.lipoout.com
+```
+
+Requisitos build: `.env` con `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` (ver `.env.example`).
+El build genera `dist/`; el script limpia la raíz remota (no borra `.user.ini` de aaPanel) y sube por `scp`.
+
+**aaPanel (config manual one-time):** regla SPA en Nginx:
+```nginx
+location / { try_files $uri $uri/ /index.html; }
+```
+**Supabase Auth:** Site URL y Redirect URLs deben incluir `https://suite.lipoout.com`.
+
+**Trampa conocida:** `.user.ini` de aaPanel tiene `chattr +i`; el script excluye ese fichero del `chmod`.
+
+### Migraciones SQL → Postgres (110)
+
+```powershell
+.\scripts\deploy-migration.ps1 <archivo>.sql
+```
+
+Una migración por ejecución. Confirmar salida `OK` y `Migración ... aplicada`.
+
+Alternativa local (conexión directa, requiere `SUPABASE_DB_URL` en `.env`):
+```powershell
+python scripts/apply_sql_migration.py supabase/migrations/<archivo>.sql
+```
+
+Preferir `deploy-migration.ps1` en producción (marca `schema_migrations` en el servidor).
+
+### Edge Functions → Supabase (110)
+
+```powershell
+.\scripts\deploy-edge-functions.ps1 whatsapp-proxy whatsapp-webhook
+.\scripts\deploy-edge-functions.ps1 -AllWhatsapp
+.\scripts\deploy-edge-functions.ps1 -RestartOnly
+```
+
+**NO usar** `supabase functions deploy` (es Cloud). El script sube por `scp`, incluye `_shared` si aplica, y reinicia `supabase-edge-functions`.
+Confirmar `Despliegue completado` y logs sin `SyntaxError`.
+
+Smoke test:
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" -X POST \
+  https://supabase.lipoout.com/functions/v1/<NAME> \
+  -H 'Content-Type: application/json' -d '{}'
+```
+
+### Operaciones WhatsApp
+
+```powershell
+.\scripts\sync-whatsapp-history.ps1
+```
+Despliega `whatsapp-proxy` y ejecuta `sync-whatsapp-history-remote.sh` en el servidor.
+
+Scripts de diagnóstico remoto (por SSH manual): `scripts/inspect-wa-chats.sh`, `scripts/count-messages-remote.sh`, `scripts/test-sticker.sh`.
+
+## Scripts Python (datos legacy / mantenimiento)
+
+No son despliegue de app; se ejecutan en la máquina de desarrollo con `.env` / variables:
+
+| Script | Uso |
+|--------|-----|
+| `legacy_import_pipeline.py` | Import DBF → esquema legacy |
+| `promote_legacy_*.py` | Promoción legacy → tablas Suite |
+| `apply_sql_migration.py` | SQL directo vía `SUPABASE_DB_URL` |
+
+Variables habituales: `SUPABASE_DB_URL`, `LEGACY_DBF_DIR`, `LEGACY_COMPANY_ID`, etc. (ver `.env.example`).
+
+## Errores frecuentes
+
+- `scp` con ruta Windows dentro de SSH → salir y ejecutar desde PowerShell.
+- Reiniciar contenedor sin `scp` al 100% → código viejo.
+- `deploy-frontend.ps1` falló en `chmod` → corregido; archivos ya subidos; re-ejecutar con `-SkipBuild`.
+- Migración duplicada → comprobar `schema_migrations` antes de re-aplicar.
+
+## Checklist post-despliegue
+
+- Frontend: `https://suite.lipoout.com/` → HTTP 200, login OK, recarga de ruta interna sin 404.
+- Migración: columna/tabla nueva visible o grep del cambio en servidor.
+- Edge Function: `docker logs --tail 60 supabase-edge-functions` limpio + smoke test HTTP.

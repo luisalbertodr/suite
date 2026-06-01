@@ -61,7 +61,39 @@ const UNAVAILABLE_CELL =
   'bg-neutral-200/95 dark:bg-neutral-900/90 [background-image:repeating-linear-gradient(-45deg,transparent,transparent_5px,rgba(0,0,0,0.055)_5px,rgba(0,0,0,0.055)_10px)] dark:[background-image:repeating-linear-gradient(-45deg,transparent,transparent_5px,rgba(255,255,255,0.04)_5px,rgba(255,255,255,0.04)_10px)]';
 const UNAVAILABLE_CELL_BLOCKED = `${UNAVAILABLE_CELL} cursor-not-allowed`;
 
+/** Descripción legacy tipo `[16:00] 214 - SERVICIO` (ya parseada en servicio/hora). */
+const LEGACY_DESCRIPTION_RE = /^\[\d{1,2}:\d{2}\]\s*[^\s-]+\s*-\s*.+$/;
+
 const timeToMinutes = (hhmm: string): number => hhmmToMinutes(hhmm);
+
+const formatSlotTimeRange = (appointment: Appointment): string => {
+  const end =
+    appointment.timeSegments?.length
+      ? appointment.timeSegments[appointment.timeSegments.length - 1]!.endTime
+      : appointment.occupiedEndTime || appointment.endTime;
+  return `${appointment.startTime} - ${end}`;
+};
+
+/** Comentarios/notas del slot omitiendo texto ya mostrado en horario o servicios. */
+const slotDescriptionText = (appointment: Appointment): string | null => {
+  const raw = (appointment.description || '').trim();
+  if (!raw) return null;
+  if (LEGACY_DESCRIPTION_RE.test(raw)) return null;
+
+  const serviceLine = [appointment.serviceCode, appointment.serviceName].filter(Boolean).join(' - ');
+  if (serviceLine && raw === serviceLine) return null;
+  if (appointment.serviceName && raw === appointment.serviceName.trim()) return null;
+
+  const segmentText = (appointment.timeSegments ?? [])
+    .map((s) => (s.recursoName ? `${s.label} [${s.recursoName}]` : s.label))
+    .join(' · ');
+  if (segmentText && raw === segmentText) return null;
+
+  const timeLine = formatSlotTimeRange(appointment);
+  if (raw === timeLine || raw === `${appointment.startTime} - ${appointment.endTime}`) return null;
+
+  return raw;
+};
 
 export const AgendaGrid: React.FC<AgendaGridProps> = ({
   employees,
@@ -418,6 +450,8 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
             const colFrac = overlap.total > 0 ? overlap.index / overlap.total : 0;
             const left = `calc(${TIME_GUTTER_PX}px + (100% - ${TIME_GUTTER_PX}px) * ${employeeIndex / n} + (100% - ${TIME_GUTTER_PX}px) / ${n} * ${colFrac})`;
             const width = `calc((100% - ${TIME_GUTTER_PX}px) / ${n} / ${overlap.total})`;
+            const slotDesc =
+              visibleFields.description ? slotDescriptionText(appointment) : null;
 
             return (
               <div
@@ -484,44 +518,33 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
                       </div>
                     </div>
                     {visibleFields.timeRange && (
-                      <div className="text-xs text-gray-600 truncate">
-                        {appointment.startTime}
-                        {segments.length
-                          ? ` → ${segments[segments.length - 1]!.endTime} (${segments.map((s) => `${s.startTime}–${s.endTime}`).join(', ')})`
-                          : ` - ${appointment.endTime}`}
+                      <div className="text-xs text-muted-foreground dark:text-foreground/80 truncate tabular-nums">
+                        {formatSlotTimeRange(appointment)}
                       </div>
                     )}
                     {segments.length > 0 && visibleFields.service && (
-                      <div className="text-[10px] text-gray-700 truncate mt-0.5">
+                      <div className="text-[10px] text-muted-foreground dark:text-foreground/85 truncate mt-0.5">
                         {segments.map((s) => (s.recursoName ? `${s.label} [${s.recursoName}]` : s.label)).join(' · ')}
                       </div>
                     )}
                     {visibleFields.service && !segments.length && appointment.serviceName && (
-                      <div className="text-xs text-gray-700 truncate mt-0.5 font-medium">
+                      <div className="text-xs text-muted-foreground dark:text-foreground/85 truncate mt-0.5 font-medium">
                         {appointment.serviceCode ? `${appointment.serviceCode} - ` : ''}{appointment.serviceName}
                       </div>
                     )}
                     {(appointment.paymentOnlyLabels?.length ?? 0) > 0 && (
-                      <div className="text-[10px] text-amber-800 truncate mt-0.5" title="Solo cobro, no reservan slot">
+                      <div className="text-[10px] text-amber-800 dark:text-amber-200 truncate mt-0.5" title="Solo cobro, no reservan slot">
                         + {appointment.paymentOnlyLabels!.join(' · ')}
                       </div>
                     )}
-                    {visibleFields.description && appointment.description && (
-                      <div className="text-xs text-gray-600 truncate mt-0.5">
-                        {appointment.description}
+                    {slotDesc && (
+                      <div className="text-xs text-muted-foreground dark:text-foreground/80 truncate mt-0.5">
+                        {slotDesc}
                       </div>
                     )}
                     {typeof appointment.totalAmount === 'number' && (
-                      <div className="text-xs text-gray-800 font-semibold truncate mt-0.5">
+                      <div className="text-xs text-foreground font-semibold truncate mt-0.5 tabular-nums">
                         {appointment.totalAmount.toFixed(2)} EUR
-                      </div>
-                    )}
-                    {visibleFields.legacyCodes && (
-                      <div className="text-[10px] text-gray-600 truncate mt-0.5">
-                        {appointment.legacyEmployeeCode ? `EMP:${appointment.legacyEmployeeCode}` : ''}
-                        {appointment.legacyClientCode ? ` · CLI:${appointment.legacyClientCode}` : ''}
-                        {appointment.legacyPlanincId ? ` · ID:${appointment.legacyPlanincId}` : ''}
-                        {appointment.legacyHourInText ? ` · H:${appointment.legacyHourInText}` : ''}
                       </div>
                     )}
                   </div>
@@ -574,7 +597,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
                     className={`absolute left-0 right-0 top-0 z-[1] -translate-y-1/2 text-center leading-none px-2.5 ${
                       isHourMark
                         ? 'text-sm font-semibold text-foreground tabular-nums'
-                        : 'text-xs font-medium text-muted-foreground tabular-nums'
+                        : 'text-xs font-medium text-muted-foreground dark:text-foreground/75 tabular-nums'
                     } ${timeShade ? '!text-neutral-700 dark:!text-neutral-300' : ''}`}
                   >
                     <span

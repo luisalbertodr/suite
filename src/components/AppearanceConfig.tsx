@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Palette, Check, Upload, X, Image } from 'lucide-react';
 import { useUserAppearance } from '@/hooks/useUserAppearance';
+import { useWorkCenterBranding } from '@/hooks/useWorkCenterBranding';
 
 const colorOptions = [
   { name: 'blue', label: 'Azul', bgClass: 'bg-blue-600' },
@@ -18,7 +19,15 @@ const colorOptions = [
 ];
 
 export const AppearanceConfig: React.FC = () => {
-  const { sidebarColor, logoUrl, updateSidebarColor, updateLogo, removeLogo, loading } = useUserAppearance();
+  const { sidebarColor, updateSidebarColor, loading } = useUserAppearance();
+  const {
+    displayName,
+    logoUrl,
+    updateLogo,
+    removeLogo,
+    isLoading: brandingLoading,
+    hasWorkCenter,
+  } = useWorkCenterBranding();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleColorChange = (color: string) => {
@@ -27,20 +36,13 @@ export const AppearanceConfig: React.FC = () => {
 
   const handleLogoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file) {
-      if (file.type.startsWith('image/')) {
-        updateLogo(file);
-      } else {
-        // Show error toast for invalid file type
-      }
+    if (file?.type.startsWith('image/')) {
+      updateLogo.mutate(file);
     }
+    event.target.value = '';
   };
 
-  const handleLogoRemove = () => {
-    removeLogo();
-  };
-
-  if (loading) {
+  if (loading || brandingLoading) {
     return (
       <Card>
         <CardContent className="flex justify-center p-8">
@@ -99,10 +101,13 @@ export const AppearanceConfig: React.FC = () => {
         </div>
 
         <div className="mt-8">
-          <h3 className="text-lg font-medium mb-4">Logo de la Empresa</h3>
-          <p className="text-sm text-muted-foreground mb-4">
-            Sube el logo de tu empresa para incluirlo en los PDFs de presupuestos
+          <h3 className="text-lg font-medium mb-4">Centro de trabajo</h3>
+          <p className="text-sm text-muted-foreground mb-2">
+            Nombre y logo que se muestran en la barra superior de la aplicación
+            {hasWorkCenter ? ' (centro laboral compartido)' : ''}.
           </p>
+          <p className="text-sm font-medium text-foreground mb-4">{displayName}</p>
+          <h4 className="text-sm font-medium mb-3">Logo</h4>
           
           <div className="space-y-4">
             {logoUrl ? (
@@ -124,7 +129,8 @@ export const AppearanceConfig: React.FC = () => {
                   </Button>
                   <Button
                     variant="outline"
-                    onClick={handleLogoRemove}
+                    onClick={() => removeLogo.mutate()}
+                    disabled={removeLogo.isPending}
                     className="text-red-600 hover:text-red-700"
                   >
                     <X className="w-4 h-4 mr-2" />
@@ -164,8 +170,9 @@ export const AppearanceConfig: React.FC = () => {
             
             <div className="p-3 bg-muted border border-border rounded-lg">
               <p className="text-xs text-muted-foreground">
-                El logo aparecerá en la esquina superior izquierda de los PDFs de presupuestos. 
-                Formatos soportados: JPG, PNG, GIF. Tamaño recomendado: 200x100px.
+                El logo se verá a la izquierda de la barra superior junto al nombre del centro,
+                y también en los PDFs de presupuestos. Formatos: JPG, PNG, GIF.
+                Tamaño recomendado: 200×100 px. Requiere permisos de administrador para guardar.
               </p>
             </div>
           </div>

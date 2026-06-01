@@ -2,13 +2,14 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import type { Database } from '@/integrations/supabase/types';
+import { DEFAULT_INTAKE_STAGE_NAME } from '@/lib/marketingIntakeStage';
 
 export type MarketingLeadStage = Database['public']['Tables']['marketing_lead_stages']['Row'];
 export type MarketingLeadStageInsert = Database['public']['Tables']['marketing_lead_stages']['Insert'];
 export type MarketingLeadStageUpdate = Database['public']['Tables']['marketing_lead_stages']['Update'];
 
 const DEFAULT_STAGES: Array<Omit<MarketingLeadStageInsert, 'company_id'>> = [
-  { name: 'Nuevo Formulario',           position: 0, color: '#22c55e', is_default_intake: true,  is_won: false },
+  { name: DEFAULT_INTAKE_STAGE_NAME,    position: 0, color: '#22c55e', is_default_intake: true,  is_won: false },
   { name: 'Formulario+Agenda ficticia', position: 1, color: '#3b82f6', is_default_intake: false, is_won: false },
   { name: '¡Aún no te ha escuchado!',   position: 2, color: '#f59e0b', is_default_intake: false, is_won: false },
   { name: '¡Llamar por la mañana!',     position: 3, color: '#06b6d4', is_default_intake: false, is_won: false },

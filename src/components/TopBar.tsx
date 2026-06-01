@@ -4,10 +4,9 @@ import { User, LogOut, Settings, ChevronDown, Moon, Sun } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from 'next-themes';
-import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { useWorkCenter } from '@/hooks/useWorkCenter';
+import { useWorkCenterBranding } from '@/hooks/useWorkCenterBranding';
 import { useBillingScopeRoute } from '@/hooks/useBillingScopeRoute';
 import { BillingScopeToggle } from '@/components/BillingScopeToggle';
 import {
@@ -23,28 +22,10 @@ export const TopBar: React.FC = () => {
   const { user, signOut } = useAuth();
   const { theme, setTheme } = useTheme();
   const { companyId, loading: companyLoading } = useCompanyFilter();
-  const { catalogHostCompanyId, isMultiEntity, loading: wcLoading } = useWorkCenter();
+  const { isMultiEntity, loading: wcLoading } = useWorkCenter();
+  const { displayName, logoUrl, isLoading: brandingLoading } = useWorkCenterBranding();
   const { enabled: billingScopeEnabled } = useBillingScopeRoute();
-  const brandCompanyId = catalogHostCompanyId ?? companyId;
   const [currentDateTime, setCurrentDateTime] = useState(new Date());
-
-  const { data: company } = useQuery({
-    queryKey: ['company', brandCompanyId, 'topbar-brand'],
-    queryFn: async () => {
-      if (!brandCompanyId) return null;
-      const { data, error } = await supabase
-        .from('companies')
-        .select('name, logo_url')
-        .eq('id', brandCompanyId)
-        .single();
-      if (error) {
-        console.error('Error fetching company for top bar:', error);
-        return null;
-      }
-      return data as { name: string; logo_url: string | null };
-    },
-    enabled: !!brandCompanyId && !companyLoading,
-  });
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentDateTime(new Date()), 1000);
@@ -54,20 +35,26 @@ export const TopBar: React.FC = () => {
   const handleDateClick = () => navigate('/agenda');
   const toggleTheme = () => setTheme(theme === 'dark' ? 'light' : 'dark');
 
-  const brandLabel = company?.name?.trim() || 'Lipoout';
+  const brandLabel = displayName.trim() || 'Lipoout';
+  const showBrandSkeleton = (companyLoading || brandingLoading) && !displayName;
 
   return (
     <header className="fixed top-0 left-0 right-0 z-40 h-12 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
       <div className="flex items-center justify-between h-full px-5">
-        <div className="flex items-center gap-3 min-w-0 flex-1">
-          {company?.logo_url ? (
-            <img
-              src={company.logo_url}
-              alt={brandLabel}
-              className="h-8 max-w-[220px] w-auto object-contain object-left"
-            />
+        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+          {showBrandSkeleton ? (
+            <span className="h-6 w-32 rounded bg-muted animate-pulse" aria-hidden />
           ) : (
-            <span className="text-sm font-semibold text-foreground truncate">{brandLabel}</span>
+            <>
+              {logoUrl && (
+                <img
+                  src={logoUrl}
+                  alt=""
+                  className="h-8 w-auto max-w-[140px] shrink-0 object-contain object-left"
+                />
+              )}
+              <span className="text-sm font-semibold text-foreground truncate">{brandLabel}</span>
+            </>
           )}
         </div>
 

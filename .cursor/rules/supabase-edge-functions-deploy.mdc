@@ -6,9 +6,12 @@ alwaysApply: false
 
 # Despliegue de Edge Functions (Supabase self-hosted)
 
+> Infraestructura completa y scripts: ver regla `production-deploy.mdc`.
+> Preferir `.\scripts\deploy-edge-functions.ps1` frente a scp manual.
+
 Este proyecto usa **Supabase self-hosted**, no Supabase Cloud. El CLI
-`supabase functions deploy` NO se usa. El despliegue es manual por SCP +
-reinicio del contenedor.
+`supabase functions deploy` NO se usa. El despliegue es por SCP +
+reinicio del contenedor (automatizado en `scripts/deploy-edge-functions.ps1`).
 
 ## Datos del entorno
 

@@ -897,6 +897,7 @@ serve(async (req) => {
     }
     const intakeStageId =
       (stages ?? []).find((s) => s.is_default_intake)?.id ??
+      stageByName.get('nuevo lead') ??
       stageByName.get('nuevo formulario') ??
       (stages ?? [])[0]?.id ??
       null;

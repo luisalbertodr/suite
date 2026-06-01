@@ -20,6 +20,7 @@ import {
   CheckCircle2,
   Webhook,
   Power,
+  Trash2,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useWhatsappConfig } from '@/hooks/useWhatsappConfig';
@@ -53,6 +54,7 @@ export const WhatsappConfig: React.FC = () => {
     fetchQr,
     configureWebhook,
     ping,
+    purgeHistory,
   } = useWhatsappConfig();
 
   const [pingResult, setPingResult] = useState<null | {
@@ -581,7 +583,45 @@ export const WhatsappConfig: React.FC = () => {
             >
               Cerrar sesión
             </Button>
+            <Button
+              variant="destructive"
+              className="border-destructive/50"
+              disabled={purgeHistory.isPending}
+              onClick={() => {
+                if (
+                  !window.confirm(
+                    '¿Borrar todo el historial de WhatsApp guardado en la suite?\n\n' +
+                      'Se eliminarán conversaciones y mensajes locales. ' +
+                      'También se intentará cerrar la sesión en Waha antes de vincular el nuevo teléfono.\n\n' +
+                      'Esta acción no se puede deshacer.',
+                  )
+                ) {
+                  return;
+                }
+                purgeHistory.mutate(true, {
+                  onSuccess: (res) => {
+                    toast({
+                      title: 'Historial eliminado',
+                      description: `${res.messages_deleted} mensajes y ${res.chats_deleted} chats borrados.`,
+                    });
+                  },
+                  onError: (e) => {
+                    toast({
+                      title: 'Error',
+                      description: e instanceof Error ? e.message : 'No se pudo limpiar',
+                      variant: 'destructive',
+                    });
+                  },
+                });
+              }}
+            >
+              <Trash2 className="mr-2 h-3.5 w-3.5" />
+              {purgeHistory.isPending ? 'Limpiando…' : 'Limpiar historial'}
+            </Button>
           </div>
+          <p className="text-[11px] text-muted-foreground">
+            Usa «Limpiar historial» antes de escanear el QR con un teléfono nuevo para no mezclar conversaciones antiguas.
+          </p>
           {config?.qr_data_url ? (
             <div className="flex justify-center pt-2">
               <img

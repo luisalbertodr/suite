@@ -69,6 +69,12 @@ type ForwardBody = {
   message_id: string;
 };
 
+type DeleteMessageBody = {
+  action: 'messages.delete';
+  chat_id: string;
+  message_id: string;
+};
+
 type ActionBody = {
   company_id?: string;
 } & (
@@ -101,6 +107,7 @@ type ActionBody = {
     }
   | SendBody
   | ForwardBody
+  | DeleteMessageBody
   | { action: 'media.download'; url?: string; chat_id?: string; message_id?: string }
   | { action: 'chat.mark_read'; chat_id: string }
   | { action: 'chat.ensure'; chat_id: string; name?: string | null }
@@ -112,6 +119,7 @@ type ActionBody = {
     }
   | { action: 'chat.search_link'; q: string; limit?: number }
   | { action: 'pictures.sync_batch'; chat_ids?: string[]; limit?: number }
+  | { action: 'data.purge'; logout_waha?: boolean }
 );
 
 const json = (body: unknown, status = 200) =>
@@ -563,6 +571,41 @@ type WahaMsg = {
   quotedMsg?: { id?: string } | null;
 };
 
+/** IDs alternativos para pedir mensajes a Waha (Business suele usar @lid). */
+async function resolveWahaMessageFetchChatIds(
+  admin: ReturnType<typeof createClient>,
+  companyId: string,
+  chatId: string,
+): Promise<string[]> {
+  const ids = new Set<string>([chatId]);
+  if (isPhoneJid(chatId)) ids.add(normalizeWhatsappJid(chatId));
+
+  const { data: row } = await admin
+    .from('whatsapp_chats')
+    .select('raw')
+    .eq('company_id', companyId)
+    .eq('chat_id', chatId)
+    .maybeSingle();
+  const raw = row?.raw as Record<string, unknown> | null;
+  const lastMessage = raw?.lastMessage as Record<string, unknown> | undefined;
+  const key = (lastMessage?.key ?? raw?.key) as Record<string, unknown> | undefined;
+  for (const k of ['remoteJidAlt', 'remoteJid', 'participant', 'participantAlt']) {
+    const v = key?.[k];
+    if (typeof v === 'string' && v.includes('@')) ids.add(v);
+  }
+
+  const { data: siblings } = await admin
+    .from('whatsapp_chats')
+    .select('chat_id')
+    .eq('company_id', companyId)
+    .limit(500);
+  for (const s of siblings ?? []) {
+    if (jidsSameContact(s.chat_id, chatId)) ids.add(s.chat_id);
+  }
+
+  return [...ids];
+}
+
 async function fetchWahaChatMessages(
   cfg: WhatsappConfig,
   sessionName: string,
@@ -828,6 +871,79 @@ async function fetchWahaChatsOverview(
   throw lastErr;
 }
 
+async function fetchWahaChatMessagesWithFallback(
+  admin: ReturnType<typeof createClient>,
+  cfg: WhatsappConfig,
+  companyId: string,
+  sessionName: string,
+  chatId: string,
+  limit: number,
+  downloadMedia: boolean,
+  offset: number,
+): Promise<WahaMsg[]> {
+  const fetchIds = await resolveWahaMessageFetchChatIds(admin, companyId, chatId);
+  let lastError: unknown = null;
+
+  const tryFetch = async (id: string): Promise<WahaMsg[]> => {
+    return await fetchWahaChatMessages(cfg, sessionName, id, limit, downloadMedia, offset);
+  };
+
+  for (const fetchChatId of fetchIds) {
+    try {
+      const batch = await tryFetch(fetchChatId);
+      if (batch.length > 0) return batch;
+    } catch (e) {
+      lastError = e;
+      if (e instanceof WahaError && (e.status === 401 || e.status === 403)) throw e;
+    }
+  }
+
+  try {
+    return await tryFetch(chatId);
+  } catch (e) {
+    if (!(e instanceof WahaError)) throw e;
+    if (e.status === 401 || e.status === 403) throw e;
+
+    let warmupOk = false;
+    try {
+      await wahaJson(cfg, `/api/${encodeURIComponent(sessionName)}/chats?limit=20`);
+      warmupOk = true;
+    } catch {
+      // ignore
+    }
+
+    if (warmupOk) {
+      for (const fetchChatId of fetchIds) {
+        try {
+          const batch = await tryFetch(fetchChatId);
+          if (batch.length > 0) return batch;
+        } catch (e3) {
+          if (e3 instanceof WahaError && (e3.status === 401 || e3.status === 403)) throw e3;
+        }
+      }
+      console.warn('syncChatMessagesFromWaha non-fatal failure after warmup:', lastError ?? e);
+      return [];
+    }
+    console.warn('syncChatMessagesFromWaha non-fatal failure:', e);
+    return [];
+  }
+}
+
+async function countStoredMessagesForChat(
+  admin: ReturnType<typeof createClient>,
+  companyId: string,
+  chatId: string,
+): Promise<number> {
+  const fetchIds = await resolveWahaMessageFetchChatIds(admin, companyId, chatId);
+  const { count, error } = await admin
+    .from('whatsapp_messages')
+    .select('id', { count: 'exact', head: true })
+    .eq('company_id', companyId)
+    .in('chat_id', fetchIds);
+  if (error) throw error;
+  return count ?? 0;
+}
+
 async function syncChatMessagesFromWaha(
   admin: ReturnType<typeof createClient>,
   cfg: WhatsappConfig,
@@ -839,68 +955,34 @@ async function syncChatMessagesFromWaha(
   offset = 0,
 ): Promise<number> {
   if (isSystemChatJid(chatId)) return 0;
-  let data: WahaMsg[] = [];
-  try {
-    data = await fetchWahaChatMessages(
-      cfg,
-      sessionName,
-      chatId,
-      limit,
-      downloadMedia,
-      offset,
-    );
-  } catch (e) {
-    if (!(e instanceof WahaError)) throw e;
-    if (e.status === 401 || e.status === 403) throw e;
 
-    let warmupOk = false;
-    try {
-      await wahaJson(
-        cfg,
-        `/api/${encodeURIComponent(sessionName)}/chats?limit=20`,
-      );
-      warmupOk = true;
-    } catch {
-      // ignore
-    }
-
-    if (warmupOk) {
-      try {
-        data = await fetchWahaChatMessages(
-          cfg,
-          sessionName,
-          chatId,
-          limit,
-          downloadMedia,
-          offset,
-        );
-      } catch (e3) {
-        if (e3 instanceof WahaError && (e3.status === 401 || e3.status === 403)) {
-          throw e3;
-        }
-        console.warn('syncChatMessagesFromWaha non-fatal failure:', e3);
-        return 0;
-      }
-    } else {
-      console.warn('syncChatMessagesFromWaha non-fatal failure:', e);
-      return 0;
-    }
-  }
+  const data = await fetchWahaChatMessagesWithFallback(
+    admin,
+    cfg,
+    companyId,
+    sessionName,
+    chatId,
+    limit,
+    downloadMedia,
+    offset,
+  );
 
   if (!Array.isArray(data) || data.length === 0) return 0;
 
   const isGroupChat = isGroupJid(chatId);
   const sampleKey = data.find((m) => extractMessageKey(m));
-  const storageChatId = await resolveChatIdForStorage(
+  await resolveChatIdForStorage(
     admin,
     companyId,
     chatId,
     sampleKey ? extractMessageKey(sampleKey) : null,
     isGroupChat,
   );
+  // Guardar bajo el chat_id de la UI (lista lateral) para que coincida al abrir la conversación.
+  const rowChatId = chatId;
   const rows = data.map((m) => ({
     company_id: companyId,
-    chat_id: storageChatId,
+    chat_id: rowChatId,
     waha_message_id: m.id,
     from_jid: resolveIncomingFromJid(
       chatId,
@@ -924,12 +1006,19 @@ async function syncChatMessagesFromWaha(
       : new Date().toISOString(),
     raw: m as unknown,
   }));
-  await admin
+  const { error: upsertError } = await admin
     .from('whatsapp_messages')
     .upsert(rows, {
       onConflict: 'company_id,waha_message_id',
       ignoreDuplicates: false,
     });
+  if (upsertError) {
+    console.error('whatsapp_messages upsert failed:', upsertError.message, {
+      chatId: rowChatId,
+      rows: rows.length,
+    });
+    throw new Error(`No se pudieron guardar mensajes: ${upsertError.message}`);
+  }
   return data.length;
 }
 
@@ -1018,7 +1107,7 @@ async function syncFullChatHistoryFromWaha(
   }
 
   const synced = !hasMore;
-  if (synced) {
+  if (synced && total > 0) {
     const storageChatId = await resolveChatIdForStorage(
       admin,
       companyId,
@@ -1027,6 +1116,17 @@ async function syncFullChatHistoryFromWaha(
       isGroupJid(chatId),
     );
     await markChatHistorySynced(admin, companyId, chatId, storageChatId);
+  } else if (synced && total === 0) {
+    // Marcar como sincronizado aunque no haya mensajes (evita bucle de reintentos en bg sync).
+    await admin
+      .from('whatsapp_chats')
+      .update({
+        history_synced_at: new Date().toISOString(),
+        oldest_message_at: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('company_id', companyId)
+      .eq('chat_id', chatId);
   }
 
   return { count: total, offset, has_more: hasMore, synced };
@@ -1276,6 +1376,63 @@ async function resolveCompanyId(
   if (first) return String(first);
   const roleCompany = roles?.find((r) => r.company_id)?.company_id;
   return roleCompany ? String(roleCompany) : null;
+}
+
+async function purgeWhatsappStorageAvatars(
+  admin: ReturnType<typeof createClient>,
+  companyId: string,
+): Promise<number> {
+  let removed = 0;
+  try {
+    const { data: files, error } = await admin.storage
+      .from(WAHA_AVATAR_BUCKET)
+      .list(companyId, { limit: 1000 });
+    if (error || !files?.length) return 0;
+    const paths = files
+      .filter((f) => f.name && f.id !== null)
+      .map((f) => `${companyId}/${f.name}`);
+    if (!paths.length) return 0;
+    const { error: rmErr } = await admin.storage.from(WAHA_AVATAR_BUCKET).remove(paths);
+    if (!rmErr) removed = paths.length;
+  } catch (e) {
+    console.warn('purgeWhatsappStorageAvatars:', e);
+  }
+  return removed;
+}
+
+async function purgeWhatsappCompanyData(
+  admin: ReturnType<typeof createClient>,
+  companyId: string,
+): Promise<{ messages_deleted: number; chats_deleted: number; avatars_removed: number }> {
+  const { count: msgCount } = await admin
+    .from('whatsapp_messages')
+    .delete({ count: 'exact' })
+    .eq('company_id', companyId);
+  const { count: chatCount } = await admin
+    .from('whatsapp_chats')
+    .delete({ count: 'exact' })
+    .eq('company_id', companyId);
+
+  await admin
+    .from('whatsapp_config')
+    .update({
+      last_status: 'STOPPED',
+      last_status_message: null,
+      last_status_at: new Date().toISOString(),
+      qr_data_url: null,
+      qr_updated_at: null,
+      me_jid: null,
+      me_pushname: null,
+    })
+    .eq('company_id', companyId);
+
+  const avatars_removed = await purgeWhatsappStorageAvatars(admin, companyId);
+
+  return {
+    messages_deleted: msgCount ?? 0,
+    chats_deleted: chatCount ?? 0,
+    avatars_removed,
+  };
 }
 
 serve(async (req) => {
@@ -1718,24 +1875,33 @@ serve(async (req) => {
             .eq('chat_id', chatId)
             .maybeSingle();
           if (chatRow?.history_synced_at) {
-            const count = await syncChatMessagesFromWaha(
-              admin,
-              cfg,
-              companyId,
-              sessionName,
-              chatId,
-              WAHA_HISTORY_PAGE_SIZE,
-              !!body.download_media,
-              0,
-            );
-            return json({
-              ok: true,
-              count,
-              offset: 0,
-              has_more: false,
-              synced: true,
-              already_synced: true,
-            });
+            const stored = await countStoredMessagesForChat(admin, companyId, chatId);
+            if (stored === 0) {
+              await admin
+                .from('whatsapp_chats')
+                .update({ history_synced_at: null, oldest_message_at: null })
+                .eq('company_id', companyId)
+                .eq('chat_id', chatId);
+            } else {
+              const count = await syncChatMessagesFromWaha(
+                admin,
+                cfg,
+                companyId,
+                sessionName,
+                chatId,
+                WAHA_HISTORY_PAGE_SIZE,
+                !!body.download_media,
+                0,
+              );
+              return json({
+                ok: true,
+                count,
+                offset: 0,
+                has_more: false,
+                synced: true,
+                already_synced: true,
+              });
+            }
           }
         }
 
@@ -2106,6 +2272,67 @@ serve(async (req) => {
         });
       }
 
+      case 'messages.delete': {
+        const deleteBody = body as DeleteMessageBody;
+        if (!deleteBody.chat_id) return err('Falta chat_id');
+        const wahaMessageId = deleteBody.message_id?.trim();
+        if (!wahaMessageId) return err('Falta message_id');
+
+        const chatId = normalizeChatId(
+          deleteBody.chat_id,
+          cfg.default_country_code,
+        );
+        const deletePath =
+          `/api/${encodeURIComponent(sessionName)}/chats/${encodeURIComponent(
+            chatId,
+          )}/messages/${encodeURIComponent(wahaMessageId)}`;
+
+        await wahaJson(cfg, deletePath, { method: 'DELETE' });
+
+        const revokedPreview = 'Eliminaste este mensaje';
+        const { error: markErr } = await admin
+          .from('whatsapp_messages')
+          .update({
+            type: 'revoked',
+            body: null,
+            caption: null,
+            media_url: null,
+            media_mime_type: null,
+            media_filename: null,
+            media_size: null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('company_id', companyId)
+          .eq('waha_message_id', wahaMessageId);
+
+        if (markErr) {
+          console.warn('messages.delete mark revoked failed:', markErr.message);
+        }
+
+        const { data: lastMsg } = await admin
+          .from('whatsapp_messages')
+          .select('waha_message_id')
+          .eq('company_id', companyId)
+          .eq('chat_id', chatId)
+          .order('timestamp', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (lastMsg?.waha_message_id === wahaMessageId) {
+          await admin
+            .from('whatsapp_chats')
+            .update({
+              last_message_preview: revokedPreview,
+              last_message_from_me: true,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('company_id', companyId)
+            .eq('chat_id', chatId);
+        }
+
+        return json({ ok: true, chat_id: chatId, waha_message_id: wahaMessageId });
+      }
+
       case 'groups.sync_name': {
         const chatId = typeof body.chat_id === 'string' ? body.chat_id.trim() : '';
         if (!chatId || !isGroupJid(chatId)) {
@@ -2316,6 +2543,27 @@ serve(async (req) => {
           customers: customers ?? [],
           leads: leads ?? [],
         });
+      }
+
+      case 'data.purge': {
+        const logoutWaha = body.logout_waha !== false;
+        const purged = await purgeWhatsappCompanyData(admin, companyId);
+
+        if (logoutWaha && cfg.base_url) {
+          try {
+            await wahaJson(cfg, `/api/sessions/${encodeURIComponent(sessionName)}/logout`, {
+              method: 'POST',
+              body: JSON.stringify({}),
+            });
+          } catch {
+            await wahaJson(cfg, `/api/sessions/logout`, {
+              method: 'POST',
+              body: JSON.stringify({ name: sessionName }),
+            }).catch(() => undefined);
+          }
+        }
+
+        return json({ ok: true, ...purged, waha_logout_attempted: logoutWaha });
       }
 
       default: {

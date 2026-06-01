@@ -6,6 +6,7 @@ import type { BillingCompanyOption } from '@/lib/billingCompany';
 export type WorkCenterInfo = {
   id: string;
   name: string;
+  logo_url?: string | null;
 } | null;
 
 export function useWorkCenter() {
@@ -79,7 +80,7 @@ export function useWorkCenter() {
       if (!workCenterId) return null;
       const { data, error } = await supabase
         .from('work_centers')
-        .select('id, name')
+        .select('id, name, logo_url')
         .eq('id', workCenterId)
         .maybeSingle();
       if (error) {

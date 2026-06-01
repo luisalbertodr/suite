@@ -249,6 +249,7 @@ export const Whatsapp: React.FC = () => {
             />
           ) : selectedChat ? (
               <WhatsappChatView
+                chats={chats}
                 chat={selectedChat}
                 customerName={resolveCustomerName(selectedChat)}
                 isLinkedCustomer={!!resolveCustomerId(selectedChat)}

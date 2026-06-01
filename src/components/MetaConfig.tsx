@@ -58,6 +58,7 @@ import {
   extractMetaSyncDetailFromMessage,
 } from '@/hooks/useMetaConfig';
 import { useMarketingStages } from '@/hooks/useMarketingStages';
+import { findMarketingIntakeStage } from '@/lib/marketingIntakeStage';
 import { MarketingImportDialog } from './marketing/MarketingImportDialog';
 import { WHATSAPP_MESSAGE_TEMPLATE_VARS } from '@/lib/whatsappMessageTemplates';
 import { centsToEurosInput, eurosToCents } from '@/hooks/useStripeConfig';
@@ -161,14 +162,7 @@ export const MetaConfig: React.FC = () => {
     setApiVersion(config.graph_api_version ?? 'v23.0');
   }, [config]);
 
-  const intakeStage = useMemo(
-    () =>
-      stages.find((s) => s.is_default_intake) ??
-      stages.find((s) => s.name.toLowerCase() === 'nuevo formulario') ??
-      stages[0] ??
-      null,
-    [stages],
-  );
+  const intakeStage = useMemo(() => findMarketingIntakeStage(stages), [stages]);
 
   const appointmentStage = useMemo(
     () =>

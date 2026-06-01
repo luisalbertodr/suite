@@ -110,12 +110,17 @@ export const useMarketingLeadNoteCounts = () => {
       if (!companyId) return {};
       const { data, error } = await supabase
         .from('marketing_lead_notes')
-        .select('lead_id')
+        .select('lead_id, body')
         .eq('company_id', companyId);
       if (error) throw error;
       const counts: Record<string, number> = {};
+      const seen = new Set<string>();
       for (const row of data ?? []) {
-        if (row.lead_id) counts[row.lead_id] = (counts[row.lead_id] ?? 0) + 1;
+        if (!row.lead_id || !row.body) continue;
+        const key = `${row.lead_id}\0${row.body.trim().toLowerCase()}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        counts[row.lead_id] = (counts[row.lead_id] ?? 0) + 1;
       }
       return counts;
     },
@@ -168,13 +173,21 @@ export const useMarketingLeadNotesIndex = () => {
 
       const counts: Record<string, number> = {};
       const previews: Record<string, MarketingLeadNotePreview[]> = {};
+      const countedBodies = new Set<string>();
+      const previewBodies = new Set<string>();
       for (const row of data ?? []) {
         if (!row.lead_id) continue;
         const cutoff = noteCutoffByLead.get(row.lead_id);
         if (cutoff && row.created_at < cutoff) continue;
+        const bodyKey = `${row.lead_id}\0${row.body.trim().toLowerCase()}`;
+        if (countedBodies.has(bodyKey)) continue;
+        countedBodies.add(bodyKey);
         counts[row.lead_id] = (counts[row.lead_id] ?? 0) + 1;
         if (!previews[row.lead_id]) previews[row.lead_id] = [];
         if (previews[row.lead_id].length < PREVIEW_LIMIT) {
+          const previewKey = bodyKey;
+          if (previewBodies.has(previewKey)) continue;
+          previewBodies.add(previewKey);
           previews[row.lead_id].push({
             id: row.id,
             body: row.body,

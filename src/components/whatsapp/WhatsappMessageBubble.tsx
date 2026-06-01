@@ -8,6 +8,7 @@ import {
   Download,
   Reply,
   Forward,
+  Trash2,
   ChevronDown,
 } from 'lucide-react';
 import type { WhatsappMessageRow } from '@/hooks/useWhatsappMessages';
@@ -23,6 +24,8 @@ import {
   messagePreviewText,
   lookupGroupSenderLabel,
   resolveGroupSenderJidFromRaw,
+  isMessageRevoked,
+  revokedMessageLabel,
   waTheme,
 } from './whatsappUtils';
 import { downloadWhatsappMedia } from '@/hooks/useWhatsappConfig';
@@ -48,6 +51,7 @@ interface Props {
   quotedPreview?: string | null;
   onReply?: (message: WhatsappMessageRow) => void;
   onForward?: (message: WhatsappMessageRow) => void;
+  onDeleteForEveryone?: (message: WhatsappMessageRow) => void;
 }
 
 const AckIcon: React.FC<{ ack: number }> = ({ ack }) => {
@@ -76,17 +80,21 @@ function QuoteBlock({ preview, isOut }: { preview: string; isOut: boolean }) {
 function MessageActions({
   message,
   canForward,
+  canDeleteForEveryone,
   onReply,
   onForward,
+  onDeleteForEveryone,
   className,
 }: {
   message: WhatsappMessageRow;
   canForward: boolean;
+  canDeleteForEveryone: boolean;
   onReply?: (message: WhatsappMessageRow) => void;
   onForward?: (message: WhatsappMessageRow) => void;
+  onDeleteForEveryone?: (message: WhatsappMessageRow) => void;
   className?: string;
 }) {
-  if (!onReply && !onForward) return null;
+  if (!onReply && !onForward && !onDeleteForEveryone) return null;
   return (
     <div className={`flex items-center gap-0.5 ${className ?? ''}`}>
       {onReply ? (
@@ -112,6 +120,19 @@ function MessageActions({
           onClick={() => onForward(message)}
         >
           <Forward className="h-3.5 w-3.5" />
+        </Button>
+      ) : null}
+      {onDeleteForEveryone ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 rounded-full text-[#54656f] hover:bg-black/5 hover:text-destructive disabled:opacity-40 dark:text-zinc-300"
+          title="Eliminar para todos"
+          disabled={!canDeleteForEveryone}
+          onClick={() => onDeleteForEveryone(message)}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
         </Button>
       ) : null}
     </div>
@@ -279,10 +300,12 @@ export const WhatsappMessageBubble: React.FC<Props> = ({
   quotedPreview,
   onReply,
   onForward,
+  onDeleteForEveryone,
 }) => {
   const isOut = message.from_me;
   const type = (message.type ?? 'text').toLowerCase();
-  const isMedia = type !== 'text' && type !== 'chat';
+  const revoked = isMessageRevoked(message);
+  const isMedia = !revoked && type !== 'text' && type !== 'chat';
   const time = formatMessageTime(message.timestamp);
   const rawText = extractBodyFromWahaMessageRaw(message.raw);
   const textLine =
@@ -295,7 +318,9 @@ export const WhatsappMessageBubble: React.FC<Props> = ({
     : null;
   const quoteText = resolveQuotedPreview(message, quotedMessage, quotedPreview);
   const canForward = !!message.waha_message_id;
-  const hasActions = !!(onReply || onForward);
+  const canDeleteForEveryone =
+    isOut && !!message.waha_message_id && !revoked;
+  const hasActions = !!(onReply || onForward || onDeleteForEveryone);
 
   const bubble = (
     <div
@@ -310,8 +335,10 @@ export const WhatsappMessageBubble: React.FC<Props> = ({
           <MessageActions
             message={message}
             canForward={canForward}
+            canDeleteForEveryone={canDeleteForEveryone}
             onReply={onReply}
             onForward={onForward}
+            onDeleteForEveryone={onDeleteForEveryone}
             className={`absolute top-1 hidden group-hover/bubble:flex ${
               isOut ? 'left-0 -translate-x-full pr-1' : 'right-0 translate-x-full pl-1'
             }`}
@@ -346,6 +373,16 @@ export const WhatsappMessageBubble: React.FC<Props> = ({
                   Reenviar
                 </DropdownMenuItem>
               ) : null}
+              {onDeleteForEveryone ? (
+                <DropdownMenuItem
+                  disabled={!canDeleteForEveryone}
+                  className="text-destructive focus:text-destructive"
+                  onSelect={() => onDeleteForEveryone(message)}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Eliminar para todos
+                </DropdownMenuItem>
+              ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
         </>
@@ -357,7 +394,17 @@ export const WhatsappMessageBubble: React.FC<Props> = ({
         </p>
       ) : null}
       {quoteText ? <QuoteBlock preview={quoteText} isOut={isOut} /> : null}
-      {isMedia ? (
+      {revoked ? (
+        <p
+          className={`whitespace-pre-wrap pr-12 text-sm italic ${
+            isOut
+              ? 'text-[#667781] dark:text-emerald-100/70'
+              : 'text-[#667781] dark:text-zinc-400'
+          }`}
+        >
+          {revokedMessageLabel(isOut)}
+        </p>
+      ) : isMedia ? (
         <div className="mb-1">
           <MediaContent message={message} />
           {message.caption ? (
@@ -422,6 +469,16 @@ export const WhatsappMessageBubble: React.FC<Props> = ({
             >
               <Forward className="mr-2 h-4 w-4" />
               Reenviar
+            </ContextMenuItem>
+          ) : null}
+          {onDeleteForEveryone ? (
+            <ContextMenuItem
+              disabled={!canDeleteForEveryone}
+              className="text-destructive focus:text-destructive"
+              onSelect={() => onDeleteForEveryone(message)}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              Eliminar para todos
             </ContextMenuItem>
           ) : null}
         </ContextMenuContent>
