@@ -172,12 +172,20 @@ def main() -> None:
         )
         if cur.rowcount:
             moved += 1
+            # Evitar violar sales_ticket_number_company_unique al mover empresa.
             cur.execute(
                 """
-                UPDATE sales SET company_id = %s::uuid
-                WHERE invoice_id = %s::uuid
+                UPDATE sales s
+                SET company_id = %s::uuid
+                WHERE s.invoice_id = %s::uuid
+                  AND NOT EXISTS (
+                    SELECT 1 FROM sales s2
+                    WHERE s2.company_id = %s::uuid
+                      AND s2.ticket_number = s.ticket_number
+                      AND s2.id <> s.id
+                  )
                 """,
-                (target_co, invoice_id),
+                (target_co, invoice_id, target_co),
             )
 
     print(f"Facturas movidas a medicina: {moved}")

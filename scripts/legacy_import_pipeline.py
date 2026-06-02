@@ -100,7 +100,7 @@ def execute_pipeline(
 ) -> None:
     if mode in {"staging", "refresh", "full"} and not resume:
         scope = os.environ.get("LEGACY_IMPORT_SCOPE", "all").strip() or "all"
-        print(f"Import DBF → legacy.* (LEGACY_IMPORT_SCOPE={scope})")
+        print(f"Import DBF -> legacy.* (LEGACY_IMPORT_SCOPE={scope})")
 
     completed: set[str] = set()
     if resume and tracker:

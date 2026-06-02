@@ -410,10 +410,17 @@ export const Marketing: React.FC = () => {
     await refetch();
     try {
       const invoiced = await syncPresentadaInvoicedValues();
+      const parts: string[] = [];
+      if (invoiced.moved > 0) {
+        parts.push(`${invoiced.moved} movido(s) a «${invoiced.stageName}»`);
+      }
       if (invoiced.updated > 0) {
+        parts.push(`${invoiced.updated} valor(es) actualizado(s)`);
+      }
+      if (parts.length > 0) {
         toast({
-          title: 'Valores actualizados',
-          description: `${invoiced.updated} tarjeta(s) en «${invoiced.stageName}» con importe facturado.`,
+          title: 'Facturación sincronizada',
+          description: parts.join(' · '),
         });
       }
     } catch (e) {

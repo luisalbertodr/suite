@@ -254,7 +254,7 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
               <h4
                 className={[
                   'truncate font-semibold text-foreground',
-                  compact ? 'text-sm leading-snug' : 'text-sm',
+                  compact ? 'text-[15px] leading-snug' : 'text-[15px]',
                 ].join(' ')}
               >
                 {fullName}
@@ -263,10 +263,10 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
                 ) : null}
               </h4>
               {compact && createdAtLabel ? (
-                <p className="truncate text-[11px] text-muted-foreground">{createdAtLabel}</p>
+                <p className="truncate text-xs text-muted-foreground">{createdAtLabel}</p>
               ) : null}
               {compact ? (
-                <p className="truncate text-[11px] text-muted-foreground leading-snug">
+                <p className="truncate text-xs text-muted-foreground leading-snug">
                   {lead.phone || '—'}
                 </p>
               ) : null}
@@ -274,18 +274,18 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
                 {isLinked ? (
                   compact ? (
                     <span
-                      className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-700 dark:text-emerald-400"
+                      className="inline-flex max-w-full items-center gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-400"
                       title={`Cliente: ${matchedCustomer!.name}`}
                     >
-                      <UserCheck className="h-3 w-3" />
-                      {truncate(matchedCustomer!.name, 16)}
+                      <UserCheck className="h-3 w-3 shrink-0" />
+                      <span className="min-w-0 truncate">{matchedCustomer!.name}</span>
                     </span>
                   ) : (
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
-                        <UserCheck className="h-3 w-3" />
-                        Cliente: {truncate(matchedCustomer!.name, 18)}
+                      <span className="inline-flex max-w-full items-center gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                        <UserCheck className="h-3 w-3 shrink-0" />
+                        <span className="min-w-0 truncate">Cliente: {matchedCustomer!.name}</span>
                       </span>
                     </TooltipTrigger>
                     <TooltipContent side="bottom">
@@ -366,7 +366,7 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
 
           {cardFields.length > 0 ? (
             compact ? (
-              <div className="mt-0.5 space-y-0 text-[11px] leading-snug">
+              <div className="mt-0.5 space-y-0 text-xs leading-snug">
                 {cardFields.map((field) => {
                   const raw = readLeadField(lead, field.field_key);
                   if (!shouldShowLeadCardField(lead, field, raw)) return null;
@@ -384,7 +384,7 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
                 })}
               </div>
             ) : (
-              <dl className="mt-2 space-y-1 text-[11px]">
+              <dl className="mt-2 space-y-1 text-xs">
                 {cardFields.map((field) => {
                   const raw = readLeadField(lead, field.field_key);
                   if (!shouldShowLeadCardField(lead, field, raw)) return null;

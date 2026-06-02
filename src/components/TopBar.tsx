@@ -20,10 +20,10 @@ import {
 export const TopBar: React.FC = () => {
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
-  const { theme, setTheme } = useTheme();
+  const { theme, resolvedTheme, setTheme } = useTheme();
   const { companyId, loading: companyLoading } = useCompanyFilter();
   const { isMultiEntity, loading: wcLoading } = useWorkCenter();
-  const { displayName, logoUrl, isLoading: brandingLoading } = useWorkCenterBranding();
+  const { displayName, logoUrlLight, logoUrlDark, isLoading: brandingLoading } = useWorkCenterBranding();
   const { enabled: billingScopeEnabled } = useBillingScopeRoute();
   const [currentDateTime, setCurrentDateTime] = useState(new Date());
 
@@ -34,6 +34,8 @@ export const TopBar: React.FC = () => {
 
   const handleDateClick = () => navigate('/agenda');
   const toggleTheme = () => setTheme(theme === 'dark' ? 'light' : 'dark');
+  const activeTheme = resolvedTheme ?? theme;
+  const logoUrl = activeTheme === 'dark' ? (logoUrlDark || logoUrlLight) : logoUrlLight;
 
   const brandLabel = displayName.trim() || 'Lipoout';
   const showBrandSkeleton = (companyLoading || brandingLoading) && !displayName;
@@ -50,10 +52,12 @@ export const TopBar: React.FC = () => {
                 <img
                   src={logoUrl}
                   alt=""
-                  className="h-8 w-auto max-w-[140px] shrink-0 object-contain object-left"
+                  className="h-10 w-auto max-w-[220px] shrink-0 self-end object-contain object-center"
                 />
               )}
-              <span className="text-sm font-semibold text-foreground truncate">{brandLabel}</span>
+              {!logoUrl && (
+                <span className="text-sm font-semibold text-foreground truncate">{brandLabel}</span>
+              )}
             </>
           )}
         </div>

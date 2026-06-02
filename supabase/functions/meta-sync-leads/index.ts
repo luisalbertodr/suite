@@ -895,10 +895,13 @@ serve(async (req) => {
     for (const s of stages ?? []) {
       if (s.name) stageByName.set(s.name.toLowerCase(), s.id);
     }
+    // Para los leads nuevos priorizamos siempre la etapa llamada "Nuevo lead".
+    // Así evitamos que una configuración antigua con `is_default_intake` mal marcada
+    // nos mande los leads a otra columna (p. ej. "¡Llamar por la tarde!").
     const intakeStageId =
-      (stages ?? []).find((s) => s.is_default_intake)?.id ??
       stageByName.get('nuevo lead') ??
       stageByName.get('nuevo formulario') ??
+      (stages ?? []).find((s) => s.is_default_intake)?.id ??
       (stages ?? [])[0]?.id ??
       null;
     const appointmentStageId =
@@ -912,7 +915,9 @@ serve(async (req) => {
     let totalErrors = 0;
 
     for (const form of forms) {
-      const targetIntake = form.default_stage_id ?? intakeStageId;
+      // Forzamos la etapa de entrada para leads nuevos (intake) a `intakeStageId`.
+      // Si no existe, el valor será null y la BD lo tratará como "sin etapa".
+      const targetIntake = intakeStageId ?? form.default_stage_id ?? null;
       const targetAppointment =
         form.appointment_stage_id ??
         (form.creates_appointment ? appointmentStageId : null) ??

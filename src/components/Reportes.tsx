@@ -45,6 +45,14 @@ export const Reportes: React.FC<{ embedded?: boolean }> = ({ embedded = false })
       color: "from-blue-500 to-blue-600",
       reports: [
         {
+          id: "listado-facturas-emitidas",
+          title: "Listado de Facturas Emitidas",
+          description: "Facturas emitidas en un periodo, con filtros por familia y artículo",
+          icon: FileText,
+          filters: ["fechas", "familias", "articulos", "cliente", "estado-pago", "rango-importes", "empresa-emisora"],
+          columns: ["Número", "Fecha", "Cliente", "Artículo", "Familia", "Cant.", "Importe línea", "Total factura", "Cobro"]
+        },
+        {
           id: "facturas-cobrar",
           title: "Facturas por Cobrar",
           description: "Control de facturas pendientes de cobro con análisis de vencimientos",

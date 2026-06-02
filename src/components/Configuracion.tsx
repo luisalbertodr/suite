@@ -25,6 +25,7 @@ import { MetaConfig } from './MetaConfig';
 import { WhatsappConfig } from './WhatsappConfig';
 import { WorkCenterAuditPanel } from './WorkCenterAuditPanel';
 import { LegacyImportPanel } from './LegacyImportPanel';
+import { InbodyCsvImportPanel } from './InbodyCsvImportPanel';
 import { TpvSettingsConfig } from './TpvSettingsConfig';
 import { StripeConfigPanel } from './StripeConfig';
 import { useWorkCenter } from '@/hooks/useWorkCenter';
@@ -178,7 +179,8 @@ export const Configuracion: React.FC = () => {
               </Card>
             </TabsContent>
 
-            <TabsContent value="general-importar" className="mt-4">
+            <TabsContent value="general-importar" className="mt-4 space-y-6">
+              <InbodyCsvImportPanel />
               <LegacyImportPanel />
             </TabsContent>
           </Tabs>

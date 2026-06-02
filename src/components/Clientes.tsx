@@ -15,6 +15,7 @@ import { useWorkCenter } from '@/hooks/useWorkCenter';
 import { useCustomerSearch } from '@/hooks/useCustomerSearch';
 import { CUSTOMER_SEARCH_MIN_CHARS, isCustomerSearchQueryReady } from '@/lib/customerSearch';
 import { formatCustomerPhoneLabels } from '@/lib/legacyCustomerPhones';
+import type { ClienteDetailTab } from '@/types/clienteDetail';
 
 interface Customer {
   id: string;
@@ -35,7 +36,6 @@ interface Customer {
 }
 
 type View = 'list' | 'form' | 'detail';
-type DetailTab = 'timeline' | 'vouchers' | 'ficha';
 
 export const Clientes: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -43,7 +43,7 @@ export const Clientes: React.FC = () => {
   const [view, setView] = useState<View>('list');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
-  const [detailTab, setDetailTab] = useState<DetailTab>('timeline');
+  const [detailTab, setDetailTab] = useState<ClienteDetailTab>('timeline');
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { companyId, loading: companyLoading } = useCompanyFilter();
@@ -57,7 +57,7 @@ export const Clientes: React.FC = () => {
     if (!customerId) return;
     const tab = searchParams.get('tab');
     setSelectedCustomerId(customerId);
-    setDetailTab(tab === 'ficha' || tab === 'vouchers' ? tab : 'timeline');
+    setDetailTab(tab === 'ficha' || tab === 'vouchers' || tab === 'inbody' ? tab : 'timeline');
     setView('detail');
   }, [searchParams]);
 
@@ -68,7 +68,7 @@ export const Clientes: React.FC = () => {
     setSearchParams(next, { replace: true });
   };
 
-  const openCustomerDetail = (customerId: string, tab: DetailTab = 'timeline') => {
+  const openCustomerDetail = (customerId: string, tab: ClienteDetailTab = 'timeline') => {
     setSelectedCustomerId(customerId);
     setDetailTab(tab);
     setView('detail');

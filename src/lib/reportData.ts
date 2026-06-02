@@ -12,10 +12,14 @@ export type ReportFilters = {
   proveedor?: string;
   estado?: string;
   familia?: string;
+  familias?: string[];
+  articulos?: string[];
   empresaEmisora?: string;
   diasInactividad?: number;
   diasSinMovimiento?: number;
   numClientes?: number;
+  importeDesde?: number;
+  importeHasta?: number;
   [key: string]: unknown;
 };
 
@@ -39,12 +43,15 @@ export const REPORT_ROW_KEYS: Record<string, string[]> = {
   'flujo-caja': ['periodo', 'ingresos', 'gastos', 'saldo', 'proyeccion'],
   'analisis-margenes': ['concepto', 'ventas', 'costos', 'margenBruto', 'margenPct'],
   'resumen-fiscal': ['concepto', 'baseImponible', 'iva', 'total', 'tipoIva'],
+  'listado-facturas-emitidas': [
+    'numero', 'fechaEmision', 'cliente', 'articulo', 'familia', 'cantidad', 'importeLinea', 'totalFactura', 'cobro',
+  ],
 };
 
 const MONEY_KEYS = new Set([
   'importe', 'totalFacturado', 'valorStock', 'promedio', 'margen', 'facturacion',
   'totalComprado', 'ingresos', 'gastos', 'saldo', 'ventas', 'costos', 'margenBruto',
-  'baseImponible', 'iva', 'total', 'valor',
+  'baseImponible', 'iva', 'total', 'valor', 'importeLinea', 'totalFactura',
 ]);
 
 export function formatReportCell(key: string, value: unknown): string {
@@ -68,6 +75,35 @@ function dateTo(filters: ReportFilters): string | undefined {
 
 function dateToIsoEnd(filters: ReportFilters): string | undefined {
   return filters.fechaHasta ? `${format(filters.fechaHasta, 'yyyy-MM-dd')}T23:59:59` : undefined;
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.filter((v) => typeof v === 'string' && v.trim()).map((v) => v.trim());
+  if (typeof value === 'string' && value.trim() && value !== 'todas' && value !== 'todos') return [value.trim()];
+  return [];
+}
+
+function resolveFamiliaFilter(filters: ReportFilters): string[] {
+  const multi = normalizeStringArray(filters.familias);
+  if (multi.length) return multi;
+  const single = filters.familia;
+  if (single && single !== 'todas') return [String(single)];
+  return [];
+}
+
+function resolveArticuloFilter(filters: ReportFilters): string[] {
+  return normalizeStringArray(filters.articulos);
+}
+
+function paidStatusLabel(paid: boolean | null | undefined, status: string | null | undefined): string {
+  if (paid === true) return 'Cobrada';
+  if (status === 'cancelled' || status === 'void' || status === 'anulada') return 'Anulada';
+  return 'Pendiente';
+}
+
+function lineAmount(item: Record<string, unknown>): number {
+  return Number(item.subtotal_after_discount ?? item.subtotal ?? item.total_price ?? 0);
 }
 
 export function resolveBillingScope(
@@ -148,9 +184,111 @@ export async function fetchReportData(
       return fetchAnalisisMargenes(scope, filters);
     case 'resumen-fiscal':
       return fetchResumenFiscal(scope, filters);
+    case 'listado-facturas-emitidas':
+      return fetchListadoFacturasEmitidas(scope, filters);
     default:
       return [];
   }
+}
+
+async function fetchListadoFacturasEmitidas(scope: Scope, filters: ReportFilters) {
+  const familias = resolveFamiliaFilter(filters);
+  const articuloIds = resolveArticuloFilter(filters);
+  const hasLineFilter = familias.length > 0 || articuloIds.length > 0;
+
+  let query = supabase
+    .from('invoices')
+    .select(
+      'id, number, issue_date, total_amount, subtotal, tax_amount, paid_status, status, customers:customer_id (name)',
+    )
+    ;
+  query = applyCompanyScope(query, scope);
+
+  if (filters.cliente && filters.cliente !== 'todos') query = query.eq('customer_id', filters.cliente);
+  const from = dateFrom(filters);
+  const to = dateTo(filters);
+  if (from) query = query.gte('issue_date', from);
+  if (to) query = query.lte('issue_date', to);
+
+  if (filters.estado === 'paid') query = query.eq('paid_status', true);
+  if (filters.estado === 'pending' || filters.estado === 'sent') query = query.eq('paid_status', false);
+
+  const importeDesde = Number(filters.importeDesde ?? 0);
+  const importeHasta = Number(filters.importeHasta ?? 0);
+  if (importeDesde > 0) query = query.gte('total_amount', importeDesde);
+  if (importeHasta > 0) query = query.lte('total_amount', importeHasta);
+
+  const { data: invoices, error } = await query.order('issue_date', { ascending: false }).order('number', { ascending: false });
+  if (error) throw error;
+  const cancelled = new Set(['cancelled', 'void', 'anulada']);
+  const invList = ((invoices ?? []) as Record<string, unknown>[]).filter(
+    (inv) => !cancelled.has(String(inv.status ?? '').toLowerCase()),
+  );
+
+  if (!hasLineFilter) {
+    return invList.map((inv) => ({
+      numero: inv.number,
+      fechaEmision: format(new Date(String(inv.issue_date)), 'dd/MM/yyyy'),
+      cliente: (inv.customers as { name?: string } | null)?.name || 'N/A',
+      articulo: '—',
+      familia: '—',
+      cantidad: '—',
+      importeLinea: '—',
+      totalFactura: Number(inv.total_amount ?? 0),
+      cobro: paidStatusLabel(inv.paid_status as boolean | undefined, inv.status as string | undefined),
+    }));
+  }
+
+  const invIds = invList.map((i) => String(i.id));
+  if (invIds.length === 0) return [];
+
+  const invById = new Map(invList.map((i) => [String(i.id), i]));
+  const rows: Record<string, unknown>[] = [];
+  const chunkSize = 150;
+
+  for (let i = 0; i < invIds.length; i += chunkSize) {
+    const chunk = invIds.slice(i, i + chunkSize);
+    const { data: items, error: itemsErr } = await supabase
+      .from('invoice_items')
+      .select(
+        'invoice_id, description, quantity, total_price, subtotal_after_discount, subtotal, articles:article_id (id, descripcion, familia, codigo)',
+      )
+      .in('invoice_id', chunk);
+    if (itemsErr) throw itemsErr;
+
+    for (const raw of items ?? []) {
+      const item = raw as Record<string, unknown>;
+      const art = item.articles as { id?: string; descripcion?: string; familia?: string; codigo?: string } | null;
+      const familiaArt = art?.familia ?? '';
+      const artId = art?.id ?? '';
+
+      if (familias.length > 0 && !familias.includes(familiaArt)) continue;
+      if (articuloIds.length > 0 && (!artId || !articuloIds.includes(artId))) continue;
+
+      const inv = invById.get(String(item.invoice_id));
+      if (!inv) continue;
+
+      const artLabel = art?.descripcion || String(item.description || 'Sin artículo');
+      rows.push({
+        numero: inv.number,
+        fechaEmision: format(new Date(String(inv.issue_date)), 'dd/MM/yyyy'),
+        cliente: (inv.customers as { name?: string } | null)?.name || 'N/A',
+        articulo: art?.codigo ? `${art.codigo} - ${artLabel}` : artLabel,
+        familia: familiaArt || '—',
+        cantidad: Number(item.quantity ?? 1),
+        importeLinea: lineAmount(item),
+        totalFactura: Number(inv.total_amount ?? 0),
+        cobro: paidStatusLabel(inv.paid_status as boolean | undefined, inv.status as string | undefined),
+      });
+    }
+  }
+
+  return rows.sort((a, b) => {
+    const da = String(a.fechaEmision).split('/').reverse().join('');
+    const db = String(b.fechaEmision).split('/').reverse().join('');
+    if (da !== db) return db.localeCompare(da);
+    return String(b.numero).localeCompare(String(a.numero));
+  });
 }
 
 async function fetchFacturasPorCobrar(scope: Scope, filters: ReportFilters) {

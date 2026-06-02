@@ -20,6 +20,8 @@ export const useWhatsappUnread = () => {
     queryKey: ['whatsapp-unread-total', companyId],
     enabled: !!companyId && !loading,
     staleTime: 15_000,
+    refetchInterval: 20_000,
+    refetchIntervalInBackground: true,
     retry: 2,
     retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
     queryFn: async (): Promise<number> => {

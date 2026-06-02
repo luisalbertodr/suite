@@ -1,10 +1,12 @@
 import { supabase } from '@/lib/supabase';
+import { isSchemaColumnError } from '@/lib/appointmentSales';
 import type { MarketingLead } from '@/hooks/useMarketingLeads';
 
 const INVOICE_CHUNK = 150;
 
 export type CustomerInvoiceRow = {
   customer_id: string;
+  invoice_id: string;
   issue_date: string;
   total_amount: number;
 };
@@ -31,17 +33,18 @@ export async function fetchCustomerInvoices(
     const slice = unique.slice(i, i + INVOICE_CHUNK);
     const { data, error } = await supabase
       .from('invoices')
-      .select('customer_id, issue_date, total_amount, status')
+      .select('id, customer_id, issue_date, total_amount, status')
       .eq('company_id', companyId)
       .in('customer_id', slice)
       .neq('status', 'cancelled');
     if (error) throw error;
     for (const row of data ?? []) {
-      if (!row.customer_id || !row.issue_date) continue;
+      if (!row.customer_id || !row.issue_date || !row.id) continue;
       const amt = Number(row.total_amount ?? 0);
       if (!Number.isFinite(amt) || amt <= 0) continue;
       rows.push({
         customer_id: row.customer_id,
+        invoice_id: row.id,
         issue_date: row.issue_date,
         total_amount: amt,
       });
@@ -49,6 +52,80 @@ export async function fetchCustomerInvoices(
   }
   return rows;
 }
+
+/** Facturas de citas cobradas (venta TPV con appointment_id + invoice_id). */
+export async function fetchCustomerAppointmentInvoiceIds(
+  companyId: string,
+  customerIds: string[],
+): Promise<Set<string>> {
+  const unique = [...new Set(customerIds.filter(Boolean))];
+  if (!unique.length) return new Set();
+
+  const appointmentIds = new Set<string>();
+  for (let i = 0; i < unique.length; i += INVOICE_CHUNK) {
+    const slice = unique.slice(i, i + INVOICE_CHUNK);
+    const { data, error } = await supabase
+      .from('agenda_appointments')
+      .select('id')
+      .eq('company_id', companyId)
+      .in('customer_id', slice);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      if (row.id) appointmentIds.add(row.id);
+    }
+  }
+
+  const invoiceIds = new Set<string>();
+  const saleSelects = [
+    'appointment_id, invoice_id, status, customer_id',
+    'appointment_id, invoice_id, status',
+  ] as const;
+
+  for (const select of saleSelects) {
+    let res = await supabase
+      .from('sales')
+      .select(select)
+      .eq('company_id', companyId)
+      .eq('status', 'completed')
+      .not('appointment_id', 'is', null)
+      .not('invoice_id', 'is', null);
+
+    if (res.error && isSchemaColumnError(res.error)) continue;
+    if (res.error) throw res.error;
+
+    for (const row of res.data ?? []) {
+      const appointmentId = (row as { appointment_id?: string | null }).appointment_id;
+      const invoiceId = (row as { invoice_id?: string | null }).invoice_id;
+      const saleCustomerId = (row as { customer_id?: string | null }).customer_id;
+      if (!appointmentId || !invoiceId) continue;
+      if (saleCustomerId && unique.includes(saleCustomerId)) {
+        invoiceIds.add(invoiceId);
+        continue;
+      }
+      if (appointmentIds.has(appointmentId)) {
+        invoiceIds.add(invoiceId);
+      }
+    }
+    if ((res.data ?? []).length > 0) break;
+  }
+
+  return invoiceIds;
+}
+
+/** ¿Hay factura de cita del cliente desde sinceDate (inclusive)? */
+export const hasAppointmentInvoiceSince = (
+  invoices: CustomerInvoiceRow[],
+  appointmentInvoiceIds: Set<string>,
+  customerId: string,
+  sinceDate: string,
+): boolean => {
+  for (const inv of invoices) {
+    if (inv.customer_id !== customerId) continue;
+    if (inv.issue_date < sinceDate) continue;
+    if (appointmentInvoiceIds.has(inv.invoice_id)) return true;
+  }
+  return false;
+};
 
 /** Suma facturación del cliente desde sinceDate (inclusive), p. ej. fecha de creación del lead. */
 export const sumInvoicedSince = (

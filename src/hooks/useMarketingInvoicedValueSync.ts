@@ -1,24 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { MarketingLead } from '@/hooks/useMarketingLeads';
 import type { MarketingLeadStage } from '@/hooks/useMarketingStages';
 import type { CustomerLookupRow } from '@/hooks/useCustomerLookup';
-import { isPresentadaExitoStageName } from '@/lib/marketingPresentadaStage';
 import {
-  fetchCustomerInvoices,
-  invoicedValueDiffers,
-  leadInvoicingSinceDate,
-  sumInvoicedSince,
-} from '@/lib/marketingInvoicedTotals';
+  runMarketingPresentadaInvoicedSync,
+  type MarketingPresentadaSyncResult,
+} from '@/lib/marketingPresentadaSync';
+import { leadInvoicingSinceDate } from '@/lib/marketingInvoicedTotals';
 
-export type MarketingInvoicedValueSyncResult = {
-  updated: number;
-  skipped: number;
-  stageName: string | null;
-};
+export type MarketingInvoicedValueSyncResult = MarketingPresentadaSyncResult;
 
-type MatchCustomer = (lead: Pick<MarketingLead, 'phone' | 'email' | 'customer_id'>) => CustomerLookupRow | null;
+type MatchCustomer = (
+  lead: Pick<MarketingLead, 'phone' | 'email' | 'customer_id'>,
+) => CustomerLookupRow | null;
 
 export const useMarketingInvoicedValueSync = (input: {
   companyId: string | null | undefined;
@@ -31,95 +26,62 @@ export const useMarketingInvoicedValueSync = (input: {
   const queryClient = useQueryClient();
   const syncingRef = useRef(false);
 
+  const { data: invoiceTick } = useQuery({
+    queryKey: ['marketing-invoice-sync-tick', companyId],
+    enabled: !!companyId && enabled,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    queryFn: async () => {
+      const { supabase } = await import('@/lib/supabase');
+      const { data, error } = await supabase
+        .from('invoices')
+        .select('id, created_at')
+        .eq('company_id', companyId!)
+        .order('created_at', { ascending: false })
+        .limit(1);
+      if (error) throw error;
+      const row = data?.[0];
+      return row ? `${row.id}:${row.created_at}` : 'none';
+    },
+  });
+
   const runSync = useCallback(async (): Promise<MarketingInvoicedValueSyncResult> => {
     if (!companyId) {
-      return { updated: 0, skipped: 0, stageName: null };
+      return { moved: 0, updated: 0, skipped: 0, stageName: null };
     }
 
-    const stage = stages.find((s) => isPresentadaExitoStageName(s.name));
-    if (!stage) {
-      return { updated: 0, skipped: 0, stageName: null };
-    }
+    const result = await runMarketingPresentadaInvoicedSync({
+      companyId,
+      stages,
+      leads,
+      matchCustomer,
+    });
 
-    const stageLeads = leads.filter((l) => l.stage_id === stage.id);
-    if (!stageLeads.length) {
-      return { updated: 0, skipped: 0, stageName: stage.name };
-    }
-
-    const leadCustomerPairs: Array<{ leadId: string; customerId: string }> = [];
-    let skipped = 0;
-
-    for (const lead of stageLeads) {
-      const customerId = lead.customer_id ?? matchCustomer(lead)?.id ?? null;
-      if (!customerId) {
-        skipped++;
-        continue;
-      }
-      leadCustomerPairs.push({ leadId: lead.id, customerId });
-    }
-
-    if (!leadCustomerPairs.length) {
-      return { updated: 0, skipped, stageName: stage.name };
-    }
-
-    const customerIds = [...new Set(leadCustomerPairs.map((p) => p.customerId))];
-    const invoices = await fetchCustomerInvoices(companyId, customerIds);
-
-    const updates: Array<{ id: string; value: number }> = [];
-    for (const { leadId, customerId } of leadCustomerPairs) {
-      const lead = stageLeads.find((l) => l.id === leadId);
-      if (!lead) continue;
-      const sinceDate = leadInvoicingSinceDate(lead);
-      const total = sumInvoicedSince(invoices, customerId, sinceDate);
-      if (total <= 0) {
-        skipped++;
-        continue;
-      }
-      if (!invoicedValueDiffers(lead.value, total)) {
-        skipped++;
-        continue;
-      }
-      updates.push({ id: leadId, value: total });
-    }
-
-    if (updates.length > 0) {
-      const results = await Promise.all(
-        updates.map((u) =>
-          supabase.from('marketing_leads').update({ value: u.value }).eq('id', u.id),
-        ),
-      );
-      const firstErr = results.find((r) => r.error)?.error;
-      if (firstErr) throw firstErr;
+    if (result.moved > 0 || result.updated > 0) {
       await queryClient.invalidateQueries({ queryKey: ['marketing-leads', companyId] });
     }
 
-    return {
-      updated: updates.length,
-      skipped,
-      stageName: stage.name,
-    };
+    return result;
   }, [companyId, stages, leads, matchCustomer, queryClient]);
 
   const syncFingerprint = useMemo(() => {
-    const stage = stages.find((s) => isPresentadaExitoStageName(s.name));
-    if (!stage) return '';
+    const stageIds = new Set(stages.map((s) => s.id));
     return leads
-      .filter((l) => l.stage_id === stage.id)
       .map((l) => {
         const since = leadInvoicingSinceDate(l);
-        return `${l.id}:${l.customer_id ?? ''}:${since}:${l.value ?? 0}`;
+        return `${l.id}:${l.stage_id ?? ''}:${l.customer_id ?? ''}:${since}:${l.value ?? 0}:${stageIds.has(l.stage_id ?? '')}`;
       })
       .sort()
       .join('|');
   }, [stages, leads]);
 
   useEffect(() => {
-    if (!enabled || !companyId || !syncFingerprint || syncingRef.current) return;
+    if (!enabled || !companyId || syncingRef.current) return;
 
     let cancelled = false;
     syncingRef.current = true;
     runSync()
-      .catch((e) => console.warn('Sync valor facturado (Presentada con éxito):', e))
+      .catch((e) => console.warn('Sync facturación → Presentada con éxito:', e))
       .finally(() => {
         if (!cancelled) syncingRef.current = false;
       });
@@ -127,7 +89,7 @@ export const useMarketingInvoicedValueSync = (input: {
     return () => {
       cancelled = true;
     };
-  }, [enabled, companyId, syncFingerprint, runSync]);
+  }, [enabled, companyId, syncFingerprint, invoiceTick, runSync]);
 
   return { runSync };
 };

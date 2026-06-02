@@ -19,6 +19,8 @@ import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { useWorkCenter } from '@/hooks/useWorkCenter';
 import { fetchCatalogCustomers } from '@/lib/customerSearch';
 import { CustomerSelector } from '@/components/forms/CustomerSelector';
+import { ReportFilterMultiSelect } from '@/components/reports/ReportFilterMultiSelect';
+import { REPORT_DATE_PRESETS, resolveDatePresetRange, type DatePresetId } from '@/lib/reportDatePresets';
 
 const REPORT_SELECT_CONTENT_CLASS = 'z-[200]';
 
@@ -51,7 +53,9 @@ interface FilterValues {
   proveedor?: string;
   estado?: string;
   familia?: string;
+  familias?: string[];
   articulo?: string;
+  articulos?: string[];
   importeDesde?: number;
   importeHasta?: number;
   empresaEmisora?: string;
@@ -61,7 +65,13 @@ interface FilterValues {
 export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) => {
   const [showFilters, setShowFilters] = useState(true);
   const [showResults, setShowResults] = useState(false);
-  const [filters, setFilters] = useState<FilterValues>({});
+  const [filters, setFilters] = useState<FilterValues>(() => {
+    if (report.id === 'listado-facturas-emitidas') {
+      const { fechaDesde, fechaHasta } = resolveDatePresetRange('month');
+      return { fechaDesde, fechaHasta, incluirTotales: true };
+    }
+    return {};
+  });
   const { companyId, loading: companyLoading } = useCompanyFilter();
   const { isMultiEntity, billingCompanies, companyLabels, operationalCompanyId } = useWorkCenter();
   const catalogCompanyId = operationalCompanyId ?? companyId;
@@ -102,13 +112,25 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
     enabled: !!catalogCompanyId && !companyLoading,
   });
 
-  const quickDateRanges = [
-    { label: "Hoy", value: "today" },
-    { label: "Esta semana", value: "week" },
-    { label: "Este mes", value: "month" },
-    { label: "Este trimestre", value: "quarter" },
-    { label: "Este año", value: "year" }
-  ];
+  const needsArticles = report.filters.includes('articulos') || report.filters.includes('articulo');
+
+  const { data: catalogArticles } = useQuery({
+    queryKey: ['articles', catalogCompanyId, 'reporte-modal'],
+    queryFn: async () => {
+      if (!catalogCompanyId) return [];
+      const { data, error } = await supabase
+        .from('articles')
+        .select('id, codigo, descripcion, familia, estado')
+        .eq('company_id', catalogCompanyId)
+        .eq('estado', 'activo')
+        .order('descripcion');
+      if (error) throw error;
+      return data ?? [];
+    },
+    enabled: !!catalogCompanyId && !companyLoading && needsArticles,
+  });
+
+  const quickDateRanges = REPORT_DATE_PRESETS;
 
   const estadosFactura = [
     { value: "draft", label: "Borrador" },
@@ -126,33 +148,9 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
     { value: "expired", label: "Expirado" }
   ];
 
-  const handleQuickDate = (range: string) => {
-    const today = new Date();
-    let fechaDesde: Date;
-    let fechaHasta: Date = today;
-
-    switch (range) {
-      case "today":
-        fechaDesde = today;
-        break;
-      case "week":
-        fechaDesde = new Date(today.setDate(today.getDate() - 7));
-        break;
-      case "month":
-        fechaDesde = new Date(today.getFullYear(), today.getMonth(), 1);
-        break;
-      case "quarter":
-        const quarterStart = Math.floor(today.getMonth() / 3) * 3;
-        fechaDesde = new Date(today.getFullYear(), quarterStart, 1);
-        break;
-      case "year":
-        fechaDesde = new Date(today.getFullYear(), 0, 1);
-        break;
-      default:
-        return;
-    }
-
-    setFilters(prev => ({ ...prev, fechaDesde, fechaHasta }));
+  const handleQuickDate = (range: DatePresetId) => {
+    const { fechaDesde, fechaHasta } = resolveDatePresetRange(range);
+    setFilters((prev) => ({ ...prev, fechaDesde, fechaHasta }));
   };
 
   const handleGenerateReport = () => {
@@ -260,17 +258,33 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
           />
         );
 
-      case "estado":
       case "estado-pago":
         return (
           <div className="space-y-2">
-            <Label>Estado de Pago</Label>
+            <Label>Estado de cobro</Label>
+            <Select modal={false} onValueChange={(value) => setFilters(prev => ({ ...prev, estado: value === 'all' ? undefined : value }))}>
+              <SelectTrigger>
+                <SelectValue placeholder="Todos" />
+              </SelectTrigger>
+              <SelectContent className={REPORT_SELECT_CONTENT_CLASS}>
+                <SelectItem value="all">Todos</SelectItem>
+                <SelectItem value="paid">Cobradas</SelectItem>
+                <SelectItem value="pending">Pendientes de cobro</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        );
+
+      case "estado":
+        return (
+          <div className="space-y-2">
+            <Label>Estado</Label>
             <Select modal={false} onValueChange={(value) => setFilters(prev => ({ ...prev, estado: value }))}>
               <SelectTrigger>
                 <SelectValue placeholder="Seleccionar estado" />
               </SelectTrigger>
               <SelectContent className={REPORT_SELECT_CONTENT_CLASS}>
-                {estadosFactura.map((estado) => (
+                {estadosPresupuesto.map((estado) => (
                   <SelectItem key={estado.value} value={estado.value}>
                     {estado.label}
                   </SelectItem>
@@ -301,6 +315,18 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
           </div>
         );
 
+      case "familias":
+        return (
+          <ReportFilterMultiSelect
+            label="Familias de artículos"
+            options={(families ?? []).map((name) => ({ value: name, label: name }))}
+            value={filters.familias ?? []}
+            onChange={(familias) => setFilters((prev) => ({ ...prev, familias }))}
+            emptyLabel="Todas las familias"
+            searchPlaceholder="Buscar familia…"
+          />
+        );
+
       case "familia":
         return (
           <div className="space-y-2">
@@ -319,6 +345,21 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
               </SelectContent>
             </Select>
           </div>
+        );
+
+      case "articulos":
+        return (
+          <ReportFilterMultiSelect
+            label="Artículos"
+            options={(catalogArticles ?? []).map((a) => ({
+              value: a.id as string,
+              label: a.codigo ? `${a.codigo} - ${a.descripcion}` : String(a.descripcion),
+            }))}
+            value={filters.articulos ?? []}
+            onChange={(articulos) => setFilters((prev) => ({ ...prev, articulos }))}
+            emptyLabel="Todos los artículos"
+            searchPlaceholder="Buscar artículo…"
+          />
         );
 
       case "proveedor":

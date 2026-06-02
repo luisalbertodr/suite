@@ -4,10 +4,12 @@ import { ClienteDetailView } from '@/components/ClienteDetailView';
 import { AGENDA_CUSTOMER_DETAIL_OVERLAY_Z } from '@/lib/agendaResourceColors';
 import { cn } from '@/lib/utils';
 
+import type { ClienteDetailTab } from '@/types/clienteDetail';
+
 type Props = {
   open: boolean;
   customerId: string;
-  initialTab?: 'timeline' | 'vouchers' | 'ficha';
+  initialTab?: ClienteDetailTab;
   onClose: () => void;
   onNewAppointment?: () => void;
   onAppointmentClick?: (appointmentId: string, dateYmd: string) => void;

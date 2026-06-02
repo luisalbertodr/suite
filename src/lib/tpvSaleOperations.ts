@@ -5,6 +5,7 @@ import {
   parseAgendaSaleNotes,
   type AppointmentSaleInfo,
 } from '@/lib/appointmentSales';
+import { runMarketingPresentadaInvoicedSyncForCompany } from '@/lib/marketingPresentadaSync';
 
 export type SaleItemRow = {
   id: string;
@@ -286,6 +287,12 @@ export async function issueInvoiceFromSale(
     .eq('id', saleId);
 
   if (linkError) throw linkError;
+
+  if (sale.appointment_id && customerId) {
+    void runMarketingPresentadaInvoicedSyncForCompany(billingCompanyId, {
+      customerIds: [customerId],
+    }).catch((e) => console.warn('Marketing sync tras factura cita:', e));
+  }
 
   return { mode: 'created', invoiceId: String(invoice.id), invoiceNumber: String(invoice.number) };
 }

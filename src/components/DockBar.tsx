@@ -4,6 +4,7 @@ import { Home, Calendar, ShoppingBag, Receipt, Users, Package, Building2, Settin
 import { usePermissions } from '@/hooks/usePermissions';
 import { useWhatsappUnread } from '@/hooks/useWhatsappUnread';
 import { useMarketingUnread } from '@/hooks/useMarketingUnread';
+import { useNotificationSoundOnIncrease } from '@/hooks/useNotificationSoundOnIncrease';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 
 const dockItems = [
@@ -27,6 +28,7 @@ export const DockBar: React.FC = () => {
   const canSeeMarketing = hasPermission('marketing', 'read');
   const { total: whatsappUnread } = useWhatsappUnread();
   const { total: marketingUnread } = useMarketingUnread();
+  useNotificationSoundOnIncrease(whatsappUnread, 'whatsapp', { enabled: canSeeWhatsapp });
 
   const visibleItems = dockItems.filter(item =>
     hasPermission(item.permission.resource, item.permission.action)

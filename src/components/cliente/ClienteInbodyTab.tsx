@@ -1,0 +1,258 @@
+import React, { useMemo, useState } from 'react';
+import { format } from 'date-fns';
+import { es } from 'date-fns/locale';
+import { Activity, ChevronDown } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { useInbodyMeasurements } from '@/hooks/useInbodyMeasurements';
+import {
+  formatInbodyNumber,
+  inbodySexLabel,
+  type InbodyMeasurement,
+} from '@/lib/inbodyMeasurements';
+import { InbodyMetricRow, InbodyRangeBar } from './inbody/InbodyRangeBar';
+import { InbodyHistoryChart } from './inbody/InbodyHistoryChart';
+import { InbodySegmentalSilhouette } from './inbody/InbodySegmentalSilhouette';
+
+interface Props {
+  customerId: string;
+  taxId?: string | null;
+  companyId?: string | null;
+  compact?: boolean;
+}
+
+function ImpedanceTable({ measurement }: { measurement: InbodyMeasurement }) {
+  const freqs = ['20khz', '100khz'] as const;
+  const segments = [
+    ['BD', 'right_arm'],
+    ['BI', 'left_arm'],
+    ['TR', 'trunk'],
+    ['PD', 'right_leg'],
+    ['PI', 'left_leg'],
+  ] as const;
+
+  const hasData = freqs.some((f) => measurement.impedance?.[f]);
+  if (!hasData) return null;
+
+  return (
+    <Card className="border-sky-100/50 dark:border-sky-900/20">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm">Impedancia (Ω)</CardTitle>
+      </CardHeader>
+      <CardContent className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-muted-foreground border-b">
+              <th className="text-left py-1 pr-3">Hz</th>
+              {segments.map(([label]) => (
+                <th key={label} className="text-right py-1 px-2 tabular-nums">
+                  {label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {freqs.map((freq) => {
+              const block = measurement.impedance?.[freq];
+              if (!block) return null;
+              const label = freq === '20khz' ? '20 kHz' : '100 kHz';
+              return (
+                <tr key={freq} className="border-b border-border/30 last:border-0">
+                  <td className="py-1.5 pr-3 font-medium">{label}</td>
+                  {segments.map(([_, key]) => (
+                    <td key={key} className="text-right py-1.5 px-2 tabular-nums">
+                      {formatInbodyNumber(block[key], 1)}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </CardContent>
+    </Card>
+  );
+}
+
+function MeasurementReport({ measurement, compact }: { measurement: InbodyMeasurement; compact?: boolean }) {
+  const measuredLabel = format(new Date(measurement.measured_at), "yyyy-MM-dd HH:mm:ss", { locale: es });
+
+  return (
+    <div className="space-y-4">
+      <div className={compact ? 'text-xs space-y-0.5' : 'text-sm space-y-1'}>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
+          <span className="font-medium text-foreground">{measurement.inbody_user_id}</span>
+          {measurement.age_years != null && <span>{formatInbodyNumber(measurement.age_years, 0)} Edad</span>}
+          {measurement.height_cm != null && (
+            <span>{formatInbodyNumber(measurement.height_cm, 1, 'cm')}</span>
+          )}
+          {measurement.sex && <span>{inbodySexLabel(measurement.sex)}</span>}
+          <span className="ml-auto flex items-center gap-1 tabular-nums">
+            <ChevronDown className="h-3.5 w-3.5 opacity-50" />
+            Fecha {measuredLabel}
+          </span>
+        </div>
+      </div>
+
+      <Card className="border-sky-100/50 dark:border-sky-900/20">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">Composición corporal</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <InbodyRangeBar label="Peso" value={measurement.weight_kg} min={measurement.weight_min_kg} max={measurement.weight_max_kg} />
+          <InbodyRangeBar label="MME" value={measurement.smm_kg} min={measurement.smm_min_kg} max={measurement.smm_max_kg} />
+          <InbodyRangeBar label="Masa grasa" value={measurement.body_fat_kg} min={measurement.body_fat_min_kg} max={measurement.body_fat_max_kg} />
+          <div className="grid sm:grid-cols-2 gap-2 pt-2 border-t border-border/40">
+            <InbodyRangeBar label="ACT" value={measurement.tbw_kg} min={measurement.tbw_min_kg} max={measurement.tbw_max_kg} className="col-span-1" />
+            <InbodyRangeBar label="MLG" value={measurement.ffm_kg} min={measurement.ffm_min_kg} max={measurement.ffm_max_kg} className="col-span-1" />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-sky-100/50 dark:border-sky-900/20">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">Diagnóstico de obesidad</CardTitle>
+        </CardHeader>
+        <CardContent className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-muted-foreground border-b">
+                <th className="text-left py-1 pr-3">Parámetro</th>
+                <th className="text-left py-1 pr-3">Valor</th>
+                <th className="text-left py-1 pr-3">Normal</th>
+                <th className="text-left py-1">Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              <InbodyMetricRow label="IMC" value={measurement.bmi} min={measurement.bmi_min} max={measurement.bmi_max} />
+              <InbodyMetricRow label="PGC" value={measurement.pbf_pct} min={measurement.pbf_min_pct} max={measurement.pbf_max_pct} unit="%" />
+              <InbodyMetricRow label="RCC" value={measurement.whr} min={measurement.whr_min} max={measurement.whr_max} decimals={2} />
+              <InbodyMetricRow label="MB" value={measurement.bmr_kcal} min={measurement.bmr_min_kcal} max={measurement.bmr_max_kcal} unit="kcal" decimals={0} />
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+
+      <div className="grid sm:grid-cols-2 gap-3">
+        <Card className="border-sky-100/50 dark:border-sky-900/20">
+          <CardContent className="pt-4 text-center">
+            <div className="text-[11px] text-muted-foreground uppercase">Control de músculo</div>
+            <div className="text-2xl font-bold tabular-nums mt-1">
+              {formatInbodyNumber(measurement.muscle_control_kg, 1, ' kg')}
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="border-sky-100/50 dark:border-sky-900/20">
+          <CardContent className="pt-4 text-center">
+            <div className="text-[11px] text-muted-foreground uppercase">Control de grasa</div>
+            <div className="text-2xl font-bold tabular-nums mt-1">
+              {formatInbodyNumber(measurement.fat_control_kg, 1, ' kg')}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className="border-sky-100/50 dark:border-sky-900/20">
+        <CardContent className="pt-4">
+          <ImpedanceTable measurement={measurement} />
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+export const ClienteInbodyTab: React.FC<Props> = ({ customerId, taxId, companyId, compact }) => {
+  const { data: measurements, isLoading, error } = useInbodyMeasurements(customerId, taxId, companyId);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const selected = useMemo(() => {
+    if (!measurements?.length) return null;
+    if (selectedId) return measurements.find((m) => m.id === selectedId) ?? measurements[0];
+    return measurements[0];
+  }, [measurements, selectedId]);
+
+  if (isLoading) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-10 w-full" />
+        <Skeleton className="h-48 w-full" />
+        <Skeleton className="h-32 w-full" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-10 text-sm text-destructive">
+        No se pudieron cargar las mediciones InBody.
+      </div>
+    );
+  }
+
+  if (!measurements?.length) {
+    return (
+      <div className="text-center py-12 text-muted-foreground">
+        <Activity className="h-10 w-10 mx-auto mb-3 opacity-30" />
+        <p className="font-medium text-foreground">Sin mediciones InBody</p>
+        <p className="text-sm mt-1 max-w-sm mx-auto">
+          {taxId
+            ? 'No hay registros vinculados a este DNI. Importa datos desde Configuración → General → Importar.'
+            : 'Añade el DNI del cliente para vincular mediciones por ID de Lookin\'Body.'}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <InbodyHistoryChart
+        measurements={measurements}
+        selectedId={selected?.id}
+        compact={compact}
+        onSelectSession={setSelectedId}
+      />
+
+      {selected && (
+        <InbodySegmentalSilhouette
+          lean={selected.segmental_lean}
+          fat={selected.segmental_fat}
+          measuredAtLabel={format(new Date(selected.measured_at), "EEEE d MMMM yyyy · HH:mm", {
+            locale: es,
+          })}
+          compact={compact}
+        />
+      )}
+
+      {measurements.length > 1 && (
+        <Select value={selected?.id} onValueChange={setSelectedId}>
+          <SelectTrigger className={compact ? 'h-8 text-xs' : ''}>
+            <SelectValue placeholder="Seleccionar medición" />
+          </SelectTrigger>
+          <SelectContent>
+            {measurements.map((m) => (
+              <SelectItem key={m.id} value={m.id}>
+                {format(new Date(m.measured_at), "dd/MM/yyyy HH:mm", { locale: es })}
+                {' · '}
+                {formatInbodyNumber(m.weight_kg, 1, ' kg')}
+                {m.pbf_pct != null ? ` · PGC ${formatInbodyNumber(m.pbf_pct, 1, '%')}` : ''}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+
+      {selected && <MeasurementReport measurement={selected} compact={compact} />}
+
+      <p className="text-[10px] text-muted-foreground italic text-center pt-2">
+        Utilice sus resultados como referencia cuando consulte a su médico o entrenador personal.
+      </p>
+    </div>
+  );
+};

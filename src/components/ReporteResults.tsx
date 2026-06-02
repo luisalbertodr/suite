@@ -52,7 +52,7 @@ interface ReporteResultsProps {
 export const ReporteResults: React.FC<ReporteResultsProps> = ({ report, filters, onBack }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage] = useState(10);
+  const [itemsPerPage] = useState(report.id === 'listado-facturas-emitidas' ? 25 : 10);
   const { companyId, loading: companyLoading } = useCompanyFilter();
   const { isMultiEntity, billingCompanies, operationalCompanyId } = useWorkCenter();
   const catalogCompanyId = operationalCompanyId ?? companyId;
@@ -84,8 +84,8 @@ export const ReporteResults: React.FC<ReporteResultsProps> = ({ report, filters,
   const paginatedData = filteredData.slice(startIndex, startIndex + itemsPerPage);
 
   const chartData = filteredData.slice(0, 5).map((item: any, index) => ({
-    name: item.cliente || item.mes || item.articulo || item.proveedor || `Item ${index + 1}`,
-    value: item.importe || item.totalFacturado || item.valorStock || 0
+    name: item.cliente || item.mes || item.articulo || item.proveedor || item.numero || `Item ${index + 1}`,
+    value: item.importeLinea ?? item.importe ?? item.totalFacturado ?? item.totalFactura ?? item.valorStock ?? 0,
   }));
 
   const calculateTotals = () => {
@@ -98,6 +98,26 @@ export const ReporteResults: React.FC<ReporteResultsProps> = ({ report, filters,
       const totalValue = filteredData.reduce((sum: number, item: any) => sum + Number(item.valorStock || 0), 0);
       const lowStock = filteredData.filter((item: any) => item.stockActual <= item.stockMinimo).length;
       return { total: totalValue.toFixed(2), lowStock };
+    }
+    if (report.id === "listado-facturas-emitidas") {
+      const lineSum = filteredData.reduce((sum: number, item: any) => {
+        const v = item.importeLinea;
+        return sum + (typeof v === 'number' ? v : 0);
+      }, 0);
+      const invoiceNums = new Set(
+        filteredData.map((item: any) => item.numero).filter(Boolean),
+      );
+      const invoiceTotal = [...invoiceNums].reduce((sum, num) => {
+        const row = filteredData.find((item: any) => item.numero === num);
+        return sum + Number(row?.totalFactura ?? 0);
+      }, 0);
+      const hasLines = lineSum > 0;
+      return {
+        total: (hasLines ? lineSum : invoiceTotal).toFixed(2),
+        vencidas: hasLines ? filteredData.length : invoiceNums.size,
+        labelTotal: hasLines ? 'Importe líneas' : 'Total facturado',
+        labelCount: hasLines ? 'Líneas listadas' : 'Facturas',
+      };
     }
     return null;
   };
@@ -218,21 +238,32 @@ export const ReporteResults: React.FC<ReporteResultsProps> = ({ report, filters,
                 )}
                 {filters.estado && (
                   <span className="px-3 py-1 bg-orange-100 text-orange-800 rounded-full text-sm">
-                    Estado: {filters.estado}
+                    Cobro: {filters.estado === 'paid' ? 'Cobradas' : filters.estado === 'pending' ? 'Pendientes' : filters.estado}
                   </span>
                 )}
+                {(filters.familias as string[] | undefined)?.length ? (
+                  <span className="px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-sm">
+                    Familias: {(filters.familias as string[]).length}
+                  </span>
+                ) : null}
+                {(filters.articulos as string[] | undefined)?.length ? (
+                  <span className="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm">
+                    Artículos: {(filters.articulos as string[]).length}
+                  </span>
+                ) : null}
               </div>
             </CardContent>
           </Card>
 
           {/* Resumen y totales */}
-          {totals && filters.incluirTotales && (
+          {totals && (filters.incluirTotales || report.id === 'listado-facturas-emitidas') && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Card>
                 <CardContent className="p-6">
                   <div className="text-2xl font-bold text-blue-600">€{totals.total}</div>
                   <p className="text-sm text-gray-600">
-                    {report.id === "facturas-cobrar" ? "Total por Cobrar" : "Valor Total"}
+                    {(totals as { labelTotal?: string }).labelTotal
+                      ?? (report.id === "facturas-cobrar" ? "Total por Cobrar" : "Valor Total")}
                   </p>
                 </CardContent>
               </Card>
@@ -242,7 +273,8 @@ export const ReporteResults: React.FC<ReporteResultsProps> = ({ report, filters,
                     {totals.vencidas || totals.lowStock || 0}
                   </div>
                   <p className="text-sm text-gray-600">
-                    {report.id === "facturas-cobrar" ? "Facturas Vencidas" : "Stock Bajo"}
+                    {(totals as { labelCount?: string }).labelCount
+                      ?? (report.id === "facturas-cobrar" ? "Facturas Vencidas" : "Stock Bajo")}
                   </p>
                 </CardContent>
               </Card>

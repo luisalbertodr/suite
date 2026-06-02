@@ -13,6 +13,9 @@ import type { Database } from '@/integrations/supabase/types';
 export type WhatsappChatRow = Database['public']['Tables']['whatsapp_chats']['Row'];
 
 const BG_SYNC_INTERVAL_MS = 4000;
+/** Evita traer `raw` (JSONB pesado) en cada refresco de lista. */
+const CHAT_LIST_COLUMNS =
+  'id,company_id,chat_id,name,is_group,profile_picture_url,last_message_preview,last_message_at,last_message_from_me,unread_count,pinned,archived,history_synced_at,oldest_message_at,customer_id,marketing_lead_id,created_at,updated_at';
 
 export const useWhatsappChats = () => {
   const queryClient = useQueryClient();
@@ -21,16 +24,18 @@ export const useWhatsappChats = () => {
   const chatsQuery = useQuery({
     queryKey: ['whatsapp-chats', companyId],
     enabled: !!companyId && !companyLoading,
-    staleTime: 5_000,
+    staleTime: 20_000,
+    refetchInterval: 45_000,
+    refetchIntervalInBackground: true,
     queryFn: async (): Promise<WhatsappChatRow[]> => {
       if (!companyId) return [];
       const { data, error } = await supabase
         .from('whatsapp_chats')
-        .select('*')
+        .select(CHAT_LIST_COLUMNS)
         .eq('company_id', companyId)
         .eq('archived', false)
         .order('last_message_at', { ascending: false, nullsFirst: false })
-        .limit(300);
+        .limit(120);
       if (error) throw error;
       return (data ?? []).filter((c) => !isSystemChatJid(c.chat_id));
     },
@@ -99,6 +104,19 @@ export const useWhatsappChats = () => {
       invalidate();
     },
   });
+
+  // Fallback robusto: si falla realtime/webhook, refrescamos lista de chats desde WAHA.
+  // El historial lo gestiona SOLO el worker de bg (runNext) para no reiniciar offsets.
+  useEffect(() => {
+    if (!companyId) return;
+    const tick = () => {
+      if (refreshFromWaha.isPending) return;
+      refreshFromWaha.mutate(undefined, { onError: () => undefined });
+    };
+    tick();
+    const timer = window.setInterval(tick, 30_000);
+    return () => window.clearInterval(timer);
+  }, [companyId, refreshFromWaha]);
 
   const syncHistoryFromWaha = useMutation({
     mutationFn: async () => {
@@ -259,11 +277,41 @@ export const useWhatsappChats = () => {
   const markRead = useMutation({
     mutationFn: async (chatId: string) => {
       if (!companyId) throw new Error('Sin empresa activa');
-      return invokeWhatsappProxy<{ ok: boolean }>({
-        action: 'chat.mark_read',
-        chat_id: chatId,
-        company_id: companyId,
-      });
+      const relatedIds = Array.from(
+        new Set(
+          (chatsQuery.data ?? [])
+            .filter((c) => c.chat_id === chatId || jidsSameContact(c.chat_id, chatId))
+            .map((c) => c.chat_id),
+        ),
+      );
+      if (!relatedIds.includes(chatId)) relatedIds.push(chatId);
+
+      for (const id of relatedIds) {
+        await invokeWhatsappProxy<{ ok: boolean }>({
+          action: 'chat.mark_read',
+          chat_id: id,
+          company_id: companyId,
+        });
+      }
+      return { ok: true, chatIds: relatedIds };
+    },
+    onMutate: async (chatId: string) => {
+      const key = ['whatsapp-chats', companyId] as const;
+      await queryClient.cancelQueries({ queryKey: key });
+      const prev = queryClient.getQueryData<WhatsappChatRow[]>(key) ?? [];
+      const next = prev.map((c) =>
+        c.chat_id === chatId || jidsSameContact(c.chat_id, chatId)
+          ? { ...c, unread_count: 0 }
+          : c,
+      );
+      queryClient.setQueryData<WhatsappChatRow[]>(key, next);
+      return { prev };
+    },
+    onError: (_error, _chatId, ctx) => {
+      if (!companyId) return;
+      if (ctx?.prev) {
+        queryClient.setQueryData(['whatsapp-chats', companyId], ctx.prev);
+      }
     },
     onSuccess: invalidate,
   });

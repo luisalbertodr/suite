@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Bell, Check, CheckCheck, Info, AlertTriangle, CheckCircle } from 'lucide-react';
 import { useNotifications } from '@/hooks/useNotifications';
+import { useNotificationSoundOnIncrease } from '@/hooks/useNotificationSoundOnIncrease';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -17,6 +18,7 @@ const typeIcons: Record<string, React.ReactNode> = {
 export const NotificationBell: React.FC = () => {
   const navigate = useNavigate();
   const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
+  useNotificationSoundOnIncrease(unreadCount, 'bell');
 
   const handleClick = (n: { id: string; link: string | null; read: boolean }) => {
     if (!n.read) markAsRead.mutate(n.id);

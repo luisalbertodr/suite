@@ -18,9 +18,16 @@ export function findMarketingIntakeStage<T extends MarketingStageLike>(
   stages: T[],
 ): T | null {
   if (!stages.length) return null;
+  const normalize = (name: string) =>
+    name
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '');
+
   return (
+    stages.find((s) => INTAKE_NAME_ALIASES.has(normalize(s.name))) ??
     stages.find((s) => s.is_default_intake) ??
-    stages.find((s) => INTAKE_NAME_ALIASES.has(s.name.trim().toLowerCase())) ??
     stages.find((s) => s.position === 0) ??
     stages[0] ??
     null
