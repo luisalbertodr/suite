@@ -1,8 +1,15 @@
 import React, { useMemo, useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
+import { Camera, FileSignature, Paperclip } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import {
   Table,
   TableBody,
@@ -13,6 +20,7 @@ import {
 } from '@/components/ui/table';
 import {
   useCustomerDayTimeline,
+  type AppointmentAttachmentHints,
   type AppointmentTimelineDetails,
   type DayGroup,
   type DayTimelineItem,
@@ -30,6 +38,7 @@ type HistoryTableRow = {
   muted?: boolean;
   appointmentId?: string;
   appointmentDate?: string;
+  attachments?: AppointmentAttachmentHints;
 };
 
 function formatDateLabel(ymd: string): string {
@@ -90,6 +99,7 @@ function itemToRow(dayDate: string, it: DayTimelineItem): HistoryTableRow {
       price: formatPrice(d.chargedAmount, it.amountLabel),
       appointmentId: d.appointmentId,
       appointmentDate: dayDate,
+      attachments: d.attachments,
     };
   }
 
@@ -123,6 +133,66 @@ function buildTableRows(days: DayGroup[]): HistoryTableRow[] {
     }
   }
   return rows;
+}
+
+function AppointmentAttachmentIcons({ attachments }: { attachments: AppointmentAttachmentHints }) {
+  const { photos, signedConsents, documents } = attachments;
+  if (!photos && !signedConsents && !documents) return null;
+
+  return (
+    <TooltipProvider delayDuration={200}>
+      <span className="inline-flex items-center gap-0.5 shrink-0 ml-1">
+        {photos && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                className="inline-flex text-sky-600 dark:text-sky-400"
+                aria-label="Fotos adjuntas"
+                title="Fotos adjuntas"
+              >
+                <Camera className="h-3.5 w-3.5" aria-hidden />
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="text-xs">
+              Fotos adjuntas
+            </TooltipContent>
+          </Tooltip>
+        )}
+        {signedConsents && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                className="inline-flex text-emerald-600 dark:text-emerald-400"
+                aria-label="Consentimiento firmado"
+                title="Consentimiento firmado"
+              >
+                <FileSignature className="h-3.5 w-3.5" aria-hidden />
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="text-xs">
+              Consentimiento firmado
+            </TooltipContent>
+          </Tooltip>
+        )}
+        {documents && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                className="inline-flex text-amber-700 dark:text-amber-400"
+                aria-label="Otros documentos adjuntos"
+                title="Otros documentos adjuntos"
+              >
+                <Paperclip className="h-3.5 w-3.5" aria-hidden />
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="text-xs">
+              Documentos adjuntos
+            </TooltipContent>
+          </Tooltip>
+        )}
+      </span>
+    </TooltipProvider>
+  );
 }
 
 interface Props {
@@ -229,12 +299,15 @@ export const ClienteDailyScrollView: React.FC<Props> = ({ customerId, className,
               </TableCell>
               <TableCell
                 className={cn(
-                  'px-2 py-1.5 align-middle min-w-0 max-w-0 w-full truncate',
+                  'px-2 py-1.5 align-middle min-w-0 max-w-0 w-full',
                   row.muted ? 'text-muted-foreground italic' : 'text-foreground',
                 )}
                 title={row.details}
               >
-                {row.details}
+                <div className="flex items-center min-w-0 gap-0.5">
+                  <span className="truncate flex-1 min-w-0">{row.details}</span>
+                  {row.attachments && <AppointmentAttachmentIcons attachments={row.attachments} />}
+                </div>
               </TableCell>
             </TableRow>
             );

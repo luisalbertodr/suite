@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { invokeWhatsappProxy } from '@/hooks/useWhatsappConfig';
-import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
 
 export interface LinkCandidateCustomer {
   id: string;
@@ -27,7 +27,7 @@ export interface LinkSearchResult {
 
 export const useWhatsappChatLink = () => {
   const queryClient = useQueryClient();
-  const { companyId } = useCompanyFilter();
+  const { companyId } = useWhatsappCompanyId();
 
   const search = useMutation({
     mutationFn: async (q: string) => {

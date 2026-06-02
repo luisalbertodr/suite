@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -60,8 +60,14 @@ export interface AppointmentItemsEditorProps {
   compactHeader?: boolean;
   /** Edición de cita: sin cantidad (siempre 1) y un solo campo de importe por slot. */
   compactSlots?: boolean;
+  /** Reserva tiempo: solo servicios, sin selector tipo ni cambio de artículo una vez añadido. */
+  timeSlotsServicesOnly?: boolean;
   /** Nueva cita: artículos por familia (sin cargar todo el catálogo). */
   articlePicker?: 'all' | 'by-family';
+  /** Aviso al padre cuando cambian los conflictos de cabina/recurso. */
+  onResourceConflictsChange?: (messages: string[]) => void;
+  /** Cita facturada: no permitir añadir ni quitar ítems. */
+  itemsLocked?: boolean;
 }
 
 export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
@@ -76,8 +82,12 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
   excludeAppointmentId,
   compactHeader = false,
   compactSlots = false,
+  timeSlotsServicesOnly = false,
   articlePicker = 'all',
+  onResourceConflictsChange,
+  itemsLocked = false,
 }) => {
+  const servicesOnly = timeSlotsServicesOnly || compactSlots;
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [articleCache, setArticleCache] = useState<Map<string, AppointmentArticleOption>>(new Map());
   const { companyId } = useCompanyFilter();
@@ -198,6 +208,16 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
     const probes = segmentsToConflictProbes(timeSegments);
     return findItemResourceConflicts(appointmentDate, probes, dayAppointments, excludeAppointmentId);
   }, [appointmentDate, dayAppointments, excludeAppointmentId, timeSegments]);
+
+  const conflictMessages = useMemo(
+    () => [...new Set([...itemConflicts.values()].flat())],
+    [itemConflicts],
+  );
+
+  useEffect(() => {
+    onResourceConflictsChange?.(conflictMessages);
+  }, [conflictMessages, onResourceConflictsChange]);
+
   const timelineEnd = timeSegments.length
     ? timeSegments[timeSegments.length - 1]!.endTime
     : endPreview;
@@ -270,6 +290,7 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
   );
 
   const addTimeItem = () => {
+    if (itemsLocked) return;
     onChange([
       ...items,
       {
@@ -286,6 +307,7 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
   };
 
   const addPaymentItem = () => {
+    if (itemsLocked) return;
     onChange([
       ...items,
       {
@@ -302,7 +324,7 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
   };
 
   const removeAt = (index: number) => {
-    if (items.length <= 1) return;
+    if (itemsLocked) return;
     onChange(items.filter((_, i) => i !== index));
   };
 
@@ -345,6 +367,32 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
     },
     [articleById, items, updateAt, recursosCatalog, useFamilyPicker]
   );
+
+  const renderTimeSlotArticleField = (index: number, item: AppointmentItemDraft) => {
+    const hasLockedService = !!(item.label?.trim() || item.article_id);
+    if (servicesOnly && hasLockedService) {
+      return (
+        <span
+          className="h-7 min-w-0 flex-1 text-[11px] px-1.5 flex items-center truncate font-medium text-foreground bg-muted/40 rounded border border-transparent"
+          title={item.label || 'Servicio'}
+        >
+          {item.label || 'Servicio'}
+        </span>
+      );
+    }
+    if (servicesOnly) {
+      return (
+        <AppointmentArticleFamilyPicker
+          value={item.article_id ?? null}
+          itemKind="service"
+          selectedLabel={item.label?.trim() || undefined}
+          onSelect={(a) => applyArticleAt(index, a.id, a)}
+          onClear={() => updateAt(index, { article_id: null, label: '' })}
+        />
+      );
+    }
+    return renderArticlePicker(index, item);
+  };
 
   const renderArticlePicker = (index: number, item: AppointmentItemDraft) => {
     if (useFamilyPicker) {
@@ -409,6 +457,7 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
 
   const addBonoSession = useCallback(
     (bono: CustomerActiveBono, coverageIndex?: number) => {
+      if (itemsLocked) return;
       const line =
         typeof coverageIndex === 'number' ? bono.coverage_items[coverageIndex] : null;
       const articleId = line?.article_id ?? null;
@@ -454,11 +503,16 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
         },
       ]);
     },
-    [articleById, items, onChange, recursosCatalog]
+    [articleById, items, itemsLocked, onChange, recursosCatalog]
   );
 
   return (
-    <div className="space-y-2 rounded-md border bg-muted/30 p-2">
+    <div className="space-y-1.5 rounded-md border bg-muted/30 p-1.5">
+      {itemsLocked && (
+        <p className="text-[10px] text-amber-700 dark:text-amber-400 px-0.5 leading-tight">
+          Cita facturada: no se pueden añadir ni eliminar servicios, bonos o productos.
+        </p>
+      )}
       {!compactHeader && (
         <>
           <div className="flex items-center justify-between gap-2">
@@ -473,12 +527,14 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
           </p>
         </>
       )}
-      <AppointmentItemTimeline
-        startTime={startTime}
-        endTime={timelineEnd}
-        segments={timeSegments}
-        compact={compactHeader}
-      />
+      {(!servicesOnly || timeItems.length > 1) && (
+        <AppointmentItemTimeline
+          startTime={startTime}
+          endTime={timelineEnd}
+          segments={timeSegments}
+          compact={compactHeader}
+        />
+      )}
       {!!customerId && activeBonos.length > 0 && (
         <div className="rounded border border-emerald-200/60 dark:border-emerald-800/50 bg-emerald-50/50 dark:bg-emerald-950/25 p-1.5 space-y-1">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400 px-0.5">
@@ -515,6 +571,7 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
                         variant="secondary"
                         size="sm"
                         className="h-6 px-1.5 text-[10px] shrink-0"
+                        disabled={itemsLocked}
                         onClick={() => addBonoSession(bono, ln.index)}
                         title={ln.label}
                       >
@@ -527,6 +584,7 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
                       variant="secondary"
                       size="sm"
                       className="h-6 px-1.5 text-[10px] shrink-0"
+                      disabled={itemsLocked}
                       onClick={() => addBonoSession(bono)}
                     >
                       + Sesión
@@ -539,11 +597,13 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
         </div>
       )}
       <div className="space-y-2">
-        <div className="space-y-1 max-h-[220px] overflow-y-auto pr-0.5">
-          <div className="flex items-center gap-1.5 text-[11px] font-medium text-foreground sticky top-0 bg-muted/30 py-0.5 z-[1]">
-            <Clock className="w-3.5 h-3.5 text-sky-600" />
-            Reservan tiempo ({timeItems.length})
-          </div>
+        <div className={cn('space-y-1', !servicesOnly && 'max-h-[220px] overflow-y-auto pr-0.5')}>
+          {!servicesOnly && (
+            <div className="flex items-center gap-1.5 text-[11px] font-medium text-foreground sticky top-0 bg-muted/30 py-0.5 z-[1]">
+              <Clock className="w-3.5 h-3.5 text-sky-600" />
+              Reservan tiempo ({timeItems.length})
+            </div>
+          )}
           {items.map((item, index) => {
             if (!item.occupies_time || Number(item.duration_minutes || 0) <= 0) return null;
             const seg = timeSegments.find((s) => s.clientKey === item.clientKey);
@@ -566,6 +626,56 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
               dragIndex === index ? 'opacity-70 ring-1 ring-primary/40' : ''
             }`}
           >
+            {servicesOnly ? (
+              <div className="flex items-center gap-0.5 h-7 flex-nowrap min-w-0">
+                {seg && (
+                  <span className="text-[10px] tabular-nums text-sky-700 font-medium shrink-0 w-[68px]">
+                    {seg.startTime}–{seg.endTime}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  draggable={!itemsLocked}
+                  onDragStart={(e) => {
+                    setDragIndex(index);
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('text/plain', String(index));
+                  }}
+                  onDragEnd={() => setDragIndex(null)}
+                  className="cursor-grab touch-none text-muted-foreground hover:text-foreground p-0.5 shrink-0"
+                  aria-label="Arrastrar para reordenar"
+                >
+                  <GripVertical className="w-3.5 h-3.5" />
+                </button>
+                <div className="min-w-0 flex-1">{renderTimeSlotArticleField(index, item)}</div>
+                <Input
+                  type="number"
+                  min={0}
+                  step={5}
+                  className="h-7 w-10 text-xs px-1 shrink-0"
+                  value={item.duration_minutes}
+                  onChange={(e) => updateAt(index, { duration_minutes: parseInt(e.target.value, 10) || 0 })}
+                />
+                <span className="text-[10px] text-muted-foreground shrink-0">m</span>
+                {isBonoSessionItem(item) ? (
+                  <span className="text-[11px] font-semibold text-emerald-700 shrink-0 px-1">BONO</span>
+                ) : (
+                  renderTimeSlotPriceInput(index, item, 'w-14')
+                )}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0 shrink-0"
+                  disabled={itemsLocked}
+                  onClick={() => removeAt(index)}
+                  aria-label="Quitar ítem"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                </Button>
+              </div>
+            ) : (
+              <>
             <div className="flex items-center gap-0.5 h-7 flex-nowrap">
               {seg && (
                 <span className="text-[10px] tabular-nums text-sky-700 font-medium shrink-0 w-[68px]">
@@ -574,7 +684,7 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
               )}
               <button
                 type="button"
-                draggable
+                draggable={!itemsLocked}
                 onDragStart={(e) => {
                   setDragIndex(index);
                   e.dataTransfer.effectAllowed = 'move';
@@ -586,21 +696,23 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
               >
                 <GripVertical className="w-3.5 h-3.5" />
               </button>
-              <Select
-                value={item.kind}
-                onValueChange={(v) => handleKindChange(index, v as AppointmentItemKind)}
-              >
-                <SelectTrigger className="h-7 w-[72px] text-[11px] px-1 shrink-0">
-                  <SelectValue />
-                </SelectTrigger>
-                <AppointmentSelectContent>
-                  <SelectItem value="service">Servicio</SelectItem>
-                  <SelectItem value="product">Producto</SelectItem>
-                  <SelectItem value="bonus">Bono</SelectItem>
-                  <SelectItem value="other">Otro</SelectItem>
-                </AppointmentSelectContent>
-              </Select>
-              {renderArticlePicker(index, item)}
+              {!servicesOnly && (
+                <Select
+                  value={item.kind}
+                  onValueChange={(v) => handleKindChange(index, v as AppointmentItemKind)}
+                >
+                  <SelectTrigger className="h-7 w-[72px] text-[11px] px-1 shrink-0">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <AppointmentSelectContent>
+                    <SelectItem value="service">Servicio</SelectItem>
+                    <SelectItem value="product">Producto</SelectItem>
+                    <SelectItem value="bonus">Bono</SelectItem>
+                    <SelectItem value="other">Otro</SelectItem>
+                  </AppointmentSelectContent>
+                </Select>
+              )}
+              {renderTimeSlotArticleField(index, item)}
             </div>
             <div className="flex items-center gap-0.5 h-7 mt-0.5 flex-nowrap overflow-x-auto">
                 <Input
@@ -703,13 +815,15 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
                 variant="ghost"
                 size="sm"
                 className="h-7 w-7 p-0 shrink-0 ml-auto"
-                disabled={items.length <= 1}
+                disabled={itemsLocked}
                 onClick={() => removeAt(index)}
                 aria-label="Quitar ítem"
               >
                 <Trash2 className="w-3.5 h-3.5 text-destructive" />
               </Button>
             </div>
+              </>
+            )}
             {(item.bono_id || item.customer_voucher_id || conflicts.length > 0) && (
               <div className="flex flex-wrap items-center gap-1 pt-0.5 text-[10px]">
                 {item.bono_id && (
@@ -743,16 +857,26 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
           {!timeItems.length && (
             <p className="text-[10px] text-muted-foreground px-1">Ningún ítem reserva tiempo en el slot.</p>
           )}
-          <Button type="button" variant="outline" size="sm" className="h-7 w-full text-xs gap-1" onClick={addTimeItem}>
-            <Plus className="w-3 h-3" /> Añadir servicio / sesión
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 w-full text-xs gap-1"
+            disabled={itemsLocked}
+            onClick={addTimeItem}
+          >
+            <Plus className="w-3 h-3" /> {servicesOnly ? 'Añadir servicio' : 'Añadir servicio / sesión'}
           </Button>
         </div>
 
-        <div className="space-y-1 max-h-[180px] overflow-y-auto pr-0.5 pt-1 border-t border-border/60">
-          <div className="flex items-center gap-1.5 text-[11px] font-medium text-foreground sticky top-0 bg-muted/30 py-0.5 z-[1]">
-            <CreditCard className="w-3.5 h-3.5 text-amber-600" />
-            Solo cobro ({paymentItems.length})
-          </div>
+        {(!servicesOnly || paymentItems.length > 0) ? (
+        <div className={cn('space-y-1 pt-1 border-t border-border/60', !servicesOnly && 'max-h-[180px] overflow-y-auto pr-0.5')}>
+          {!servicesOnly && (
+            <div className="flex items-center gap-1.5 text-[11px] font-medium text-foreground sticky top-0 bg-muted/30 py-0.5 z-[1]">
+              <CreditCard className="w-3.5 h-3.5 text-amber-600" />
+              Solo cobro ({paymentItems.length})
+            </div>
+          )}
           {items.map((item, index) => {
             if (item.occupies_time && Number(item.duration_minutes || 0) > 0) return null;
             const filteredArticles = useFamilyPicker
@@ -778,7 +902,7 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
           >
             <button
               type="button"
-              draggable
+              draggable={!itemsLocked}
               onDragStart={(e) => {
                 setDragIndex(index);
                 e.dataTransfer.effectAllowed = 'move';
@@ -892,7 +1016,7 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
               variant="ghost"
               size="sm"
               className="h-7 w-7 p-0 shrink-0"
-              disabled={items.length <= 1}
+              disabled={itemsLocked}
               onClick={() => removeAt(index)}
               aria-label="Quitar ítem"
             >
@@ -901,13 +1025,32 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
           </div>
             );
           })}
-          {!paymentItems.length && (
+          {!paymentItems.length && !servicesOnly && (
             <p className="text-[10px] text-muted-foreground px-1">Productos, bonos vendidos u otros cobros sin bloqueo horario.</p>
           )}
-          <Button type="button" variant="outline" size="sm" className="h-7 w-full text-xs gap-1" onClick={addPaymentItem}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 w-full text-xs gap-1"
+            disabled={itemsLocked}
+            onClick={addPaymentItem}
+          >
             <Plus className="w-3 h-3" /> Añadir producto / bono / cobro
           </Button>
         </div>
+        ) : (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-6 w-full text-[10px] text-muted-foreground"
+            disabled={itemsLocked}
+            onClick={addPaymentItem}
+          >
+            + Producto o bono (sin reserva de tiempo)
+          </Button>
+        )}
       </div>
     </div>
   );

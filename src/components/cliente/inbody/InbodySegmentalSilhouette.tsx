@@ -1,35 +1,25 @@
-import React from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import {
+  inbodySexLabel,
   inbodyStatusClass,
   inbodyStatusLabel,
+  resolveInbodySex,
+  segmentLeanEvalPct,
   segmentStatusFromPct,
   type InbodySegmentalFat,
   type InbodySegmentalLean,
 } from '@/lib/inbodyMeasurements';
-
-type SegmentKey = 'right_arm' | 'left_arm' | 'trunk' | 'right_leg' | 'left_leg';
-
-const SEGMENT_META: Record<
-  SegmentKey,
-  { side: 'Derecho' | 'Izquierdo' | 'Tronco'; short: string }
-> = {
-  right_arm: { side: 'Derecho', short: 'BD' },
-  left_arm: { side: 'Izquierdo', short: 'BI' },
-  trunk: { side: 'Tronco', short: 'TR' },
-  right_leg: { side: 'Derecho', short: 'PD' },
-  left_leg: { side: 'Izquierdo', short: 'PI' },
-};
-
-/** Posiciones de las etiquetas (% del contenedor). Vista frontal: derecho del paciente = izquierda de pantalla. */
-const CALLOUT_LAYOUT: Record<SegmentKey, { className: string; align: 'left' | 'center' | 'right' }> = {
-  right_arm: { className: 'left-0 top-[14%] max-w-[38%]', align: 'right' },
-  left_arm: { className: 'right-0 top-[14%] max-w-[38%]', align: 'left' },
-  trunk: { className: 'left-1/2 -translate-x-1/2 top-[30%] max-w-[44%]', align: 'center' },
-  right_leg: { className: 'left-[4%] bottom-[8%] max-w-[36%]', align: 'right' },
-  left_leg: { className: 'right-[4%] bottom-[8%] max-w-[36%]', align: 'left' },
-};
+import {
+  INBODY_CALLOUT_ANCHORS,
+  INBODY_SEGMENT_LABELS,
+  INBODY_SILHOUETTE_FRAME,
+  INBODY_SILHOUETTE_SRC,
+  type InbodySegmentKey,
+  type InbodySilhouetteSex,
+} from '@/lib/inbodySegmentalLayout';
+import { InbodySectionHelp } from './InbodyMetricHelp';
 
 function formatEs(value: number | null | undefined, decimals = 1, suffix = ''): string {
   if (value == null || Number.isNaN(value)) return '—';
@@ -54,21 +44,85 @@ function StatusBadge({ pct }: { pct?: number | null }) {
   );
 }
 
-function BodySilhouetteSvg({ className }: { className?: string }) {
+function calloutStyle(segment: InbodySegmentKey): React.CSSProperties {
+  const anchor = INBODY_CALLOUT_ANCHORS[segment];
+  const translateX =
+    anchor.align === 'center' ? '-50%' : anchor.align === 'right' ? '-100%' : '0';
+  return {
+    top: `${anchor.top}%`,
+    left: `${anchor.left}%`,
+    maxWidth: anchor.maxWidth ? `${anchor.maxWidth}%` : undefined,
+    transform: `translate(${translateX}, ${anchor.offsetY ?? 0}px) translateX(${anchor.offsetX ?? 0}px)`,
+  };
+}
+
+function BodySilhouetteImage({
+  src,
+  sex,
+  className,
+  onError,
+}: {
+  src: string;
+  sex: InbodySilhouetteSex;
+  className?: string;
+  onError?: () => void;
+}) {
+  const frame = INBODY_SILHOUETTE_FRAME[sex];
+  return (
+    <img
+      src={src}
+      alt=""
+      aria-hidden
+      draggable={false}
+      onError={onError}
+      className={cn(
+        'absolute pointer-events-none select-none object-contain opacity-90 dark:opacity-80',
+        className,
+      )}
+      style={{
+        top: `${frame.top}%`,
+        left: `${frame.left}%`,
+        width: `${frame.width}%`,
+        height: `${frame.height}%`,
+        objectPosition: `${frame.objectX}% ${frame.objectY}%`,
+        transform: 'translateX(-50%)',
+      }}
+    />
+  );
+}
+
+function BodySilhouetteFallback({ sex }: { sex: InbodySilhouetteSex }) {
+  const frame = INBODY_SILHOUETTE_FRAME[sex];
+  const isFemale = sex === 'female';
   return (
     <svg
       viewBox="0 0 100 240"
-      className={cn('h-full w-auto drop-shadow-sm', className)}
+      className="absolute pointer-events-none opacity-40"
       aria-hidden
+      style={{
+        top: `${frame.top}%`,
+        left: `${frame.left}%`,
+        width: `${frame.width}%`,
+        height: `${frame.height}%`,
+        transform: 'translateX(-50%)',
+      }}
     >
       <g
-        fill="hsl(var(--card))"
-        stroke="hsl(var(--foreground) / 0.12)"
+        fill="hsl(var(--muted-foreground) / 0.15)"
+        stroke="hsl(var(--foreground) / 0.2)"
         strokeWidth="0.6"
-        className="dark:fill-white dark:stroke-white/20"
       >
-        <ellipse cx="50" cy="17" rx="13" ry="15" />
-        <path d="M34 32 Q50 28 66 32 L64 98 Q50 102 36 98 Z" />
+        <ellipse cx="50" cy="17" rx={isFemale ? 12 : 13} ry="15" />
+        {isFemale && (
+          <path d="M38 14 Q50 8 62 14 Q64 22 60 28 Q50 32 40 28 Q36 22 38 14 Z" fill="inherit" />
+        )}
+        <path
+          d={
+            isFemale
+              ? 'M36 32 Q50 26 64 32 L62 96 Q50 100 38 96 Z'
+              : 'M34 32 Q50 28 66 32 L64 98 Q50 102 36 98 Z'
+          }
+        />
         <path d="M10 36 L32 34 L30 86 L12 84 Z" />
         <path d="M68 34 L90 36 L88 84 L70 86 Z" />
         <path d="M36 100 L48 98 L46 228 L34 230 Z" />
@@ -81,29 +135,31 @@ function BodySilhouetteSvg({ className }: { className?: string }) {
 function LeanCallout({
   segment,
   kg,
-  pct,
+  evalPct,
 }: {
-  segment: SegmentKey;
+  segment: InbodySegmentKey;
   kg?: number | null;
-  pct?: number | null;
+  evalPct?: number | null;
 }) {
-  const layout = CALLOUT_LAYOUT[segment];
-  const meta = SEGMENT_META[segment];
+  const anchor = INBODY_CALLOUT_ANCHORS[segment];
+  const meta = INBODY_SEGMENT_LABELS[segment];
   return (
     <div
       className={cn(
-        'absolute z-10 text-[11px] leading-tight',
-        layout.className,
-        layout.align === 'right' && 'text-right',
-        layout.align === 'left' && 'text-left',
-        layout.align === 'center' && 'text-center',
+        'absolute z-10 text-[11px] leading-tight rounded px-1 py-0.5',
+        'bg-background/85 backdrop-blur-[2px] shadow-sm border border-border/30',
+        anchor.align === 'right' && 'text-right',
+        anchor.align === 'left' && 'text-left',
+        anchor.align === 'center' && 'text-center',
       )}
+      style={calloutStyle(segment)}
     >
-      {segment !== 'trunk' && (
-        <div className="text-[9px] text-foreground/70 font-medium mb-0.5">{meta.side}</div>
-      )}
+      <div className="text-[9px] text-foreground/70 font-medium mb-0.5">{meta.side}</div>
       <div className="font-bold tabular-nums text-foreground text-sm">{formatEs(kg, 1, ' kg')}</div>
-      <StatusBadge pct={pct} />
+      {evalPct != null && (
+        <div className="tabular-nums text-[10px] text-muted-foreground">{formatEs(evalPct, 1, ' %')}</div>
+      )}
+      <StatusBadge pct={evalPct} />
     </div>
   );
 }
@@ -111,30 +167,28 @@ function LeanCallout({
 function FatCallout({
   segment,
   kg,
-  pct,
+  pbfPct,
 }: {
-  segment: SegmentKey;
+  segment: InbodySegmentKey;
   kg?: number | null;
-  pct?: number | null;
+  pbfPct?: number | null;
 }) {
-  const layout = CALLOUT_LAYOUT[segment];
-  const meta = SEGMENT_META[segment];
+  const anchor = INBODY_CALLOUT_ANCHORS[segment];
+  const meta = INBODY_SEGMENT_LABELS[segment];
   return (
     <div
       className={cn(
-        'absolute z-10 text-[11px] leading-tight space-y-0.5',
-        layout.className,
-        layout.align === 'right' && 'text-right',
-        layout.align === 'left' && 'text-left',
-        layout.align === 'center' && 'text-center',
+        'absolute z-10 text-[11px] leading-tight space-y-0.5 rounded px-1 py-0.5',
+        'bg-background/85 backdrop-blur-[2px] shadow-sm border border-border/30',
+        anchor.align === 'right' && 'text-right',
+        anchor.align === 'left' && 'text-left',
+        anchor.align === 'center' && 'text-center',
       )}
+      style={calloutStyle(segment)}
     >
-      {segment !== 'trunk' && (
-        <div className="text-[9px] text-foreground/70 font-medium">{meta.side}</div>
-      )}
-      <div className="font-bold tabular-nums text-foreground">{formatEs(pct, 1, ' %')}</div>
+      <div className="text-[9px] text-foreground/70 font-medium">{meta.side}</div>
+      <div className="font-bold tabular-nums text-foreground">{formatEs(pbfPct, 1, ' %')}</div>
       <div className="tabular-nums text-foreground/90">{formatEs(kg, 1, ' kg')}</div>
-      <StatusBadge pct={pct} />
     </div>
   );
 }
@@ -146,6 +200,8 @@ function SegmentPanel({
   children,
   sideLabelLeft,
   sideLabelRight,
+  silhouetteSrc,
+  silhouetteSex,
 }: {
   title: string;
   variant: 'lean' | 'fat';
@@ -153,7 +209,12 @@ function SegmentPanel({
   children: React.ReactNode;
   sideLabelLeft: string;
   sideLabelRight: string;
+  silhouetteSrc: string;
+  silhouetteSex: InbodySilhouetteSex;
 }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const handleImageError = useCallback(() => setImageFailed(true), []);
+
   return (
     <div
       className={cn(
@@ -164,11 +225,17 @@ function SegmentPanel({
       )}
     >
       <div className="px-3 pt-2 pb-1 border-b border-black/5 dark:border-white/10">
-        <h4 className="text-xs font-bold text-foreground/90 uppercase tracking-wide">{title}</h4>
+        <h4 className="text-xs font-bold text-foreground/90 uppercase tracking-wide">
+          {variant === 'lean' ? (
+            <InbodySectionHelp metricId="segmental_lean" title={title} className="text-xs font-bold uppercase tracking-wide" />
+          ) : (
+            <InbodySectionHelp metricId="segmental_fat" title={title} className="text-xs font-bold uppercase tracking-wide" />
+          )}
+        </h4>
         <div className="mt-1 text-[9px] text-muted-foreground leading-snug">{legend}</div>
       </div>
 
-      <div className="relative flex min-h-[300px] sm:min-h-[340px] px-6 py-3">
+      <div className="relative flex min-h-[280px] sm:min-h-[300px] px-3 py-2">
         <span
           className="absolute left-1 top-1/2 -translate-y-1/2 text-[10px] font-semibold text-foreground/50 tracking-widest uppercase"
           style={{ writingMode: 'vertical-rl', transform: 'translateY(-50%) rotate(180deg)' }}
@@ -182,10 +249,12 @@ function SegmentPanel({
           {sideLabelRight}
         </span>
 
-        <div className="relative mx-auto w-full max-w-[200px] flex-1 h-[280px] sm:h-[300px]">
-          <div className="absolute inset-[12%_18%] flex items-center justify-center pointer-events-none">
-            <BodySilhouetteSvg className="max-h-full opacity-95" />
-          </div>
+        <div className="relative mx-auto w-full max-w-[210px] flex-1 h-[260px] sm:h-[280px]">
+          {!imageFailed ? (
+            <BodySilhouetteImage src={silhouetteSrc} sex={silhouetteSex} onError={handleImageError} />
+          ) : (
+            <BodySilhouetteFallback sex={silhouetteSex} />
+          )}
           {children}
         </div>
       </div>
@@ -196,6 +265,8 @@ function SegmentPanel({
 interface Props {
   lean: InbodySegmentalLean;
   fat: InbodySegmentalFat;
+  /** Sexo registrado en la medición InBody (M/F). Define silueta y rangos de referencia del equipo. */
+  sex?: string | null;
   measuredAtLabel?: string;
   compact?: boolean;
 }
@@ -203,16 +274,23 @@ interface Props {
 export const InbodySegmentalSilhouette: React.FC<Props> = ({
   lean,
   fat,
+  sex,
   measuredAtLabel,
   compact,
 }) => {
-  const segments: SegmentKey[] = ['right_arm', 'left_arm', 'trunk', 'right_leg', 'left_leg'];
+  const segments: InbodySegmentKey[] = ['right_arm', 'left_arm', 'trunk', 'right_leg', 'left_leg'];
+  const silhouetteSex: InbodySilhouetteSex = resolveInbodySex(sex) ?? 'male';
+  const silhouetteSrc = INBODY_SILHOUETTE_SRC[silhouetteSex];
+  const sexLabel = useMemo(() => inbodySexLabel(sex), [sex]);
 
   return (
     <Card className="border-sky-100/50 dark:border-sky-900/20">
       <CardHeader className={cn('pb-2', compact && 'py-3')}>
         <CardTitle className={cn('text-sm', compact && 'text-xs')}>
-          Análisis segmental
+          <InbodySectionHelp metricId="segmental_lean" title="Análisis segmental" className={cn('text-sm', compact && 'text-xs')} />
+          {sexLabel !== '—' && (
+            <span className="ml-2 text-[11px] font-normal text-muted-foreground">· {sexLabel}</span>
+          )}
         </CardTitle>
         {measuredAtLabel && (
           <p className="text-[10px] text-muted-foreground mt-0.5">{measuredAtLabel}</p>
@@ -225,11 +303,15 @@ export const InbodySegmentalSilhouette: React.FC<Props> = ({
             variant="lean"
             sideLabelLeft="Derecho"
             sideLabelRight="Izquierdo"
+            silhouetteSrc={silhouetteSrc}
+            silhouetteSex={silhouetteSex}
             legend={
               <>
-                <span className="font-medium text-foreground/80">Masa magra</span>
-                <span className="mx-1">·</span>
-                <span>Evaluación (% normal)</span>
+                <InbodySectionHelp
+                  metricId="segment_lean_eval"
+                  title="Masa magra · Evaluación (% normal)"
+                  className="text-[9px] font-normal normal-case tracking-normal text-muted-foreground"
+                />
               </>
             }
           >
@@ -238,7 +320,7 @@ export const InbodySegmentalSilhouette: React.FC<Props> = ({
                 key={key}
                 segment={key}
                 kg={lean[key]?.kg}
-                pct={lean[key]?.pct}
+                evalPct={segmentLeanEvalPct(lean[key])}
               />
             ))}
           </SegmentPanel>
@@ -248,13 +330,15 @@ export const InbodySegmentalSilhouette: React.FC<Props> = ({
             variant="fat"
             sideLabelLeft="Derecho"
             sideLabelRight="Izquierdo"
+            silhouetteSrc={silhouetteSrc}
+            silhouetteSex={silhouetteSex}
             legend={
               <>
-                <span className="font-medium text-foreground/80">PGC</span>
-                <span className="mx-1">·</span>
-                <span className="font-medium">Masa grasa</span>
-                <span className="mx-1">·</span>
-                <span>Evaluación</span>
+                <InbodySectionHelp
+                  metricId="segment_fat_pbf"
+                  title="PGC segmental · Masa grasa"
+                  className="text-[9px] font-normal normal-case tracking-normal text-muted-foreground"
+                />
               </>
             }
           >
@@ -263,7 +347,7 @@ export const InbodySegmentalSilhouette: React.FC<Props> = ({
                 key={key}
                 segment={key}
                 kg={fat[key]?.kg}
-                pct={fat[key]?.pct}
+                pbfPct={fat[key]?.pct}
               />
             ))}
           </SegmentPanel>

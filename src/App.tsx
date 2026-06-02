@@ -20,6 +20,7 @@ import WhatsappPage from '@/pages/WhatsappPage';
 import DepositPaymentPage from '@/pages/DepositPaymentPage';
 import SuperuserPage from '@/pages/SuperuserPage';
 import SuperuserManagementPage from '@/pages/SuperuserManagementPage';
+import ReportesPage from '@/pages/ReportesPage';
 
 const ProtectedLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <ProtectedRoute>
@@ -63,6 +64,9 @@ function App() {
         } />
         <Route path="/gestion-documental" element={
           <ProtectedLayout><GestionDocumentalPage /></ProtectedLayout>
+        } />
+        <Route path="/reportes" element={
+          <ProtectedLayout><ReportesPage /></ProtectedLayout>
         } />
         <Route path="/configuracion" element={
           <ProtectedLayout><ConfiguracionPage /></ProtectedLayout>

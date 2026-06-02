@@ -23,6 +23,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { ClienteDetailOverlay } from '@/components/cliente/ClienteDetailOverlay';
+import { AppointmentResourceConflictDialog } from '@/components/AppointmentResourceConflictDialog';
 import {
   filterEmployeesForBillingCompanies,
   resolveRequiredBillingCompanyIds,
@@ -80,6 +81,8 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
   const [clientPick, setClientPick] = useState<AppointmentClientPick | null>(null);
   const [showCustomerHistory, setShowCustomerHistory] = useState(false);
   const [customerHistoryTab, setCustomerHistoryTab] = useState<'timeline' | 'vouchers' | 'ficha'>('ficha');
+  const [resourceConflictMessages, setResourceConflictMessages] = useState<string[]>([]);
+  const [showResourceConflictDialog, setShowResourceConflictDialog] = useState(false);
 
   const [formData, setFormData] = useState({
     description: '',
@@ -243,6 +246,10 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!clientPick) return;
+    if (resourceConflictMessages.length > 0) {
+      setShowResourceConflictDialog(true);
+      return;
+    }
     const clientName = clientPick.kind === 'customer' ? clientPick.displayName : clientPick.name;
     if (!clientName.trim()) return;
 
@@ -263,9 +270,9 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
   };
 
   return (
-    <div className={`fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center ${AGENDA_APPOINTMENT_MODAL_Z} px-4 pt-3 pb-28 sm:pb-24 sm:p-4`}>
-      <Card className="w-full max-w-md max-h-[calc(100dvh-7rem)] overflow-y-auto">
-        <CardHeader className="pb-3">
+    <div className={`fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center ${AGENDA_APPOINTMENT_MODAL_Z} px-3 pt-2 pb-24 sm:p-4`}>
+      <Card className="w-full max-w-md overflow-visible">
+        <CardHeader className="pb-2 pt-3 px-4">
           <div className="flex items-start gap-2">
             <CardTitle className="text-base flex items-center gap-2 shrink-0 pt-1">
               <User className="w-4 h-4" /> Nueva Cita
@@ -278,8 +285,8 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
             </Button>
           </div>
         </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-3">
+        <CardContent className="px-4 pb-3 pt-0">
+          <form onSubmit={handleSubmit} className="space-y-2">
             {selectedCustomerId && selectedCustomer && (
               <AppointmentCustomerSummaryBar
                 customer={selectedCustomer}
@@ -337,6 +344,9 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
               dayAppointments={dayAppointments}
               articlePicker="by-family"
               compactHeader
+              compactSlots
+              timeSlotsServicesOnly
+              onResourceConflictsChange={setResourceConflictMessages}
             />
 
             <div>
@@ -349,13 +359,23 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
             </div>
 
             <div className="flex gap-2 pt-2">
-              <Button type="submit" className="flex-1 gap-1" disabled={!clientPick}>
+              <Button
+                type="submit"
+                className="flex-1 gap-1"
+                disabled={!clientPick || resourceConflictMessages.length > 0}
+                title={resourceConflictMessages.length > 0 ? 'Hay conflicto de cabina o recurso' : undefined}
+              >
                 <Save className="w-4 h-4" /> Guardar
               </Button>
             </div>
           </form>
         </CardContent>
       </Card>
+      <AppointmentResourceConflictDialog
+        open={showResourceConflictDialog}
+        onOpenChange={setShowResourceConflictDialog}
+        messages={resourceConflictMessages}
+      />
       <ClienteDetailOverlay
         open={showCustomerHistory && !!selectedCustomerId}
         customerId={selectedCustomerId ?? ''}

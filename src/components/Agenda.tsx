@@ -9,6 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { AgendaGrid } from './AgendaGrid';
 import { AppointmentForm, type AppointmentFormInitialPrefill } from './AppointmentForm';
 import { EditAppointmentForm } from './EditAppointmentForm';
+import { AppointmentResourceConflictDialog } from './AppointmentResourceConflictDialog';
 import { useAgendaEmployees } from '@/hooks/useAgendaEmployees';
 import { useAgendaAppointments } from '@/hooks/useAgendaAppointments';
 import { useCabinas, useRecursos } from '@/hooks/useRecursosCabinas';
@@ -127,6 +128,8 @@ export const Agenda: React.FC = () => {
   const [scrollToTimeRequest, setScrollToTimeRequest] = useState<{ requestId: number; time: string } | null>(null);
   const [appointmentPrefill, setAppointmentPrefill] = useState<AppointmentFormInitialPrefill | null>(null);
   const [appointmentPrefillLeadId, setAppointmentPrefillLeadId] = useState<string | null>(null);
+  const [resourceConflictDialogOpen, setResourceConflictDialogOpen] = useState(false);
+  const [resourceConflictDialogMessages, setResourceConflictDialogMessages] = useState<string[]>([]);
   const processedMarketingLeadPrefillRef = useRef<string | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -882,6 +885,11 @@ export const Agenda: React.FC = () => {
       excludeId
     );
 
+  const showResourceConflictDialog = (messages: string[]) => {
+    setResourceConflictDialogMessages(messages);
+    setResourceConflictDialogOpen(true);
+  };
+
   const handleSlotClick = (employeeId: string, time: string) => {
     setAppointmentPrefill(null);
     setAppointmentPrefillLeadId(null);
@@ -909,8 +917,14 @@ export const Agenda: React.FC = () => {
 
       const itemDrafts = appointmentItemsByAppt[appointmentId] || [];
 
-      if (checkItemsResourceConflict(format(selectedDate, 'yyyy-MM-dd'), newTime, itemDrafts, appointmentId).hasConflict) {
-        toast({ title: 'Conflicto de recurso/cabina', description: 'Algún servicio de la cita solapa cabina o recurso ya ocupados.', variant: 'destructive' });
+      const moveConflict = checkItemsResourceConflict(
+        format(selectedDate, 'yyyy-MM-dd'),
+        newTime,
+        itemDrafts,
+        appointmentId,
+      );
+      if (moveConflict.hasConflict) {
+        showResourceConflictDialog(moveConflict.messages);
         return;
       }
 
@@ -937,8 +951,9 @@ export const Agenda: React.FC = () => {
       const dateStr = data.date || format(selectedDate, 'yyyy-MM-dd');
       const items = data.items ?? [];
 
-      if (checkItemsResourceConflict(dateStr, data.startTime, items).hasConflict) {
-        toast({ title: 'Conflicto de recurso/cabina', description: 'Algún servicio solapa cabina o recurso ya ocupados en ese tramo.', variant: 'destructive' });
+      const createConflict = checkItemsResourceConflict(dateStr, data.startTime, items);
+      if (createConflict.hasConflict) {
+        showResourceConflictDialog(createConflict.messages);
         return;
       }
 
@@ -997,11 +1012,7 @@ export const Agenda: React.FC = () => {
     try {
       const conflict = checkItemsResourceConflict(updated.date, updated.startTime, items, updated.id);
       if (conflict.hasConflict) {
-        toast({
-          title: 'Conflicto de recurso/cabina',
-          description: conflict.messages[0] || 'Algún servicio solapa cabina o recurso ya ocupados.',
-          variant: 'destructive',
-        });
+        showResourceConflictDialog(conflict.messages);
         return;
       }
 
@@ -1407,6 +1418,12 @@ export const Agenda: React.FC = () => {
           onHistoryAppointmentClick={openAppointmentById}
         />
       )}
+
+      <AppointmentResourceConflictDialog
+        open={resourceConflictDialogOpen}
+        onOpenChange={setResourceConflictDialogOpen}
+        messages={resourceConflictDialogMessages}
+      />
     </div>
   );
 };

@@ -1,25 +1,28 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
-import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
 import { invokeWhatsappProxy } from '@/hooks/useWhatsappConfig';
 import {
   isSystemChatJid,
   isGroupJid,
   hasResolvedGroupName,
+  jidsSameContact,
 } from '@/components/whatsapp/whatsappUtils';
+import { chatsQueryKey, createDebouncedInvalidate } from '@/lib/whatsappQueryCache';
 import type { Database } from '@/integrations/supabase/types';
 
 export type WhatsappChatRow = Database['public']['Tables']['whatsapp_chats']['Row'];
 
-const BG_SYNC_INTERVAL_MS = 4000;
+const BG_SYNC_INTERVAL_MS = 8000;
+const WAHA_CHATS_REFRESH_MS = 60_000;
 /** Evita traer `raw` (JSONB pesado) en cada refresco de lista. */
 const CHAT_LIST_COLUMNS =
   'id,company_id,chat_id,name,is_group,profile_picture_url,last_message_preview,last_message_at,last_message_from_me,unread_count,pinned,archived,history_synced_at,oldest_message_at,customer_id,marketing_lead_id,created_at,updated_at';
 
 export const useWhatsappChats = () => {
   const queryClient = useQueryClient();
-  const { companyId, loading: companyLoading } = useCompanyFilter();
+  const { companyId, loading: companyLoading } = useWhatsappCompanyId();
 
   const chatsQuery = useQuery({
     queryKey: ['whatsapp-chats', companyId],
@@ -41,8 +44,14 @@ export const useWhatsappChats = () => {
     },
   });
 
-  const invalidate = () =>
-    queryClient.invalidateQueries({ queryKey: ['whatsapp-chats', companyId] });
+  const invalidateChatsRef = useRef<ReturnType<typeof createDebouncedInvalidate> | null>(null);
+  if (!invalidateChatsRef.current) {
+    invalidateChatsRef.current = createDebouncedInvalidate(queryClient, 1200);
+  }
+  const invalidate = (immediate = false) => {
+    if (!companyId) return;
+    invalidateChatsRef.current?.(chatsQueryKey(companyId), immediate);
+  };
 
   const channelIdRef = useRef<string>('');
   if (!channelIdRef.current) {
@@ -105,18 +114,19 @@ export const useWhatsappChats = () => {
     },
   });
 
-  // Fallback robusto: si falla realtime/webhook, refrescamos lista de chats desde WAHA.
-  // El historial lo gestiona SOLO el worker de bg (runNext) para no reiniciar offsets.
+  const refreshFromWahaRef = useRef(refreshFromWaha);
+  refreshFromWahaRef.current = refreshFromWaha;
+
+  // Fallback: refresco periódico desde WAHA (no re-ejecutar al cambiar la ref del mutation).
   useEffect(() => {
     if (!companyId) return;
     const tick = () => {
-      if (refreshFromWaha.isPending) return;
-      refreshFromWaha.mutate(undefined, { onError: () => undefined });
+      if (refreshFromWahaRef.current.isPending) return;
+      refreshFromWahaRef.current.mutate(undefined, { onError: () => undefined });
     };
-    tick();
-    const timer = window.setInterval(tick, 30_000);
+    const timer = window.setInterval(tick, WAHA_CHATS_REFRESH_MS);
     return () => window.clearInterval(timer);
-  }, [companyId, refreshFromWaha]);
+  }, [companyId]);
 
   const syncHistoryFromWaha = useMutation({
     mutationFn: async () => {

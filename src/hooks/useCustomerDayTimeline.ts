@@ -2,7 +2,13 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { fetchAppointmentsForCustomer, CUSTOMER_APPOINTMENTS_TIMELINE_LIMIT, type CustomerAppointmentRow } from '@/lib/agendaCustomerAppointments';
 import { parseDescriptionServiceLines, appointmentStatusLabel, normalizeHm } from '@/lib/agendaAppointmentDisplay';
-import { buildAppointmentChargedTotals } from '@/lib/appointmentChargeTotals';
+import { buildAppointmentChargedTotals, parseAppointmentIdFromSaleNotes } from '@/lib/appointmentChargeTotals';
+
+export type AppointmentAttachmentHints = {
+  photos: boolean;
+  signedConsents: boolean;
+  documents: boolean;
+};
 
 export type AppointmentTimelineDetails = {
   appointmentId: string;
@@ -14,6 +20,7 @@ export type AppointmentTimelineDetails = {
   services: string[];
   items: CustomerAppointmentRow['items'];
   chargedAmount?: number | null;
+  attachments?: AppointmentAttachmentHints;
 };
 
 export type DayTimelineItem = {
@@ -27,6 +34,8 @@ export type DayTimelineItem = {
   imageUrls?: string[];
   amountLabel?: string;
   sortKey: number;
+  /** Consentimiento firmado (solo kind consent) */
+  signedConsent?: boolean;
   appointmentDetails?: AppointmentTimelineDetails;
 };
 
@@ -71,6 +80,79 @@ const refKey = (table?: string | null, id?: string | null): string | null => {
   return null;
 };
 
+function isInvoicePaid(inv: { status?: string | null; paid_status?: boolean | null }): boolean {
+  return inv.paid_status === true || inv.status === 'paid';
+}
+
+function shouldHideInvoiceRow(
+  inv: { id: string; total_amount?: number | null; status?: string | null; paid_status?: boolean | null },
+  day: DayGroup,
+  invoiceIdsLinkedToAppointments: Set<string>,
+): boolean {
+  if (invoiceIdsLinkedToAppointments.has(String(inv.id))) return true;
+  if (!isInvoicePaid(inv)) return false;
+  const invTotal = Number(inv.total_amount ?? 0);
+  if (invTotal <= 0) return false;
+  return day.items.some(
+    (it) =>
+      it.kind === 'appointment' &&
+      it.appointmentDetails != null &&
+      Math.abs((it.appointmentDetails.chargedAmount ?? 0) - invTotal) < 0.02,
+  );
+}
+
+function itemRelatesToAppointment(it: DayTimelineItem, appointmentId: string): boolean {
+  if (it.kind === 'appointment' && it.id === `appt:${appointmentId}`) return false;
+  if (it.refTable === 'agenda_appointments' && it.refId) {
+    return it.refId === appointmentId;
+  }
+  return true;
+}
+
+function assetRelatesToAppointment(asset: DayAsset, appointmentId: string): boolean {
+  if (asset.refTable === 'agenda_appointments' && asset.refId) {
+    return asset.refId === appointmentId;
+  }
+  return true;
+}
+
+function computeAppointmentAttachments(day: DayGroup, appointmentId: string): AppointmentAttachmentHints {
+  let photos = false;
+  let signedConsents = false;
+  let documents = false;
+
+  for (const asset of day.assets) {
+    if (!assetRelatesToAppointment(asset, appointmentId)) continue;
+    if (asset.kind === 'photo_before' || asset.kind === 'photo_after') photos = true;
+    if (asset.kind === 'consent') signedConsents = true;
+    if (asset.kind === 'document' || asset.kind === 'other') documents = true;
+  }
+
+  for (const it of day.items) {
+    if (!itemRelatesToAppointment(it, appointmentId)) continue;
+    if (it.imageUrls?.length) photos = true;
+    if (it.kind === 'consent' && it.signedConsent) signedConsents = true;
+    if (it.kind === 'document' || it.kind === 'clinic_note') {
+      if (it.kind === 'document') documents = true;
+    }
+    if (it.kind === 'sale' || it.kind === 'product' || it.kind === 'service') {
+      /* cobertura ya en la cita */
+    }
+  }
+
+  return { photos, signedConsents, documents };
+}
+
+function enrichDayAppointmentAttachments(day: DayGroup): void {
+  for (const it of day.items) {
+    if (it.kind !== 'appointment' || !it.appointmentDetails) continue;
+    it.appointmentDetails.attachments = computeAppointmentAttachments(
+      day,
+      it.appointmentDetails.appointmentId,
+    );
+  }
+}
+
 type DailyRow = {
   id: string;
   log_date: string;
@@ -108,6 +190,7 @@ function mergeByDay(
   invoices: any[],
   quotes: any[],
   chargedByAppointment: Map<string, number>,
+  invoiceIdsLinkedToAppointments: Set<string>,
 ): DayGroup[] {
   const byDay = new Map<string, DayGroup>();
 
@@ -133,6 +216,9 @@ function mergeByDay(
     d.daySummary = log.day_summary;
     for (const it of log.daily_customer_log_items || []) {
       if (!it) continue;
+      if (it.item_kind === 'sale' && it.ref_table === 'agenda_appointments' && it.ref_id) {
+        continue;
+      }
       d.items.push({
         id: `daily_item:${it.id}`,
         kind: it.item_kind,
@@ -207,6 +293,7 @@ function mergeByDay(
       timeLabel: timeFromFecha(c.fecha_firma || c.created_at),
       refTable: 'consentimientos',
       refId: c.id,
+      signedConsent: c.firmado === true || !!c.firma_url,
       sortKey: 2_000_000 + sortN++,
     });
   }
@@ -322,8 +409,9 @@ function mergeByDay(
     const k = refKey('invoices', inv.id);
     if (k && dailyRefKeys.has(k)) continue;
     const d = getDay(ymd);
+    if (shouldHideInvoiceRow(inv, d, invoiceIdsLinkedToAppointments)) continue;
     const status =
-      inv.status === 'paid' ? 'Pagada' : inv.status === 'pending' ? 'Pendiente' : String(inv.status || '');
+      isInvoicePaid(inv) ? 'Pagada' : inv.status === 'pending' ? 'Pendiente' : String(inv.status || '');
     d.items.push({
       id: `invoice:${inv.id}`,
       kind: 'invoice',
@@ -360,6 +448,7 @@ function mergeByDay(
 
   for (const g of byDay.values()) {
     g.items.sort((a, b) => a.sortKey - b.sortKey);
+    enrichDayAppointmentAttachments(g);
   }
 
   return Array.from(byDay.values()).sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
@@ -427,7 +516,7 @@ export const useCustomerDayTimeline = (
         }),
         supabase
           .from('invoices')
-          .select('id, number, issue_date, created_at, total_amount, status')
+          .select('id, number, issue_date, created_at, total_amount, status, paid_status')
           .eq('customer_id', customerId)
           .order('issue_date', { ascending: false }),
         supabase
@@ -477,6 +566,33 @@ export const useCustomerDayTimeline = (
         console.warn('buildAppointmentChargedTotals:', err);
       }
 
+      const invoiceIdsLinkedToAppointments = new Set<string>();
+      try {
+        let salesRes = await supabase
+          .from('sales')
+          .select('appointment_id, invoice_id, notes')
+          .eq('customer_id', customerId)
+          .not('invoice_id', 'is', null);
+        if (salesRes.error) {
+          salesRes = await supabase
+            .from('sales')
+            .select('appointment_id, invoice_id, notes')
+            .not('invoice_id', 'is', null)
+            .limit(5000);
+        }
+        if (!salesRes.error) {
+          for (const sale of salesRes.data || []) {
+            const invId = (sale as { invoice_id?: string | null }).invoice_id;
+            const aptId =
+              (sale as { appointment_id?: string | null }).appointment_id ??
+              parseAppointmentIdFromSaleNotes((sale as { notes?: string | null }).notes ?? null);
+            if (invId && aptId) invoiceIdsLinkedToAppointments.add(String(invId));
+          }
+        }
+      } catch (err) {
+        console.warn('sales invoice linkage:', err);
+      }
+
       return {
         days: mergeByDay(
           customerId,
@@ -491,6 +607,7 @@ export const useCustomerDayTimeline = (
           invoicesRes.data || [],
           quotesRes.data || [],
           chargedByAppointment,
+          invoiceIdsLinkedToAppointments,
         ),
         hasMoreAppointments: appointmentsPage.hasMore,
       };

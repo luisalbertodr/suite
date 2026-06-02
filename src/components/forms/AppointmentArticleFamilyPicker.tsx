@@ -112,7 +112,7 @@ export const AppointmentArticleFamilyPicker: React.FC<Props> = ({
 
   const triggerText =
     selectedLabel?.trim() ||
-    (value ? 'Artículo seleccionado' : 'Elegir familia y artículo…');
+    (value ? 'Artículo seleccionado' : itemKind === 'service' ? 'Elegir servicio…' : 'Elegir artículo…');
 
   const toggleFamily = (key: string) => {
     setExpandedFamily((prev) => (prev === key ? null : key));

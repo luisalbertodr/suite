@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
-import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
 import { invokeWhatsappProxy } from '@/hooks/useWhatsappConfig';
 import { jidsSameContact } from '@/components/whatsapp/whatsappUtils';
+import { patchChatsListAfterOutgoing } from '@/lib/whatsappQueryCache';
 import type { Database } from '@/integrations/supabase/types';
 
 export type WhatsappMessageRow = Database['public']['Tables']['whatsapp_messages']['Row'];
@@ -76,6 +77,45 @@ async function syncRecentMessagesFromWaha(
   return total;
 }
 
+function parseMessageTime(m: WhatsappMessageRow): number {
+  const t = Date.parse(m.timestamp);
+  return Number.isNaN(t) ? 0 : t;
+}
+
+function compareWhatsappMessages(a: WhatsappMessageRow, b: WhatsappMessageRow): number {
+  const diff = parseMessageTime(a) - parseMessageTime(b);
+  if (diff !== 0) return diff;
+  if (a.from_me === b.from_me) {
+    return (a.created_at ?? a.id).localeCompare(b.created_at ?? b.id);
+  }
+  return a.from_me ? -1 : 1;
+}
+
+/** Corrige respuestas entrantes con hora anterior al último envío (reloj WAHA vs cliente). */
+function fixTimelineOrder(rows: WhatsappMessageRow[]): WhatsappMessageRow[] {
+  if (rows.length < 2) return rows;
+  const sorted = [...rows].sort(compareWhatsappMessages);
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const incoming = sorted[i];
+    const outgoing = sorted[i + 1];
+    if (incoming.from_me || !outgoing.from_me) continue;
+    const ti = parseMessageTime(incoming);
+    const to = parseMessageTime(outgoing);
+    if (ti >= to) {
+      sorted[i + 1] = {
+        ...outgoing,
+        timestamp: new Date(ti + 1).toISOString(),
+      };
+    } else {
+      sorted[i] = {
+        ...incoming,
+        timestamp: new Date(to + 1).toISOString(),
+      };
+    }
+  }
+  return sorted.sort(compareWhatsappMessages);
+}
+
 /** Evita burbujas duplicadas cuando webhook y send crean dos filas del mismo envío. */
 function dedupeWhatsappMessages(rows: WhatsappMessageRow[]): WhatsappMessageRow[] {
   const byKey = new Map<string, WhatsappMessageRow>();
@@ -93,9 +133,26 @@ function dedupeWhatsappMessages(rows: WhatsappMessageRow[]): WhatsappMessageRow[
     }
     if (!prev.waha_message_id && m.waha_message_id) byKey.set(key, m);
   }
-  return [...byKey.values()].sort((a, b) =>
-    a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0,
-  );
+  return fixTimelineOrder([...byKey.values()]);
+}
+
+function adjustIncomingBeforeAppend(
+  list: WhatsappMessageRow[],
+  incoming: WhatsappMessageRow,
+): WhatsappMessageRow {
+  if (incoming.from_me) return incoming;
+  let lastOutgoingMs = 0;
+  for (const m of list) {
+    if (m.from_me || m.id.startsWith('pending-')) {
+      lastOutgoingMs = Math.max(lastOutgoingMs, parseMessageTime(m));
+    }
+  }
+  if (lastOutgoingMs === 0) return incoming;
+  const incMs = parseMessageTime(incoming);
+  if (incMs < lastOutgoingMs) {
+    return { ...incoming, timestamp: new Date(lastOutgoingMs + 1).toISOString() };
+  }
+  return incoming;
 }
 
 export type SendMessageInput =
@@ -110,13 +167,66 @@ export type SendMessageInput =
       reply_to_message_id?: string;
     };
 
+function buildOptimisticMessage(
+  companyId: string,
+  input: SendMessageInput,
+  tempId: string,
+): WhatsappMessageRow {
+  const now = new Date().toISOString();
+  return {
+    id: tempId,
+    company_id: companyId,
+    chat_id: input.chat_id,
+    waha_message_id: null,
+    from_jid: null,
+    from_me: true,
+    type: input.type,
+    body: input.type === 'text' ? input.text : null,
+    caption: input.type !== 'text' ? (input.caption ?? null) : null,
+    media_url: null,
+    media_mime_type: input.type !== 'text' ? input.mime_type : null,
+    media_filename: input.type !== 'text' ? input.filename : null,
+    media_size: null,
+    ack: 0,
+    quoted_message_id: input.reply_to_message_id ?? null,
+    timestamp: now,
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+function messageBelongsToChat(row: WhatsappMessageRow, chatIds: string[]): boolean {
+  return chatIds.some((id) => id === row.chat_id || jidsSameContact(id, row.chat_id));
+}
+
+function appendMessageToCache(
+  queryClient: ReturnType<typeof useQueryClient>,
+  key: readonly unknown[],
+  row: WhatsappMessageRow,
+) {
+  queryClient.setQueryData<WhatsappMessageRow[]>(key, (prev) => {
+    const list = prev ?? [];
+    if (
+      list.some(
+        (m) =>
+          m.id === row.id ||
+          (m.waha_message_id && row.waha_message_id && m.waha_message_id === row.waha_message_id),
+      )
+    ) {
+      return list;
+    }
+    const adjusted = adjustIncomingBeforeAppend(list, row);
+    return dedupeWhatsappMessages([...list, adjusted]);
+  });
+}
+
 export const useWhatsappMessages = (
   chatId: string | null,
   relatedChatIds: string[] = [],
   options?: { historySyncedAt?: string | null },
 ) => {
   const queryClient = useQueryClient();
-  const { companyId, loading: companyLoading } = useCompanyFilter();
+  const { companyId, loading: companyLoading } = useWhatsappCompanyId();
   const historySyncedAt = options?.historySyncedAt ?? null;
 
   const chatIds = useMemo(() => {
@@ -149,11 +259,17 @@ export const useWhatsappMessages = (
   });
 
   const invalidateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const invalidate = () => {
+  const invalidate = (immediate = false) => {
+    if (immediate) {
+      if (invalidateTimerRef.current) clearTimeout(invalidateTimerRef.current);
+      invalidateTimerRef.current = null;
+      void queryClient.invalidateQueries({ queryKey: key });
+      return;
+    }
     if (invalidateTimerRef.current) clearTimeout(invalidateTimerRef.current);
     invalidateTimerRef.current = setTimeout(() => {
       invalidateTimerRef.current = null;
-      queryClient.invalidateQueries({ queryKey: key });
+      void queryClient.invalidateQueries({ queryKey: key });
     }, 400);
   };
 
@@ -175,7 +291,20 @@ export const useWhatsappMessages = (
           table: 'whatsapp_messages',
           filter: `company_id=eq.${companyId}`,
         },
-        () => {
+        (payload) => {
+          const row = payload.new as WhatsappMessageRow | null;
+          if (row && messageBelongsToChat(row, chatIds)) {
+            if (payload.eventType === 'INSERT') {
+              appendMessageToCache(queryClient, key, row);
+              return;
+            }
+            if (payload.eventType === 'UPDATE') {
+              queryClient.setQueryData<WhatsappMessageRow[]>(key, (prev) =>
+                (prev ?? []).map((m) => (m.id === row.id ? { ...m, ...row } : m)),
+              );
+              return;
+            }
+          }
           invalidate();
         },
       )
@@ -201,9 +330,8 @@ export const useWhatsappMessages = (
       return { ok: true, count, mode: force ? ('full' as const) : ('auto' as const) };
     },
     onSuccess: (res) => {
-      invalidate();
       if ((res.count ?? 0) > 0 || res.mode === 'full') {
-        queryClient.invalidateQueries({ queryKey: ['whatsapp-chats', companyId] });
+        invalidate();
       }
     },
   });
@@ -259,9 +387,51 @@ export const useWhatsappMessages = (
         company_id: companyId,
       });
     },
-    onSuccess: () => {
-      invalidate();
-      queryClient.invalidateQueries({ queryKey: ['whatsapp-chats', companyId] });
+    onMutate: async (input) => {
+      if (!companyId) return {};
+      const tempId = `pending-${Date.now()}`;
+      const optimistic = buildOptimisticMessage(companyId, input, tempId);
+      await queryClient.cancelQueries({ queryKey: key });
+      const prev = queryClient.getQueryData<WhatsappMessageRow[]>(key);
+      appendMessageToCache(queryClient, key, optimistic);
+      return { prev, tempId };
+    },
+    onSuccess: (res, input, ctx) => {
+      const confirmed = res.message as WhatsappMessageRow | undefined;
+      const chatId = res.chat_id ?? input.chat_id;
+      if (confirmed) {
+        queryClient.setQueryData<WhatsappMessageRow[]>(key, (prev) => {
+          const optimistic = prev?.find((m) => m.id === ctx?.tempId);
+          const withoutPending = (prev ?? []).filter((m) => m.id !== ctx?.tempId);
+          let merged = confirmed;
+          if (optimistic) {
+            const optMs = parseMessageTime(optimistic);
+            const confMs = parseMessageTime(confirmed);
+            if (optMs > confMs) {
+              merged = { ...confirmed, timestamp: optimistic.timestamp };
+            }
+          }
+          return dedupeWhatsappMessages([...withoutPending, merged]);
+        });
+      } else {
+        invalidate(true);
+      }
+      if (companyId && chatId) {
+        const preview =
+          confirmed?.body?.trim() ||
+          confirmed?.caption?.trim() ||
+          (input.type === 'text' ? input.text.trim() : `[${input.type}]`);
+        patchChatsListAfterOutgoing(
+          queryClient,
+          companyId,
+          chatId,
+          preview || null,
+          confirmed?.timestamp,
+        );
+      }
+    },
+    onError: (_err, _input, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(key, ctx.prev);
     },
   });
 
@@ -280,7 +450,6 @@ export const useWhatsappMessages = (
     },
     onSuccess: () => {
       invalidate();
-      queryClient.invalidateQueries({ queryKey: ['whatsapp-chats', companyId] });
     },
   });
 
@@ -299,7 +468,6 @@ export const useWhatsappMessages = (
     },
     onSuccess: () => {
       invalidate();
-      queryClient.invalidateQueries({ queryKey: ['whatsapp-chats', companyId] });
     },
   });
 

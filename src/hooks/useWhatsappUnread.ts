@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
-import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
 import type { WhatsappChatRow } from '@/hooks/useWhatsappChats';
 
 function sumUnreadFromChats(chats: WhatsappChatRow[] | undefined): number | null {
@@ -14,7 +14,7 @@ function sumUnreadFromChats(chats: WhatsappChatRow[] | undefined): number | null
 /** Total de no leídos WhatsApp (badge del dock). */
 export const useWhatsappUnread = () => {
   const queryClient = useQueryClient();
-  const { companyId, loading } = useCompanyFilter();
+  const { companyId, loading } = useWhatsappCompanyId();
 
   const totalQuery = useQuery({
     queryKey: ['whatsapp-unread-total', companyId],

@@ -10,6 +10,7 @@ import { ClienteDailyScrollView } from './cliente/ClienteDailyScrollView';
 import { ClienteBonosTab } from './cliente/ClienteBonosTab';
 import { ClienteFichaTecnicaTab } from './cliente/ClienteFichaTecnicaTab';
 import { ClienteInbodyTab } from './cliente/ClienteInbodyTab';
+import { ClienteAdjuntosTab } from './cliente/ClienteAdjuntosTab';
 import type { ClienteDetailTab } from '@/types/clienteDetail';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
@@ -138,7 +139,7 @@ export const ClienteDetailView: React.FC<Props> = ({
       <Tabs value={tab} onValueChange={setTab} className="w-full">
         <TabsList
           className={cn(
-            'w-full grid grid-cols-4 bg-sky-50/50 dark:bg-sky-950/20 border border-sky-100/50 dark:border-sky-900/20 rounded-lg p-0.5',
+            'w-full grid grid-cols-5 bg-sky-50/50 dark:bg-sky-950/20 border border-sky-100/50 dark:border-sky-900/20 rounded-lg p-0.5',
             compact && 'h-8',
           )}
         >
@@ -149,7 +150,7 @@ export const ClienteDetailView: React.FC<Props> = ({
               compact ? 'text-xs py-1 h-7' : 'text-sm rounded-lg',
             )}
           >
-            Ficha Técnica
+            Datos
           </TabsTrigger>
           <TabsTrigger
             value="vouchers"
@@ -158,7 +159,16 @@ export const ClienteDetailView: React.FC<Props> = ({
               compact ? 'text-xs py-1 h-7' : 'text-sm rounded-lg',
             )}
           >
-            Bonos Activos
+            Artículos
+          </TabsTrigger>
+          <TabsTrigger
+            value="timeline"
+            className={cn(
+              'rounded-md data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-sky-700 dark:data-[state=active]:bg-gray-800 dark:data-[state=active]:text-sky-300',
+              compact ? 'text-xs py-1 h-7' : 'text-sm rounded-lg',
+            )}
+          >
+            Servicios
           </TabsTrigger>
           <TabsTrigger
             value="inbody"
@@ -170,13 +180,13 @@ export const ClienteDetailView: React.FC<Props> = ({
             InBody
           </TabsTrigger>
           <TabsTrigger
-            value="timeline"
+            value="adjuntos"
             className={cn(
               'rounded-md data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-sky-700 dark:data-[state=active]:bg-gray-800 dark:data-[state=active]:text-sky-300',
-              compact ? 'text-xs py-1 h-7' : 'text-sm rounded-lg',
+              compact ? 'text-[10px] px-1 py-1 h-7' : 'text-sm rounded-lg',
             )}
           >
-            Historial
+            Adjuntos
           </TabsTrigger>
         </TabsList>
 
@@ -193,6 +203,16 @@ export const ClienteDetailView: React.FC<Props> = ({
             {tab === 'vouchers' ? <ClienteBonosTab customerId={customerId} /> : null}
           </TabsContent>
 
+          <TabsContent value="timeline" className="mt-0">
+            {tab === 'timeline' ? (
+              <ClienteDailyScrollView
+                customerId={customerId}
+                className="max-w-full"
+                onAppointmentClick={handleAppointmentClick}
+              />
+            ) : null}
+          </TabsContent>
+
           <TabsContent value="inbody" className="mt-0">
             {tab === 'inbody' ? (
               <ClienteInbodyTab
@@ -204,13 +224,9 @@ export const ClienteDetailView: React.FC<Props> = ({
             ) : null}
           </TabsContent>
 
-          <TabsContent value="timeline" className="mt-0">
-            {tab === 'timeline' ? (
-              <ClienteDailyScrollView
-                customerId={customerId}
-                className="max-w-full"
-                onAppointmentClick={handleAppointmentClick}
-              />
+          <TabsContent value="adjuntos" className="mt-0">
+            {tab === 'adjuntos' ? (
+              <ClienteAdjuntosTab customerId={customerId} compact={compact} />
             ) : null}
           </TabsContent>
         </div>

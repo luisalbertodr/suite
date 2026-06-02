@@ -4,6 +4,7 @@ import { DockBar } from './DockBar';
 import { Screensaver } from './Screensaver';
 import { Toaster } from '@/components/ui/toaster';
 import { useWhatsappIncomingNotifier } from '@/hooks/useWhatsappIncomingNotifier';
+import { useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
 import { useMarketingUnread } from '@/hooks/useMarketingUnread';
 import { useNotificationSoundOnIncrease } from '@/hooks/useNotificationSoundOnIncrease';
 import { unlockNotificationAudio } from '@/lib/notificationSounds';
@@ -13,6 +14,7 @@ interface LayoutProps {
 }
 
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
+  useWhatsappCompanyId();
   useWhatsappIncomingNotifier();
   const { total: marketingUnread } = useMarketingUnread();
   useNotificationSoundOnIncrease(marketingUnread, 'marketing');

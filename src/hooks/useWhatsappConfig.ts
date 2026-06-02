@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
-import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { getStoredWhatsappCompanyId, useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
 import type { Database } from '@/integrations/supabase/types';
 
 export type WhatsappConfigRow = Database['public']['Tables']['whatsapp_config']['Row'];
@@ -75,11 +75,11 @@ export async function invokeWhatsappProxy<T = unknown>(
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('No hay sesión activa');
 
-  const storedCompanyId = sessionStorage.getItem('current_company_id');
+  const whatsappCompanyId = getStoredWhatsappCompanyId();
   const requestBody: WhatsappProxyAction =
-    payload.company_id || !storedCompanyId
+    payload.company_id || !whatsappCompanyId
       ? payload
-      : { ...payload, company_id: storedCompanyId };
+      : { ...payload, company_id: whatsappCompanyId };
 
   // Usamos fetch directo en lugar de supabase.functions.invoke para no perder
   // el cuerpo de la respuesta en códigos 4xx/5xx (algunas versiones de
@@ -189,7 +189,7 @@ const DEFAULTS: Omit<WhatsappConfigUpdate, 'company_id'> = {
 
 export const useWhatsappConfig = () => {
   const queryClient = useQueryClient();
-  const { companyId, loading: companyLoading } = useCompanyFilter();
+  const { companyId, loading: companyLoading } = useWhatsappCompanyId();
 
   const configQuery = useQuery({
     queryKey: ['whatsapp-config', companyId],

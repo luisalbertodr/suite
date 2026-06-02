@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
-import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
 import {
   extractPhoneDigitsFromJid,
   formatPhoneDigits,
@@ -66,7 +66,7 @@ async function resolvePhoneLabelByChat(
  * Complementa whatsapp_auto_link_chat hasta que persista el vínculo.
  */
 export function useWhatsappCustomerMatch(chats: WhatsappChatRow[]) {
-  const { companyId } = useCompanyFilter();
+  const { companyId } = useWhatsappCompanyId();
 
   const unlinkedChats = useMemo(
     () =>

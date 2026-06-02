@@ -57,7 +57,9 @@ export const Clientes: React.FC = () => {
     if (!customerId) return;
     const tab = searchParams.get('tab');
     setSelectedCustomerId(customerId);
-    setDetailTab(tab === 'ficha' || tab === 'vouchers' || tab === 'inbody' ? tab : 'timeline');
+    setDetailTab(
+      tab === 'ficha' || tab === 'vouchers' || tab === 'inbody' || tab === 'adjuntos' ? tab : 'timeline',
+    );
     setView('detail');
   }, [searchParams]);
 

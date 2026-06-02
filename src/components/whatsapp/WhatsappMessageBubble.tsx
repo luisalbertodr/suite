@@ -49,6 +49,8 @@ interface Props {
   senderDirectory?: Record<string, string>;
   quotedMessage?: WhatsappMessageRow | null;
   quotedPreview?: string | null;
+  /** Mensaje entrante aún no leído al abrir el chat. */
+  isUnread?: boolean;
   onReply?: (message: WhatsappMessageRow) => void;
   onForward?: (message: WhatsappMessageRow) => void;
   onDeleteForEveryone?: (message: WhatsappMessageRow) => void;
@@ -298,6 +300,7 @@ export const WhatsappMessageBubble: React.FC<Props> = ({
   senderDirectory,
   quotedMessage,
   quotedPreview,
+  isUnread = false,
   onReply,
   onForward,
   onDeleteForEveryone,
@@ -327,7 +330,11 @@ export const WhatsappMessageBubble: React.FC<Props> = ({
       className={`group/bubble relative max-w-[65%] rounded-lg p-2 text-sm shadow-sm ${
         isOut
           ? `rounded-tr-none ${waTheme.bubbleOut} text-[#111b21] dark:text-emerald-50`
-          : `rounded-tl-none ${waTheme.bubbleIn} text-[#111b21] dark:text-zinc-100`
+          : `rounded-tl-none ${waTheme.bubbleIn} text-[#111b21] dark:text-zinc-100${
+              isUnread
+                ? ' ring-2 ring-emerald-500/50 bg-emerald-50/90 dark:bg-emerald-950/50'
+                : ''
+            }`
       }`}
     >
       {hasActions ? (

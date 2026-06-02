@@ -1,5 +1,6 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
+import type { InbodyMetricId } from '@/lib/inbodyGlossary';
 import {
   formatInbodyNumber,
   inbodyBarScale,
@@ -8,9 +9,11 @@ import {
   inbodyStatusLabel,
   type InbodyRangeStatus,
 } from '@/lib/inbodyMeasurements';
+import { InbodyMetricHelp } from './InbodyMetricHelp';
 
 interface Props {
-  label: string;
+  metricId: InbodyMetricId;
+  label?: string;
   value: number | null | undefined;
   min: number | null | undefined;
   max: number | null | undefined;
@@ -19,6 +22,7 @@ interface Props {
 }
 
 export const InbodyRangeBar: React.FC<Props> = ({
+  metricId,
   label,
   value,
   min,
@@ -31,9 +35,17 @@ export const InbodyRangeBar: React.FC<Props> = ({
   const scale = hasBar ? inbodyBarScale(value, min, max) : null;
 
   return (
-    <div className={cn('grid grid-cols-[88px_1fr_72px_64px] gap-2 items-center text-xs', className)}>
-      <span className="font-medium text-foreground truncate">{label}</span>
-      <div className="relative h-5 rounded-sm bg-muted/40 overflow-hidden border border-border/40">
+    <div
+      className={cn('grid grid-cols-[minmax(96px,1fr)_2fr_72px_64px] gap-2 items-center text-xs', className)}
+      aria-label={`${label ?? metricId}: ${formatInbodyNumber(value, 1, unit === '%' ? '%' : ` ${unit}`)}, ${inbodyStatusLabel(status)}`}
+    >
+      <InbodyMetricHelp metricId={metricId} label={label} labelClassName="text-xs" />
+      <div
+        className="relative h-5 rounded-sm bg-muted/40 overflow-hidden border border-border/40"
+        role="img"
+        aria-hidden
+        title="Banda verde: rango normal InBody. Línea azul: valor medido."
+      >
         {scale && (
           <>
             <div
@@ -50,7 +62,11 @@ export const InbodyRangeBar: React.FC<Props> = ({
       <span className="text-right font-semibold tabular-nums">
         {formatInbodyNumber(value, 1, unit === '%' ? '%' : ` ${unit}`)}
       </span>
-      <span className={cn('text-center rounded px-1 py-0.5 text-[10px] font-medium', inbodyStatusClass(status))}>
+      <span
+        className={cn('text-center rounded px-1 py-0.5 text-[10px] font-medium', inbodyStatusClass(status))}
+        aria-label={inbodyStatusLabel(status)}
+        title={inbodyStatusLabel(status)}
+      >
         {inbodyStatusLabel(status)}
       </span>
     </div>
@@ -58,7 +74,8 @@ export const InbodyRangeBar: React.FC<Props> = ({
 };
 
 interface MetricRowProps {
-  label: string;
+  metricId: InbodyMetricId;
+  label?: string;
   value: number | null | undefined;
   min?: number | null;
   max?: number | null;
@@ -67,6 +84,7 @@ interface MetricRowProps {
 }
 
 export const InbodyMetricRow: React.FC<MetricRowProps> = ({
+  metricId,
   label,
   value,
   min,
@@ -82,11 +100,19 @@ export const InbodyMetricRow: React.FC<MetricRowProps> = ({
 
   return (
     <tr className="border-b border-border/40 last:border-0">
-      <td className="py-2 pr-3 font-medium">{label}</td>
+      <td className="py-2 pr-3">
+        <InbodyMetricHelp metricId={metricId} label={label} labelClassName="text-xs" />
+      </td>
       <td className="py-2 pr-3 tabular-nums">{formatInbodyNumber(value, decimals, unit ? ` ${unit}` : '')}</td>
-      <td className="py-2 pr-3 text-muted-foreground tabular-nums">{range}</td>
+      <td className="py-2 pr-3 text-muted-foreground tabular-nums" title="Rango normal InBody para su perfil">
+        {range}
+      </td>
       <td className="py-2">
-        <span className={cn('rounded px-2 py-0.5 text-[11px] font-medium', inbodyStatusClass(status))}>
+        <span
+          className={cn('rounded px-2 py-0.5 text-[11px] font-medium', inbodyStatusClass(status))}
+          aria-label={inbodyStatusLabel(status)}
+          title={inbodyStatusLabel(status)}
+        >
           {inbodyStatusLabel(status)}
         </span>
       </td>

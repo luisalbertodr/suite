@@ -399,6 +399,61 @@ export function dayKey(iso: string | null | undefined): string {
   return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
 }
 
+/** Agrupa mensajes por día calendario (ordenados antes para no duplicar cabeceras). */
+export function groupMessagesByDay<T extends { timestamp: string }>(
+  messages: T[],
+): Array<{ day: string; iso: string; messages: T[] }> {
+  const sorted = [...messages].sort((a, b) => {
+    const ta = Date.parse(a.timestamp);
+    const tb = Date.parse(b.timestamp);
+    return (Number.isNaN(ta) ? 0 : ta) - (Number.isNaN(tb) ? 0 : tb);
+  });
+  const out: Array<{ day: string; iso: string; messages: T[] }> = [];
+  for (const m of sorted) {
+    const k = dayKey(m.timestamp);
+    const last = out[out.length - 1];
+    if (last && last.day === k) {
+      last.messages.push(m);
+    } else {
+      out.push({ day: k, iso: m.timestamp, messages: [m] });
+    }
+  }
+  return out;
+}
+
+/** IDs de mensajes entrantes no leídos (según contador del chat al abrirlo). */
+export function unreadMessageIdsFromCount<T extends { id: string; from_me: boolean | null }>(
+  messages: T[],
+  unreadCount: number,
+): Set<string> {
+  const ids = new Set<string>();
+  if (unreadCount <= 0 || messages.length === 0) return ids;
+  let remaining = unreadCount;
+  for (let i = messages.length - 1; i >= 0 && remaining > 0; i--) {
+    const m = messages[i];
+    if (m.from_me) continue;
+    ids.add(m.id);
+    remaining -= 1;
+  }
+  return ids;
+}
+
+export function firstUnreadMessageId<T extends { id: string; from_me: boolean | null }>(
+  messages: T[],
+  unreadCount: number,
+): string | null {
+  if (unreadCount <= 0 || messages.length === 0) return null;
+  let remaining = unreadCount;
+  let first: string | null = null;
+  for (let i = messages.length - 1; i >= 0 && remaining > 0; i--) {
+    const m = messages[i];
+    if (m.from_me) continue;
+    first = m.id;
+    remaining -= 1;
+  }
+  return first;
+}
+
 /** Lee texto del `raw` JSON (Baileys/NOWEB del webhook) si `body` quedó vacío. */
 export function isExternalWhatsappCdnUrl(url: string | null | undefined): boolean {
   if (!url) return false;

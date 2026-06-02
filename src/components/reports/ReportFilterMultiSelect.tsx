@@ -54,7 +54,7 @@ export const ReportFilterMultiSelect: React.FC<ReportFilterMultiSelectProps> = (
   return (
     <div className="space-y-2">
       <Label>{label}</Label>
-      <Popover open={open} onOpenChange={setOpen}>
+      <Popover open={open} onOpenChange={setOpen} modal={false}>
         <PopoverTrigger asChild>
           <Button
             variant="outline"
@@ -71,7 +71,11 @@ export const ReportFilterMultiSelect: React.FC<ReportFilterMultiSelectProps> = (
             <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0 z-[200]" align="start">
+        <PopoverContent
+          className="w-[var(--radix-popover-trigger-width)] p-0 z-[250] flex flex-col max-h-72 overflow-hidden"
+          align="start"
+          onWheel={(e) => e.stopPropagation()}
+        >
           <div className="p-2 border-b">
             <Input
               placeholder={searchPlaceholder}
@@ -80,7 +84,16 @@ export const ReportFilterMultiSelect: React.FC<ReportFilterMultiSelectProps> = (
               className="h-8"
             />
           </div>
-          <div className="max-h-56 overflow-y-auto p-2 space-y-1">
+          <div
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2 space-y-1"
+            onWheel={(e) => {
+              e.stopPropagation();
+              const el = e.currentTarget;
+              if (el.scrollHeight <= el.clientHeight) return;
+              el.scrollTop += e.deltaY;
+              e.preventDefault();
+            }}
+          >
             {filtered.length === 0 ? (
               <p className="text-sm text-muted-foreground px-2 py-3">Sin resultados</p>
             ) : (

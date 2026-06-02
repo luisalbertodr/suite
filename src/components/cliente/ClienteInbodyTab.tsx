@@ -20,6 +20,7 @@ import {
 import { InbodyMetricRow, InbodyRangeBar } from './inbody/InbodyRangeBar';
 import { InbodyHistoryChart } from './inbody/InbodyHistoryChart';
 import { InbodySegmentalSilhouette } from './inbody/InbodySegmentalSilhouette';
+import { InbodyMetricHelp, InbodySectionHelp } from './inbody/InbodyMetricHelp';
 
 interface Props {
   customerId: string;
@@ -44,7 +45,9 @@ function ImpedanceTable({ measurement }: { measurement: InbodyMeasurement }) {
   return (
     <Card className="border-sky-100/50 dark:border-sky-900/20">
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm">Impedancia (Ω)</CardTitle>
+        <CardTitle className="text-sm">
+          <InbodySectionHelp metricId="impedance" title="Impedancia (Ω)" />
+        </CardTitle>
       </CardHeader>
       <CardContent className="overflow-x-auto">
         <table className="w-full text-xs">
@@ -81,44 +84,90 @@ function ImpedanceTable({ measurement }: { measurement: InbodyMeasurement }) {
   );
 }
 
-function MeasurementReport({ measurement, compact }: { measurement: InbodyMeasurement; compact?: boolean }) {
-  const measuredLabel = format(new Date(measurement.measured_at), "yyyy-MM-dd HH:mm:ss", { locale: es });
+function MeasurementSessionBar({
+  measurements,
+  selected,
+  onSelect,
+  compact,
+}: {
+  measurements: InbodyMeasurement[];
+  selected: InbodyMeasurement;
+  onSelect: (id: string) => void;
+  compact?: boolean;
+}) {
+  const measuredLabel = format(new Date(selected.measured_at), 'yyyy-MM-dd HH:mm:ss', { locale: es });
 
   return (
-    <div className="space-y-4">
-      <div className={compact ? 'text-xs space-y-0.5' : 'text-sm space-y-1'}>
+    <div className="space-y-2">
+      {measurements.length > 1 && (
+        <Select value={selected.id} onValueChange={onSelect}>
+          <SelectTrigger className={compact ? 'h-8 text-xs' : ''}>
+            <SelectValue placeholder="Seleccionar medición" />
+          </SelectTrigger>
+          <SelectContent>
+            {measurements.map((m) => (
+              <SelectItem key={m.id} value={m.id}>
+                {format(new Date(m.measured_at), 'dd/MM/yyyy HH:mm', { locale: es })}
+                {' · '}
+                {formatInbodyNumber(m.weight_kg, 1, ' kg')}
+                {m.pbf_pct != null ? ` · PGC ${formatInbodyNumber(m.pbf_pct, 1, '%')}` : ''}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+
+      <div className={compact ? 'text-xs' : 'text-sm'}>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
-          <span className="font-medium text-foreground">{measurement.inbody_user_id}</span>
-          {measurement.age_years != null && <span>{formatInbodyNumber(measurement.age_years, 0)} Edad</span>}
-          {measurement.height_cm != null && (
-            <span>{formatInbodyNumber(measurement.height_cm, 1, 'cm')}</span>
+          <span className="font-medium text-foreground">{selected.inbody_user_id}</span>
+          {selected.age_years != null && (
+            <span>{formatInbodyNumber(selected.age_years, 0)} Edad</span>
           )}
-          {measurement.sex && <span>{inbodySexLabel(measurement.sex)}</span>}
+          {selected.height_cm != null && (
+            <span>{formatInbodyNumber(selected.height_cm, 1, 'cm')}</span>
+          )}
+          {selected.sex && <span>{inbodySexLabel(selected.sex)}</span>}
           <span className="ml-auto flex items-center gap-1 tabular-nums">
-            <ChevronDown className="h-3.5 w-3.5 opacity-50" />
+            <ChevronDown className="h-3.5 w-3.5 opacity-50" aria-hidden />
             Fecha {measuredLabel}
           </span>
         </div>
       </div>
+    </div>
+  );
+}
 
+function MeasurementReport({ measurement, compact }: { measurement: InbodyMeasurement; compact?: boolean }) {
+  return (
+    <div className="space-y-4">
       <Card className="border-sky-100/50 dark:border-sky-900/20">
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Composición corporal</CardTitle>
+          <CardTitle className="text-sm">
+            <InbodySectionHelp metricId="weight_kg" title="Composición corporal" />
+          </CardTitle>
+          <p className="text-[10px] text-muted-foreground mt-1">
+            Banda verde = rango normal InBody. Pase el cursor sobre cada sigla para ver qué mide y cómo interpretarla.
+          </p>
         </CardHeader>
         <CardContent className="space-y-2">
-          <InbodyRangeBar label="Peso" value={measurement.weight_kg} min={measurement.weight_min_kg} max={measurement.weight_max_kg} />
-          <InbodyRangeBar label="MME" value={measurement.smm_kg} min={measurement.smm_min_kg} max={measurement.smm_max_kg} />
-          <InbodyRangeBar label="Masa grasa" value={measurement.body_fat_kg} min={measurement.body_fat_min_kg} max={measurement.body_fat_max_kg} />
+          <InbodyRangeBar metricId="weight_kg" value={measurement.weight_kg} min={measurement.weight_min_kg} max={measurement.weight_max_kg} />
+          <InbodyRangeBar metricId="smm_kg" value={measurement.smm_kg} min={measurement.smm_min_kg} max={measurement.smm_max_kg} />
+          <InbodyRangeBar metricId="body_fat_kg" value={measurement.body_fat_kg} min={measurement.body_fat_min_kg} max={measurement.body_fat_max_kg} />
           <div className="grid sm:grid-cols-2 gap-2 pt-2 border-t border-border/40">
-            <InbodyRangeBar label="ACT" value={measurement.tbw_kg} min={measurement.tbw_min_kg} max={measurement.tbw_max_kg} className="col-span-1" />
-            <InbodyRangeBar label="MLG" value={measurement.ffm_kg} min={measurement.ffm_min_kg} max={measurement.ffm_max_kg} className="col-span-1" />
+            <InbodyRangeBar metricId="tbw_kg" value={measurement.tbw_kg} min={measurement.tbw_min_kg} max={measurement.tbw_max_kg} className="col-span-1" />
+            <InbodyRangeBar metricId="ffm_kg" value={measurement.ffm_kg} min={measurement.ffm_min_kg} max={measurement.ffm_max_kg} className="col-span-1" />
           </div>
         </CardContent>
       </Card>
 
       <Card className="border-sky-100/50 dark:border-sky-900/20">
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Diagnóstico de obesidad</CardTitle>
+          <CardTitle className="text-sm">
+            <InbodySectionHelp metricId="pbf_pct" title="Diagnóstico de obesidad" />
+          </CardTitle>
+          <p className="text-[10px] text-muted-foreground mt-1">
+            Columna «Normal»: intervalo de referencia según sexo, edad y talla registrados en la medición.
+          </p>
         </CardHeader>
         <CardContent className="overflow-x-auto">
           <table className="w-full text-xs">
@@ -126,15 +175,17 @@ function MeasurementReport({ measurement, compact }: { measurement: InbodyMeasur
               <tr className="text-muted-foreground border-b">
                 <th className="text-left py-1 pr-3">Parámetro</th>
                 <th className="text-left py-1 pr-3">Valor</th>
-                <th className="text-left py-1 pr-3">Normal</th>
-                <th className="text-left py-1">Estado</th>
+                <th className="text-left py-1 pr-3" title="Rango normal InBody">Normal</th>
+                <th className="text-left py-1">
+                  <InbodyMetricHelp metricId="inbody_status" label="Estado" labelClassName="text-[11px] font-normal text-muted-foreground" />
+                </th>
               </tr>
             </thead>
             <tbody>
-              <InbodyMetricRow label="IMC" value={measurement.bmi} min={measurement.bmi_min} max={measurement.bmi_max} />
-              <InbodyMetricRow label="PGC" value={measurement.pbf_pct} min={measurement.pbf_min_pct} max={measurement.pbf_max_pct} unit="%" />
-              <InbodyMetricRow label="RCC" value={measurement.whr} min={measurement.whr_min} max={measurement.whr_max} decimals={2} />
-              <InbodyMetricRow label="MB" value={measurement.bmr_kcal} min={measurement.bmr_min_kcal} max={measurement.bmr_max_kcal} unit="kcal" decimals={0} />
+              <InbodyMetricRow metricId="bmi" value={measurement.bmi} min={measurement.bmi_min} max={measurement.bmi_max} />
+              <InbodyMetricRow metricId="pbf_pct" value={measurement.pbf_pct} min={measurement.pbf_min_pct} max={measurement.pbf_max_pct} unit="%" />
+              <InbodyMetricRow metricId="whr" value={measurement.whr} min={measurement.whr_min} max={measurement.whr_max} decimals={2} />
+              <InbodyMetricRow metricId="bmr_kcal" label="MB" value={measurement.bmr_kcal} min={measurement.bmr_min_kcal} max={measurement.bmr_max_kcal} unit="kcal" decimals={0} />
             </tbody>
           </table>
         </CardContent>
@@ -143,16 +194,20 @@ function MeasurementReport({ measurement, compact }: { measurement: InbodyMeasur
       <div className="grid sm:grid-cols-2 gap-3">
         <Card className="border-sky-100/50 dark:border-sky-900/20">
           <CardContent className="pt-4 text-center">
-            <div className="text-[11px] text-muted-foreground uppercase">Control de músculo</div>
-            <div className="text-2xl font-bold tabular-nums mt-1">
+            <div className="flex justify-center">
+              <InbodyMetricHelp metricId="muscle_control_kg" labelClassName="text-[11px] uppercase text-muted-foreground font-normal" />
+            </div>
+            <div className="text-2xl font-bold tabular-nums mt-1" title="Kg de MME a ganar (+) o perder (−) según InBody">
               {formatInbodyNumber(measurement.muscle_control_kg, 1, ' kg')}
             </div>
           </CardContent>
         </Card>
         <Card className="border-sky-100/50 dark:border-sky-900/20">
           <CardContent className="pt-4 text-center">
-            <div className="text-[11px] text-muted-foreground uppercase">Control de grasa</div>
-            <div className="text-2xl font-bold tabular-nums mt-1">
+            <div className="flex justify-center">
+              <InbodyMetricHelp metricId="fat_control_kg" labelClassName="text-[11px] uppercase text-muted-foreground font-normal" />
+            </div>
+            <div className="text-2xl font-bold tabular-nums mt-1" title="Kg de grasa a perder (−) o ganar (+) según InBody">
               {formatInbodyNumber(measurement.fat_control_kg, 1, ' kg')}
             </div>
           </CardContent>
@@ -212,6 +267,15 @@ export const ClienteInbodyTab: React.FC<Props> = ({ customerId, taxId, companyId
 
   return (
     <div className="space-y-4">
+      {selected && (
+        <MeasurementSessionBar
+          measurements={measurements}
+          selected={selected}
+          onSelect={setSelectedId}
+          compact={compact}
+        />
+      )}
+
       <InbodyHistoryChart
         measurements={measurements}
         selectedId={selected?.id}
@@ -223,29 +287,12 @@ export const ClienteInbodyTab: React.FC<Props> = ({ customerId, taxId, companyId
         <InbodySegmentalSilhouette
           lean={selected.segmental_lean}
           fat={selected.segmental_fat}
+          sex={selected.sex}
           measuredAtLabel={format(new Date(selected.measured_at), "EEEE d MMMM yyyy · HH:mm", {
             locale: es,
           })}
           compact={compact}
         />
-      )}
-
-      {measurements.length > 1 && (
-        <Select value={selected?.id} onValueChange={setSelectedId}>
-          <SelectTrigger className={compact ? 'h-8 text-xs' : ''}>
-            <SelectValue placeholder="Seleccionar medición" />
-          </SelectTrigger>
-          <SelectContent>
-            {measurements.map((m) => (
-              <SelectItem key={m.id} value={m.id}>
-                {format(new Date(m.measured_at), "dd/MM/yyyy HH:mm", { locale: es })}
-                {' · '}
-                {formatInbodyNumber(m.weight_kg, 1, ' kg')}
-                {m.pbf_pct != null ? ` · PGC ${formatInbodyNumber(m.pbf_pct, 1, '%')}` : ''}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
       )}
 
       {selected && <MeasurementReport measurement={selected} compact={compact} />}

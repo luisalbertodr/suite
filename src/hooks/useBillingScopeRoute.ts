@@ -7,6 +7,7 @@ const BILLING_SCOPE_PATH_PREFIXES = [
   '/facturacion',
   '/marketing',
   '/articulos',
+  '/reportes',
 ] as const;
 
 function pathUsesBillingScope(pathname: string): boolean {

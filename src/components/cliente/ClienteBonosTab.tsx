@@ -6,12 +6,14 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
-import { Plus, Gift, X, Play, Pencil, Trash2 } from 'lucide-react';
+import { Plus, Gift, X, Play, Pencil, Trash2, Package } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { bonoSessionsDisplay } from '@/lib/bonoSessionsDisplay';
+import { useCustomerPurchasedProducts } from '@/hooks/useCustomerPurchasedProducts';
+import { groupProductsByDate } from '@/lib/customerPurchasedProducts';
 import type { PostgrestError } from '@supabase/supabase-js';
 
 interface Props {
@@ -957,10 +959,51 @@ export const ClienteBonosTab: React.FC<Props> = ({ customerId }) => {
     );
   };
 
+  const { data: purchasedProducts = [], isLoading: productsLoading } = useCustomerPurchasedProducts(customerId);
+
+  const productGroups = React.useMemo(
+    () => groupProductsByDate(purchasedProducts),
+    [purchasedProducts],
+  );
+
+  const fmtProductDate = (ymd: string) => {
+    try {
+      return format(new Date(`${ymd}T12:00:00`), 'dd/MM/yyyy');
+    } catch {
+      return ymd;
+    }
+  };
+
+  const renderProductRow = (p: (typeof purchasedProducts)[number]) => (
+    <div
+      key={p.id}
+      className="flex items-center gap-2 min-h-8 px-2 py-1.5 rounded-md border border-border/40 bg-background/60 text-xs sm:text-sm leading-tight min-w-0"
+    >
+      <Package className="w-3.5 h-3.5 shrink-0 text-sky-600 dark:text-sky-400" />
+      <span className="font-medium truncate min-w-0 flex-1">{p.label}</span>
+      {p.codigo && (
+        <span className="hidden md:inline shrink-0 font-mono text-[10px] text-muted-foreground">
+          {p.codigo}
+        </span>
+      )}
+      <span className="shrink-0 tabular-nums text-muted-foreground whitespace-nowrap">
+        ×{p.quantity}
+      </span>
+      <span className="shrink-0 tabular-nums font-semibold whitespace-nowrap">
+        {p.totalPrice.toFixed(2)} €
+      </span>
+      {p.ticketNumber && (
+        <span className="hidden sm:inline shrink-0 text-[10px] text-muted-foreground whitespace-nowrap">
+          {p.ticketNumber}
+        </span>
+      )}
+    </div>
+  );
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <div className="flex justify-between items-center">
-        <h3 className="text-lg font-semibold">Bonos y Sesiones</h3>
+        <h3 className="text-base font-semibold">Bonos</h3>
         <Button size="sm" onClick={openNew} disabled={Boolean(editingId)}>
           {showNewForm ? <X className="w-4 h-4 mr-1" /> : <Plus className="w-4 h-4 mr-1" />}
           {showNewForm ? 'Cancelar' : 'Asignar Bono'}
@@ -1010,6 +1053,26 @@ export const ClienteBonosTab: React.FC<Props> = ({ customerId }) => {
           )}
         </div>
       )}
+
+      <section className="space-y-2 pt-1 border-t border-border/50">
+        <h3 className="text-base font-semibold">Productos comprados</h3>
+        {productsLoading ? (
+          <div className="text-center py-4 text-sm text-muted-foreground">Cargando productos...</div>
+        ) : !purchasedProducts.length ? (
+          <div className="text-center py-4 text-sm text-muted-foreground">Sin productos registrados</div>
+        ) : (
+          <div className="space-y-3">
+            {[...productGroups.entries()].map(([ymd, items]) => (
+              <div key={ymd} className="space-y-1">
+                <h4 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground px-0.5">
+                  {fmtProductDate(ymd)}
+                </h4>
+                <div className="space-y-0.5">{items.map(renderProductRow)}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   );
 };

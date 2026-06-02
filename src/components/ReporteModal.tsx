@@ -1,16 +1,15 @@
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { CalendarIcon, Filter, Download, Mail, FileText, FileSpreadsheet } from 'lucide-react';
+import { Filter, Download, Mail, FileText, FileSpreadsheet } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ReporteResults } from './ReporteResults';
 import { supabase } from '@/lib/supabase';
@@ -19,8 +18,14 @@ import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { useWorkCenter } from '@/hooks/useWorkCenter';
 import { fetchCatalogCustomers } from '@/lib/customerSearch';
 import { CustomerSelector } from '@/components/forms/CustomerSelector';
-import { ReportFilterMultiSelect } from '@/components/reports/ReportFilterMultiSelect';
-import { REPORT_DATE_PRESETS, resolveDatePresetRange, type DatePresetId } from '@/lib/reportDatePresets';
+import {
+  ReportCatalogTreeFilter,
+  type CatalogTreeSelection,
+} from '@/components/reports/ReportCatalogTreeFilter';
+import { resolveDatePresetRange } from '@/lib/reportDatePresets';
+import { ReportDateRangeFilter } from '@/components/reports/ReportDateRangeFilter';
+import { resolveBillingScope } from '@/lib/reportData';
+import { fetchReportFamilyNames } from '@/lib/reportCatalogScope';
 
 const REPORT_SELECT_CONTENT_CLASS = 'z-[200]';
 
@@ -76,6 +81,31 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
   const { isMultiEntity, billingCompanies, companyLabels, operationalCompanyId } = useWorkCenter();
   const catalogCompanyId = operationalCompanyId ?? companyId;
 
+  const billingCompanyIds = useMemo(
+    () => resolveBillingScope(
+      companyId,
+      billingCompanies,
+      isMultiEntity,
+      filters.empresaEmisora as string | undefined,
+    ),
+    [companyId, billingCompanies, isMultiEntity, filters.empresaEmisora],
+  );
+
+  useEffect(() => {
+    if (!companyId) return;
+    setFilters((prev) => {
+      if (prev.empresaEmisora === 'all') return prev;
+      if (prev.empresaEmisora === companyId) return prev;
+      return {
+        ...prev,
+        empresaEmisora: companyId,
+        familias: [],
+        articulos: [],
+        familia: undefined,
+      };
+    });
+  }, [companyId]);
+
   const { data: customers } = useQuery({
     queryKey: ['customers', catalogCompanyId, 'reporte-modal'],
     queryFn: async () => {
@@ -98,39 +128,15 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
   });
 
   const { data: families } = useQuery({
-    queryKey: ['article-families', catalogCompanyId],
-    queryFn: async () => {
-      if (!catalogCompanyId) return [];
-      const { data, error } = await supabase
-        .from('article_families')
-        .select('name')
-        .eq('company_id', catalogCompanyId)
-        .order('name');
-      if (error) throw error;
-      return (data ?? []).map((f) => f.name as string);
-    },
-    enabled: !!catalogCompanyId && !companyLoading,
+    queryKey: ['report-families', catalogCompanyId, billingCompanyIds.join(',')],
+    queryFn: () => fetchReportFamilyNames(catalogCompanyId!, billingCompanyIds),
+    enabled: !!catalogCompanyId && billingCompanyIds.length > 0 && !companyLoading,
   });
 
-  const needsArticles = report.filters.includes('articulos') || report.filters.includes('articulo');
-
-  const { data: catalogArticles } = useQuery({
-    queryKey: ['articles', catalogCompanyId, 'reporte-modal'],
-    queryFn: async () => {
-      if (!catalogCompanyId) return [];
-      const { data, error } = await supabase
-        .from('articles')
-        .select('id, codigo, descripcion, familia, estado')
-        .eq('company_id', catalogCompanyId)
-        .eq('estado', 'activo')
-        .order('descripcion');
-      if (error) throw error;
-      return data ?? [];
-    },
-    enabled: !!catalogCompanyId && !companyLoading && needsArticles,
-  });
-
-  const quickDateRanges = REPORT_DATE_PRESETS;
+  const catalogSelection: CatalogTreeSelection = {
+    familias: filters.familias ?? [],
+    articulos: filters.articulos ?? [],
+  };
 
   const estadosFactura = [
     { value: "draft", label: "Borrador" },
@@ -147,11 +153,6 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
     { value: "rejected", label: "Rechazado" },
     { value: "expired", label: "Expirado" }
   ];
-
-  const handleQuickDate = (range: DatePresetId) => {
-    const { fechaDesde, fechaHasta } = resolveDatePresetRange(range);
-    setFilters((prev) => ({ ...prev, fechaDesde, fechaHasta }));
-  };
 
   const handleGenerateReport = () => {
     setShowFilters(false);
@@ -172,74 +173,12 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
       case "periodo":
       case "fechas":
         return (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Fecha Desde</Label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className={cn(
-                        "w-full justify-start text-left font-normal",
-                        !filters.fechaDesde && "text-muted-foreground"
-                      )}
-                    >
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {filters.fechaDesde ? format(filters.fechaDesde, "PPP", { locale: es }) : "Seleccionar fecha"}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0">
-                    <Calendar
-                      mode="single"
-                      selected={filters.fechaDesde}
-                      onSelect={(date) => setFilters(prev => ({ ...prev, fechaDesde: date }))}
-                      initialFocus
-                      className="pointer-events-auto"
-                    />
-                  </PopoverContent>
-                </Popover>
-              </div>
-              <div className="space-y-2">
-                <Label>Fecha Hasta</Label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className={cn(
-                        "w-full justify-start text-left font-normal",
-                        !filters.fechaHasta && "text-muted-foreground"
-                      )}
-                    >
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {filters.fechaHasta ? format(filters.fechaHasta, "PPP", { locale: es }) : "Seleccionar fecha"}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0">
-                    <Calendar
-                      mode="single"
-                      selected={filters.fechaHasta}
-                      onSelect={(date) => setFilters(prev => ({ ...prev, fechaHasta: date }))}
-                      initialFocus
-                      className="pointer-events-auto"
-                    />
-                  </PopoverContent>
-                </Popover>
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {quickDateRanges.map((range) => (
-                <Button
-                  key={range.value}
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleQuickDate(range.value)}
-                >
-                  {range.label}
-                </Button>
-              ))}
-            </div>
-          </div>
+          <ReportDateRangeFilter
+            value={{ fechaDesde: filters.fechaDesde, fechaHasta: filters.fechaHasta }}
+            onChange={({ fechaDesde, fechaHasta }) =>
+              setFilters((prev) => ({ ...prev, fechaDesde, fechaHasta }))
+            }
+          />
         );
 
       case "cliente":
@@ -315,15 +254,17 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
           </div>
         );
 
-      case "familias":
+      case "catalogo":
         return (
-          <ReportFilterMultiSelect
-            label="Familias de artículos"
-            options={(families ?? []).map((name) => ({ value: name, label: name }))}
-            value={filters.familias ?? []}
-            onChange={(familias) => setFilters((prev) => ({ ...prev, familias }))}
-            emptyLabel="Todas las familias"
-            searchPlaceholder="Buscar familia…"
+          <ReportCatalogTreeFilter
+            companyId={catalogCompanyId}
+            billingCompanyIds={billingCompanyIds}
+            families={families ?? []}
+            value={catalogSelection}
+            onChange={({ familias, articulos }) =>
+              setFilters((prev) => ({ ...prev, familias, articulos }))
+            }
+            label="Familias y artículos"
           />
         );
 
@@ -345,21 +286,6 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
               </SelectContent>
             </Select>
           </div>
-        );
-
-      case "articulos":
-        return (
-          <ReportFilterMultiSelect
-            label="Artículos"
-            options={(catalogArticles ?? []).map((a) => ({
-              value: a.id as string,
-              label: a.codigo ? `${a.codigo} - ${a.descripcion}` : String(a.descripcion),
-            }))}
-            value={filters.articulos ?? []}
-            onChange={(articulos) => setFilters((prev) => ({ ...prev, articulos }))}
-            emptyLabel="Todos los artículos"
-            searchPlaceholder="Buscar artículo…"
-          />
         );
 
       case "proveedor":
@@ -389,8 +315,14 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
             <Label>Empresa emisora</Label>
             <Select
               modal={false}
-              value={filters.empresaEmisora ?? 'all'}
-              onValueChange={(value) => setFilters((prev) => ({ ...prev, empresaEmisora: value }))}
+              value={filters.empresaEmisora ?? companyId ?? 'all'}
+              onValueChange={(value) => setFilters((prev) => ({
+                ...prev,
+                empresaEmisora: value,
+                familias: [],
+                articulos: [],
+                familia: undefined,
+              }))}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Todas las empresas" />
@@ -404,6 +336,9 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
                 ))}
               </SelectContent>
             </Select>
+            <p className="text-xs text-muted-foreground">
+              Por defecto usa la empresa activa (M/E en la barra superior). El catálogo muestra solo sus familias.
+            </p>
           </div>
         );
 
@@ -594,7 +529,10 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {report.filters.map((filter) => (
-              <div key={filter} className="space-y-2">
+              <div
+                key={filter}
+                className={cn('space-y-2', filter === 'catalogo' && 'md:col-span-2')}
+              >
                 {renderFilterInput(filter)}
               </div>
             ))}

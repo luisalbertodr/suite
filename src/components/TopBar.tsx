@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { User, LogOut, Settings, ChevronDown, Moon, Sun } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
 import { useAuth } from '@/hooks/useAuth';
@@ -19,6 +19,7 @@ import {
 
 export const TopBar: React.FC = () => {
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const { user, signOut } = useAuth();
   const { theme, resolvedTheme, setTheme } = useTheme();
   const { companyId, loading: companyLoading } = useCompanyFilter();
@@ -39,6 +40,7 @@ export const TopBar: React.FC = () => {
 
   const brandLabel = displayName.trim() || 'Lipoout';
   const showBrandSkeleton = (companyLoading || brandingLoading) && !displayName;
+  const showBillingToggle = isMultiEntity && !wcLoading && !pathname.startsWith('/whatsapp');
 
   return (
     <header className="fixed top-0 left-0 right-0 z-40 h-12 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
@@ -63,7 +65,7 @@ export const TopBar: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
-          {isMultiEntity && !wcLoading && (
+          {showBillingToggle && (
             <BillingScopeToggle disabled={!billingScopeEnabled} />
           )}
 

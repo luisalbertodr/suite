@@ -4,6 +4,7 @@ import {
   formatInbodyNumber,
   inbodyStatusClass,
   inbodyStatusLabel,
+  segmentLeanEvalPct,
   segmentStatusFromPct,
   type InbodySegmentalFat,
   type InbodySegmentalLean,
@@ -44,9 +45,11 @@ function SegmentCell({
           {pctLabel || `${formatInbodyNumber(pct, 1, '%')}`}
         </div>
       )}
-      <div className={cn('mt-1 inline-block rounded px-1.5 py-0.5 text-[10px] font-medium', inbodyStatusClass(status))}>
-        {inbodyStatusLabel(status)}
-      </div>
+      {pct != null && !pctLabel && (
+        <div className={cn('mt-1 inline-block rounded px-1.5 py-0.5 text-[10px] font-medium', inbodyStatusClass(status))}>
+          {inbodyStatusLabel(status)}
+        </div>
+      )}
     </div>
   );
 }
@@ -64,7 +67,7 @@ export const InbodySegmentalView: React.FC<Props> = ({ lean, fat, className }) =
                 key={`lean-${seg.key}`}
                 title={`${seg.label} (${seg.short})`}
                 kg={entry?.kg}
-                pct={entry?.pct}
+                pct={segmentLeanEvalPct(entry)}
               />
             );
           })}

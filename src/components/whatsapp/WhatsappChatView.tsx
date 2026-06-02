@@ -22,10 +22,12 @@ import {
   type SendMessageInput,
 } from '@/hooks/useWhatsappMessages';
 import { useToast } from '@/hooks/use-toast';
-import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
 import {
-  dayKey,
+  firstUnreadMessageId,
+  groupMessagesByDay,
   formatDateHeader,
+  unreadMessageIdsFromCount,
   formatMetaLeadLabel,
   displayNameForChat,
   findMessageByWahaId,
@@ -71,7 +73,7 @@ export const WhatsappChatView: React.FC<Props> = ({
   onCreateCustomer,
 }) => {
   const { toast } = useToast();
-  const { companyId, loading: companyLoading } = useCompanyFilter();
+  const { companyId, loading: companyLoading } = useWhatsappCompanyId();
   const relatedChatIds = useMemo(() => {
     const ids = new Set<string>();
     for (const c of chats) {
@@ -104,6 +106,8 @@ export const WhatsappChatView: React.FC<Props> = ({
   });
   const scrollRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const firstUnreadDividerRef = useRef<HTMLDivElement>(null);
+  const [sessionUnreadCount, setSessionUnreadCount] = useState(0);
   const [replyTo, setReplyTo] = useState<WhatsappMessageRow | null>(null);
   const [forwardMessageRow, setForwardMessageRow] = useState<WhatsappMessageRow | null>(null);
   const [forwardOpen, setForwardOpen] = useState(false);
@@ -114,6 +118,7 @@ export const WhatsappChatView: React.FC<Props> = ({
     setForwardMessageRow(null);
     setForwardOpen(false);
     setDeleteTarget(null);
+    setSessionUnreadCount(chat.unread_count ?? 0);
   }, [chat.chat_id]);
 
   // Cuando entramos al chat, marcamos como leído (la sync la gestiona useWhatsappMessages).
@@ -127,19 +132,24 @@ export const WhatsappChatView: React.FC<Props> = ({
     endRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
   }, [messages.length]);
 
-  const grouped = useMemo(() => {
-    const out: Array<{ day: string; iso: string; messages: WhatsappMessageRow[] }> = [];
-    for (const m of messages) {
-      const k = dayKey(m.timestamp);
-      const last = out[out.length - 1];
-      if (last && last.day === k) {
-        last.messages.push(m);
-      } else {
-        out.push({ day: k, iso: m.timestamp, messages: [m] });
-      }
-    }
-    return out;
-  }, [messages]);
+  const unreadMessageIds = useMemo(
+    () => unreadMessageIdsFromCount(messages, sessionUnreadCount),
+    [messages, sessionUnreadCount, chat.chat_id],
+  );
+  const firstUnreadId = useMemo(
+    () => firstUnreadMessageId(messages, sessionUnreadCount),
+    [messages, sessionUnreadCount, chat.chat_id],
+  );
+
+  useEffect(() => {
+    if (sessionUnreadCount <= 0 || !firstUnreadDividerRef.current) return;
+    const t = window.setTimeout(() => {
+      firstUnreadDividerRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }, 120);
+    return () => window.clearTimeout(t);
+  }, [chat.chat_id, firstUnreadId, sessionUnreadCount]);
+
+  const grouped = useMemo(() => groupMessagesByDay(messages), [messages]);
 
   const onSend = async (input: SendMessageInput) => {
     try {
@@ -355,8 +365,11 @@ export const WhatsappChatView: React.FC<Props> = ({
         </div>
       </div>
 
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-          <div className="flex flex-col space-y-3 p-6">
+      <div
+        ref={scrollRef}
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain max-md:pb-2"
+      >
+          <div className="flex flex-col space-y-3 p-4 pb-6 sm:p-6">
             {isError && messages.length === 0 ? (
               <div className="py-10 text-center space-y-3">
                 <p className="text-xs text-destructive">
@@ -404,23 +417,39 @@ export const WhatsappChatView: React.FC<Props> = ({
                     </span>
                   </div>
                   {g.messages.map((m) => (
-                    <WhatsappMessageBubble
-                      key={m.id}
-                      message={m}
-                      isGroupChat={isGroup}
-                      senderDirectory={groupSenderDirectory}
-                      quotedMessage={
-                        m.quoted_message_id
-                          ? findMessageByWahaId(messages, m.quoted_message_id)
-                          : undefined
-                      }
-                      onReply={(msg) => setReplyTo(msg)}
-                      onForward={(msg) => {
-                        setForwardMessageRow(msg);
-                        setForwardOpen(true);
-                      }}
-                      onDeleteForEveryone={(msg) => setDeleteTarget(msg)}
-                    />
+                    <React.Fragment key={m.id}>
+                      {m.id === firstUnreadId ? (
+                        <div
+                          ref={firstUnreadDividerRef}
+                          className="my-3 flex justify-center"
+                          role="separator"
+                          aria-label="Mensajes no leídos"
+                        >
+                          <span className="rounded-full bg-emerald-600 px-3 py-1 text-[11px] font-semibold text-white shadow-md dark:bg-emerald-500">
+                            {sessionUnreadCount === 1
+                              ? '1 mensaje no leído'
+                              : `${sessionUnreadCount} mensajes no leídos`}
+                          </span>
+                        </div>
+                      ) : null}
+                      <WhatsappMessageBubble
+                        message={m}
+                        isGroupChat={isGroup}
+                        senderDirectory={groupSenderDirectory}
+                        isUnread={unreadMessageIds.has(m.id)}
+                        quotedMessage={
+                          m.quoted_message_id
+                            ? findMessageByWahaId(messages, m.quoted_message_id)
+                            : undefined
+                        }
+                        onReply={(msg) => setReplyTo(msg)}
+                        onForward={(msg) => {
+                          setForwardMessageRow(msg);
+                          setForwardOpen(true);
+                        }}
+                        onDeleteForEveryone={(msg) => setDeleteTarget(msg)}
+                      />
+                    </React.Fragment>
                   ))}
                 </div>
               ))
@@ -429,12 +458,14 @@ export const WhatsappChatView: React.FC<Props> = ({
           </div>
       </div>
 
-      <WhatsappMessageInput
-        sending={sendMessage.isPending}
-        replyTo={replyTo}
-        onClearReply={() => setReplyTo(null)}
-        onSend={onSend}
-      />
+      <div className="z-10 shrink-0">
+        <WhatsappMessageInput
+          sending={sendMessage.isPending}
+          replyTo={replyTo}
+          onClearReply={() => setReplyTo(null)}
+          onSend={onSend}
+        />
+      </div>
 
       <WhatsappForwardDialog
         open={forwardOpen}

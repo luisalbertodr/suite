@@ -2,6 +2,17 @@ import { format, subDays } from 'date-fns';
 import { es } from 'date-fns/locale';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
+import { articleInBillingScope, fetchFamilyBillingByName } from '@/lib/reportCatalogScope';
+import {
+  buildArticleCodigoIndex,
+  buildArticleFilterTerms,
+  buildFamilyCodigoSets,
+  fetchCatalogArticlesForMatching,
+  lineMatchesArticleFilter,
+  lineMatchesFamiliaFilter,
+  parseInvoiceLineArticleCode,
+  resolveLineArticle,
+} from '@/lib/invoiceLineCatalogMatch';
 import { fetchCatalogCustomers } from '@/lib/customerSearch';
 import { fetchSalesWithoutInvoiceRows } from '@/lib/salesRevenue';
 
@@ -63,6 +74,8 @@ export function formatReportCell(key: string, value: unknown): string {
 type Scope = {
   billingCompanyIds: string[];
   catalogCompanyId: string;
+  /** Todas las empresas del centro (filtro por artículo fiscal cruzado). */
+  allBillingCompanyIds?: string[];
 };
 
 function dateFrom(filters: ReportFilters): string | undefined {
@@ -106,6 +119,7 @@ function lineAmount(item: Record<string, unknown>): number {
   return Number(item.subtotal_after_discount ?? item.subtotal ?? item.total_price ?? 0);
 }
 
+/** Ámbito fiscal del informe: por defecto la empresa activa (M/E en barra superior). */
 export function resolveBillingScope(
   companyId: string | null,
   billingCompanies: { id: string }[],
@@ -113,9 +127,14 @@ export function resolveBillingScope(
   empresaEmisora?: string,
 ): string[] {
   if (!companyId) return [];
-  if (empresaEmisora && empresaEmisora !== 'all') return [empresaEmisora];
-  if (isMultiEntity && billingCompanies.length > 1) return billingCompanies.map((c) => c.id);
-  return [companyId];
+  const tab = empresaEmisora ?? companyId;
+  if (tab === 'all') {
+    if (isMultiEntity && billingCompanies.length > 1) {
+      return billingCompanies.map((c) => c.id);
+    }
+    return [companyId];
+  }
+  return [tab];
 }
 
 export function applyCompanyScope<T extends { eq: (c: string, v: string) => T; in: (c: string, v: string[]) => T }>(
@@ -196,13 +215,44 @@ async function fetchListadoFacturasEmitidas(scope: Scope, filters: ReportFilters
   const articuloIds = resolveArticuloFilter(filters);
   const hasLineFilter = familias.length > 0 || articuloIds.length > 0;
 
+  const catalogArticles = hasLineFilter
+    ? await fetchCatalogArticlesForMatching(scope.catalogCompanyId)
+    : [];
+  const byCodigo = buildArticleCodigoIndex(catalogArticles);
+  const articleTerms = buildArticleFilterTerms(articuloIds, catalogArticles);
+  const familiasFromArticulos = [
+    ...new Set(
+      catalogArticles
+        .filter((a) => articleTerms.ids.has(a.id) && a.familia?.trim())
+        .map((a) => a.familia!.trim()),
+    ),
+  ];
+  const familiasForLineMatch = [...new Set([...familias, ...familiasFromArticulos])];
+  const familyCodigoSets = buildFamilyCodigoSets(catalogArticles, familiasForLineMatch);
+
+  let invoiceScopeIds = scope.billingCompanyIds;
+  if (
+    articuloIds.length > 0 &&
+    scope.allBillingCompanyIds &&
+    scope.allBillingCompanyIds.length > 0
+  ) {
+    const selected = catalogArticles.filter((a) => articleTerms.ids.has(a.id));
+    const scopeSet = new Set(scope.billingCompanyIds);
+    if (selected.some((a) => a.billing_company_id && scopeSet.has(a.billing_company_id))) {
+      invoiceScopeIds = scope.allBillingCompanyIds;
+    }
+  }
+
   let query = supabase
     .from('invoices')
     .select(
-      'id, number, issue_date, total_amount, subtotal, tax_amount, paid_status, status, customers:customer_id (name)',
+      'id, company_id, number, issue_date, total_amount, subtotal, tax_amount, paid_status, status, customers:customer_id (name)',
     )
     ;
-  query = applyCompanyScope(query, scope);
+  query = applyCompanyScope(
+    query,
+    { billingCompanyIds: invoiceScopeIds, catalogCompanyId: scope.catalogCompanyId },
+  );
 
   if (filters.cliente && filters.cliente !== 'todos') query = query.eq('customer_id', filters.cliente);
   const from = dateFrom(filters);
@@ -251,29 +301,45 @@ async function fetchListadoFacturasEmitidas(scope: Scope, filters: ReportFilters
     const { data: items, error: itemsErr } = await supabase
       .from('invoice_items')
       .select(
-        'invoice_id, description, quantity, total_price, subtotal_after_discount, subtotal, articles:article_id (id, descripcion, familia, codigo)',
+        'invoice_id, description, quantity, total_price, subtotal_after_discount, subtotal',
       )
       .in('invoice_id', chunk);
     if (itemsErr) throw itemsErr;
 
     for (const raw of items ?? []) {
       const item = raw as Record<string, unknown>;
-      const art = item.articles as { id?: string; descripcion?: string; familia?: string; codigo?: string } | null;
-      const familiaArt = art?.familia ?? '';
-      const artId = art?.id ?? '';
-
-      if (familias.length > 0 && !familias.includes(familiaArt)) continue;
-      if (articuloIds.length > 0 && (!artId || !articuloIds.includes(artId))) continue;
+      const description = String(item.description ?? '');
+      const resolved = resolveLineArticle(description, byCodigo);
+      const familiaArt = resolved?.familia?.trim() ?? '';
+      const artId = resolved?.id ?? '';
 
       const inv = invById.get(String(item.invoice_id));
       if (!inv) continue;
 
-      const artLabel = art?.descripcion || String(item.description || 'Sin artículo');
+      const invoiceCompanyId = String(inv.company_id ?? '');
+      const matchesFamilia =
+        familiasForLineMatch.length === 0 ||
+        lineMatchesFamiliaFilter(description, byCodigo, familiasForLineMatch, familyCodigoSets, {
+          invoiceCompanyId,
+          billingCompanyIds: scope.billingCompanyIds,
+        });
+      const matchesArticulo =
+        articuloIds.length === 0 || lineMatchesArticleFilter(description, byCodigo, articleTerms);
+      if (familiasForLineMatch.length > 0 && articuloIds.length > 0) {
+        if (!matchesFamilia && !matchesArticulo) continue;
+      } else if (familiasForLineMatch.length > 0 && !matchesFamilia) {
+        continue;
+      } else if (articuloIds.length > 0 && !matchesArticulo) {
+        continue;
+      }
+
+      const artLabel = resolved?.descripcion || description || 'Sin artículo';
+      const codigo = resolved?.codigo ?? parseInvoiceLineArticleCode(description);
       rows.push({
         numero: inv.number,
         fechaEmision: format(new Date(String(inv.issue_date)), 'dd/MM/yyyy'),
         cliente: (inv.customers as { name?: string } | null)?.name || 'N/A',
-        articulo: art?.codigo ? `${art.codigo} - ${artLabel}` : artLabel,
+        articulo: codigo ? `${codigo} - ${artLabel}` : artLabel,
         familia: familiaArt || '—',
         cantidad: Number(item.quantity ?? 1),
         importeLinea: lineAmount(item),
@@ -395,15 +461,29 @@ async function fetchVentasPorArticulo(scope: Scope, filters: ReportFilters) {
   const saleIds = await saleIdsInScope(scope, filters);
   if (saleIds.length === 0) return [];
 
+  const familyBilling = await fetchFamilyBillingByName(
+    scope.catalogCompanyId,
+    scope.billingCompanyIds,
+  );
+
   const { data, error } = await supabase
     .from('sale_items')
-    .select('quantity, total_price, description, articles:article_id (descripcion, precio_compra, familia)')
+    .select(
+      'quantity, total_price, description, articles:article_id (descripcion, precio_compra, familia, company_id, billing_company_id)',
+    )
     .in('sale_id', saleIds);
   if (error) throw error;
 
   const byArt: Record<string, { cantidad: number; importe: number; costo: number }> = {};
   for (const item of data ?? []) {
     const art = item as any;
+    const linked = art.articles;
+    if (
+      linked &&
+      !articleInBillingScope(linked, scope.catalogCompanyId, scope.billingCompanyIds, familyBilling)
+    ) {
+      continue;
+    }
     if (filters.familia && filters.familia !== 'todas' && art.articles?.familia !== filters.familia) continue;
     const name = art.articles?.descripcion || art.description || 'Sin nombre';
     if (!byArt[name]) byArt[name] = { cantidad: 0, importe: 0, costo: Number(art.articles?.precio_compra ?? 0) };
@@ -555,15 +635,24 @@ async function fetchClientesTop(scope: Scope, filters: ReportFilters) {
 }
 
 async function fetchStockActual(scope: Scope, filters: ReportFilters) {
+  const familyBilling = await fetchFamilyBillingByName(
+    scope.catalogCompanyId,
+    scope.billingCompanyIds,
+  );
+
   let query = supabase
     .from('articles')
-    .select('descripcion, stock_actual, stock_minimo, precio_compra, familia')
+    .select('descripcion, stock_actual, stock_minimo, precio_compra, familia, company_id, billing_company_id')
     .eq('company_id', scope.catalogCompanyId)
     .order('descripcion');
   if (filters.familia && filters.familia !== 'todas') query = query.eq('familia', filters.familia);
   const { data, error } = await query;
   if (error) throw error;
-  let rows = (data ?? []).map((a: any) => ({
+  let rows = (data ?? [])
+    .filter((a: any) =>
+      articleInBillingScope(a, scope.catalogCompanyId, scope.billingCompanyIds, familyBilling),
+    )
+    .map((a: any) => ({
     articulo: a.descripcion,
     stockActual: a.stock_actual,
     stockMinimo: a.stock_minimo,
@@ -633,14 +722,22 @@ async function fetchArticulosSinMovimiento(scope: Scope, filters: ReportFilters)
       : { data: [] };
   const activeArticleIds = new Set((items ?? []).map((i: any) => i.article_id));
 
+  const familyBilling = await fetchFamilyBillingByName(
+    scope.catalogCompanyId,
+    scope.billingCompanyIds,
+  );
+
   const { data: articles, error } = await supabase
     .from('articles')
-    .select('id, descripcion, stock_actual, precio_compra, familia, updated_at')
+    .select('id, descripcion, stock_actual, precio_compra, familia, updated_at, company_id, billing_company_id')
     .eq('company_id', scope.catalogCompanyId)
     .gt('stock_actual', 0);
   if (error) throw error;
 
   return (articles ?? [])
+    .filter((a: any) =>
+      articleInBillingScope(a, scope.catalogCompanyId, scope.billingCompanyIds, familyBilling),
+    )
     .filter((a: any) => !activeArticleIds.has(a.id))
     .filter((a: any) => !filters.familia || filters.familia === 'todas' || a.familia === filters.familia)
     .map((a: any) => ({

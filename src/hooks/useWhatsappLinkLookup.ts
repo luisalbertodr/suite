@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
-import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
 import type { MetaLeadInfo } from '@/components/whatsapp/whatsappUtils';
 
 export interface WhatsappLinkSummary {
@@ -16,7 +16,7 @@ export const useWhatsappLinkLookup = (
     marketing_lead_id: string | null;
   }>,
 ): WhatsappLinkSummary => {
-  const { companyId } = useCompanyFilter();
+  const { companyId } = useWhatsappCompanyId();
 
   const customerIds = useMemo(
     () => Array.from(new Set(chats.map((c) => c.customer_id).filter(Boolean))) as string[],

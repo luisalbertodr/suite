@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
-import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
 import { usePermissions } from '@/hooks/usePermissions';
 import { toast } from '@/hooks/use-toast';
 import {
@@ -88,7 +88,7 @@ const channelsByCompany = new Map<string, NotifierChannel>();
 // Hook global (lo monta el Layout). Solo avisa fuera de /whatsapp: toast si la
 // pestaña está visible, notificación del sistema si está en segundo plano.
 export const useWhatsappIncomingNotifier = () => {
-  const { companyId, loading } = useCompanyFilter();
+  const { companyId, loading } = useWhatsappCompanyId();
   const { hasPermission } = usePermissions();
   const navigate = useNavigate();
   const location = useLocation();

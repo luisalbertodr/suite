@@ -10,6 +10,7 @@ import { Select, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/
 import { Skeleton } from '@/components/ui/skeleton';
 import { X, Save, Trash2, ArrowLeft } from 'lucide-react';
 import { AppointmentItemsEditor } from '@/components/AppointmentItemsEditor';
+import { AppointmentAttachmentsPanel } from '@/components/AppointmentAttachmentsPanel';
 import { AppointmentCustomerSummaryBar } from '@/components/AppointmentCustomerSummaryBar';
 import { AppointmentSelectContent } from '@/components/AppointmentSelectContent';
 import { APPOINTMENT_CUSTOMER_SUMMARY_FIELDS } from '@/lib/appointmentCustomerSummary';
@@ -37,6 +38,7 @@ import { PermissionButton } from '@/components/PermissionButton';
 import { usePermissionGuard } from '@/hooks/usePermissionGuard';
 import { resolveAppointmentClientPick } from '@/lib/appointmentCustomerResolve';
 import { normalizeLegacyAppointmentDescription } from '@/lib/legacyAppointmentItems';
+import { AppointmentResourceConflictDialog } from '@/components/AppointmentResourceConflictDialog';
 
 interface Employee { id: string; name: string; color: string; billing_company_id?: string | null; }
 interface Appointment {
@@ -148,6 +150,8 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
   const { requireOrToast: requirePermissionOrToast } = usePermissionGuard();
   const [showCustomerHistory, setShowCustomerHistory] = useState(false);
   const [customerHistoryTab, setCustomerHistoryTab] = useState<'timeline' | 'vouchers' | 'ficha'>('ficha');
+  const [resourceConflictMessages, setResourceConflictMessages] = useState<string[]>([]);
+  const [showResourceConflictDialog, setShowResourceConflictDialog] = useState(false);
 
   const [formData, setFormData] = useState({
     description: normalizeLegacyAppointmentDescription(appointment.description),
@@ -326,6 +330,10 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (resourceConflictMessages.length > 0) {
+      setShowResourceConflictDialog(true);
+      return;
+    }
     const clientName = (appointment.clientName || summaryCustomer?.name || '').trim();
     if (!clientName) return;
     const endTime = calcEndFromStart(formData.startTime, effectiveDurationMinutes(items));
@@ -433,6 +441,9 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                 excludeAppointmentId={appointment.id}
                 compactHeader
                 compactSlots
+                timeSlotsServicesOnly
+                onResourceConflictsChange={setResourceConflictMessages}
+                itemsLocked={chargeState.anyInvoiced}
               />
             )}
 
@@ -444,6 +455,15 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                 placeholder="Notas rápidas de la cita"
               />
             </div>
+
+            {effectiveCustomerId && companyId && (
+              <AppointmentAttachmentsPanel
+                appointmentId={appointment.id}
+                customerId={effectiveCustomerId}
+                companyId={companyId}
+                logDate={formData.date}
+              />
+            )}
 
             <div className="flex justify-between pt-2">
               <PermissionButton
@@ -492,7 +512,14 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                         : 'Cobrar en TPV'}
                   </Button>
                 )}
-                <Button type="submit" size="sm"><Save className="w-4 h-4 mr-1" /> Guardar</Button>
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={resourceConflictMessages.length > 0}
+                  title={resourceConflictMessages.length > 0 ? 'Hay conflicto de cabina o recurso' : undefined}
+                >
+                  <Save className="w-4 h-4 mr-1" /> Guardar
+                </Button>
               </div>
             </div>
             {showNotify && onNotify && (
@@ -535,6 +562,11 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
           </form>
         </CardContent>
       </Card>
+      <AppointmentResourceConflictDialog
+        open={showResourceConflictDialog}
+        onOpenChange={setShowResourceConflictDialog}
+        messages={resourceConflictMessages}
+      />
       <ClienteDetailOverlay
         open={showCustomerHistory && !!effectiveCustomerId}
         customerId={effectiveCustomerId ?? ''}

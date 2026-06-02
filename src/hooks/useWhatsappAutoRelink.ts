@@ -1,13 +1,13 @@
 import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
-import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
 import { isGroupJid, isSystemChatJid } from '@/components/whatsapp/whatsappUtils';
 import type { WhatsappChatRow } from '@/hooks/useWhatsappChats';
 
 /** Persiste vínculos cliente/chat en BD vía whatsapp_auto_link_chat (incl. @lid). */
 export function useWhatsappAutoRelink(chats: WhatsappChatRow[]) {
-  const { companyId } = useCompanyFilter();
+  const { companyId } = useWhatsappCompanyId();
   const queryClient = useQueryClient();
   const runningRef = useRef(false);
   const lastKeyRef = useRef('');

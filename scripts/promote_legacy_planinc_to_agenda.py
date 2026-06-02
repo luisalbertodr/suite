@@ -45,6 +45,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor, execute_values
 
 from legacy_company import DEFAULT_COMPANY_ID, get_company_id
+from legacy_planinc_items import collect_planart_rows_from_group_text
 
 ROOT = Path(__file__).resolve().parents[1]
 ENV_PATH = ROOT / ".env"
@@ -288,26 +289,6 @@ def canonical_legacy_planinc_id(group: list[dict]) -> int | None:
     return None
 
 
-def collect_planart_rows_for_group(
-    group: list[dict],
-    planart_by_idplan: dict[str, list[dict]],
-) -> list[dict]:
-    seen: set[tuple[str, str]] = set()
-    rows: list[dict] = []
-    for seg in group:
-        idp = str(seg.get("idplan") or "").strip()
-        if not idp:
-            continue
-        for pa in planart_by_idplan.get(idp, []):
-            cod = str(pa.get("codart") or "").strip()
-            key = (idp, cod)
-            if not cod or key in seen:
-                continue
-            seen.add(key)
-            rows.append(pa)
-    return rows
-
-
 def build_item_templates_for_group(
     group: list[dict],
     planart_by_idplan: dict[str, list[dict]],
@@ -315,7 +296,7 @@ def build_item_templates_for_group(
     article_by_legacy: dict[str, dict],
     art_legacy_meta: dict[str, dict],
 ) -> list[dict]:
-    planart_rows = collect_planart_rows_for_group(group, planart_by_idplan)
+    planart_rows = collect_planart_rows_from_group_text(group, planart_by_idplan)
     if planart_rows:
         rows: list[dict] = []
         for order, pa in enumerate(planart_rows):
@@ -503,12 +484,18 @@ def main() -> None:
             (company_id,),
         )
         for ar in cur.fetchall():
-            c = str(ar.get("legacy_codart") or "").strip()
-            if not c:
-                continue
             row = dict(ar)
-            article_by_legacy[c] = row
-            article_by_legacy[c.lstrip("0") or "0"] = row
+            keys: set[str] = set()
+            for raw in (ar.get("legacy_codart"), ar.get("codigo")):
+                c = str(raw or "").strip()
+                if not c:
+                    continue
+                keys.add(c)
+                keys.add(c.lstrip("0") or "0")
+            if not keys:
+                continue
+            for c in keys:
+                article_by_legacy[c] = row
 
     customer_by_legacy: dict[str, str] = {}
     if public_table_exists(cur, "customers"):
@@ -551,7 +538,8 @@ def main() -> None:
         codcli = str(r.get("codcli") or "").strip()
         client_name = nomcli or codcli or "Cliente"
 
-        planart_txt = effective_planinc_text(r, "planart")
+        planart_raw = effective_planinc_text(r, "planart")
+        planart_txt = planart_raw
         texto = effective_planinc_text(r, "texto")
         description = appointment_description_from_seg({"texto": texto, "planart_txt": planart_txt}) or "Cita importada"
 
@@ -583,6 +571,7 @@ def main() -> None:
             "client_name": client_name,
             "description": description[:1000],
             "planart_txt": planart_txt,
+            "planart_raw": planart_raw,
             "texto": texto,
             "idplan": idplan_s,
             "legacy_planinc_id": legacy_planinc_id,

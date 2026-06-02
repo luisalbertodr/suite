@@ -15,7 +15,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/lib/supabase';
-import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
 import { useWhatsappChatLink } from '@/hooks/useWhatsappChatLink';
 import {
   displayNameForChat,
@@ -42,7 +42,7 @@ export const WhatsappCreateCustomerDialog: React.FC<Props> = ({
 }) => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { companyId } = useCompanyFilter();
+  const { companyId } = useWhatsappCompanyId();
   const { setLink } = useWhatsappChatLink();
 
   const [name, setName] = useState('');

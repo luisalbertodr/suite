@@ -186,11 +186,26 @@ export function inbodyStatusClass(status: InbodyRangeStatus): string {
   }
 }
 
-export function inbodySexLabel(sex: string | null | undefined): string {
+export type InbodySex = 'male' | 'female';
+
+export function resolveInbodySex(sex: string | null | undefined): InbodySex | null {
   const s = (sex || '').trim().toUpperCase();
-  if (s === 'F' || s === 'FEMALE' || s === 'MUJER') return 'Mujer';
-  if (s === 'M' || s === 'MALE' || s === 'HOMBRE') return 'Hombre';
+  if (s === 'F' || s === 'FEMALE' || s === 'MUJER' || s === 'W') return 'female';
+  if (s === 'M' || s === 'MALE' || s === 'HOMBRE') return 'male';
+  return null;
+}
+
+export function inbodySexLabel(sex: string | null | undefined): string {
+  const resolved = resolveInbodySex(sex);
+  if (resolved === 'female') return 'Mujer';
+  if (resolved === 'male') return 'Hombre';
   return sex || '—';
+}
+
+/** % respecto al rango normal InBody (90–110). El dispositivo ya aplica referencias por sexo/edad. */
+export function segmentLeanEvalPct(entry?: { pct?: number | null; eval_pct?: number | null }): number | null {
+  const v = entry?.eval_pct ?? entry?.pct;
+  return v == null || Number.isNaN(v) ? null : v;
 }
 
 export function inbodyBarScale(

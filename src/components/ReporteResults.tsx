@@ -68,7 +68,15 @@ export const ReporteResults: React.FC<ReporteResultsProps> = ({ report, filters,
     queryKey: ['report-data', companyId, catalogCompanyId, report.id, filters, billingCompanyIds.join(',')],
     queryFn: async () => {
       if (!companyId || !catalogCompanyId) return [];
-      return fetchReportData(report.id, { billingCompanyIds, catalogCompanyId }, filters as ReportFilters);
+      return fetchReportData(
+        report.id,
+        {
+          billingCompanyIds,
+          catalogCompanyId,
+          allBillingCompanyIds: billingCompanies.map((c) => c.id),
+        },
+        filters as ReportFilters,
+      );
     },
     enabled: !!companyId && !!catalogCompanyId && !companyLoading,
   });
@@ -241,14 +249,20 @@ export const ReporteResults: React.FC<ReporteResultsProps> = ({ report, filters,
                     Cobro: {filters.estado === 'paid' ? 'Cobradas' : filters.estado === 'pending' ? 'Pendientes' : filters.estado}
                   </span>
                 )}
-                {(filters.familias as string[] | undefined)?.length ? (
+                {((filters.familias as string[] | undefined)?.length ||
+                  (filters.articulos as string[] | undefined)?.length) ? (
                   <span className="px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-sm">
-                    Familias: {(filters.familias as string[]).length}
-                  </span>
-                ) : null}
-                {(filters.articulos as string[] | undefined)?.length ? (
-                  <span className="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm">
-                    Artículos: {(filters.articulos as string[]).length}
+                    Catálogo:{' '}
+                    {[
+                      (filters.familias as string[] | undefined)?.length
+                        ? `${(filters.familias as string[]).length} fam.`
+                        : null,
+                      (filters.articulos as string[] | undefined)?.length
+                        ? `${(filters.articulos as string[]).length} art.`
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
                   </span>
                 ) : null}
               </div>

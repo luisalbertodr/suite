@@ -25,8 +25,11 @@ import {
   INBODY_CHART_PARAMS,
   buildInbodyChartSeries,
   formatChartValue,
+  type InbodyChartParam,
   type InbodyChartParamId,
 } from '@/lib/inbodyChartParams';
+import { inbodyGlossaryForChartParam } from '@/lib/inbodyGlossary';
+import { InbodyMetricHelp } from './InbodyMetricHelp';
 
 interface Props {
   measurements: InbodyMeasurement[];
@@ -45,6 +48,13 @@ const chartConfig = {
   },
 } satisfies ChartConfig;
 
+const CHART_GROUP_ORDER: InbodyChartParam['group'][] = [
+  'composicion',
+  'diagnostico',
+  'control',
+  'segmental',
+];
+
 export const InbodyHistoryChart: React.FC<Props> = ({
   measurements,
   selectedId,
@@ -53,6 +63,7 @@ export const InbodyHistoryChart: React.FC<Props> = ({
 }) => {
   const [paramId, setParamId] = useState<InbodyChartParamId>('weight_kg');
   const param = INBODY_CHART_PARAMS.find((p) => p.id === paramId)!;
+  const glossaryId = inbodyGlossaryForChartParam(paramId);
 
   const series = useMemo(
     () => buildInbodyChartSeries(measurements, paramId, selectedId),
@@ -90,10 +101,13 @@ export const InbodyHistoryChart: React.FC<Props> = ({
               <SelectTrigger className={cn('h-9', compact && 'h-8 text-xs')}>
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
-                {Object.entries(groupedParams).map(([group, params]) => (
+              <SelectContent className="z-[100] max-h-80">
+                {CHART_GROUP_ORDER.map((group) => {
+                  const params = groupedParams[group];
+                  if (!params?.length) return null;
+                  return (
                   <SelectGroup key={group}>
-                    <SelectLabel>{INBODY_CHART_PARAM_GROUPS[group as keyof typeof INBODY_CHART_PARAM_GROUPS]}</SelectLabel>
+                    <SelectLabel>{INBODY_CHART_PARAM_GROUPS[group]}</SelectLabel>
                     {params.map((p) => (
                       <SelectItem key={p.id} value={p.id}>
                         {p.label}
@@ -101,9 +115,19 @@ export const InbodyHistoryChart: React.FC<Props> = ({
                       </SelectItem>
                     ))}
                   </SelectGroup>
-                ))}
+                  );
+                })}
               </SelectContent>
             </Select>
+            {glossaryId && (
+              <div className="pt-1">
+                <InbodyMetricHelp
+                  metricId={glossaryId}
+                  label={param.label}
+                  labelClassName="text-[11px] font-normal text-muted-foreground"
+                />
+              </div>
+            )}
           </div>
         </div>
       </CardHeader>
@@ -181,11 +205,13 @@ export const InbodyHistoryChart: React.FC<Props> = ({
                   stroke="var(--color-value)"
                   strokeWidth={2}
                   dot={(props) => {
-                    const { cx, cy, payload } = props;
-                    const selected = (payload as { isSelected?: boolean }).isSelected;
-                    if (cx == null || cy == null) return <g />;
+                    const { cx, cy, payload, index } = props;
+                    const row = payload as { id?: string; isSelected?: boolean };
+                    const selected = row.isSelected;
+                    if (cx == null || cy == null) return <g key={`dot-empty-${index ?? 0}`} />;
                     return (
                       <circle
+                        key={row.id ?? `dot-${index ?? 0}`}
                         cx={cx}
                         cy={cy}
                         r={selected ? 5.5 : 4}
@@ -203,7 +229,8 @@ export const InbodyHistoryChart: React.FC<Props> = ({
                     strokeWidth: 2.5,
                   }}
                   connectNulls
-                />              </LineChart>
+                />
+              </LineChart>
             </ChartContainer>
             {rangeBand && (
               <p className="text-[10px] text-muted-foreground text-center mt-2">

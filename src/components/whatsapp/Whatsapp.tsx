@@ -200,7 +200,7 @@ export const Whatsapp: React.FC = () => {
 
   return (
     <div
-      className={`mx-auto h-[calc(100vh-9rem)] max-w-[1400px] overflow-hidden rounded-lg border ${waTheme.border} ${waTheme.appBg} shadow-sm dark:bg-zinc-950`}
+      className={`mx-auto h-[calc(100vh-9rem)] max-md:h-[calc(100dvh-13.5rem)] max-w-[1400px] overflow-hidden rounded-lg border ${waTheme.border} ${waTheme.appBg} shadow-sm dark:bg-zinc-950`}
     >
       <div className="grid h-full min-h-0 grid-cols-[minmax(340px,400px)_1fr] overflow-hidden">
         <WhatsappChatList

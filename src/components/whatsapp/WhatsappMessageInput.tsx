@@ -270,7 +270,7 @@ export const WhatsappMessageInput: React.FC<Props> = ({
 
   return (
     <footer
-      className={`z-10 flex shrink-0 flex-col border-t ${waTheme.headerBg} ${waTheme.border}`}
+      className={`z-10 flex shrink-0 flex-col border-t pb-[env(safe-area-inset-bottom)] max-md:pb-[calc(env(safe-area-inset-bottom)+4.75rem)] ${waTheme.headerBg} ${waTheme.border}`}
     >
       {replyTo ? (
         <div className="flex items-center gap-2 border-b border-[#e9edef] px-4 py-2 dark:border-zinc-800">
