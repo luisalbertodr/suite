@@ -23,7 +23,7 @@ export type CustomerAttachment = {
   refId?: string | null;
 };
 
-const IMAGE_EXT = /\.(jpe?g|png|gif|webp|bmp|svg)(\?|$)/i;
+const IMAGE_EXT = /\.(jpe?g|png|gif|webp|bmp|svg|heic|heif)(\?|$)/i;
 
 function toYmd(value: string | null | undefined): string | null {
   if (!value) return null;
@@ -44,6 +44,12 @@ export function isCustomerAttachmentImage(
 ): boolean {
   if (kind === 'photo' || kind === 'consent') return true;
   return IMAGE_EXT.test(url);
+}
+
+/** ID de fila en daily_customer_log_assets si el adjunto se puede borrar desde Suite. */
+export function deletableCustomerAttachmentAssetId(item: CustomerAttachment): string | null {
+  if (!item.id.startsWith('log-asset:')) return null;
+  return item.id.slice('log-asset:'.length) || null;
 }
 
 function assetKindToAttachmentKind(assetKind: string): CustomerAttachmentKind {
@@ -111,7 +117,11 @@ export async function fetchCustomerAttachments(customerId: string): Promise<Cust
         kind,
         source: asset.ref_table === 'agenda_appointments' ? 'cita' : 'daily_log',
         sourceLabel:
-          asset.ref_table === 'agenda_appointments' ? 'Cita' : 'Registro diario',
+          asset.ref_table === 'agenda_appointments'
+            ? 'Cita'
+            : asset.ref_table === 'customers'
+              ? 'Immich'
+              : 'Registro diario',
         isImage: isCustomerAttachmentImage(url, kind),
         refTable: asset.ref_table,
         refId: asset.ref_id,

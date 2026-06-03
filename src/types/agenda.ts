@@ -1,3 +1,4 @@
+import type { AppointmentAttachmentHints } from '@/lib/appointmentAttachmentHints';
 
 export interface Employee {
   id: string;
@@ -57,6 +58,8 @@ export interface Appointment {
   status: 'confirmed' | 'pending' | 'cancelled';
   /** Cobro TPV / factura asociada a la cita. */
   paymentStatus?: 'paid' | 'invoiced' | 'pending_charge' | 'none';
+  /** Fotos / documentos / consentimientos en daily_customer_log_assets. */
+  attachments?: AppointmentAttachmentHints;
 }
 
 /** Borrador de ítem de cita (UI); `clientKey` es estable en el cliente para listas y drag. */

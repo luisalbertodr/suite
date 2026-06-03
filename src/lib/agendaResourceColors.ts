@@ -48,5 +48,7 @@ export const AGENDA_APPOINTMENT_OVERLAY_Z = 'z-[90]';
 export const AGENDA_CUSTOMER_DETAIL_OVERLAY_Z = 'z-[95]';
 /** Desplegables dentro del modal de cita. */
 export const AGENDA_APPOINTMENT_SELECT_Z = 'z-[100]';
+/** Formulario historial clínico sobre la cita y la ficha cliente. */
+export const AGENDA_CLINICAL_HISTORY_OVERLAY_Z = 'z-[105]';
 
 export { resolveRecursoColor };

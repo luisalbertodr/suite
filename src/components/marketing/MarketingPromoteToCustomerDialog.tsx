@@ -18,6 +18,11 @@ import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import type { MarketingLead } from '@/hooks/useMarketingLeads';
 import { humanizeFieldKey } from './marketingFormatters';
+import {
+  extractBirthDateFromMetaFieldData,
+  parseBirthDateValue,
+} from '@/lib/birthDateParse';
+import { formatAgeLabel } from '@/lib/patientAge';
 
 interface MarketingPromoteToCustomerDialogProps {
   lead: MarketingLead | null;
@@ -66,6 +71,7 @@ export const MarketingPromoteToCustomerDialog: React.FC<MarketingPromoteToCustom
   const [email, setEmail] = useState('');
   const [taxId, setTaxId] = useState('');
   const [city, setCity] = useState('');
+  const [birthDate, setBirthDate] = useState('');
   const [notes, setNotes] = useState('');
   const [existingCustomer, setExistingCustomer] = useState<{
     id: string;
@@ -82,6 +88,13 @@ export const MarketingPromoteToCustomerDialog: React.FC<MarketingPromoteToCustom
       setEmail(lead.email ?? '');
       setTaxId('');
       setCity('');
+      const fd = Array.isArray(lead.field_data)
+        ? (lead.field_data as Array<{ name: string; values?: string[] }>)
+        : [];
+      const fromMeta = extractBirthDateFromMetaFieldData(
+        fd.map((f) => ({ name: f.name, values: f.values ?? [] })),
+      );
+      setBirthDate(fromMeta ?? '');
       setNotes(buildNotes(lead));
       setExistingCustomer(null);
     }
@@ -159,6 +172,8 @@ export const MarketingPromoteToCustomerDialog: React.FC<MarketingPromoteToCustom
       const trimmedName = name.trim();
       if (!trimmedName) throw new Error('El nombre es obligatorio');
 
+      const birthYmd = parseBirthDateValue(birthDate.trim());
+
       const insertPayload = {
         company_id: companyId,
         name: trimmedName,
@@ -166,6 +181,7 @@ export const MarketingPromoteToCustomerDialog: React.FC<MarketingPromoteToCustom
         email: email.trim() || null,
         tax_id: taxId.trim() || null,
         address_city: city.trim() || null,
+        birth_date: birthYmd,
         notes: notes.trim() || null,
       };
 
@@ -284,6 +300,23 @@ export const MarketingPromoteToCustomerDialog: React.FC<MarketingPromoteToCustom
           <div className="space-y-2">
             <Label htmlFor="promote-city">Ciudad</Label>
             <Input id="promote-city" value={city} onChange={(e) => setCity(e.target.value)} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="promote-birth">Fecha de nacimiento</Label>
+            <div className="flex items-center gap-2">
+              <Input
+                id="promote-birth"
+                type="date"
+                value={birthDate}
+                onChange={(e) => setBirthDate(e.target.value)}
+                className="flex-1"
+              />
+              {formatAgeLabel(birthDate) && (
+                <span className="text-xs text-muted-foreground whitespace-nowrap tabular-nums">
+                  {formatAgeLabel(birthDate)}
+                </span>
+              )}
+            </div>
           </div>
           <div className="space-y-2 md:col-span-2">
             <Label htmlFor="promote-notes">Notas (origen del lead + respuestas)</Label>

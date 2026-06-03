@@ -12,6 +12,8 @@ import { EditAppointmentForm } from './EditAppointmentForm';
 import { AppointmentResourceConflictDialog } from './AppointmentResourceConflictDialog';
 import { useAgendaEmployees } from '@/hooks/useAgendaEmployees';
 import { useAgendaAppointments } from '@/hooks/useAgendaAppointments';
+import { useAgendaAppointmentAttachments } from '@/hooks/useAgendaAppointmentAttachments';
+import { hasAttachmentHints } from '@/lib/appointmentAttachmentHints';
 import { useCabinas, useRecursos } from '@/hooks/useRecursosCabinas';
 import { format, addDays, subDays, parse, isValid } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -362,6 +364,12 @@ export const Agenda: React.FC = () => {
     updateAppointment,
     deleteAppointment,
   } = useAgendaAppointments(selectedDateYmd);
+
+  const agendaAppointmentIds = useMemo(
+    () => dbAppointments.map((a) => a.id).filter(Boolean),
+    [dbAppointments],
+  );
+  const { data: agendaAttachmentHints } = useAgendaAppointmentAttachments(agendaAppointmentIds);
 
   const { cabinas } = useCabinas();
   const { recursos } = useRecursos();
@@ -726,6 +734,10 @@ export const Agenda: React.FC = () => {
         : undefined,
       paymentStatus,
       status: aptStatus,
+      attachments: (() => {
+        const hints = agendaAttachmentHints?.get(row.id);
+        return hints && hasAttachmentHints(hints) ? hints : undefined;
+      })(),
     };
   });
 
@@ -997,6 +1009,17 @@ export const Agenda: React.FC = () => {
           description: (e as Error)?.message || 'Revisa los ítems y vuelve a guardar.',
           variant: 'destructive',
         });
+      }
+
+      if (dateStr !== selectedDateYmd) {
+        const parsed = parse(dateStr, 'yyyy-MM-dd', new Date());
+        if (isValid(parsed)) {
+          selectAgendaDate(parsed, { syncUrl: false });
+          toast({
+            title: 'Cita guardada',
+            description: `Se ha guardado el ${format(parsed, 'd MMM yyyy', { locale: es })}.`,
+          });
+        }
       }
 
       setShowAppointmentForm(false);
@@ -1379,6 +1402,7 @@ export const Agenda: React.FC = () => {
           }
           employeeId={selectedSlot.employeeId}
           time={selectedSlot.time}
+          defaultDate={selectedDateYmd}
           employees={allEmployees}
           cabinas={cabinas.data || []}
           recursos={recursos.data || []}

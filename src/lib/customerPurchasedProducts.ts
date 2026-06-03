@@ -12,6 +12,8 @@ export type CustomerPurchasedProduct = {
   ticketNumber: string | null;
   saleId: string;
   appointmentId: string | null;
+  /** Fecha de la cita (yyyy-MM-dd) si está vinculada. */
+  appointmentDateYmd: string | null;
 };
 
 export function isProductArticleKind(kind: string | null | undefined): boolean {
@@ -114,7 +116,34 @@ export async function fetchCustomerPurchasedProducts(
         ticketNumber,
         saleId,
         appointmentId,
+        appointmentDateYmd: null,
       });
+    }
+  }
+
+  const appointmentIds = [...new Set(rows.map((r) => r.appointmentId).filter(Boolean))] as string[];
+  const appointmentDateById = new Map<string, string>();
+
+  if (appointmentIds.length) {
+    const { data: appts, error: apptErr } = await supabase
+      .from('agenda_appointments')
+      .select('id, start_time, appointment_date')
+      .in('id', appointmentIds);
+    if (!apptErr) {
+      for (const a of appts ?? []) {
+        const id = String((a as { id: string }).id);
+        const raw =
+          (a as { appointment_date?: string | null }).appointment_date ??
+          (a as { start_time?: string | null }).start_time;
+        const ymd = raw ? String(raw).slice(0, 10) : '';
+        if (/^\d{4}-\d{2}-\d{2}$/.test(ymd)) appointmentDateById.set(id, ymd);
+      }
+    }
+  }
+
+  for (const row of rows) {
+    if (row.appointmentId) {
+      row.appointmentDateYmd = appointmentDateById.get(row.appointmentId) ?? row.purchasedAt.slice(0, 10);
     }
   }
 

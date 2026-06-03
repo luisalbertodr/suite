@@ -21,6 +21,7 @@ export function useAppointmentAssets(
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey });
+    queryClient.invalidateQueries({ queryKey: ['agenda-appointment-attachments'] });
     if (opts?.customerId) {
       queryClient.invalidateQueries({ queryKey: ['customer_day_timeline', opts.customerId] });
       queryClient.invalidateQueries({ queryKey: ['customer_attachments', opts.customerId] });

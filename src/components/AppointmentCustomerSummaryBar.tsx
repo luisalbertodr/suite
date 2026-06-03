@@ -24,6 +24,7 @@ type Props = {
   onOpenFacturacion: () => void;
   onViewInvoice?: () => void;
   onCharge?: () => void;
+  onOpenClinicalHistory?: () => void;
   showCrearBono?: boolean;
 };
 
@@ -43,6 +44,7 @@ export const AppointmentCustomerSummaryBar: React.FC<Props> = ({
   onOpenFacturacion,
   onViewInvoice,
   onCharge,
+  onOpenClinicalHistory,
   showCrearBono = true,
 }) => {
   const contactLine = formatCustomerContactLine(customer);
@@ -65,6 +67,17 @@ export const AppointmentCustomerSummaryBar: React.FC<Props> = ({
           <Button type="button" variant="outline" size="sm" className="h-6 text-[11px] px-2" onClick={onOpenFicha}>
             Ficha
           </Button>
+          {onOpenClinicalHistory && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-6 text-[11px] px-2"
+              onClick={onOpenClinicalHistory}
+            >
+              Hist. clínico
+            </Button>
+          )}
           <Select value={status} onValueChange={(v) => onStatusChange(v as typeof status)}>
             <SelectTrigger className="h-6 text-[11px] px-2 min-w-[104px]">
               <SelectValue />

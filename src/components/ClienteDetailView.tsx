@@ -11,6 +11,7 @@ import { ClienteBonosTab } from './cliente/ClienteBonosTab';
 import { ClienteFichaTecnicaTab } from './cliente/ClienteFichaTecnicaTab';
 import { ClienteInbodyTab } from './cliente/ClienteInbodyTab';
 import { ClienteAdjuntosTab } from './cliente/ClienteAdjuntosTab';
+import { ClienteHistorialClinicoTab } from './cliente/ClienteHistorialClinicoTab';
 import type { ClienteDetailTab } from '@/types/clienteDetail';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
@@ -139,7 +140,7 @@ export const ClienteDetailView: React.FC<Props> = ({
       <Tabs value={tab} onValueChange={setTab} className="w-full">
         <TabsList
           className={cn(
-            'w-full grid grid-cols-5 bg-sky-50/50 dark:bg-sky-950/20 border border-sky-100/50 dark:border-sky-900/20 rounded-lg p-0.5',
+            'w-full grid grid-cols-3 sm:grid-cols-6 bg-sky-50/50 dark:bg-sky-950/20 border border-sky-100/50 dark:border-sky-900/20 rounded-lg p-0.5',
             compact && 'h-8',
           )}
         >
@@ -180,6 +181,15 @@ export const ClienteDetailView: React.FC<Props> = ({
             InBody
           </TabsTrigger>
           <TabsTrigger
+            value="historial"
+            className={cn(
+              'rounded-md data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-sky-700 dark:data-[state=active]:bg-gray-800 dark:data-[state=active]:text-sky-300',
+              compact ? 'text-[10px] px-1 py-1 h-7' : 'text-sm rounded-lg',
+            )}
+          >
+            Historial
+          </TabsTrigger>
+          <TabsTrigger
             value="adjuntos"
             className={cn(
               'rounded-md data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-sky-700 dark:data-[state=active]:bg-gray-800 dark:data-[state=active]:text-sky-300',
@@ -200,7 +210,12 @@ export const ClienteDetailView: React.FC<Props> = ({
           </TabsContent>
 
           <TabsContent value="vouchers" className="mt-0">
-            {tab === 'vouchers' ? <ClienteBonosTab customerId={customerId} /> : null}
+            {tab === 'vouchers' ? (
+              <ClienteBonosTab
+                customerId={customerId}
+                onAppointmentClick={handleAppointmentClick}
+              />
+            ) : null}
           </TabsContent>
 
           <TabsContent value="timeline" className="mt-0">
@@ -219,6 +234,17 @@ export const ClienteDetailView: React.FC<Props> = ({
                 customerId={customerId}
                 taxId={mergedCustomer?.tax_id}
                 companyId={mergedCustomer?.company_id}
+                compact={compact}
+              />
+            ) : null}
+          </TabsContent>
+
+          <TabsContent value="historial" className="mt-0">
+            {tab === 'historial' ? (
+              <ClienteHistorialClinicoTab
+                customerId={customerId}
+                companyId={mergedCustomer?.company_id}
+                customerName={mergedCustomer?.name}
                 compact={compact}
               />
             ) : null}

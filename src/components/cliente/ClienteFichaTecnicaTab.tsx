@@ -6,6 +6,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { IbanInput } from '@/components/ui/iban-input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
+import { formatAgeLabel } from '@/lib/patientAge';
 
 interface Props {
   customer: any;
@@ -16,12 +17,9 @@ interface Props {
 const fieldLabel = 'text-[10px] uppercase tracking-wide text-muted-foreground font-medium';
 const fieldInput = 'h-8 text-sm mt-0.5';
 
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="text-xs font-semibold text-foreground/90 col-span-full pt-1 first:pt-0 border-t border-border/40 first:border-t-0 mt-2 first:mt-0">
-      {children}
-    </p>
-  );
+function birthDateYmd(customer: { birth_date?: string | null }): string {
+  if (!customer.birth_date) return '';
+  return String(customer.birth_date).slice(0, 10);
 }
 
 export const ClienteFichaTecnicaTab: React.FC<Props> = ({ customer, isLoading, onUpdate }) => {
@@ -37,10 +35,12 @@ export const ClienteFichaTecnicaTab: React.FC<Props> = ({ customer, isLoading, o
 
   if (!customer) return null;
 
+  const birthYmd = birthDateYmd(customer);
+  const ageLabel = formatAgeLabel(birthYmd);
+
   return (
     <div className="rounded-lg border border-sky-100/50 dark:border-sky-900/20 bg-card/40 p-3">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-3 gap-y-2">
-        <SectionTitle>Identificación</SectionTitle>
         <div>
           <Label className={fieldLabel}>Nombre</Label>
           <Input
@@ -58,6 +58,22 @@ export const ClienteFichaTecnicaTab: React.FC<Props> = ({ customer, isLoading, o
           />
         </div>
         <div>
+          <Label className={fieldLabel}>Fecha de nacimiento</Label>
+          <div className="flex items-center gap-2 mt-0.5">
+            <Input
+              type="date"
+              value={birthYmd}
+              onChange={(e) => onUpdate('birth_date', e.target.value || null)}
+              className={cn(fieldInput, 'flex-1 mt-0')}
+            />
+            {ageLabel && (
+              <span className="text-xs text-muted-foreground whitespace-nowrap tabular-nums">
+                {ageLabel}
+              </span>
+            )}
+          </div>
+        </div>
+        <div>
           <Label className={fieldLabel}>Persona contacto</Label>
           <Input
             value={customer.contact_person || ''}
@@ -65,8 +81,6 @@ export const ClienteFichaTecnicaTab: React.FC<Props> = ({ customer, isLoading, o
             className={fieldInput}
           />
         </div>
-
-        <SectionTitle>Contacto</SectionTitle>
         <div>
           <Label className={fieldLabel}>Email</Label>
           <Input
@@ -92,8 +106,6 @@ export const ClienteFichaTecnicaTab: React.FC<Props> = ({ customer, isLoading, o
             className={fieldInput}
           />
         </div>
-
-        <SectionTitle>Pago</SectionTitle>
         <div>
           <Label className={fieldLabel}>Forma de pago</Label>
           <Select
@@ -120,8 +132,6 @@ export const ClienteFichaTecnicaTab: React.FC<Props> = ({ customer, isLoading, o
             className="mt-0.5 [&_input]:h-8 [&_input]:text-sm"
           />
         </div>
-
-        <SectionTitle>Dirección</SectionTitle>
         <div className="sm:col-span-2 lg:col-span-3">
           <Label className={fieldLabel}>Calle</Label>
           <Input
@@ -162,9 +172,8 @@ export const ClienteFichaTecnicaTab: React.FC<Props> = ({ customer, isLoading, o
             className={fieldInput}
           />
         </div>
-
-        <SectionTitle>Notas</SectionTitle>
         <div className="sm:col-span-2 lg:col-span-3">
+          <Label className={fieldLabel}>Notas</Label>
           <Textarea
             value={customer.notes || ''}
             onChange={(e) => onUpdate('notes', e.target.value)}

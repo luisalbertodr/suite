@@ -2,6 +2,8 @@
 import React from 'react';
 import { format } from 'date-fns';
 import { CheckCircle, Clock, XCircle, Receipt, Banknote, FileText } from 'lucide-react';
+import { AppointmentAttachmentIcons } from '@/components/AppointmentAttachmentIcons';
+import { hasAttachmentHints } from '@/lib/appointmentAttachmentHints';
 import { Employee, Appointment, TimeSlot } from '@/types/agenda';
 import { slotOverlapsOccupiedTime } from '@/lib/agendaAppointmentItems';
 import { segmentAppearance } from '@/lib/agendaResourceColors';
@@ -513,6 +515,12 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
                         <div className="font-semibold truncate flex-1">{appointment.clientName}</div>
                       )}
                       <div className="flex items-center gap-0.5 shrink-0">
+                        {appointment.attachments && hasAttachmentHints(appointment.attachments) ? (
+                          <AppointmentAttachmentIcons
+                            attachments={appointment.attachments}
+                            iconClassName="h-3 w-3"
+                          />
+                        ) : null}
                         {getPaymentIcon(appointment.paymentStatus)}
                         {visibleFields.status && getStatusIcon(appointment.status)}
                       </div>

@@ -185,16 +185,14 @@ export const useAgendaAppointments = (date?: string) => {
         return `${yy}-${mm}-${dd}`;
       };
 
+      let legacyRows: AgendaAppointment[] = [];
       if (date) {
         const legacyResult = await base
           .eq('appointment_date', date)
           .order('start_time');
 
         if (!legacyResult.error) {
-          const legacyRows = (legacyResult.data || []) as AgendaAppointment[];
-          if (legacyRows.length > 0) {
-            return dedupeByLegacyPlanincId(dedupeByLegacyIdPlan(legacyRows));
-          }
+          legacyRows = (legacyResult.data || []) as AgendaAppointment[];
         } else if (legacyResult.error.code !== '42703') {
           console.error('Error fetching appointments (legacy mode):', legacyResult.error);
           throw legacyResult.error;
@@ -215,9 +213,14 @@ export const useAgendaAppointments = (date?: string) => {
         throw modernResult.error;
       }
 
-      return dedupeByLegacyPlanincId(
-        dedupeByLegacyIdPlan((modernResult.data || []) as AgendaAppointment[]),
-      );
+      const modernRows = (modernResult.data || []) as AgendaAppointment[];
+      const mergedById = new Map<string, AgendaAppointment>();
+      for (const row of [...legacyRows, ...modernRows]) {
+        if (row?.id) mergedById.set(row.id, row);
+      }
+      const merged = mergedById.size > 0 ? Array.from(mergedById.values()) : modernRows;
+
+      return dedupeByLegacyPlanincId(dedupeByLegacyIdPlan(merged));
     },
     enabled: !!scopeCompanyId && !wcLoading,
   });

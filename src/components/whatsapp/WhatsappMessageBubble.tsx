@@ -25,6 +25,7 @@ import {
   lookupGroupSenderLabel,
   resolveGroupSenderJidFromRaw,
   isMessageRevoked,
+  resolveWhatsappMessageType,
   revokedMessageLabel,
   waTheme,
 } from './whatsappUtils';
@@ -142,7 +143,7 @@ function MessageActions({
 }
 
 function MediaContent({ message }: { message: WhatsappMessageRow }) {
-  const type = (message.type ?? 'text').toLowerCase();
+  const type = resolveWhatsappMessageType(message);
   const rawStickerUrl = extractMediaUrlFromWahaMessageRaw(message.raw);
   const storedUrl = message.media_url || rawStickerUrl || null;
   const wahaDirectUrl =
@@ -151,9 +152,12 @@ function MediaContent({ message }: { message: WhatsappMessageRow }) {
     !!wahaDirectUrl || !!(message.waha_message_id && message.chat_id);
 
   const [objectUrl, setObjectUrl] = React.useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = React.useState(false);
   React.useEffect(() => {
     let cancelled = false;
     let revoke: string | null = null;
+    setObjectUrl(null);
+    setLoadFailed(false);
     const load = async () => {
       if (!canDownload) return;
       try {
@@ -167,7 +171,7 @@ function MediaContent({ message }: { message: WhatsappMessageRow }) {
         revoke = url;
         setObjectUrl(url);
       } catch {
-        // placeholder
+        if (!cancelled) setLoadFailed(true);
       }
     };
     load();
@@ -306,7 +310,7 @@ export const WhatsappMessageBubble: React.FC<Props> = ({
   onDeleteForEveryone,
 }) => {
   const isOut = message.from_me;
-  const type = (message.type ?? 'text').toLowerCase();
+  const type = resolveWhatsappMessageType(message);
   const revoked = isMessageRevoked(message);
   const isMedia = !revoked && type !== 'text' && type !== 'chat';
   const time = formatMessageTime(message.timestamp);

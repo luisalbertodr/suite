@@ -16,6 +16,7 @@ Campos:
   pais        → address_country
   percon      → contact_person
   obscli      → notes
+  fecnac      → birth_date (si parsea a yyyy-MM-dd)
 
 Match fila existente (en orden):
   1. legacy_codcli exacto o sin ceros a la izquierda
@@ -45,6 +46,7 @@ except ImportError:
     print("pip install psycopg2-binary", file=sys.stderr)
     raise
 
+from legacy_birth_date import parse_fecnac_to_ymd
 from legacy_company import DEFAULT_COMPANY_ID, get_company_id
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -120,7 +122,7 @@ def main() -> None:
         SELECT
           codcli, nomcli, ape1cli, tel1cli, tel2cli,
           email, dnicli, dircli, codposcli, pobcli, procli, pais,
-          percon, obscli, obsoleto
+          percon, obscli, fecnac, obsoleto
         FROM legacy.clientes
         WHERE NULLIF(btrim(codcli), '') IS NOT NULL
         ORDER BY codcli
@@ -175,7 +177,7 @@ def main() -> None:
 
     for row in legacy_rows:
         codcli = blank(row[0])
-        if not codcli or is_obsolete(row[14]):
+        if not codcli or is_obsolete(row[15]):
             continue
 
         name = build_legacy_name(row[1], row[2])
@@ -184,6 +186,7 @@ def main() -> None:
 
         phone_home, phone_mobile, phone = map_phones(row[3], row[4])
         notes = blank(row[13])
+        birth_date = parse_fecnac_to_ymd(row[14])
         email = blank(row[5])
         tax_id = blank(row[6])
         street = blank(row[7])
@@ -221,6 +224,7 @@ def main() -> None:
                     country,
                     contact,
                     notes,
+                    birth_date,
                     apply_phones,
                     phone_home,
                     phone_mobile,
@@ -254,6 +258,7 @@ def main() -> None:
                     country,
                     contact,
                     notes,
+                    birth_date,
                     phone_home,
                     phone_mobile,
                     phone,
@@ -283,6 +288,7 @@ def main() -> None:
         WHEN position(lower(%s) in lower(notes)) > 0 THEN notes
         ELSE notes || E'\\n' || %s
       END,
+      birth_date = COALESCE(%s::date, birth_date),
       phone_home = CASE WHEN %s THEN %s ELSE phone_home END,
       phone_mobile = CASE WHEN %s THEN %s ELSE phone_mobile END,
       phone = CASE WHEN %s THEN %s ELSE phone END,
@@ -304,6 +310,7 @@ def main() -> None:
             country,
             contact,
             notes,
+            birth_date,
             apply_phones,
             ph_home,
             ph_mobile,
@@ -326,6 +333,7 @@ def main() -> None:
                 notes,
                 notes,
                 notes,
+                birth_date,
                 apply_phones,
                 ph_home,
                 apply_phones,
@@ -340,11 +348,11 @@ def main() -> None:
     INSERT INTO public.customers (
       id, company_id, legacy_codcli, name, email, tax_id,
       address_street, address_postal_code, address_city, address_state, address_country,
-      contact_person, notes, phone_home, phone_mobile, phone
+      contact_person, notes, birth_date, phone_home, phone_mobile, phone
     ) VALUES (
       %s::uuid, %s::uuid, %s, %s, %s, %s,
       %s, %s, %s, %s, %s,
-      %s, %s, %s, %s, %s
+      %s, %s, %s::date, %s, %s, %s
     )
     """
 

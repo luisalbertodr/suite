@@ -50,6 +50,8 @@ export type AppointmentFormInitialPrefill = {
 interface AppointmentFormProps {
   employeeId: string;
   time: string;
+  /** Día visible en la agenda (yyyy-MM-dd); evita guardar en «hoy» por defecto. */
+  defaultDate: string;
   employees: Employee[];
   cabinas?: any[];
   recursos?: any[];
@@ -62,6 +64,7 @@ interface AppointmentFormProps {
 export const AppointmentForm: React.FC<AppointmentFormProps> = ({
   employeeId,
   time,
+  defaultDate,
   employees,
   cabinas = [],
   recursos = [],
@@ -86,7 +89,7 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
 
   const [formData, setFormData] = useState({
     description: '',
-    date: format(new Date(), 'yyyy-MM-dd'),
+    date: defaultDate,
     employeeId,
     startTime: time,
     status: 'confirmed' as const,

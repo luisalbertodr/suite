@@ -141,13 +141,12 @@ export async function downloadWhatsappMedia(input: {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('No hay sesión activa');
 
-  const storedCompanyId = sessionStorage.getItem('current_company_id');
   const payload = {
     action: 'media.download' as const,
     url: input.url ?? undefined,
     chat_id: input.chat_id,
     message_id: input.message_id ?? undefined,
-    company_id: input.company_id ?? storedCompanyId ?? undefined,
+    company_id: input.company_id ?? getStoredWhatsappCompanyId() ?? undefined,
   };
 
   const baseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined) ?? '';

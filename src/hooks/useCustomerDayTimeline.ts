@@ -4,11 +4,8 @@ import { fetchAppointmentsForCustomer, CUSTOMER_APPOINTMENTS_TIMELINE_LIMIT, typ
 import { parseDescriptionServiceLines, appointmentStatusLabel, normalizeHm } from '@/lib/agendaAppointmentDisplay';
 import { buildAppointmentChargedTotals, parseAppointmentIdFromSaleNotes } from '@/lib/appointmentChargeTotals';
 
-export type AppointmentAttachmentHints = {
-  photos: boolean;
-  signedConsents: boolean;
-  documents: boolean;
-};
+export type { AppointmentAttachmentHints } from '@/lib/appointmentAttachmentHints';
+import type { AppointmentAttachmentHints } from '@/lib/appointmentAttachmentHints';
 
 export type AppointmentTimelineDetails = {
   appointmentId: string;

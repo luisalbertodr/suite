@@ -465,6 +465,69 @@ export function isExternalWhatsappCdnUrl(url: string | null | undefined): boolea
   }
 }
 
+const BAILEYS_WRAP_KEYS = [
+  'ephemeralMessage',
+  'viewOnceMessage',
+  'viewOnceMessageV2',
+  'documentWithCaptionMessage',
+  'editedMessage',
+] as const;
+
+function unwrapBaileysInnerMessage(
+  m: Record<string, unknown>,
+  depth = 0,
+): Record<string, unknown> {
+  if (depth > 8) return m;
+  for (const key of BAILEYS_WRAP_KEYS) {
+    const w = m[key];
+    if (w && typeof w === 'object') {
+      const inner = (w as Record<string, unknown>).message;
+      if (inner && typeof inner === 'object') {
+        return unwrapBaileysInnerMessage(inner as Record<string, unknown>, depth + 1);
+      }
+    }
+  }
+  return m;
+}
+
+/** Detecta sticker en el JSON crudo (Baileys/Waha) aunque `type` en BD sea text/unknown. */
+export function hasStickerInWahaMessageRaw(raw: unknown): boolean {
+  if (!raw || typeof raw !== 'object') return false;
+  const root = raw as Record<string, unknown>;
+  const checkMsg = (msg: unknown): boolean => {
+    if (!msg || typeof msg !== 'object') return false;
+    const u = unwrapBaileysInnerMessage(msg as Record<string, unknown>);
+    const sticker = u.stickerMessage;
+    return sticker != null && typeof sticker === 'object';
+  };
+  if (checkMsg(root.message)) return true;
+  const data = root._data as Record<string, unknown> | undefined;
+  return data ? checkMsg(data.message) : false;
+}
+
+export type WhatsappMessageTypeSource = {
+  type?: string | null;
+  body?: string | null;
+  media_mime_type?: string | null;
+  raw?: unknown;
+};
+
+/** Tipo efectivo para UI (stickers mal tipados en sync antiguo o WAHA). */
+export function resolveWhatsappMessageType(m: WhatsappMessageTypeSource): string {
+  const rawType = (m.type ?? 'text').toLowerCase();
+  if (rawType === 'sticker' || rawType === 'stickermessage') return 'sticker';
+  if (hasStickerInWahaMessageRaw(m.raw)) return 'sticker';
+  if (m.body?.trim() === '[sticker]') return 'sticker';
+  if (
+    (rawType === 'image' || rawType === 'unknown') &&
+    m.media_mime_type?.toLowerCase().includes('webp') &&
+    hasStickerInWahaMessageRaw(m.raw)
+  ) {
+    return 'sticker';
+  }
+  return rawType;
+}
+
 /** URL HTTP de sticker/imagen en el payload Baileys/Waha (si está expuesta). */
 export function extractMediaUrlFromWahaMessageRaw(raw: unknown): string | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -478,17 +541,7 @@ export function extractMediaUrlFromWahaMessageRaw(raw: unknown): string | null {
     }
   }
 
-  const unwrap = (m: Record<string, unknown>, depth: number): Record<string, unknown> => {
-    if (depth > 8) return m;
-    for (const key of ['ephemeralMessage', 'viewOnceMessage', 'viewOnceMessageV2', 'documentWithCaptionMessage', 'editedMessage'] as const) {
-      const w = m[key];
-      if (w && typeof w === 'object') {
-        const inner = (w as Record<string, unknown>).message;
-        if (inner && typeof inner === 'object') return unwrap(inner as Record<string, unknown>, depth + 1);
-      }
-    }
-    return m;
-  };
+  const unwrap = unwrapBaileysInnerMessage;
 
   const tryMsg = (msg: unknown): string | null => {
     if (!msg || typeof msg !== 'object') return null;
@@ -621,7 +674,7 @@ export function revokedMessageLabel(fromMe: boolean): string {
 }
 
 export function messagePreviewText(m: MessagePreviewSource): string {
-  const type = (m.type ?? 'text').toLowerCase();
+  const type = resolveWhatsappMessageType(m);
   if (type === 'revoked') return revokedMessageLabel(!!m.from_me);
   if (type === 'text' || type === 'chat') {
     return m.body?.trim() || extractBodyFromWahaMessageRaw(m.raw) || 'Mensaje';

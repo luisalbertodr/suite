@@ -52,6 +52,10 @@ def build_pipeline_step_list(
                     ),
                     PipelineStepDef("Clientes", lambda: py("promote_legacy_customers.py", *company_args)),
                     PipelineStepDef(
+                        "Fechas nacimiento (fecnac)",
+                        lambda: py("backfill_customer_birth_dates.py", "--skip-dbf", *company_args),
+                    ),
+                    PipelineStepDef(
                         "Teléfonos clientes",
                         lambda: py("promote_legacy_customer_phones.py", *company_args),
                     ),

@@ -93,6 +93,10 @@ if (-not $SkipRestart) {
   Write-Host "Reiniciando $Container ..." -ForegroundColor Green
   ssh $SshTarget "docker restart $Container && sleep 2 && docker logs --tail 15 $Container"
   if ($LASTEXITCODE -ne 0) { throw "docker restart falló" }
+  # Kong cachea la IP de `functions`; sin esto → 502 en /functions/v1/*
+  Write-Host "Reiniciando supabase-kong (DNS edge) ..." -ForegroundColor Green
+  ssh $SshTarget "docker restart supabase-kong"
+  if ($LASTEXITCODE -ne 0) { throw "docker restart kong falló" }
 }
 
 Write-Host "Despliegue completado." -ForegroundColor Green

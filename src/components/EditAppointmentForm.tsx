@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
-import { X, Save, Trash2, ArrowLeft } from 'lucide-react';
+import { X, Save, Trash2, ArrowLeft, Stethoscope } from 'lucide-react';
 import { AppointmentItemsEditor } from '@/components/AppointmentItemsEditor';
 import { AppointmentAttachmentsPanel } from '@/components/AppointmentAttachmentsPanel';
 import { AppointmentCustomerSummaryBar } from '@/components/AppointmentCustomerSummaryBar';
@@ -39,6 +39,8 @@ import { usePermissionGuard } from '@/hooks/usePermissionGuard';
 import { resolveAppointmentClientPick } from '@/lib/appointmentCustomerResolve';
 import { normalizeLegacyAppointmentDescription } from '@/lib/legacyAppointmentItems';
 import { AppointmentResourceConflictDialog } from '@/components/AppointmentResourceConflictDialog';
+import { AppointmentClinicalHistoryPanel } from '@/components/AppointmentClinicalHistoryPanel';
+import type { ClienteDetailTab } from '@/types/clienteDetail';
 
 interface Employee { id: string; name: string; color: string; billing_company_id?: string | null; }
 interface Appointment {
@@ -149,7 +151,8 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
 
   const { requireOrToast: requirePermissionOrToast } = usePermissionGuard();
   const [showCustomerHistory, setShowCustomerHistory] = useState(false);
-  const [customerHistoryTab, setCustomerHistoryTab] = useState<'timeline' | 'vouchers' | 'ficha'>('ficha');
+  const [customerHistoryTab, setCustomerHistoryTab] = useState<ClienteDetailTab>('ficha');
+  const [showClinicalHistory, setShowClinicalHistory] = useState(false);
   const [resourceConflictMessages, setResourceConflictMessages] = useState<string[]>([]);
   const [showResourceConflictDialog, setShowResourceConflictDialog] = useState(false);
 
@@ -418,6 +421,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                 chargeBlockedReason={!chargeCheck.allowed ? chargeCheck.reason : null}
                 onOpenVouchers={() => { setCustomerHistoryTab('vouchers'); setShowCustomerHistory(true); }}
                 onOpenFacturacion={() => { setCustomerHistoryTab('timeline'); setShowCustomerHistory(true); }}
+                onOpenClinicalHistory={() => setShowClinicalHistory(true)}
                 onViewInvoice={linkedInvoice
                   ? () => navigate(`/facturacion?invoice=${linkedInvoice.id}`)
                   : undefined}
@@ -457,12 +461,27 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
             </div>
 
             {effectiveCustomerId && companyId && (
-              <AppointmentAttachmentsPanel
-                appointmentId={appointment.id}
-                customerId={effectiveCustomerId}
-                companyId={companyId}
-                logDate={formData.date}
-              />
+              <>
+                <div className="flex justify-end">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="h-8 text-xs gap-1.5"
+                    onClick={() => setShowClinicalHistory(true)}
+                  >
+                    <Stethoscope className="w-3.5 h-3.5" />
+                    Historial clínico
+                  </Button>
+                </div>
+                <AppointmentAttachmentsPanel
+                  appointmentId={appointment.id}
+                  customerId={effectiveCustomerId}
+                  companyId={companyId}
+                  logDate={formData.date}
+                  customerLabel={summaryCustomer?.name?.trim() || appointment.clientName || 'Cliente'}
+                />
+              </>
             )}
 
             <div className="flex justify-between pt-2">
@@ -577,6 +596,25 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
           onHistoryAppointmentClick?.(appointmentId, dateYmd);
         }}
       />
+      {effectiveCustomerId && companyId && (
+        <AppointmentClinicalHistoryPanel
+          open={showClinicalHistory}
+          onClose={() => setShowClinicalHistory(false)}
+          appointmentId={appointment.id}
+          appointmentDate={formData.date}
+          customerId={effectiveCustomerId}
+          companyId={companyId}
+          customerName={summaryCustomer?.name?.trim() || appointment.clientName || 'Cliente'}
+          employeeId={formData.employeeId}
+          notifyRecipients={notifyRecipients}
+          onNotify={
+            onNotify
+              ? (recipientUserId, message) =>
+                  onNotify(appointment, recipientUserId, message)
+              : undefined
+          }
+        />
+      )}
     </div>
   );
 };

@@ -2,9 +2,10 @@ import React, { useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, ExternalLink, FileText, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ExternalLink, FileText, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { CustomerAttachment } from '@/lib/customerAttachments';
+import { DisplayableImage } from '@/components/cliente/DisplayableImage';
 import { cn } from '@/lib/utils';
 
 interface Props {
@@ -116,8 +117,8 @@ export const AttachmentLightbox: React.FC<Props> = ({
 
         <div className="w-full h-full flex items-center justify-center">
           {item.isImage ? (
-            <img
-              src={item.url}
+            <DisplayableImage
+              url={item.url}
               alt={item.title}
               className="max-h-full max-w-full object-contain select-none"
               draggable={false}
@@ -157,38 +158,62 @@ export const AttachmentLightbox: React.FC<Props> = ({
 interface ThumbProps {
   item: CustomerAttachment;
   onClick: () => void;
+  onDelete?: () => void;
+  deleting?: boolean;
   className?: string;
 }
 
-export function AttachmentThumbnail({ item, onClick, className }: ThumbProps) {
+export function AttachmentThumbnail({ item, onClick, onDelete, deleting, className }: ThumbProps) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
+    <div
       className={cn(
         'group relative aspect-square rounded-lg overflow-hidden border border-border/60 bg-muted/30',
-        'hover:ring-2 hover:ring-sky-500/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500',
         className,
       )}
-      title={item.title}
     >
-      {item.isImage ? (
-        <img
-          src={item.url}
-          alt={item.title}
-          className="h-full w-full object-cover transition-transform group-hover:scale-[1.02]"
-          loading="lazy"
-        />
-      ) : (
-        <div className="h-full w-full flex flex-col items-center justify-center gap-1 p-2 text-muted-foreground">
-          <FileText className="h-8 w-8 opacity-60" />
-          <span className="text-[10px] line-clamp-2 text-center leading-tight">{item.title}</span>
+      <button
+        type="button"
+        onClick={onClick}
+        className={cn(
+          'absolute inset-0 w-full h-full',
+          'hover:ring-2 hover:ring-sky-500/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 rounded-lg',
+        )}
+        title={item.title}
+      >
+        {item.isImage ? (
+          <DisplayableImage
+            url={item.url}
+            alt={item.title}
+            className="h-full w-full object-cover transition-transform group-hover:scale-[1.02]"
+            loading="lazy"
+          />
+        ) : (
+          <div className="h-full w-full flex flex-col items-center justify-center gap-1 p-2 text-muted-foreground">
+            <FileText className="h-8 w-8 opacity-60" />
+            <span className="text-[10px] line-clamp-2 text-center leading-tight">{item.title}</span>
+          </div>
+        )}
+        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent px-2 py-1.5 pt-6 pointer-events-none">
+          <p className="text-[10px] text-white truncate">{item.title}</p>
+          <p className="text-[9px] text-white/75 truncate">{item.sourceLabel}</p>
         </div>
-      )}
-      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent px-2 py-1.5 pt-6">
-        <p className="text-[10px] text-white truncate">{item.title}</p>
-        <p className="text-[9px] text-white/75 truncate">{item.sourceLabel}</p>
-      </div>
-    </button>
+      </button>
+      {onDelete ? (
+        <Button
+          type="button"
+          variant="destructive"
+          size="icon"
+          className="absolute top-1 right-1 z-10 h-7 w-7 rounded-full shadow-md opacity-90 hover:opacity-100"
+          disabled={deleting}
+          aria-label="Eliminar foto"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
+      ) : null}
+    </div>
   );
 }

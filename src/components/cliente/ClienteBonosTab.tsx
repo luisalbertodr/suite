@@ -13,11 +13,13 @@ import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { bonoSessionsDisplay } from '@/lib/bonoSessionsDisplay';
 import { useCustomerPurchasedProducts } from '@/hooks/useCustomerPurchasedProducts';
-import { groupProductsByDate } from '@/lib/customerPurchasedProducts';
+import { fetchBonoPurchaseAppointmentMap } from '@/lib/customerBonoAppointmentLinks';
+import { AppointmentCitaLink } from '@/components/cliente/AppointmentCitaLink';
 import type { PostgrestError } from '@supabase/supabase-js';
 
 interface Props {
   customerId: string;
+  onAppointmentClick?: (appointmentId: string, dateYmd: string) => void;
 }
 
 type CoverageItem = {
@@ -207,7 +209,7 @@ const bonoToForm = (bono: BonusRow): BonoFormState => ({
   coverage_items: bono.coverage_items.map((it) => ({ ...it })),
 });
 
-export const ClienteBonosTab: React.FC<Props> = ({ customerId }) => {
+export const ClienteBonosTab: React.FC<Props> = ({ customerId, onAppointmentClick }) => {
   const [showNewForm, setShowNewForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const { toast } = useToast();
@@ -345,6 +347,17 @@ export const ClienteBonosTab: React.FC<Props> = ({ customerId }) => {
       return coverage.length ? { ...b, coverage_items: coverage } : b;
     });
   }, [bonosRaw, definitionById]);
+
+  const { data: bonoAppointmentById = new Map() } = useQuery({
+    queryKey: ['customer-bono-appointment-links', customerId, companyId, bonos.map((b) => b.id).join(',')],
+    enabled: Boolean(companyId && bonos.length),
+    queryFn: () =>
+      fetchBonoPurchaseAppointmentMap(
+        customerId,
+        companyId!,
+        bonos.map((b) => ({ id: b.id, nombre: b.nombre, fecha_compra: b.fecha_compra })),
+      ),
+  });
 
   const { bonosVigentes, bonosHistorico } = React.useMemo(() => {
     const vigentes: BonusRow[] = [];
@@ -876,6 +889,7 @@ export const ClienteBonosTab: React.FC<Props> = ({ customerId }) => {
     }
 
     const isVigente = section === 'vigente';
+    const cita = bonoAppointmentById.get(bono.id);
 
     return (
       <div
@@ -915,6 +929,13 @@ export const ClienteBonosTab: React.FC<Props> = ({ customerId }) => {
             {isVigente ? `→ ${vence}` : vence}
           </span>
         )}
+        {cita ? (
+          <AppointmentCitaLink
+            appointmentId={cita.appointmentId}
+            dateYmd={cita.dateYmd}
+            onOpen={onAppointmentClick}
+          />
+        ) : null}
         {!isVigente && (
           <span className="shrink-0 text-[10px] uppercase tracking-wide font-medium">
             {bonoInactiveLabel(bono)}
@@ -961,44 +982,40 @@ export const ClienteBonosTab: React.FC<Props> = ({ customerId }) => {
 
   const { data: purchasedProducts = [], isLoading: productsLoading } = useCustomerPurchasedProducts(customerId);
 
-  const productGroups = React.useMemo(
-    () => groupProductsByDate(purchasedProducts),
-    [purchasedProducts],
-  );
-
-  const fmtProductDate = (ymd: string) => {
-    try {
-      return format(new Date(`${ymd}T12:00:00`), 'dd/MM/yyyy');
-    } catch {
-      return ymd;
-    }
+  const renderProductRow = (p: (typeof purchasedProducts)[number]) => {
+    const dateYmd = p.appointmentDateYmd ?? p.purchasedAt.slice(0, 10);
+    return (
+      <div
+        key={p.id}
+        className="flex items-center gap-1.5 sm:gap-2 min-h-9 px-2 sm:px-2.5 py-1.5 rounded-md border border-border/40 bg-background/60 text-xs sm:text-sm leading-tight min-w-0"
+      >
+        <Package className="w-3.5 h-3.5 shrink-0 text-sky-600 dark:text-sky-400" />
+        <span className="font-medium truncate min-w-0 flex-1">{p.label}</span>
+        {p.codigo && (
+          <span className="hidden md:inline shrink-0 font-mono text-[10px] text-muted-foreground">
+            {p.codigo}
+          </span>
+        )}
+        <span className="shrink-0 tabular-nums text-muted-foreground whitespace-nowrap">
+          ×{p.quantity}
+        </span>
+        <span className="shrink-0 tabular-nums font-semibold whitespace-nowrap">
+          {p.totalPrice.toFixed(2)} €
+        </span>
+        {p.appointmentId ? (
+          <AppointmentCitaLink
+            appointmentId={p.appointmentId}
+            dateYmd={dateYmd}
+            onOpen={onAppointmentClick}
+          />
+        ) : p.ticketNumber ? (
+          <span className="hidden sm:inline shrink-0 text-[10px] text-muted-foreground whitespace-nowrap">
+            {p.ticketNumber}
+          </span>
+        ) : null}
+      </div>
+    );
   };
-
-  const renderProductRow = (p: (typeof purchasedProducts)[number]) => (
-    <div
-      key={p.id}
-      className="flex items-center gap-2 min-h-8 px-2 py-1.5 rounded-md border border-border/40 bg-background/60 text-xs sm:text-sm leading-tight min-w-0"
-    >
-      <Package className="w-3.5 h-3.5 shrink-0 text-sky-600 dark:text-sky-400" />
-      <span className="font-medium truncate min-w-0 flex-1">{p.label}</span>
-      {p.codigo && (
-        <span className="hidden md:inline shrink-0 font-mono text-[10px] text-muted-foreground">
-          {p.codigo}
-        </span>
-      )}
-      <span className="shrink-0 tabular-nums text-muted-foreground whitespace-nowrap">
-        ×{p.quantity}
-      </span>
-      <span className="shrink-0 tabular-nums font-semibold whitespace-nowrap">
-        {p.totalPrice.toFixed(2)} €
-      </span>
-      {p.ticketNumber && (
-        <span className="hidden sm:inline shrink-0 text-[10px] text-muted-foreground whitespace-nowrap">
-          {p.ticketNumber}
-        </span>
-      )}
-    </div>
-  );
 
   return (
     <div className="space-y-4">
@@ -1061,16 +1078,7 @@ export const ClienteBonosTab: React.FC<Props> = ({ customerId }) => {
         ) : !purchasedProducts.length ? (
           <div className="text-center py-4 text-sm text-muted-foreground">Sin productos registrados</div>
         ) : (
-          <div className="space-y-3">
-            {[...productGroups.entries()].map(([ymd, items]) => (
-              <div key={ymd} className="space-y-1">
-                <h4 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground px-0.5">
-                  {fmtProductDate(ymd)}
-                </h4>
-                <div className="space-y-0.5">{items.map(renderProductRow)}</div>
-              </div>
-            ))}
-          </div>
+          <div className="space-y-0.5">{purchasedProducts.map(renderProductRow)}</div>
         )}
       </section>
     </div>
