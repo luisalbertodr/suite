@@ -15,6 +15,8 @@ def build_pipeline_step_list(
     *,
     mode: str,
     skip_master: bool,
+    skip_catalog: bool,
+    with_customers: bool,
     clean_import: bool,
     include_fallback: bool,
     company_id: str,
@@ -42,26 +44,36 @@ def build_pipeline_step_list(
                 )
             )
 
+        customer_steps = [
+            PipelineStepDef("Clientes", lambda: py("promote_legacy_customers.py", *company_args)),
+            PipelineStepDef(
+                "Fechas nacimiento (fecnac)",
+                lambda: py("backfill_customer_birth_dates.py", "--skip-dbf", *company_args),
+            ),
+            PipelineStepDef(
+                "Teléfonos clientes",
+                lambda: py("promote_legacy_customer_phones.py", *company_args),
+            ),
+            PipelineStepDef("Bonos cliente", lambda: py("promote_legacy_bonoscli.py", *company_args)),
+        ]
+
         if mode == "full" and not skip_master:
-            steps.extend(
-                [
-                    PipelineStepDef("Catálogo", lambda: py("promote_legacy_catalog.py", *company_args)),
-                    PipelineStepDef(
-                        "Cobertura bonos",
-                        lambda: py("promote_legacy_bonus_coverage.py", *company_args),
-                    ),
-                    PipelineStepDef("Clientes", lambda: py("promote_legacy_customers.py", *company_args)),
-                    PipelineStepDef(
-                        "Fechas nacimiento (fecnac)",
-                        lambda: py("backfill_customer_birth_dates.py", "--skip-dbf", *company_args),
-                    ),
-                    PipelineStepDef(
-                        "Teléfonos clientes",
-                        lambda: py("promote_legacy_customer_phones.py", *company_args),
-                    ),
-                    PipelineStepDef("Bonos cliente", lambda: py("promote_legacy_bonoscli.py", *company_args)),
-                ]
-            )
+            if not skip_catalog:
+                steps.extend(
+                    [
+                        PipelineStepDef("Catálogo", lambda: py("promote_legacy_catalog.py", *company_args)),
+                        PipelineStepDef(
+                            "Cobertura bonos",
+                            lambda: py("promote_legacy_bonus_coverage.py", *company_args),
+                        ),
+                    ]
+                )
+            else:
+                print("[pipeline] Catálogo y cobertura bonos omitidos (artículos/familias Medicina intactos)")
+            steps.extend(customer_steps)
+
+        if mode in {"refresh", "promote-only"} and with_customers:
+            steps.extend(customer_steps)
 
         planinc_args = list(company_args)
         if clean_import:

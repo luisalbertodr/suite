@@ -91,6 +91,8 @@ def execute_pipeline(
     mode: str,
     dry_run: bool,
     skip_master: bool,
+    skip_catalog: bool,
+    with_customers: bool,
     clean_import: bool,
     include_fallback: bool,
     company_id: str,
@@ -113,6 +115,8 @@ def execute_pipeline(
     steps: list[PipelineStepDef] = build_pipeline_step_list(
         mode=mode,
         skip_master=skip_master,
+        skip_catalog=skip_catalog,
+        with_customers=with_customers,
         clean_import=clean_import,
         include_fallback=include_fallback,
         company_id=company_id,
@@ -147,6 +151,16 @@ def main() -> None:
     )
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--skip-master", action="store_true")
+    ap.add_argument(
+        "--skip-catalog",
+        action="store_true",
+        help="No promover ARTICULOS/FAMILIAS/BONOS a public (preserva Medicina en app)",
+    )
+    ap.add_argument(
+        "--with-customers",
+        action="store_true",
+        help="En refresh/promote-only: actualizar clientes, fecnac, teléfonos y bonoscli",
+    )
     ap.add_argument("--clean-import", action="store_true")
     ap.add_argument("--include-fallback", action="store_true")
     ap.add_argument("--company-id", default=os.environ.get("PROMOTE_COMPANY_ID", ""))
@@ -178,6 +192,8 @@ def main() -> None:
             mode=args.mode,
             dry_run=args.dry_run,
             skip_master=args.skip_master,
+            skip_catalog=args.skip_catalog,
+            with_customers=args.with_customers,
             clean_import=args.clean_import,
             include_fallback=args.include_fallback,
             company_id=args.company_id,
