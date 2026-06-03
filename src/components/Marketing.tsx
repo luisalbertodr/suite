@@ -3,12 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import {
   Search,
   LayoutGrid,
-  Settings2,
-  ListFilter,
   RefreshCw,
-  Settings as SettingsIcon,
 } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
@@ -26,10 +23,9 @@ import { useMarketingLeadNotesIndex } from '@/hooks/useMarketingLeadNotes';
 import { useCustomerLookup, type CustomerLookupRow } from '@/hooks/useCustomerLookup';
 import { MarketingStageColumn } from './marketing/MarketingStageColumn';
 import { MarketingLeadDetailDialog } from './marketing/MarketingLeadDetailDialog';
-import { MarketingStagesManager } from './marketing/MarketingStagesManager';
-import { MarketingFieldsConfigDialog } from './marketing/MarketingFieldsConfigDialog';
 import { MarketingLeadNotesDialog } from './marketing/MarketingLeadNotesDialog';
 import { MarketingPromoteToCustomerDialog } from './marketing/MarketingPromoteToCustomerDialog';
+import { ClienteDetailOverlay } from '@/components/cliente/ClienteDetailOverlay';
 import {
   useMetaConfig,
   formatMetaSyncErrorsSummary,
@@ -52,6 +48,7 @@ import {
   collectDistinctValues,
 } from './marketing/marketingFilterUtils';
 import { useMarketingInvoicedValueSync } from '@/hooks/useMarketingInvoicedValueSync';
+import { useRegisterTopBarContent } from '@/components/TopBarContentContext';
 
 const COLLAPSED_STAGES_STORAGE_KEY = 'marketing-kanban-collapsed-stage-ids';
 const COMPACT_CARDS_STORAGE_KEY = 'marketing-kanban-compact-cards';
@@ -112,8 +109,7 @@ export const Marketing: React.FC = () => {
   const [activeLead, setActiveLead] = useState<MarketingLead | null>(null);
   const [notesLead, setNotesLead] = useState<MarketingLead | null>(null);
   const [promoteLead, setPromoteLead] = useState<MarketingLead | null>(null);
-  const [openStagesManager, setOpenStagesManager] = useState(false);
-  const [openFieldsConfig, setOpenFieldsConfig] = useState(false);
+  const [customerDetailId, setCustomerDetailId] = useState<string | null>(null);
   const autoSyncTriggered = useRef(false);
 
   const toastMetaSyncResult = useCallback(
@@ -333,12 +329,12 @@ export const Marketing: React.FC = () => {
   );
 
   const handleEditStage = useCallback((_stage: MarketingLeadStage) => {
-    setOpenStagesManager(true);
-  }, []);
+    navigate('/configuracion?tab=marketing');
+  }, [navigate]);
 
   const handleDeleteStage = useCallback((_stage: MarketingLeadStage) => {
-    setOpenStagesManager(true);
-  }, []);
+    navigate('/configuracion?tab=marketing');
+  }, [navigate]);
 
   const handleLeadClickById = useCallback(
     (leadId: string) => {
@@ -387,26 +383,7 @@ export const Marketing: React.FC = () => {
     [],
   );
 
-  if (companyLoading || stagesLoading || leadsLoading || fieldsLoading) {
-    return (
-      <div className="flex justify-center items-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-sky-500" />
-      </div>
-    );
-  }
-
-  if (!companyId) {
-    return (
-      <div className="flex justify-center items-center h-64 text-center">
-        <div>
-          <h2 className="text-xl font-semibold text-foreground">No se encontró empresa</h2>
-          <p className="text-muted-foreground mt-2">Contacta con el administrador.</p>
-        </div>
-      </div>
-    );
-  }
-
-  const handleManualRefresh = async () => {
+  const handleManualRefresh = useCallback(async () => {
     await refetch();
     try {
       const invoiced = await syncPresentadaInvoicedValues();
@@ -436,112 +413,138 @@ export const Marketing: React.FC = () => {
         },
       });
     }
-  };
+  }, [
+    metaConfig,
+    metaForms,
+    refetch,
+    syncNow,
+    syncPresentadaInvoicedValues,
+    toast,
+    toastMetaSyncResult,
+  ]);
+
+  const topBarActions = useMemo(() => (
+    <>
+      <div className="hidden items-center gap-2 text-xs text-muted-foreground xl:flex">
+        <span>
+          <span className="font-semibold text-foreground">{totalLeads}</span>{' '}
+          {totalLeads === 1 ? 'cliente potencial' : 'clientes potenciales'}
+        </span>
+        {totalValue > 0 ? (
+          <>
+            <span>·</span>
+            <span>
+              Valor <span className="font-semibold text-foreground">{currencyFmt.format(totalValue)}</span>
+            </span>
+          </>
+        ) : null}
+        {linkedInView > 0 ? (
+          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+            {linkedInView} ya en clientes
+          </span>
+        ) : null}
+      </div>
+
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Buscar leads…"
+          className="h-7 w-[170px] pl-8 text-xs lg:w-[220px]"
+        />
+      </div>
+
+      <MarketingFiltersPopover
+        sortField={sortField}
+        sortDir={sortDir}
+        onSortFieldChange={setSortField}
+        onSortDirChange={setSortDir}
+        filters={filters}
+        onFiltersChange={setFilters}
+        formNames={formNames}
+        sources={sources}
+        filterableFields={filterableFields}
+        compactCards={compactCards}
+        onCompactCardsChange={setCompactCards}
+      />
+
+      <Button
+        variant="outline"
+        size="sm"
+        className="h-7 px-2"
+        onClick={handleManualRefresh}
+        title="Refrescar y sincronizar con Meta"
+        disabled={syncNow.isPending}
+      >
+        <RefreshCw className={`h-3.5 w-3.5 ${syncNow.isPending ? 'animate-spin' : ''}`} />
+      </Button>
+    </>
+  ), [
+    compactCards,
+    currencyFmt,
+    filterableFields,
+    filters,
+    formNames,
+    handleManualRefresh,
+    linkedInView,
+    search,
+    sortDir,
+    sortField,
+    sources,
+    syncNow.isPending,
+    totalLeads,
+    totalValue,
+  ]);
+
+  useRegisterTopBarContent(
+    {
+      title: (
+        <span className="inline-flex items-center gap-2">
+          <LayoutGrid className="h-4 w-4 text-rose-500" />
+          Marketing
+        </span>
+      ),
+      actions: topBarActions,
+    },
+    [topBarActions],
+  );
+
+  if (companyLoading || stagesLoading || leadsLoading || fieldsLoading) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-sky-500" />
+      </div>
+    );
+  }
+
+  if (!companyId) {
+    return (
+      <div className="flex justify-center items-center h-64 text-center">
+        <div>
+          <h2 className="text-xl font-semibold text-foreground">No se encontró empresa</h2>
+          <p className="text-muted-foreground mt-2">Contacta con el administrador.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <Card className="border-none shadow-none bg-transparent">
-      <CardHeader className="px-0">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="rounded-xl bg-rose-500/10 p-2">
-              <LayoutGrid className="h-5 w-5 text-rose-500" />
-            </div>
-            <div>
-              <CardTitle className="text-2xl">Marketing</CardTitle>
-              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
-                <span>
-                  <span className="font-semibold text-foreground">{totalLeads}</span>{' '}
-                  {totalLeads === 1 ? 'cliente potencial' : 'clientes potenciales'}
-                </span>
-                {totalValue > 0 ? (
-                  <>
-                    <span className="hidden sm:inline">·</span>
-                    <span>
-                      Valor total{' '}
-                      <span className="font-semibold text-foreground">
-                        {currencyFmt.format(totalValue)}
-                      </span>
-                    </span>
-                  </>
-                ) : null}
-                {linkedInView > 0 ? (
-                  <>
-                    <span className="hidden sm:inline">·</span>
-                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
-                      {linkedInView} ya en clientes
-                    </span>
-                  </>
-                ) : null}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Buscar leads…"
-                className="h-9 w-[220px] pl-8 text-xs"
-              />
-            </div>
-
-            <MarketingFiltersPopover
-              sortField={sortField}
-              sortDir={sortDir}
-              onSortFieldChange={setSortField}
-              onSortDirChange={setSortDir}
-              filters={filters}
-              onFiltersChange={setFilters}
-              formNames={formNames}
-              sources={sources}
-              filterableFields={filterableFields}
-              compactCards={compactCards}
-              onCompactCardsChange={setCompactCards}
-            />
-
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleManualRefresh}
-              title="Refrescar y sincronizar con Meta"
-              disabled={syncNow.isPending}
-            >
-              <RefreshCw className={`h-3.5 w-3.5 ${syncNow.isPending ? 'animate-spin' : ''}`} />
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setOpenFieldsConfig(true)}>
-              <ListFilter className="mr-2 h-3.5 w-3.5" /> Campos
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setOpenStagesManager(true)}>
-              <Settings2 className="mr-2 h-3.5 w-3.5" /> Etapas
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => navigate('/configuracion?tab=meta')}
-              title="Configuración de Meta (formularios, token, intervalo, importar)"
-            >
-              <SettingsIcon className="mr-2 h-3.5 w-3.5" /> Meta
-            </Button>
-          </div>
-        </div>
-      </CardHeader>
-
       <CardContent className="px-0 pb-0">
         {stages.length === 0 ? (
           <div className="rounded-xl border border-dashed p-10 text-center">
             <p className="text-sm text-muted-foreground">
               Aún no tienes etapas configuradas.
             </p>
-            <Button className="mt-3" size="sm" onClick={() => setOpenStagesManager(true)}>
-              Crear primera etapa
+            <Button className="mt-3" size="sm" onClick={() => navigate('/configuracion?tab=marketing')}>
+              Configurar etapas
             </Button>
           </div>
         ) : (
           <div
             className={[
-              'w-full min-w-0 overflow-x-scroll overflow-y-hidden scrollbar-kanban h-[calc(100vh-180px)] -mb-24',
+              'w-full min-w-0 overflow-x-scroll overflow-y-hidden scrollbar-kanban h-[calc(100vh-128px)] -mb-24',
               draggedLeadId ? '[&_*]:!transition-none' : '',
             ].join(' ')}
           >
@@ -562,6 +565,7 @@ export const Marketing: React.FC = () => {
                   compact={compactCards}
                   onToggleCollapsed={() => toggleStageColumnCollapsed(stage.id)}
                   onLeadClickById={handleLeadClickById}
+                  onOpenCustomer={setCustomerDetailId}
                   onLeadOpenNotesById={handleLeadOpenNotesById}
                   onLeadPromoteById={handleLeadPromoteById}
                   onLeadDragStart={handleLeadDragStart}
@@ -629,8 +633,15 @@ export const Marketing: React.FC = () => {
           }}
         />
       ) : null}
-      <MarketingStagesManager open={openStagesManager} onOpenChange={setOpenStagesManager} />
-      <MarketingFieldsConfigDialog open={openFieldsConfig} onOpenChange={setOpenFieldsConfig} />
+      {customerDetailId ? (
+        <ClienteDetailOverlay
+          open
+          customerId={customerDetailId}
+          initialTab="ficha"
+          backLabel="Volver a Marketing"
+          onClose={() => setCustomerDetailId(null)}
+        />
+      ) : null}
     </Card>
   );
 };

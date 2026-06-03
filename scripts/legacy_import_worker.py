@@ -17,26 +17,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from legacy_import_progress import ensure_db_connection
 from legacy_import_run_tracker import RunTracker
 from legacy_company import get_company_id
 
 
-def load_dotenv() -> None:
-    env = ROOT / ".env"
-    if not env.is_file():
-        return
-    for line in env.read_text(encoding="utf-8", errors="replace").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        k, v = line.split("=", 1)
-        k, v = k.strip(), v.strip().strip('"')
-        if k and k not in os.environ:
-            os.environ[k] = v
-
-
 def main() -> None:
-    load_dotenv()
+    os.environ["SUPABASE_DB_URL"] = ensure_db_connection()
     ap = argparse.ArgumentParser()
     ap.add_argument("--run-id", required=True)
     ap.add_argument(
@@ -55,6 +42,8 @@ def main() -> None:
         help="Reanudar desde un paso concreto",
     )
     args = ap.parse_args()
+    os.environ["LEGACY_IMPORT_RUN_ID"] = args.run_id
+    os.environ.setdefault("PYTHONUNBUFFERED", "1")
 
     tracker = RunTracker(args.run_id)
     run = tracker.load_run()
@@ -92,7 +81,11 @@ def main() -> None:
             mode=mode,
             dry_run=False,
             skip_master=bool(options.get("skipMaster")),
-            clean_import=bool(options.get("cleanImport")),
+            skip_catalog=bool(options.get("skip_catalog")),
+            with_customers=bool(options.get("withCustomers") or options.get("with_customers")),
+            no_invoices=bool(options.get("no_invoices")),
+            no_sales=bool(options.get("no_sales")),
+            clean_import=bool(options.get("cleanImport") or options.get("clean_import")),
             include_fallback=bool(options.get("includeFallback")),
             company_id=company_id,
             tracker=tracker,

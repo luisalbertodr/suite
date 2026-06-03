@@ -24,26 +24,22 @@ async function resolveCompanyId(
 ): Promise<string | null> {
   const allowed = new Set<string>();
 
-  const { data: active } = await supabaseAdmin
-    .from('user_active_company')
-    .select('company_id')
-    .eq('user_id', userId)
-    .maybeSingle();
-  if (active?.company_id) allowed.add(String(active.company_id));
+  const [activeRes, profilesRes, rolesRes] = await Promise.all([
+    supabaseAdmin
+      .from('user_active_company')
+      .select('company_id')
+      .eq('user_id', userId)
+      .maybeSingle(),
+    supabaseAdmin.from('user_profiles').select('company_id').eq('user_id', userId),
+    supabaseAdmin.from('user_company_roles').select('company_id').eq('user_id', userId),
+  ]);
 
-  const { data: profiles } = await supabaseAdmin
-    .from('user_profiles')
-    .select('company_id')
-    .eq('user_id', userId);
-  for (const row of profiles ?? []) {
+  const active = activeRes.data;
+  if (active?.company_id) allowed.add(String(active.company_id));
+  for (const row of profilesRes.data ?? []) {
     if (row.company_id) allowed.add(String(row.company_id));
   }
-
-  const { data: roles } = await supabaseAdmin
-    .from('user_company_roles')
-    .select('company_id')
-    .eq('user_id', userId);
-  for (const row of roles ?? []) {
+  for (const row of rolesRes.data ?? []) {
     if (row.company_id) allowed.add(String(row.company_id));
   }
 
@@ -51,9 +47,9 @@ async function resolveCompanyId(
     return requestedCompanyId;
   }
   if (active?.company_id) return String(active.company_id);
-  const first = profiles?.find((p) => p.company_id)?.company_id;
+  const first = profilesRes.data?.find((p) => p.company_id)?.company_id;
   if (first) return String(first);
-  const roleCompany = roles?.find((r) => r.company_id)?.company_id;
+  const roleCompany = rolesRes.data?.find((r) => r.company_id)?.company_id;
   return roleCompany ? String(roleCompany) : null;
 }
 
@@ -62,6 +58,53 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
+}
+
+function isStatementTimeout(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const o = err as { code?: string; message?: string };
+  return (
+    o.code === '57014' ||
+    (typeof o.message === 'string' &&
+      o.message.includes('statement timeout'))
+  );
+}
+
+function degradedStatus(lastRun: Record<string, unknown> | null) {
+  return {
+    legacy_staging: {
+      planinc_rows: 0,
+      faccab_rows: 0,
+      albcab_rows: 0,
+      last_imported_at: null,
+      last_import_batch: null,
+      row_counts_approximate: true,
+    },
+    public_promoted: {
+      legacy_appointments: null,
+      legacy_sales: null,
+      legacy_invoices: null,
+      counts_deferred: true,
+    },
+    last_run: lastRun,
+    degraded: true,
+  };
+}
+
+async function fetchLastRun(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  companyId: string,
+) {
+  const { data } = await supabaseAdmin
+    .from('legacy_import_runs')
+    .select(
+      'id, mode, status, current_step, created_at, started_at, finished_at, error_message',
+    )
+    .eq('company_id', companyId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data;
 }
 
 async function isAuthorizedAdmin(
@@ -135,11 +178,25 @@ Deno.serve(async (req) => {
     }
 
     if (action === 'getStatus') {
-      const { data, error } = await supabaseAdmin.rpc('legacy_import_get_status', {
-        p_company_id: companyId,
-      });
-      if (error) throw error;
-      return json({ status: data });
+      try {
+        const { data, error } = await supabaseAdmin.rpc('legacy_import_get_status', {
+          p_company_id: companyId,
+        });
+        if (error) {
+          if (isStatementTimeout(error)) {
+            const lastRun = await fetchLastRun(supabaseAdmin, companyId);
+            return json({ status: degradedStatus(lastRun) });
+          }
+          throw error;
+        }
+        return json({ status: data });
+      } catch (err) {
+        if (isStatementTimeout(err)) {
+          const lastRun = await fetchLastRun(supabaseAdmin, companyId);
+          return json({ status: degradedStatus(lastRun) });
+        }
+        throw err;
+      }
     }
 
     if (action === 'reset') {
@@ -195,20 +252,41 @@ Deno.serve(async (req) => {
 
     if (action === 'listRuns') {
       const limit = Math.min(body.limit ?? 10, 50);
-      const { data, error } = await supabaseAdmin
-        .from('legacy_import_runs')
-        .select('id, mode, status, current_step, created_at, started_at, finished_at, error_message')
-        .eq('company_id', companyId)
-        .order('created_at', { ascending: false })
-        .limit(limit);
-      if (error) throw error;
-      return json({ runs: data ?? [] });
+      try {
+        const { data, error } = await supabaseAdmin
+          .from('legacy_import_runs')
+          .select(
+            'id, mode, status, current_step, created_at, started_at, finished_at, error_message',
+          )
+          .eq('company_id', companyId)
+          .order('created_at', { ascending: false })
+          .limit(limit);
+        if (error) {
+          if (isStatementTimeout(error)) return json({ runs: [] });
+          throw error;
+        }
+        return json({ runs: data ?? [] });
+      } catch (err) {
+        if (isStatementTimeout(err)) return json({ runs: [] });
+        throw err;
+      }
     }
 
     return json({ error: 'Acción desconocida' }, 400);
   } catch (err) {
     console.error('legacy-import error:', err);
-    const message = err instanceof Error ? err.message : 'Error interno';
+    if (isStatementTimeout(err)) {
+      return json(
+        { error: 'Base de datos ocupada (timeout). Reintente en unos segundos.' },
+        503,
+      );
+    }
+    const message =
+      err && typeof err === 'object' && 'message' in err
+        ? String((err as { message: unknown }).message)
+        : err instanceof Error
+          ? err.message
+          : 'Error interno';
     return json({ error: message }, 500);
   }
 });

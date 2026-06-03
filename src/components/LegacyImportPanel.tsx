@@ -182,9 +182,17 @@ export const LegacyImportPanel: React.FC = () => {
             </div>
             <div className="rounded-lg border p-3 text-sm">
               <p className="text-muted-foreground text-xs">Promovido en Suite</p>
-              <p className="font-medium">{status?.public_promoted.legacy_appointments ?? 0} citas</p>
-              <p className="text-xs">{status?.public_promoted.legacy_sales ?? 0} ventas ·{' '}
-                {status?.public_promoted.legacy_invoices ?? 0} facturas</p>
+              <p className="font-medium">
+                {status?.public_promoted.counts_deferred
+                  ? 'N/D (consulta pesada omitida)'
+                  : `${status?.public_promoted.legacy_appointments ?? 0} citas`}
+              </p>
+              {!status?.public_promoted.counts_deferred && (
+                <p className="text-xs">
+                  {status?.public_promoted.legacy_sales ?? 0} ventas ·{' '}
+                  {status?.public_promoted.legacy_invoices ?? 0} facturas
+                </p>
+              )}
             </div>
             <div className="rounded-lg border p-3 text-sm">
               <p className="text-muted-foreground text-xs">albcab (tickets TPV)</p>

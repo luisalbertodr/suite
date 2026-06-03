@@ -220,6 +220,16 @@ def import_one(
 
 def main() -> None:
     load_dotenv()
+    tracker = None
+    run_id = os.environ.get("LEGACY_IMPORT_RUN_ID", "").strip()
+    if run_id:
+        try:
+            from legacy_import_progress import tracker_from_env
+
+            tracker = tracker_from_env()
+        except Exception:
+            tracker = None
+
     legacy_dir = Path(os.environ.get("LEGACY_DBF_DIR", r"E:\dbf"))
     scope = os.environ.get("LEGACY_IMPORT_SCOPE", "wave1").strip().lower()
     batch = os.environ.get("IMPORT_BATCH", "wave1").strip() or "wave1"
@@ -249,12 +259,18 @@ def main() -> None:
         names = legacy_tables_for_import(cur)
         import_pairs = [(t, f"{t.upper()}.DBF") for t in names]
 
+    total_tables = len(import_pairs)
     total = 0
     try:
-        for table, dbf_name in import_pairs:
-            print(f"→ legacy.{table} <= {dbf_name}")
+        for idx, (table, dbf_name) in enumerate(import_pairs, 1):
+            label = f"DBF {table} <- {dbf_name}"
+            print(f"[{idx}/{total_tables}] -> legacy.{table} <= {dbf_name}", flush=True)
+            if tracker:
+                tracker.set_progress(idx, total_tables, label)
             n = import_one(cur, legacy_dir, table, dbf_name, batch, encoding)
-            print(f"   {n} filas")
+            print(f"    {n} filas", flush=True)
+            if tracker:
+                tracker.step_done(f"DBF:{table}", f"{n} filas")
             total += n
             conn.commit()
     except Exception:
@@ -264,7 +280,7 @@ def main() -> None:
         cur.close()
         conn.close()
 
-    print(f"Listo. Total filas importadas (suma por tabla): {total}")
+    print(f"Listo. Total filas importadas (suma por tabla): {total}", flush=True)
 
 
 if __name__ == "__main__":

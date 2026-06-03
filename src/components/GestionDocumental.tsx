@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { 
   Upload, 
   Search, 
@@ -21,6 +21,7 @@ import { SimpleDocumentViewer } from './SimpleDocumentViewer';
 import { CategoryManager } from './CategoryManager';
 import { useDocumentCategories } from '@/hooks/useDocumentCategories';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useRegisterTopBarContent } from '@/components/TopBarContentContext';
 
 interface DocumentData {
   id: string;
@@ -231,6 +232,77 @@ export const GestionDocumental: React.FC = () => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
+  const topBarActions = useMemo(() => (
+    <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}>
+      <DialogTrigger asChild>
+        <Button className="flex h-7 items-center space-x-1.5 px-2 text-xs">
+          <Upload className="w-3.5 h-3.5" />
+          <span>Subir Documento</span>
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Subir Nuevo Documento</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div>
+            <Label htmlFor="file">Archivo</Label>
+            <Input
+              id="file"
+              type="file"
+              onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.txt"
+            />
+          </div>
+          <div>
+            <Label htmlFor="category">Categoría *</Label>
+            <Select value={uploadCategory} onValueChange={setUploadCategory}>
+              <SelectTrigger>
+                <SelectValue placeholder="Selecciona una categoría" />
+              </SelectTrigger>
+              <SelectContent>
+                {categories.map(category => (
+                  <SelectItem key={category.id} value={category.name}>
+                    {category.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label htmlFor="tags">Etiquetas (separadas por comas)</Label>
+            <Input
+              id="tags"
+              value={uploadTags}
+              onChange={(e) => setUploadTags(e.target.value)}
+              placeholder="etiqueta1, etiqueta2, etiqueta3"
+            />
+          </div>
+          <Button
+            onClick={handleUpload}
+            disabled={!selectedFile || !uploadCategory || uploadMutation.isPending}
+            className="w-full"
+          >
+            {uploadMutation.isPending ? 'Subiendo...' : 'Subir Documento'}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  ), [categories, handleUpload, selectedFile, uploadCategory, uploadDialogOpen, uploadMutation.isPending, uploadTags]);
+
+  useRegisterTopBarContent(
+    {
+      title: (
+        <span className="inline-flex items-center gap-2">
+          <FolderOpen className="w-4 h-4 text-blue-500" />
+          Gestión Documental
+        </span>
+      ),
+      actions: topBarActions,
+    },
+    [topBarActions],
+  );
+
   if (error) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -257,67 +329,6 @@ export const GestionDocumental: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Gestión Documental</h1>
-        </div>
-        <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}>
-          <DialogTrigger asChild>
-            <Button className="flex items-center space-x-2">
-              <Upload className="w-4 h-4" />
-              <span>Subir Documento</span>
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Subir Nuevo Documento</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div>
-                <Label htmlFor="file">Archivo</Label>
-                <Input
-                  id="file"
-                  type="file"
-                  onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
-                  accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.txt"
-                />
-              </div>
-              <div>
-                <Label htmlFor="category">Categoría *</Label>
-                <Select value={uploadCategory} onValueChange={setUploadCategory}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecciona una categoría" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {categories.map(category => (
-                      <SelectItem key={category.id} value={category.name}>
-                        {category.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label htmlFor="tags">Etiquetas (separadas por comas)</Label>
-                <Input
-                  id="tags"
-                  value={uploadTags}
-                  onChange={(e) => setUploadTags(e.target.value)}
-                  placeholder="etiqueta1, etiqueta2, etiqueta3"
-                />
-              </div>
-              <Button 
-                onClick={handleUpload} 
-                disabled={!selectedFile || !uploadCategory || uploadMutation.isPending}
-                className="w-full"
-              >
-                {uploadMutation.isPending ? 'Subiendo...' : 'Subir Documento'}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
-      </div>
-
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <Card>

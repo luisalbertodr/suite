@@ -12,6 +12,7 @@ import { es } from 'date-fns/locale';
 const typeIcons: Record<string, React.ReactNode> = {
   info: <Info className="h-4 w-4 text-blue-500" />,
   warning: <AlertTriangle className="h-4 w-4 text-amber-500" />,
+  phone_missed_call: <AlertTriangle className="h-4 w-4 text-rose-500" />,
   success: <CheckCircle className="h-4 w-4 text-emerald-500" />,
 };
 
@@ -20,9 +21,23 @@ export const NotificationBell: React.FC = () => {
   const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
   useNotificationSoundOnIncrease(unreadCount, 'bell');
 
-  const handleClick = (n: { id: string; link: string | null; read: boolean }) => {
+  const handleClick = (n: {
+    id: string;
+    link: string | null;
+    read: boolean;
+    type?: string;
+    metadata?: Record<string, unknown> | null;
+  }) => {
     if (!n.read) markAsRead.mutate(n.id);
-    if (n.link) navigate(n.link);
+    const customerId =
+      n.type === 'phone_missed_call' && typeof n.metadata?.customer_id === 'string'
+        ? n.metadata.customer_id
+        : null;
+    if (customerId) {
+      navigate(`/clientes?customer=${customerId}`);
+    } else if (n.link) {
+      navigate(n.link);
+    }
   };
 
   return (
@@ -37,7 +52,7 @@ export const NotificationBell: React.FC = () => {
           )}
         </button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-80 p-0">
+      <PopoverContent align="end" className="w-96 max-w-[calc(100vw-1rem)] p-0">
         <div className="flex items-center justify-between p-3 border-b">
           <span className="text-sm font-semibold">Notificaciones</span>
           {unreadCount > 0 && (
@@ -52,7 +67,7 @@ export const NotificationBell: React.FC = () => {
             </Button>
           )}
         </div>
-        <ScrollArea className="max-h-80">
+        <ScrollArea className="h-[70vh] max-h-[560px]">
           {notifications.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
               <Bell className="h-8 w-8 mb-2 opacity-30" />

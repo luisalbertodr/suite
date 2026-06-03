@@ -17,6 +17,8 @@ def build_pipeline_step_list(
     skip_master: bool,
     skip_catalog: bool,
     with_customers: bool,
+    no_invoices: bool,
+    no_sales: bool,
     clean_import: bool,
     include_fallback: bool,
     company_id: str,
@@ -68,8 +70,6 @@ def build_pipeline_step_list(
                         ),
                     ]
                 )
-            else:
-                print("[pipeline] Catálogo y cobertura bonos omitidos (artículos/familias Medicina intactos)")
             steps.extend(customer_steps)
 
         if mode in {"refresh", "promote-only"} and with_customers:
@@ -79,37 +79,46 @@ def build_pipeline_step_list(
         if clean_import:
             planinc_args.append("--clean-import")
 
-        sales_args = list(company_args)
-        if include_fallback:
-            sales_args.append("--include-fallback")
+        promote_tail: list[PipelineStepDef] = [
+            PipelineStepDef(
+                "Citas planinc",
+                lambda: py("promote_legacy_planinc_to_agenda.py", *planinc_args),
+            ),
+            PipelineStepDef(
+                "Enlace customer_id",
+                lambda: py("link_agenda_customer_ids.py", *company_args),
+            ),
+        ]
 
-        steps.extend(
-            [
-                PipelineStepDef(
-                    "Citas planinc",
-                    lambda: py("promote_legacy_planinc_to_agenda.py", *planinc_args),
-                ),
-                PipelineStepDef(
-                    "Enlace customer_id",
-                    lambda: py("link_agenda_customer_ids.py", *company_args),
-                ),
+        if not no_sales:
+            sales_args = list(company_args)
+            if include_fallback:
+                sales_args.append("--include-fallback")
+            promote_tail.append(
                 PipelineStepDef(
                     "Ventas legacy (impcob)",
                     lambda: py("promote_legacy_agenda_sales.py", *sales_args),
                 ),
-                PipelineStepDef(
-                    "Facturas legacy",
-                    lambda: py("promote_legacy_sales_invoices.py", *company_args),
-                ),
-                PipelineStepDef(
-                    "Facturas faccab sin cita",
-                    lambda: py("promote_legacy_unmatched_faccab.py", *company_args),
-                ),
-                PipelineStepDef(
-                    "Corregir fechas factura",
-                    lambda: py("fix_legacy_invoice_dates.py", *company_args),
-                ),
-            ]
-        )
+            )
+
+        if not no_invoices:
+            promote_tail.extend(
+                [
+                    PipelineStepDef(
+                        "Facturas legacy",
+                        lambda: py("promote_legacy_sales_invoices.py", *company_args),
+                    ),
+                    PipelineStepDef(
+                        "Facturas faccab sin cita",
+                        lambda: py("promote_legacy_unmatched_faccab.py", *company_args),
+                    ),
+                    PipelineStepDef(
+                        "Corregir fechas factura",
+                        lambda: py("fix_legacy_invoice_dates.py", *company_args),
+                    ),
+                ],
+            )
+
+        steps.extend(promote_tail)
 
     return steps

@@ -348,6 +348,19 @@ def main() -> None:
         )
         existing_sales = {str(r["appointment_id"]) for r in cur.fetchall() if r.get("appointment_id")}
 
+    existing_ticket_numbers: set[str] = set()
+    if "ticket_number" in sales_cols:
+        cur.execute(
+            """
+            SELECT ticket_number FROM public.sales
+            WHERE company_id = %s AND ticket_number IS NOT NULL
+            """,
+            (company_id,),
+        )
+        existing_ticket_numbers = {
+            str(r["ticket_number"]) for r in cur.fetchall() if r.get("ticket_number")
+        }
+
     legacy_filter = []
     if "legacy_planinc_id" in apt_cols:
         legacy_filter.append("a.legacy_planinc_id IS NOT NULL")
@@ -532,6 +545,10 @@ def main() -> None:
         }
 
         ticket = f"LEG-{legacy_idplan or apt.get('legacy_planinc_id') or apt_id[:8]}"
+        ticket_number = ticket[:64]
+        if ticket_number in existing_ticket_numbers:
+            skipped += 1
+            continue
         customer_id = str(apt["customer_id"]) if apt.get("customer_id") else next(
             (customer_by_legacy.get(k) for k in cli_keys if customer_by_legacy.get(k)),
             None,
@@ -540,7 +557,7 @@ def main() -> None:
 
         sale_row: dict = {
             "company_id": company_id,
-            "ticket_number": ticket[:64],
+            "ticket_number": ticket_number,
             "total_amount": float(items_total),
             "payment_method": "card",
             "status": "completed",
@@ -601,6 +618,7 @@ def main() -> None:
             cur.execute("RELEASE SAVEPOINT sale_insert")
             created += 1
             existing_sales.add(apt_id)
+            existing_ticket_numbers.add(ticket_number)
             if not args.dry_run and created % batch_size == 0:
                 conn.commit()
                 print(f"... {created} tickets creados", file=sys.stderr)

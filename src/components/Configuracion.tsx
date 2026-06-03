@@ -38,7 +38,7 @@ const VALID_TABS = [
   'recursos',
   'apariencia',
   'email',
-  'meta',
+  'marketing',
   'whatsapp',
   'stripe',
   'tpv',
@@ -59,8 +59,9 @@ export const Configuracion: React.FC = () => {
   const { isMultiEntity } = useWorkCenter();
 
   const tabParam = searchParams.get('tab') ?? '';
-  const activeTab: ConfigTab = (VALID_TABS as readonly string[]).includes(tabParam)
-    ? (tabParam as ConfigTab)
+  const normalizedTabParam = tabParam === 'meta' ? 'marketing' : tabParam;
+  const activeTab: ConfigTab = (VALID_TABS as readonly string[]).includes(normalizedTabParam)
+    ? (normalizedTabParam as ConfigTab)
     : 'general';
 
   const handleTabChange = (value: string) => {
@@ -119,12 +120,7 @@ export const Configuracion: React.FC = () => {
   };
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
-      <div className="flex items-center space-x-2">
-        <Settings className="h-6 w-6" />
-        <h1 className="text-2xl font-bold">Configuración</h1>
-      </div>
-
+    <div className="container mx-auto p-6 pt-0 space-y-6">
       <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
         <TabsList className="flex flex-wrap">
           <TabsTrigger value="general">General</TabsTrigger>
@@ -134,7 +130,7 @@ export const Configuracion: React.FC = () => {
           <TabsTrigger value="recursos">Recursos y Cabinas</TabsTrigger>
           <TabsTrigger value="apariencia">Apariencia</TabsTrigger>
           <TabsTrigger value="email">Email</TabsTrigger>
-          <TabsTrigger value="meta">Meta</TabsTrigger>
+          <TabsTrigger value="marketing">Marketing</TabsTrigger>
           <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
           <TabsTrigger value="stripe">Stripe</TabsTrigger>
           <TabsTrigger value="tpv">TPV</TabsTrigger>
@@ -212,7 +208,7 @@ export const Configuracion: React.FC = () => {
           <EmailConfig />
         </TabsContent>
 
-        <TabsContent value="meta" className="space-y-4">
+        <TabsContent value="marketing" className="space-y-4">
           <MetaConfig />
         </TabsContent>
 

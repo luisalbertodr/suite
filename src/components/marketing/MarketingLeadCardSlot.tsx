@@ -17,6 +17,7 @@ type MarketingLeadCardSlotProps = {
   isDragging: boolean;
   isUnread: boolean;
   onLeadClick: (leadId: string) => void;
+  onOpenCustomer: (customerId: string) => void;
   onLeadOpenNotes: (leadId: string) => void;
   onLeadPromote: (leadId: string) => void;
   onDragStart: (event: React.DragEvent<HTMLDivElement>, lead: MarketingLead) => void;
@@ -35,6 +36,7 @@ export const MarketingLeadCardSlot = memo(function MarketingLeadCardSlot({
   isDragging,
   isUnread,
   onLeadClick,
+  onOpenCustomer,
   onLeadOpenNotes,
   onLeadPromote,
   onDragStart,
@@ -53,6 +55,7 @@ export const MarketingLeadCardSlot = memo(function MarketingLeadCardSlot({
       isDragging={isDragging}
       isUnread={isUnread}
       onClick={() => onLeadClick(lead.id)}
+      onOpenCustomer={onOpenCustomer}
       onOpenNotes={() => onLeadOpenNotes(lead.id)}
       onPromote={() => onLeadPromote(lead.id)}
       onDragStart={onDragStart}

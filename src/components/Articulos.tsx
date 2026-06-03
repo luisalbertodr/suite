@@ -1,5 +1,7 @@
 import React, { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { 
+  Archive,
   Plus, 
   Search, 
   Edit, 
@@ -12,21 +14,26 @@ import {
   Settings,
   Eye,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  RotateCcw,
 } from 'lucide-react';
 import { useArticles } from '@/hooks/useArticles';
 import { useArticleVariations } from '@/hooks/useArticleVariations';
+import { useFamilies } from '@/hooks/useFamilies';
 import { supabase } from '@/lib/supabase';
 import { ArticleForm } from './ArticleForm';
 import { FamilyManager } from './FamilyManager';
 import { BonusDefinitionsManager } from './BonusDefinitionsManager';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { useRegisterTopBarContent } from '@/components/TopBarContentContext';
 export const Articulos: React.FC = () => {
   const { articles, loading, deleteArticle, refetch } = useArticles();
+  const { families } = useFamilies();
   const [searchTerm, setSearchTerm] = useState('');
   const [familyFilter, setFamilyFilter] = useState<string | null>(null);
   const [familyFilterOpen, setFamilyFilterOpen] = useState(false);
   const [activeKind, setActiveKind] = useState<'producto' | 'servicio' | 'bono'>('producto');
+  const [showObsolete, setShowObsolete] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [showFamilyManager, setShowFamilyManager] = useState(false);
   const [showBonusDefinitionsManager, setShowBonusDefinitionsManager] = useState(false);
@@ -35,9 +42,65 @@ export const Articulos: React.FC = () => {
   const [articleVariations, setArticleVariations] = useState<{[key: string]: any[]}>({});
   const [loadingVariations, setLoadingVariations] = useState<{[key: string]: boolean}>({});
 
+  const cutoffOneYearAgo = useMemo(() => {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() - 1);
+    return d.toISOString();
+  }, []);
+
+  const activeArticles = useMemo(
+    () => articles.filter((article) => article.estado === 'activo'),
+    [articles],
+  );
+
+  const inactiveArticleIds = useMemo(
+    () => articles.filter((article) => article.estado !== 'activo').map((article) => article.id),
+    [articles],
+  );
+
+  const { data: recentlyUsedInactiveArticleIds = new Set<string>() } = useQuery({
+    queryKey: ['obsolete-article-recent-usage', inactiveArticleIds.join('|'), cutoffOneYearAgo],
+    enabled: inactiveArticleIds.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('appointment_items')
+        .select('article_id, agenda_appointments!inner(start_time)')
+        .in('article_id', inactiveArticleIds)
+        .gte('agenda_appointments.start_time', cutoffOneYearAgo);
+
+      if (error) throw error;
+      return new Set(
+        (data ?? [])
+          .map((row) => row.article_id)
+          .filter((id): id is string => !!id),
+      );
+    },
+  });
+
+  const obsoleteArticles = useMemo(
+    () =>
+      articles.filter(
+        (article) =>
+          article.estado !== 'activo' && !recentlyUsedInactiveArticleIds.has(article.id),
+      ),
+    [articles, recentlyUsedInactiveArticleIds],
+  );
+
+  const activeFamilyNames = useMemo(
+    () => new Set(activeArticles.map((article) => article.familia).filter(Boolean)),
+    [activeArticles],
+  );
+
+  const obsoleteFamilies = useMemo(
+    () => families.filter((family) => !activeFamilyNames.has(family.name)),
+    [activeFamilyNames, families],
+  );
+
+  const visibleArticles = showObsolete ? obsoleteArticles : activeArticles;
+
   const articlesForKind = useMemo(
-    () => articles.filter((article) => (article.article_kind || 'producto') === activeKind),
-    [articles, activeKind],
+    () => visibleArticles.filter((article) => (article.article_kind || 'producto') === activeKind),
+    [visibleArticles, activeKind],
   );
 
   const familyOptions = useMemo(
@@ -60,8 +123,8 @@ export const Articulos: React.FC = () => {
     );
   });
 
-  const articulosBajoStock = articles.filter(art => art.stock_actual <= art.stock_minimo);
-  const familias = [...new Set(articles.map(art => art.familia))];
+  const articulosBajoStock = activeArticles.filter(art => art.stock_actual <= art.stock_minimo);
+  const familias = [...new Set(activeArticles.map(art => art.familia))];
 
   const handleKindChange = (kind: 'producto' | 'servicio' | 'bono') => {
     setActiveKind(kind);
@@ -69,9 +132,15 @@ export const Articulos: React.FC = () => {
   };
 
   const handleDelete = async (id: string) => {
-    if (window.confirm('¿Estás seguro de que quieres eliminar este artículo?')) {
+    if (window.confirm('¿Enviar este artículo a Obsoleto? Dejará de aparecer en agenda, TPV y facturación.')) {
       await deleteArticle(id);
     }
+  };
+
+  const handleRestore = async (id: string) => {
+    const { error } = await supabase.from('articles').update({ estado: 'activo' }).eq('id', id);
+    if (error) throw error;
+    await refetch();
   };
 
   const handleEdit = (article: any) => {
@@ -158,6 +227,47 @@ export const Articulos: React.FC = () => {
     return article.tipo_producto === 'textil' || article.tipo_producto === 'calzado';
   };
 
+  const topBarActions = useMemo(() => (
+    <>
+      <button
+        onClick={() => setShowFamilyManager(true)}
+        className="flex h-7 items-center space-x-1.5 rounded-md bg-gradient-to-r from-green-500 to-green-600 px-2 text-xs text-white shadow-sm transition-all hover:from-green-600 hover:to-green-700"
+      >
+        <Settings className="w-3.5 h-3.5" />
+        <span>Familias</span>
+      </button>
+      {activeKind === 'bono' && (
+        <button
+          onClick={() => setShowBonusDefinitionsManager(true)}
+          className="flex h-7 items-center space-x-1.5 rounded-md bg-gradient-to-r from-violet-500 to-violet-600 px-2 text-xs text-white shadow-sm transition-all hover:from-violet-600 hover:to-violet-700"
+        >
+          <Settings className="w-3.5 h-3.5" />
+          <span>Bonos</span>
+        </button>
+      )}
+      <button
+        onClick={() => setShowForm(true)}
+        className="flex h-7 items-center space-x-1.5 rounded-md bg-gradient-to-r from-blue-500 to-blue-600 px-2 text-xs text-white shadow-sm transition-all hover:from-blue-600 hover:to-blue-700"
+      >
+        <Plus className="w-3.5 h-3.5" />
+        <span>Nuevo Artículo</span>
+      </button>
+    </>
+  ), [activeKind]);
+
+  useRegisterTopBarContent(
+    {
+      title: (
+        <span className="inline-flex items-center gap-2">
+          <Package className="w-4 h-4 text-purple-500" />
+          Artículos
+        </span>
+      ),
+      actions: topBarActions,
+    },
+    [topBarActions],
+  );
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -168,37 +278,6 @@ export const Articulos: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-foreground">Artículos</h1>
-        </div>
-        <div className="flex space-x-3">
-          <button
-            onClick={() => setShowFamilyManager(true)}
-            className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-lg hover:from-green-600 hover:to-green-700 transition-all shadow-lg"
-          >
-            <Settings className="w-4 h-4" />
-            <span>Gestionar Familias</span>
-          </button>
-          {activeKind === 'bono' && (
-            <button
-              onClick={() => setShowBonusDefinitionsManager(true)}
-              className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-violet-500 to-violet-600 text-white rounded-lg hover:from-violet-600 hover:to-violet-700 transition-all shadow-lg"
-            >
-              <Settings className="w-4 h-4" />
-              <span>Plantillas de Bonos</span>
-            </button>
-          )}
-          <button
-            onClick={() => setShowForm(true)}
-            className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg hover:from-blue-600 hover:to-blue-700 transition-all shadow-lg"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Nuevo Artículo</span>
-          </button>
-        </div>
-      </div>
-
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <div className="bg-card rounded-xl shadow-lg p-6 border border-border">
           <div className="flex items-center justify-between">
@@ -267,6 +346,27 @@ export const Articulos: React.FC = () => {
             />
           </div>
           <div className="flex items-center space-x-2">
+            <button
+              type="button"
+              onClick={() => {
+                setShowObsolete((prev) => !prev);
+                setFamilyFilter(null);
+              }}
+              className={`flex items-center space-x-2 px-4 py-2 border rounded-lg transition-colors ${
+                showObsolete
+                  ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-100'
+                  : 'border-border hover:bg-accent'
+              }`}
+              title="Ver familias sin artículos activos y artículos inactivos sin citas durante el último año"
+            >
+              <Archive className="w-4 h-4 shrink-0" />
+              <span>Obsoleto</span>
+              {(obsoleteArticles.length + obsoleteFamilies.length) > 0 && (
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900">
+                  {obsoleteArticles.length + obsoleteFamilies.length}
+                </span>
+              )}
+            </button>
             <Popover open={familyFilterOpen} onOpenChange={setFamilyFilterOpen}>
               <PopoverTrigger asChild>
                 <button
@@ -337,7 +437,48 @@ export const Articulos: React.FC = () => {
             )}
           </div>
         </div>
+        {showObsolete && (
+          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+            <p className="font-medium">Vista Obsoleto</p>
+            <p>
+              Aquí aparecen familias sin artículos activos y artículos inactivos que no figuran en
+              ninguna cita desde hace más de 1 año. No se ofrecen en agenda, TPV ni facturación
+              mientras sigan inactivos.
+            </p>
+          </div>
+        )}
       </div>
+
+      {showObsolete && obsoleteFamilies.length > 0 && (
+        <div className="bg-card rounded-xl shadow-lg p-6 border border-border">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">Familias sin artículos activos</h2>
+              <p className="text-sm text-muted-foreground">
+                Crea o reactiva artículos dentro de estas familias para volver a usarlas.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowFamilyManager(true)}
+              className="flex items-center space-x-2 px-3 py-2 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-lg hover:from-green-600 hover:to-green-700 transition-all shadow"
+            >
+              <Settings className="w-4 h-4" />
+              <span>Gestionar Familias</span>
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {obsoleteFamilies.map((family) => (
+              <span
+                key={family.id}
+                className="inline-flex rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground"
+              >
+                {family.name}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="bg-card rounded-xl shadow-lg border border-border overflow-hidden">
         <div className="overflow-x-auto">
@@ -371,7 +512,15 @@ export const Articulos: React.FC = () => {
               </tr>
             </thead>
             <tbody className="bg-card divide-y divide-border">
-              {filteredArticles.map((articulo) => [
+              {filteredArticles.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="px-6 py-10 text-center text-sm text-muted-foreground">
+                    {showObsolete
+                      ? 'No hay artículos obsoletos para esta pestaña.'
+                      : 'No hay artículos que coincidan con los filtros.'}
+                  </td>
+                </tr>
+              ) : filteredArticles.map((articulo) => [
                   <tr key={articulo.id} className="hover:bg-muted transition-colors">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
@@ -465,20 +614,33 @@ export const Articulos: React.FC = () => {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                       <div className="flex space-x-2">
-                        <button
-                          onClick={() => handleEdit(articulo)}
-                          className="text-green-600 hover:text-green-900 transition-colors"
-                          title="Editar artículo"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </button>
-                        <button 
-                          onClick={() => handleDelete(articulo.id)}
-                          className="text-red-600 hover:text-red-900 transition-colors"
-                          title="Eliminar artículo"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {showObsolete ? (
+                          <button
+                            onClick={() => void handleRestore(articulo.id)}
+                            className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-900 transition-colors"
+                            title="Dar de alta el artículo"
+                          >
+                            <RotateCcw className="w-4 h-4" />
+                            <span>Dar de alta</span>
+                          </button>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => handleEdit(articulo)}
+                              className="text-green-600 hover:text-green-900 transition-colors"
+                              title="Editar artículo"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(articulo.id)}
+                              className="text-red-600 hover:text-red-900 transition-colors"
+                              title="Enviar a obsoletos"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>,

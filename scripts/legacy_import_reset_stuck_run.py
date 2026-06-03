@@ -1,4 +1,4 @@
-"""Marca un legacy_import_run colgado en running como failed."""
+"""Marca legacy_import_runs colgados (running/queued) como failed."""
 import argparse
 import os
 import sys
@@ -7,37 +7,88 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
+import psycopg2
+from psycopg2.extras import RealDictCursor
+
+from legacy_import_progress import ensure_db_connection
 from legacy_import_run_tracker import RunTracker
 
+FAIL_MSG = "Detenido manualmente (todas las importaciones en ejecución)"
 
-def load_dotenv() -> None:
-    env = ROOT / ".env"
-    if not env.is_file():
-        return
-    for line in env.read_text(encoding="utf-8", errors="replace").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        k, v = line.split("=", 1)
-        k, v = k.strip(), v.strip().strip('"')
-        if k and k not in os.environ:
-            os.environ[k] = v
+
+def list_active_runs(conn, company_id: str | None) -> list[dict]:
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        if company_id:
+            cur.execute(
+                """
+                SELECT id, company_id, mode, status, current_step, created_at
+                FROM public.legacy_import_runs
+                WHERE status IN ('running', 'queued')
+                  AND company_id = %s::uuid
+                ORDER BY created_at DESC
+                """,
+                (company_id,),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT id, company_id, mode, status, current_step, created_at
+                FROM public.legacy_import_runs
+                WHERE status IN ('running', 'queued')
+                ORDER BY created_at DESC
+                """
+            )
+        return [dict(r) for r in cur.fetchall()]
 
 
 def main() -> None:
-    load_dotenv()
+    os.environ["SUPABASE_DB_URL"] = ensure_db_connection()
     ap = argparse.ArgumentParser()
-    ap.add_argument("--run-id", required=True)
+    ap.add_argument("--run-id", help="UUID concreto")
+    ap.add_argument(
+        "--all-running",
+        action="store_true",
+        help="Detener todos los runs en running o queued",
+    )
+    ap.add_argument("--company-id", default="", help="Filtrar por empresa (opcional)")
+    ap.add_argument("--include-queued", action="store_true", help="Incluir también queued")
     args = ap.parse_args()
 
-    tracker = RunTracker(args.run_id)
-    run = tracker.load_run()
-    if not run:
-        sys.exit(f"Run no encontrado: {args.run_id}")
+    if not args.run_id and not args.all_running:
+        ap.error("Indique --run-id <uuid> o --all-running")
 
-    print(f"Estado actual: {run.get('status')}  paso: {run.get('current_step')}")
-    tracker.mark_failed("Marcado failed manualmente (run colgado en running)")
-    print("OK → failed. Ahora: python scripts/legacy_import_worker.py --run-id", args.run_id)
+    company_id = args.company_id.strip() or None
+    statuses = ("running", "queued") if args.include_queued or args.all_running else ("running",)
+
+    if args.run_id:
+        tracker = RunTracker(args.run_id)
+        run = tracker.load_run()
+        if not run:
+            sys.exit(f"Run no encontrado: {args.run_id}")
+        print(f"Estado actual: {run.get('status')}  paso: {run.get('current_step')}")
+        tracker.mark_failed(FAIL_MSG)
+        print("OK → failed:", args.run_id)
+        return
+
+    conn = psycopg2.connect(os.environ["SUPABASE_DB_URL"], connect_timeout=15)
+    conn.autocommit = True
+    try:
+        runs = list_active_runs(conn, company_id)
+        if not runs:
+            print("No hay importaciones en running/queued.")
+            return
+
+        print(f"Deteniendo {len(runs)} ejecución(es)…")
+        for run in runs:
+            rid = str(run["id"])
+            print(
+                f"  - {rid}  [{run.get('status')}]  {run.get('mode')}  "
+                f"{run.get('current_step') or '(sin paso)'}"
+            )
+            RunTracker(rid).mark_failed(FAIL_MSG)
+        print(f"OK → {len(runs)} run(s) marcados como failed.")
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":

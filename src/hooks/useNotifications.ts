@@ -8,6 +8,7 @@ interface Notification {
   type: string;
   read: boolean;
   link: string | null;
+  metadata?: Record<string, unknown> | null;
   created_at: string;
 }
 
@@ -32,7 +33,7 @@ export const useNotifications = () => {
         .from('notifications')
         .select('*')
         .order('created_at', { ascending: false })
-        .limit(50);
+        .limit(500);
       if (isMissingRelation(error)) {
         notificationsTableMissing = true;
         return [];
@@ -42,6 +43,8 @@ export const useNotifications = () => {
     },
     retry: false,
     refetchOnWindowFocus: !notificationsTableMissing,
+    refetchInterval: notificationsTableMissing ? false : 30_000,
+    refetchIntervalInBackground: true,
   });
 
   const unreadCount = notifications.filter(n => !n.read).length;

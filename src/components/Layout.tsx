@@ -8,6 +8,7 @@ import { useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
 import { useMarketingUnread } from '@/hooks/useMarketingUnread';
 import { useNotificationSoundOnIncrease } from '@/hooks/useNotificationSoundOnIncrease';
 import { unlockNotificationAudio } from '@/lib/notificationSounds';
+import { TopBarContentProvider } from './TopBarContentContext';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -23,14 +24,16 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   }, []);
 
   return (
-    <div className="min-h-screen bg-background">
-      <Screensaver />
-      <TopBar />
-      <main className="pt-12 pb-24 px-4 sm:px-6">
-        {children}
-      </main>
-      <DockBar />
-      <Toaster />
-    </div>
+    <TopBarContentProvider>
+      <div className="min-h-screen bg-background">
+        <Screensaver />
+        <TopBar />
+        <main className="pt-14 pb-24 px-4 sm:px-6">
+          {children}
+        </main>
+        <DockBar />
+        <Toaster />
+      </div>
+    </TopBarContentProvider>
   );
 };

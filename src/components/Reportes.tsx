@@ -247,12 +247,6 @@ export const Reportes: React.FC<{ embedded?: boolean }> = ({ embedded = false })
 
   return (
     <div className={embedded ? 'space-y-6' : 'space-y-6'}>
-      {!embedded && (
-        <div className="flex justify-between items-center">
-          <h1 className="text-3xl font-bold text-foreground">Reportes</h1>
-        </div>
-      )}
-
       <div className="space-y-8">
         {reportCategories.map((category) => {
           const CategoryIcon = category.icon;

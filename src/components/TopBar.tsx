@@ -9,6 +9,7 @@ import { useWorkCenter } from '@/hooks/useWorkCenter';
 import { useWorkCenterBranding } from '@/hooks/useWorkCenterBranding';
 import { useBillingScopeRoute } from '@/hooks/useBillingScopeRoute';
 import { BillingScopeToggle } from '@/components/BillingScopeToggle';
+import { useTopBarContent } from './TopBarContentContext';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,6 +17,24 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+
+const ROUTE_TITLES: Record<string, string> = {
+  '/': 'Inicio',
+  '/agenda': 'Agenda',
+  '/tpv': 'TPV',
+  '/facturacion': 'Facturación',
+  '/clientes': 'Clientes',
+  '/articulos': 'Artículos',
+  '/planillas': 'Planillas',
+  '/gestion-documental': 'Gestión Documental',
+  '/reportes': 'Reportes',
+  '/configuracion': 'Configuración',
+  '/recursos-cabinas': 'Recursos y Cabinas',
+  '/asistencia': 'Fichaje',
+  '/marketing': 'Marketing',
+  '/whatsapp': 'WhatsApp',
+  '/telefono': 'Teléfono',
+};
 
 export const TopBar: React.FC = () => {
   const navigate = useNavigate();
@@ -26,6 +45,7 @@ export const TopBar: React.FC = () => {
   const { isMultiEntity, loading: wcLoading } = useWorkCenter();
   const { displayName, logoUrlLight, logoUrlDark, isLoading: brandingLoading } = useWorkCenterBranding();
   const { enabled: billingScopeEnabled } = useBillingScopeRoute();
+  const { content } = useTopBarContent();
   const [currentDateTime, setCurrentDateTime] = useState(new Date());
 
   useEffect(() => {
@@ -39,13 +59,14 @@ export const TopBar: React.FC = () => {
   const logoUrl = activeTheme === 'dark' ? (logoUrlDark || logoUrlLight) : logoUrlLight;
 
   const brandLabel = displayName.trim() || 'Lipoout';
+  const routeTitle = content.title ?? ROUTE_TITLES[pathname] ?? '';
   const showBrandSkeleton = (companyLoading || brandingLoading) && !displayName;
   const showBillingToggle = isMultiEntity && !wcLoading && !pathname.startsWith('/whatsapp');
 
   return (
     <header className="fixed top-0 left-0 right-0 z-40 h-12 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-      <div className="flex items-center justify-between h-full px-5">
-        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+      <div className="grid h-full grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(0,1fr)] items-center gap-3 px-4 sm:px-5">
+        <div className="flex items-center gap-2.5 min-w-0">
           {showBrandSkeleton ? (
             <span className="h-6 w-32 rounded bg-muted animate-pulse" aria-hidden />
           ) : (
@@ -62,9 +83,25 @@ export const TopBar: React.FC = () => {
               )}
             </>
           )}
+          {routeTitle && (
+            <>
+              <span className="h-5 w-px shrink-0 bg-border" aria-hidden />
+              <span className="min-w-0 truncate text-sm font-semibold text-foreground sm:text-base">
+                {routeTitle}
+              </span>
+            </>
+          )}
         </div>
 
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex min-w-0 items-center justify-center overflow-x-auto">
+          {content.actions && (
+            <div className="flex min-w-0 items-center justify-center gap-1.5 whitespace-nowrap">
+              {content.actions}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end gap-3 min-w-0">
           {showBillingToggle && (
             <BillingScopeToggle disabled={!billingScopeEnabled} />
           )}

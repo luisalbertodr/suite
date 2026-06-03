@@ -197,6 +197,26 @@ export const MarketingLeadDetailDialog: React.FC<MarketingLeadDetailDialogProps>
           </div>
         ) : null}
 
+        {extraFields.length > 0 ? (
+          <div className="rounded-lg border bg-muted/30 p-3">
+            <h4 className="mb-2 text-sm font-semibold">Valores recibidos de Meta</h4>
+            <dl className="space-y-2 text-xs">
+              {extraFields.map((f) => (
+                <div key={f.name} className="grid gap-1 md:grid-cols-[1fr_2fr] md:gap-3">
+                  <dt className="text-muted-foreground">{humanizeFieldKey(f.name)}</dt>
+                  <dd className="font-medium text-foreground break-words">
+                    {formatLeadFieldValue(f.values ?? [], 'string')}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed bg-muted/20 p-3 text-xs text-muted-foreground">
+            Este lead no trae respuestas adicionales del formulario Meta.
+          </div>
+        )}
+
         <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="lead-first-name">Nombre</Label>
@@ -281,22 +301,6 @@ export const MarketingLeadDetailDialog: React.FC<MarketingLeadDetailDialogProps>
             />
           </div>
         </div>
-
-        {extraFields.length > 0 ? (
-          <div className="mt-4 rounded-lg border bg-muted/30 p-3">
-            <h4 className="mb-2 text-sm font-semibold">Respuestas del formulario</h4>
-            <dl className="space-y-2 text-xs">
-              {extraFields.map((f) => (
-                <div key={f.name} className="grid gap-1 md:grid-cols-[1fr_2fr] md:gap-3">
-                  <dt className="text-muted-foreground">{humanizeFieldKey(f.name)}</dt>
-                  <dd className="font-medium text-foreground break-words">
-                    {formatLeadFieldValue(f.values ?? [], 'string')}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          </div>
-        ) : null}
 
         <div className="mt-4">
           <h4 className="mb-2 text-sm font-semibold">Actividad y notas</h4>

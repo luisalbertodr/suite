@@ -50,6 +50,7 @@ interface MarketingLeadCardProps {
   isDragging: boolean;
   isUnread?: boolean;
   onClick: () => void;
+  onOpenCustomer: (customerId: string) => void;
   onOpenNotes: () => void;
   onPromote: () => void;
   onDragStart: (event: React.DragEvent<HTMLDivElement>, lead: MarketingLead) => void;
@@ -148,6 +149,7 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
   isDragging,
   isUnread = false,
   onClick,
+  onOpenCustomer,
   onOpenNotes,
   onPromote,
   onDragStart,
@@ -186,6 +188,11 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
     } else if (waExternalHref) {
       window.open(waExternalHref, '_blank', 'noreferrer');
     }
+  };
+  const handleMatchedCustomerClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (matchedCustomer?.id) onOpenCustomer(matchedCustomer.id);
   };
 
   const { atIso: resolvedApptIso, label: resolvedApptLabel } =
@@ -273,20 +280,26 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
               <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
                 {isLinked ? (
                   compact ? (
-                    <span
-                      className="inline-flex max-w-full items-center gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-400"
+                    <button
+                      type="button"
+                      onClick={handleMatchedCustomerClick}
+                      className="inline-flex max-w-full items-center gap-1 text-left text-xs font-medium text-emerald-700 underline-offset-2 hover:underline dark:text-emerald-400"
                       title={`Cliente: ${matchedCustomer!.name}`}
                     >
                       <UserCheck className="h-3 w-3 shrink-0" />
                       <span className="min-w-0 truncate">{matchedCustomer!.name}</span>
-                    </span>
+                    </button>
                   ) : (
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <span className="inline-flex max-w-full items-center gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                      <button
+                        type="button"
+                        onClick={handleMatchedCustomerClick}
+                        className="inline-flex max-w-full items-center gap-1 text-left text-xs font-medium text-emerald-700 underline-offset-2 hover:underline dark:text-emerald-400"
+                      >
                         <UserCheck className="h-3 w-3 shrink-0" />
                         <span className="min-w-0 truncate">Cliente: {matchedCustomer!.name}</span>
-                      </span>
+                      </button>
                     </TooltipTrigger>
                     <TooltipContent side="bottom">
                       Coincide con un cliente existente: {matchedCustomer!.name}

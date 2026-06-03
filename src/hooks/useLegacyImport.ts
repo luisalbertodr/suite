@@ -64,6 +64,9 @@ async function invokeLegacyImport<T>(
       data && typeof data.error === 'string'
         ? data.error
         : `HTTP ${res.status}`;
+    if (res.status === 503) {
+      throw new Error(`${serverMessage} Intente de nuevo en unos segundos.`);
+    }
     throw new Error(serverMessage);
   }
 

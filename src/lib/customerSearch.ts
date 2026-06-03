@@ -20,6 +20,22 @@ export function escapeIlike(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
 }
 
+function normalizeSearchText(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function searchTokens(rawQuery: string): string[] {
+  return normalizeSearchText(rawQuery)
+    .replace(/%/g, '')
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
 const CUSTOMER_ILIKE_FIELDS = [
   'name',
   'email',
@@ -32,10 +48,17 @@ const CUSTOMER_ILIKE_FIELDS = [
 
 /** PostgREST `.or()` sobre campos de cliente (tabla `customers`, sin prefijo). */
 export function buildCustomerIlikeOrFilter(rawQuery: string): string | null {
-  const q = rawQuery.trim().replace(/%/g, '');
-  if (!q) return null;
-  const pattern = `%${escapeIlike(q)}%`;
-  return CUSTOMER_ILIKE_FIELDS.map((f) => `${f}.ilike.${pattern}`).join(',');
+  const tokens = searchTokens(rawQuery);
+  if (tokens.length === 0) return null;
+  const tokenFilter = (token: string) => {
+    const pattern = `%${escapeIlike(token)}%`;
+    return `or(${CUSTOMER_ILIKE_FIELDS.map((f) => `${f}.ilike.${pattern}`).join(',')})`;
+  };
+  if (tokens.length === 1) {
+    const pattern = `%${escapeIlike(tokens[0]!)}%`;
+    return CUSTOMER_ILIKE_FIELDS.map((f) => `${f}.ilike.${pattern}`).join(',');
+  }
+  return `and(${tokens.map(tokenFilter).join(',')})`;
 }
 
 /** PostgREST `.or()` para facturas: número y/o IDs de cliente (máx. para no alargar la URL). */
@@ -110,11 +133,11 @@ function compactTaxId(s: string | null | undefined): string {
 
 /** Texto normalizado donde buscar (minúsculas, incluye teléfono solo dígitos). */
 export function customerSearchHaystack(c: CustomerSearchRow): string {
-  const name = (c.name || '').toLowerCase();
-  const email = (c.email || '').toLowerCase();
+  const name = normalizeSearchText(c.name || '');
+  const email = normalizeSearchText(c.email || '');
   const tax = compactTaxId(c.tax_id);
   const ph = [c.phone, c.phone_home, c.phone_mobile].filter(Boolean).join(' ');
-  const phoneRaw = ph.toLowerCase();
+  const phoneRaw = normalizeSearchText(ph);
   const phoneDig = digitsOnly(ph);
   return [name, email, tax, phoneRaw, phoneDig].filter(Boolean).join(' ');
 }
@@ -124,10 +147,7 @@ export function customerSearchHaystack(c: CustomerSearchRow): string {
  * Los tokens solo numéricos también se comparan con el teléfono sin separadores.
  */
 export function customerMatchesSearch(c: CustomerSearchRow, rawQuery: string): boolean {
-  const q = rawQuery.trim().toLowerCase();
-  if (!q) return true;
-
-  const tokens = q.split(/\s+/).filter(Boolean);
+  const tokens = searchTokens(rawQuery);
   if (tokens.length === 0) return true;
 
   const haystack = customerSearchHaystack(c);

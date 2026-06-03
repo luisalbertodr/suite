@@ -33,6 +33,7 @@ import {
 import { issueInvoiceFromSale } from '@/lib/tpvSaleOperations';
 import { useTpvSettings } from '@/hooks/useTpvSettings';
 import { Grid, type CellComponentProps } from 'react-window';
+import { useRegisterTopBarContent } from '@/components/TopBarContentContext';
 
 interface CartItem {
   id: string;
@@ -949,6 +950,34 @@ export const TPV: React.FC = () => {
     return { width, height, gap, columnCount, columnWidth, rowHeight, rowCount };
   }, [articles.length, productsViewport.height, productsViewport.width]);
 
+  const topBarActions = useMemo(() => {
+    if (showHistory) return null;
+    return (
+      <Button
+        onClick={() => setShowHistory(true)}
+        variant="outline"
+        size="sm"
+        className="h-7 px-2 text-xs"
+      >
+        <History className="w-3.5 h-3.5 mr-1" />
+        Historial
+      </Button>
+    );
+  }, [showHistory]);
+
+  useRegisterTopBarContent(
+    {
+      title: (
+        <span className="inline-flex items-center gap-2">
+          <CreditCard className="w-4 h-4 text-blue-600" />
+          {showHistory ? 'Historial TPV' : 'Terminal TPV'}
+        </span>
+      ),
+      actions: topBarActions,
+    },
+    [showHistory, topBarActions],
+  );
+
   if (companyLoading) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -977,23 +1006,6 @@ export const TPV: React.FC = () => {
 
   return (
     <div className="flex flex-col h-screen bg-background">
-      <div className="flex justify-between items-center p-4 bg-card shadow-sm border-b border-border">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-            <CreditCard className="w-6 h-6 text-blue-600" />
-            Terminal TPV
-          </h1>
-        </div>
-        <Button
-          onClick={() => setShowHistory(true)}
-          variant="outline"
-          size="sm"
-        >
-          <History className="w-4 h-4 mr-2" />
-          Historial
-        </Button>
-      </div>
-
       {appointmentChargeContext && (
         <div className="mx-4 mt-2 rounded-md border border-sky-200 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/40 px-3 py-2 text-sm text-sky-900 dark:text-sky-100 flex flex-wrap items-center gap-2">
           <span>

@@ -93,6 +93,8 @@ def execute_pipeline(
     skip_master: bool,
     skip_catalog: bool,
     with_customers: bool,
+    no_invoices: bool,
+    no_sales: bool,
     clean_import: bool,
     include_fallback: bool,
     company_id: str,
@@ -117,6 +119,8 @@ def execute_pipeline(
         skip_master=skip_master,
         skip_catalog=skip_catalog,
         with_customers=with_customers,
+        no_invoices=no_invoices,
+        no_sales=no_sales,
         clean_import=clean_import,
         include_fallback=include_fallback,
         company_id=company_id,
@@ -124,6 +128,8 @@ def execute_pipeline(
     )
 
     skipping_until = [bool(resume_from)]
+    step_total = len(steps)
+    step_idx = 0
     for step in steps:
         if should_skip_step(
             step.name,
@@ -133,6 +139,10 @@ def execute_pipeline(
             skipping_until=skipping_until,
         ):
             continue
+        step_idx += 1
+        print(f"\n[Paso {step_idx}/{step_total}] {step.name}", flush=True)
+        if tracker:
+            tracker.set_progress(step_idx, step_total, step.name)
         run_step(step.name, step.build_cmd(), dry_run, tracker)
 
     print("\nPipeline terminado.")
@@ -160,6 +170,16 @@ def main() -> None:
         "--with-customers",
         action="store_true",
         help="En refresh/promote-only: actualizar clientes, fecnac, teléfonos y bonoscli",
+    )
+    ap.add_argument(
+        "--no-invoices",
+        action="store_true",
+        help="No crear facturas legacy (ni faccab sueltas ni corrección fechas)",
+    )
+    ap.add_argument(
+        "--no-sales",
+        action="store_true",
+        help="No crear tickets TPV LEG-* (solo citas y maestros)",
     )
     ap.add_argument("--clean-import", action="store_true")
     ap.add_argument("--include-fallback", action="store_true")
@@ -194,6 +214,8 @@ def main() -> None:
             skip_master=args.skip_master,
             skip_catalog=args.skip_catalog,
             with_customers=args.with_customers,
+            no_invoices=args.no_invoices,
+            no_sales=args.no_sales,
             clean_import=args.clean_import,
             include_fallback=args.include_fallback,
             company_id=args.company_id,

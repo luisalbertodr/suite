@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -16,6 +16,7 @@ import { useCustomerSearch } from '@/hooks/useCustomerSearch';
 import { CUSTOMER_SEARCH_MIN_CHARS, isCustomerSearchQueryReady } from '@/lib/customerSearch';
 import { formatCustomerPhoneLabels } from '@/lib/legacyCustomerPhones';
 import type { ClienteDetailTab } from '@/types/clienteDetail';
+import { useRegisterTopBarContent } from '@/components/TopBarContentContext';
 
 interface Customer {
   id: string;
@@ -93,6 +94,31 @@ export const Clientes: React.FC = () => {
     onError: () => toast({ title: 'Error al eliminar', variant: 'destructive' }),
   });
 
+  const topBarActions = useMemo(() => (
+    <Button
+      onClick={() => {
+        setSelectedCustomer(null);
+        setView('form');
+      }}
+      className="h-7 bg-sky-500 px-2 text-xs text-white hover:bg-sky-600"
+    >
+      <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo Cliente
+    </Button>
+  ), []);
+
+  useRegisterTopBarContent(
+    {
+      title: (
+        <span className="inline-flex items-center gap-2">
+          <Users className="w-4 h-4 text-pink-500" />
+          Clientes
+        </span>
+      ),
+      actions: topBarActions,
+    },
+    [topBarActions],
+  );
+
   if (companyLoading) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -143,21 +169,6 @@ export const Clientes: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Clientes</h1>
-        </div>
-        <Button
-          onClick={() => {
-            setSelectedCustomer(null);
-            setView('form');
-          }}
-          className="bg-sky-500 hover:bg-sky-600 text-white"
-        >
-          <Plus className="w-4 h-4 mr-2" /> Nuevo Cliente
-        </Button>
-      </div>
-
       <Card>
         <CardHeader className="pb-4">
           <div className="flex items-center justify-between gap-4">

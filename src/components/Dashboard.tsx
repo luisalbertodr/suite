@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   Users, Calendar, Receipt, TrendingUp, DollarSign, Activity,
   Loader2, AlertCircle, RefreshCw, CreditCard, BarChart3
@@ -7,9 +7,32 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useDashboardData } from '../hooks/useDashboardData';
 import { Reportes } from './Reportes';
+import { useRegisterTopBarContent } from '@/components/TopBarContentContext';
 
 export const Dashboard: React.FC = () => {
   const { stats, chartData, recentActivity, isLoading } = useDashboardData();
+  const topBarActions = useMemo(() => (
+    <button
+      type="button"
+      onClick={() => window.location.reload()}
+      className="inline-flex h-7 items-center rounded-md border bg-card px-2 text-xs transition-colors hover:bg-muted"
+    >
+      <RefreshCw className="w-3.5 h-3.5 mr-1" /> Actualizar
+    </button>
+  ), []);
+
+  useRegisterTopBarContent(
+    {
+      title: (
+        <span className="inline-flex items-center gap-2">
+          <TrendingUp className="w-4 h-4 text-red-500" />
+          Inicio
+        </span>
+      ),
+      actions: topBarActions,
+    },
+    [topBarActions],
+  );
 
   if (isLoading) {
     return (
@@ -53,9 +76,8 @@ export const Dashboard: React.FC = () => {
   return (
     <div className="space-y-4">
       <Tabs defaultValue="resumen" className="space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-          <h1 className="text-2xl font-bold text-foreground shrink-0">Dashboard</h1>
-          <div className="flex flex-wrap items-center gap-2 ml-auto">
+        <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
+          <div className="flex flex-wrap items-center gap-2">
             <TabsList className="h-9">
               <TabsTrigger value="resumen" className="text-sm px-3">
                 <TrendingUp className="w-4 h-4 mr-1.5" />
@@ -66,13 +88,6 @@ export const Dashboard: React.FC = () => {
                 Reportes
               </TabsTrigger>
             </TabsList>
-            <button
-              type="button"
-              onClick={() => window.location.reload()}
-              className="inline-flex items-center px-3 py-1.5 text-sm bg-card border rounded-lg hover:bg-muted transition-colors h-9"
-            >
-              <RefreshCw className="w-4 h-4 mr-1.5" /> Actualizar
-            </button>
             <span className="text-xs text-muted-foreground hidden sm:block tabular-nums">
               {new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
             </span>

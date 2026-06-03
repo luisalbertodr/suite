@@ -80,7 +80,13 @@ class RunTracker:
         if not self.active:
             return
         self._append_log(name, detail, status="started")
-        self._update(current_step=name)
+        self._update(current_step=detail or name)
+
+    def set_progress(self, index: int, total: int, label: str) -> None:
+        if not self.active or total <= 0:
+            return
+        pct = int(100 * index / total)
+        self._update(current_step=f"{index}/{total} ({pct}%) {label}"[:500])
 
     def step_done(self, name: str, detail: str | None = None) -> None:
         if not self.active:

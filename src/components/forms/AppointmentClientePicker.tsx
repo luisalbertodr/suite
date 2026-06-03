@@ -23,6 +23,7 @@ import {
 } from '@/lib/customerSearch';
 import { useCustomerSearch } from '@/hooks/useCustomerSearch';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useWorkCenter } from '@/hooks/useWorkCenter';
 
 export type AppointmentClientPick =
   | { kind: 'customer'; customerId: string; displayName: string }
@@ -54,7 +55,9 @@ export const AppointmentClientePicker: React.FC<Props> = ({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const { companyId } = useCompanyFilter();
-  const remote = useCustomerSearch(lazySearch ? companyId : null, search);
+  const { catalogHostCompanyId } = useWorkCenter();
+  const catalogCompanyId = catalogHostCompanyId ?? companyId;
+  const remote = useCustomerSearch(lazySearch ? catalogCompanyId : null, search);
 
   const filtered = useMemo(() => {
     if (lazySearch) return remote.customers;

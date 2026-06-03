@@ -28,6 +28,7 @@ import { toRecursoCatalogEntries, type ArticleResourceHint } from '@/lib/agendaR
 import { checkAppointmentItemsResourceConflict } from '@/lib/agendaResourceConflicts';
 import { useAuth } from '@/hooks/useAuth';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { usePermissionGuard } from '@/hooks/usePermissionGuard';
 import type { CustomerSearchRow } from '@/lib/customerSearch';
 import { fetchCatalogCustomers } from '@/lib/customerSearch';
 import {
@@ -63,6 +64,7 @@ import {
   appointmentVisibleInBillingView,
   resolveAppointmentBillingIds,
 } from '@/lib/workCenterAudit';
+import { useRegisterTopBarContent } from '@/components/TopBarContentContext';
 
 interface Employee {
   id: string;
@@ -102,6 +104,7 @@ export const Agenda: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
+  const { requireOrToast: requirePermissionOrToast } = usePermissionGuard();
   const { companyId, loading: companyLoading } = useCompanyFilter();
   const { isMultiEntity, operationalCompanyId } = useWorkCenter();
   const opCompanyId = operationalCompanyId ?? companyId;
@@ -801,6 +804,103 @@ export const Agenda: React.FC = () => {
     return appointmentVisibleInBillingView(billingIds, agendaBillingView);
   });
 
+  const topBarActions = useMemo(() => (
+    <>
+      <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
+        <div className="flex h-7 flex-nowrap items-center rounded-md border border-border/60 bg-muted/80 p-0">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 shrink-0 p-0 rounded-none rounded-l-md"
+            onClick={() => selectAgendaDate(subDays(selectedDate, 1))}
+          >
+            <ChevronLeft className="w-3.5 h-3.5" />
+          </Button>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 min-w-0 max-w-[11rem] sm:max-w-[13rem] px-2 text-xs font-medium tabular-nums capitalize rounded-none border-x border-border/50"
+            >
+              {format(selectedDate, 'EEE d MMM yyyy', { locale: es })}
+            </Button>
+          </PopoverTrigger>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 shrink-0 p-0 rounded-none rounded-r-md"
+            onClick={() => selectAgendaDate(addDays(selectedDate, 1))}
+          >
+            <ChevronRight className="w-3.5 h-3.5" />
+          </Button>
+        </div>
+        <PopoverContent className="w-auto p-0" align="center">
+          <Calendar
+            key={format(selectedDate, 'yyyy-MM')}
+            mode="single"
+            selected={selectedDate}
+            onSelect={(d) => {
+              if (d) {
+                selectAgendaDate(d);
+                setDatePickerOpen(false);
+              }
+            }}
+            defaultMonth={selectedDate}
+            locale={es}
+            captionLayout="dropdown"
+            fromYear={1990}
+            toYear={2040}
+            initialFocus
+            className="pointer-events-auto p-2"
+            classNames={{
+              month: 'space-y-1',
+              caption: 'flex justify-center pt-0 pb-1 px-0 relative items-center',
+              caption_dropdowns: 'flex flex-row flex-nowrap items-center justify-center gap-1',
+              caption_label: 'hidden',
+              dropdown: 'h-7 rounded-md border border-input bg-background px-1.5 py-0 text-xs font-medium cursor-pointer',
+              dropdown_month: 'shrink-0 max-h-7',
+              dropdown_year: 'shrink-0 max-h-7 w-[4.25rem]',
+            }}
+            labels={{
+              labelMonthDropdown: () => 'Mes',
+              labelYearDropdown: () => 'Año',
+            }}
+          />
+        </PopoverContent>
+      </Popover>
+      <Button
+        variant="outline"
+        size="sm"
+        className="h-7 px-2 text-xs shrink-0"
+        onClick={() => {
+          selectAgendaDate(new Date());
+          setGoToTodayRequestId((n) => n + 1);
+        }}
+      >
+        <Clock className="w-3.5 h-3.5 mr-1" /> Hoy
+      </Button>
+      <BillingEntityToggle
+        showAll
+        value={agendaBillingView}
+        onChange={setAgendaBillingView}
+      />
+    </>
+  ), [agendaBillingView, datePickerOpen, selectAgendaDate, selectedDate]);
+
+  useRegisterTopBarContent(
+    {
+      title: (
+        <span className="inline-flex items-center gap-2">
+          <CalendarIcon className="w-4 h-4 text-sky-500" />
+          Agenda
+        </span>
+      ),
+      actions: topBarActions,
+    },
+    [topBarActions],
+  );
+
   useEffect(() => {
     if (!fromLeadIdParam) {
       processedMarketingLeadPrefillRef.current = null;
@@ -1090,6 +1190,7 @@ export const Agenda: React.FC = () => {
   };
 
   const handleAppointmentDelete = async (appointmentId: string) => {
+    if (!requirePermissionOrToast('agenda', 'delete', 'No tienes permiso para eliminar citas.')) return;
     try {
       await deleteAppointment.mutateAsync(appointmentId);
       setShowEditForm(false);
@@ -1284,93 +1385,11 @@ export const Agenda: React.FC = () => {
 
   return (
     <div className="flex flex-col h-[calc(100dvh-9rem)] min-h-[560px]">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-3">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-            <CalendarIcon className="w-5 h-5 text-sky-500" />
-            Agenda
-          </h1>
-          {isMultiEntity && agendaBillingView !== 'all' && (
-            <p className="mt-1 text-[10px] text-muted-foreground text-violet-600 dark:text-violet-400">
-              Las citas mixtas (estética + medicina) solo se ven en «Ambas empresas»
-            </p>
-          )}
-        </div>
-
-        <div className="flex flex-nowrap items-center gap-1.5 min-w-0">
-          <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
-            <div className="flex flex-nowrap items-center rounded-md border border-border/60 bg-muted/80 p-0 h-7">
-              <Button variant="ghost" size="sm" className="h-7 w-7 shrink-0 p-0 rounded-none rounded-l-md" onClick={() => selectAgendaDate(subDays(selectedDate, 1))}>
-                <ChevronLeft className="w-3.5 h-3.5" />
-              </Button>
-              <PopoverTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 min-w-0 max-w-[11rem] sm:max-w-[13rem] px-2 text-xs font-medium tabular-nums capitalize rounded-none border-x border-border/50"
-                >
-                  {format(selectedDate, 'EEE d MMM yyyy', { locale: es })}
-                </Button>
-              </PopoverTrigger>
-              <Button variant="ghost" size="sm" className="h-7 w-7 shrink-0 p-0 rounded-none rounded-r-md" onClick={() => selectAgendaDate(addDays(selectedDate, 1))}>
-                <ChevronRight className="w-3.5 h-3.5" />
-              </Button>
-            </div>
-            <PopoverContent className="w-auto p-0" align="center">
-              <Calendar
-                key={format(selectedDate, 'yyyy-MM')}
-                mode="single"
-                selected={selectedDate}
-                onSelect={(d) => {
-                  if (d) {
-                    selectAgendaDate(d);
-                    setDatePickerOpen(false);
-                  }
-                }}
-                defaultMonth={selectedDate}
-                locale={es}
-                captionLayout="dropdown"
-                fromYear={1990}
-                toYear={2040}
-                initialFocus
-                className="pointer-events-auto p-2"
-                classNames={{
-                  month: 'space-y-1',
-                  caption: 'flex justify-center pt-0 pb-1 px-0 relative items-center',
-                  caption_dropdowns: 'flex flex-row flex-nowrap items-center justify-center gap-1',
-                  /** Oculta el texto duplicado (mes/año + icono) junto al desplegable nativo */
-                  caption_label: 'hidden',
-                  dropdown: 'h-7 rounded-md border border-input bg-background px-1.5 py-0 text-xs font-medium cursor-pointer',
-                  dropdown_month: 'shrink-0 max-h-7',
-                  dropdown_year: 'shrink-0 max-h-7 w-[4.25rem]',
-                }}
-                labels={{
-                  labelMonthDropdown: () => 'Mes',
-                  labelYearDropdown: () => 'Año',
-                }}
-              />
-            </PopoverContent>
-          </Popover>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 px-2 text-xs shrink-0"
-            onClick={() => {
-              selectAgendaDate(new Date());
-              setGoToTodayRequestId((n) => n + 1);
-            }}
-          >
-            <Clock className="w-3.5 h-3.5 mr-1" /> Hoy
-          </Button>
-          <BillingEntityToggle
-            showAll
-            value={agendaBillingView}
-            onChange={setAgendaBillingView}
-          />
-        </div>
-      </div>
+      {isMultiEntity && agendaBillingView !== 'all' && (
+        <p className="mb-2 text-[10px] text-muted-foreground text-violet-600 dark:text-violet-400">
+          Las citas mixtas (estética + medicina) solo se ven en «Ambas empresas»
+        </p>
+      )}
 
       {/* Grid */}
       <div className="flex-1 overflow-hidden rounded-lg border bg-card">

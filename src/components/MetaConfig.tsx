@@ -41,10 +41,12 @@ import {
   CheckCircle2,
   XCircle,
   AlertTriangle,
+  ListFilter,
   ListChecks,
   RotateCcw,
   MessageSquare,
   CreditCard,
+  Settings2,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -60,6 +62,8 @@ import {
 import { useMarketingStages } from '@/hooks/useMarketingStages';
 import { findMarketingIntakeStage } from '@/lib/marketingIntakeStage';
 import { MarketingImportDialog } from './marketing/MarketingImportDialog';
+import { MarketingFieldsConfigDialog } from './marketing/MarketingFieldsConfigDialog';
+import { MarketingStagesManager } from './marketing/MarketingStagesManager';
 import { WHATSAPP_MESSAGE_TEMPLATE_VARS } from '@/lib/whatsappMessageTemplates';
 import { centsToEurosInput, eurosToCents } from '@/hooks/useStripeConfig';
 
@@ -135,6 +139,8 @@ export const MetaConfig: React.FC = () => {
   const [apiVersion, setApiVersion] = useState('v23.0');
 
   const [openImport, setOpenImport] = useState(false);
+  const [openFieldsConfig, setOpenFieldsConfig] = useState(false);
+  const [openStagesManager, setOpenStagesManager] = useState(false);
   const [fullResyncOpen, setFullResyncOpen] = useState(false);
   const [fullResyncAck, setFullResyncAck] = useState(false);
   /** Última respuesta de sync en esta sesión (lista por formulario). */
@@ -694,6 +700,32 @@ export const MetaConfig: React.FC = () => {
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="flex items-start gap-3">
+              <div className="rounded-xl bg-rose-500/10 p-2">
+                <Settings2 className="h-5 w-5 text-rose-600" />
+              </div>
+              <div>
+                <CardTitle>Estructura de Marketing</CardTitle>
+                <CardDescription>
+                  Configura los campos visibles de las tarjetas y las etapas del embudo.
+                </CardDescription>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => setOpenFieldsConfig(true)}>
+                <ListFilter className="mr-2 h-3.5 w-3.5" /> Campos
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setOpenStagesManager(true)}>
+                <Settings2 className="mr-2 h-3.5 w-3.5" /> Etapas
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex items-start gap-3">
               <div className="rounded-xl bg-sky-500/10 p-2">
                 <Facebook className="h-5 w-5 text-sky-600" />
               </div>
@@ -962,6 +994,8 @@ export const MetaConfig: React.FC = () => {
         onOpenChange={setOpenImport}
         stages={stages}
       />
+      <MarketingFieldsConfigDialog open={openFieldsConfig} onOpenChange={setOpenFieldsConfig} />
+      <MarketingStagesManager open={openStagesManager} onOpenChange={setOpenStagesManager} />
 
       <AlertDialog
         open={fullResyncOpen}

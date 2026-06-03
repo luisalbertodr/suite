@@ -26,6 +26,7 @@ interface MarketingStageColumnProps {
   notePreviewsByLead: Record<string, MarketingLeadNotePreview[]>;
   viewedLeadIds: Set<string>;
   onLeadClickById: (leadId: string) => void;
+  onOpenCustomer: (customerId: string) => void;
   onLeadOpenNotesById: (leadId: string) => void;
   onLeadPromoteById: (leadId: string) => void;
   onLeadDragStart: (event: React.DragEvent<HTMLDivElement>, lead: MarketingLead) => void;
@@ -71,6 +72,7 @@ export const MarketingStageColumn = memo(function MarketingStageColumn({
   onDeleteStage,
   collapsed = false,
   onToggleCollapsed,
+  onOpenCustomer,
   compact = false,
 }: MarketingStageColumnProps) {
   const totalValue = leads.reduce((acc, l) => acc + Number(l.value ?? 0), 0);
@@ -232,6 +234,7 @@ export const MarketingStageColumn = memo(function MarketingStageColumn({
                     isDragging={draggedLeadId === lead.id}
                     isUnread={!viewedLeadIds.has(lead.id)}
                     onLeadClick={onLeadClickById}
+                    onOpenCustomer={onOpenCustomer}
                     onLeadOpenNotes={onLeadOpenNotesById}
                     onLeadPromote={onLeadPromoteById}
                     onDragStart={onLeadDragStart}

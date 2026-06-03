@@ -8,7 +8,6 @@ import ClientesPage from '@/pages/ClientesPage';
 import ArticulosPage from '@/pages/ArticulosPage';
 import PlanillasPage from '@/pages/PlanillasPage';
 import FacturacionPage from '@/pages/FacturacionPage';
-import ProveedoresPage from '@/pages/ProveedoresPage';
 import TPVPage from '@/pages/TPVPage';
 import AgendaPage from '@/pages/AgendaPage';
 import GestionDocumentalPage from '@/pages/GestionDocumentalPage';
@@ -17,6 +16,7 @@ import RecursosCabinasPage from '@/pages/RecursosCabinasPage';
 import AsistenciaPage from '@/pages/AsistenciaPage';
 import MarketingPage from '@/pages/MarketingPage';
 import WhatsappPage from '@/pages/WhatsappPage';
+import TelefonoPage from '@/pages/TelefonoPage';
 import DepositPaymentPage from '@/pages/DepositPaymentPage';
 import SuperuserPage from '@/pages/SuperuserPage';
 import SuperuserManagementPage from '@/pages/SuperuserManagementPage';
@@ -60,7 +60,7 @@ function App() {
           <ProtectedLayout><PlanillasPage /></ProtectedLayout>
         } />
         <Route path="/proveedores" element={
-          <ProtectedLayout><ProveedoresPage /></ProtectedLayout>
+          <Navigate to="/facturacion?tab=proveedores" replace />
         } />
         <Route path="/gestion-documental" element={
           <ProtectedLayout><GestionDocumentalPage /></ProtectedLayout>
@@ -82,6 +82,9 @@ function App() {
         } />
         <Route path="/whatsapp" element={
           <ProtectedLayout><WhatsappPage /></ProtectedLayout>
+        } />
+        <Route path="/telefono" element={
+          <ProtectedLayout><TelefonoPage /></ProtectedLayout>
         } />
         <Route path="/pago/:token/exito" element={<DepositPaymentPage />} />
         <Route path="/pago/:token" element={<DepositPaymentPage />} />

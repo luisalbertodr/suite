@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,6 +10,7 @@ import { Plus, Search, Edit2, Trash2, Users } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { ProveedorForm } from './ProveedorForm';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useRegisterTopBarContent } from '@/components/TopBarContentContext';
 
 interface Supplier {
   id: string;
@@ -113,6 +114,29 @@ export const Proveedores: React.FC = () => {
     setSelectedSupplier(null);
   };
 
+  const topBarActions = useMemo(() => (
+    <Button
+      onClick={() => setShowForm(true)}
+      className="h-7 bg-gradient-to-r from-blue-500 to-blue-600 px-2 text-xs hover:from-blue-600 hover:to-blue-700"
+    >
+      <Plus className="w-3.5 h-3.5 mr-1" />
+      Nuevo Proveedor
+    </Button>
+  ), []);
+
+  useRegisterTopBarContent(
+    {
+      title: (
+        <span className="inline-flex items-center gap-2">
+          <Users className="w-4 h-4 text-teal-500" />
+          Proveedores
+        </span>
+      ),
+      actions: topBarActions,
+    },
+    [topBarActions],
+  );
+
   if (companyLoading) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -144,19 +168,6 @@ export const Proveedores: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Proveedores</h1>
-        </div>
-        <Button
-          onClick={() => setShowForm(true)}
-          className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700"
-        >
-          <Plus className="w-4 h-4 mr-2" />
-          Nuevo Proveedor
-        </Button>
-      </div>
-
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center space-x-2">

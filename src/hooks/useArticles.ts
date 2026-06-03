@@ -275,24 +275,26 @@ export const useArticles = () => {
 
   const deleteArticle = async (id: string) => {
     try {
-      console.log('useArticles: Deleting article:', id);
+      console.log('useArticles: Archiving article:', id);
       const { error } = await supabase
         .from('articles')
-        .delete()
+        .update({ estado: 'inactivo' })
         .eq('id', id);
 
       if (error) {
-        console.error('useArticles: Error deleting article:', error);
+        console.error('useArticles: Error archiving article:', error);
         throw error;
       }
 
-      console.log('useArticles: Article deleted successfully');
-      setArticles(prev => prev.filter(article => article.id !== id));
-      toast.success('Artículo eliminado exitosamente');
+      console.log('useArticles: Article archived successfully');
+      setArticles(prev => prev.map(article => (
+        article.id === id ? { ...article, estado: 'inactivo' } : article
+      )));
+      toast.success('Artículo enviado a obsoletos');
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Error deleting article';
-      console.error('useArticles: Error in deleteArticle:', err);
-      toast.error('Error al eliminar el artículo: ' + message);
+      const message = err instanceof Error ? err.message : 'Error archiving article';
+      console.error('useArticles: Error in archiveArticle:', err);
+      toast.error('Error al enviar el artículo a obsoletos: ' + message);
       throw err;
     }
   };

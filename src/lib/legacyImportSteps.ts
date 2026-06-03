@@ -75,12 +75,15 @@ export type LegacyImportStatus = {
     albcab_rows: number;
     last_imported_at: string | null;
     last_import_batch: string | null;
+    row_counts_approximate?: boolean;
   };
   public_promoted: {
-    legacy_appointments: number;
-    legacy_sales: number;
-    legacy_invoices: number;
+    legacy_appointments: number | null;
+    legacy_sales: number | null;
+    legacy_invoices: number | null;
+    counts_deferred?: boolean;
   };
+  degraded?: boolean;
   last_run: {
     id: string;
     mode: string;

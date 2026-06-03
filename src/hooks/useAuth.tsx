@@ -27,6 +27,17 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+let initialSessionPromise: ReturnType<typeof supabase.auth.getSession> | null = null;
+
+function getInitialSessionOnce() {
+  if (!initialSessionPromise) {
+    initialSessionPromise = supabase.auth.getSession().finally(() => {
+      initialSessionPromise = null;
+    });
+  }
+  return initialSessionPromise;
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
@@ -133,8 +144,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     checkSuperuserStatus();
 
     // Configurar listener para auth state
+    let cancelled = false;
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      (event, session) => {
         debugLog('🔐 Auth state changed:', event, session?.user?.email);
         
         // Si el usuario cambió, limpiar datos de empresa cacheados
@@ -146,9 +159,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
           // Guardar el ID del usuario actual
           sessionStorage.setItem('current_user_id', session.user.id);
-          // Auto-detectar superuser por email (RPC en BD).
-          // Se hace de forma asíncrona sin bloquear el flujo.
-          detectSupabaseSuperuser();
+          // Gotrue mantiene un lock interno mientras ejecuta este callback.
+          // Cualquier llamada a Supabase debe salir del callback para evitar
+          // el aviso "Lock ... was not released within 5000ms".
+          setTimeout(() => {
+            if (!cancelled) void detectSupabaseSuperuser();
+          }, 0);
         }
         
         // Si se desloguea, limpiar todo
@@ -167,7 +183,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Obtener sesión inicial
     const getInitialSession = async () => {
       try {
-        const { data: { session }, error } = await supabase.auth.getSession();
+        const { data: { session }, error } = await getInitialSessionOnce();
+        if (cancelled) return;
         if (error) {
           debugError('Error getting session:', error);
         } else {
@@ -207,6 +224,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     window.addEventListener('storage', handleStorageChange);
 
     return () => {
+      cancelled = true;
       subscription.unsubscribe();
       window.removeEventListener('storage', handleStorageChange);
     };

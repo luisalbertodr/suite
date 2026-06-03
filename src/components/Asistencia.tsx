@@ -12,6 +12,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useRegisterTopBarContent } from '@/components/TopBarContentContext';
 
 const getLocation = (): Promise<{ lat: number; lng: number }> =>
   new Promise((resolve, reject) => {
@@ -31,6 +32,23 @@ export const Asistencia: React.FC = () => {
   const [selectedEmployee, setSelectedEmployee] = useState('');
   const [gettingLocation, setGettingLocation] = useState(false);
   const today = format(new Date(), 'yyyy-MM-dd');
+
+  useRegisterTopBarContent(
+    {
+      title: (
+        <span className="inline-flex items-center gap-2">
+          <MapPin className="w-4 h-4 text-emerald-500" />
+          Fichaje y Asistencia
+        </span>
+      ),
+      actions: (
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {format(new Date(), "EEEE, d 'de' MMMM yyyy", { locale: es })}
+        </span>
+      ),
+    },
+    [],
+  );
 
   const { data: records, isLoading } = useQuery({
     queryKey: ['attendance', companyId, today],
@@ -125,16 +143,6 @@ export const Asistencia: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-          <MapPin className="w-5 h-5 text-emerald-500" />
-          Fichaje y Asistencia
-        </h1>
-        <p className="text-sm text-muted-foreground mt-0.5">
-          {format(new Date(), "EEEE, d 'de' MMMM yyyy", { locale: es })}
-        </p>
-      </div>
-
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Registrar Fichaje</CardTitle>

@@ -5,18 +5,34 @@ import { AlbaranesEntrada } from '@/components/AlbaranesEntrada';
 import { AlbaranesSalida } from '@/components/AlbaranesSalida';
 import { Presupuestos } from '@/components/Presupuestos';
 import { PresupuestosN } from '@/components/PresupuestosN';
+import { Proveedores } from '@/components/Proveedores';
 import { PageWrapper } from '@/components/PageWrapper';
+import { useSearchParams } from 'react-router-dom';
 
 const FacturacionPage: React.FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = searchParams.get('tab') || 'facturas';
+
+  const handleTabChange = (value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value === 'facturas') {
+      next.delete('tab');
+    } else {
+      next.set('tab', value);
+    }
+    setSearchParams(next, { replace: true });
+  };
+
   return (
     <PageWrapper resource="invoices" action="read">
-      <Tabs defaultValue="facturas" className="w-full">
-        <TabsList className="grid w-full grid-cols-5">
+      <Tabs value={tab} onValueChange={handleTabChange} className="w-full">
+        <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="facturas">Facturas</TabsTrigger>
           <TabsTrigger value="albaranes-entrada">Alb. Entrada</TabsTrigger>
           <TabsTrigger value="albaranes-salida">Alb. Salida</TabsTrigger>
           <TabsTrigger value="presupuestos">Presupuestos</TabsTrigger>
           <TabsTrigger value="presupuestos-n">Presupuestos N</TabsTrigger>
+          <TabsTrigger value="proveedores">Proveedores</TabsTrigger>
         </TabsList>
 
         <TabsContent value="facturas">
@@ -33,6 +49,9 @@ const FacturacionPage: React.FC = () => {
         </TabsContent>
         <TabsContent value="presupuestos-n">
           <PresupuestosN />
+        </TabsContent>
+        <TabsContent value="proveedores">
+          <Proveedores />
         </TabsContent>
       </Tabs>
     </PageWrapper>

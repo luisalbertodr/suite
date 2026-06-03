@@ -21,10 +21,6 @@ const CABINA_COLORS = RECURSO_COLOR_PALETTE;
 export const RecursosCabinas: React.FC = () => {
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Recursos y Cabinas</h1>
-      </div>
-
       <Tabs defaultValue="cabinas">
         <TabsList className="grid grid-cols-2 w-64">
           <TabsTrigger value="cabinas" className="gap-1.5">

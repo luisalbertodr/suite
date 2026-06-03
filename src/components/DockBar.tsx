@@ -1,9 +1,10 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Home, Calendar, ShoppingBag, Receipt, Users, Package, Building2, Settings, MapPin, Megaphone, MessageCircle } from 'lucide-react';
+import { Home, Calendar, ShoppingBag, Receipt, Users, Package, Settings, MapPin, Megaphone, MessageCircle, Phone } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useWhatsappUnread } from '@/hooks/useWhatsappUnread';
 import { useMarketingUnread } from '@/hooks/useMarketingUnread';
+import { usePhoneMissedCalls } from '@/hooks/usePhoneMissedCalls';
 import { useNotificationSoundOnIncrease } from '@/hooks/useNotificationSoundOnIncrease';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 
@@ -14,7 +15,7 @@ const dockItems = [
   { label: 'Facturación', path: '/facturacion', icon: Receipt, color: 'text-amber-500', permission: { resource: 'invoices', action: 'read' } },
   { label: 'Clientes', path: '/clientes', icon: Users, color: 'text-pink-500', permission: { resource: 'customers', action: 'read' } },
   { label: 'Artículos', path: '/articulos', icon: Package, color: 'text-purple-500', permission: { resource: 'articles', action: 'read' } },
-  { label: 'Proveedores', path: '/proveedores', icon: Building2, color: 'text-teal-500', permission: { resource: 'suppliers', action: 'read' } },
+  { label: 'Llamadas', path: '/telefono', icon: Phone, color: 'text-sky-500', permission: { resource: 'phone', action: 'read' } },
   { label: 'Marketing', path: '/marketing', icon: Megaphone, color: 'text-rose-500', permission: { resource: 'marketing', action: 'read' } },
   { label: 'WhatsApp', path: '/whatsapp', icon: MessageCircle, color: 'text-emerald-600', permission: { resource: 'whatsapp', action: 'read' } },
   { label: 'Fichaje', path: '/asistencia', icon: MapPin, color: 'text-emerald-500', permission: { resource: 'attendance', action: 'read' } },
@@ -28,6 +29,7 @@ export const DockBar: React.FC = () => {
   const canSeeMarketing = hasPermission('marketing', 'read');
   const { total: whatsappUnread } = useWhatsappUnread();
   const { total: marketingUnread } = useMarketingUnread();
+  const { missedUnread } = usePhoneMissedCalls();
   useNotificationSoundOnIncrease(whatsappUnread, 'whatsapp', { enabled: canSeeWhatsapp });
 
   const visibleItems = dockItems.filter(item =>
@@ -37,6 +39,7 @@ export const DockBar: React.FC = () => {
   const badgeForItem = (path: string): number => {
     if (path === '/whatsapp' && canSeeWhatsapp) return whatsappUnread;
     if (path === '/marketing' && canSeeMarketing) return marketingUnread;
+    if (path === '/telefono') return missedUnread;
     return 0;
   };
 

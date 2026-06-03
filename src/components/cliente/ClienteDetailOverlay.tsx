@@ -13,6 +13,7 @@ type Props = {
   onClose: () => void;
   onNewAppointment?: () => void;
   onAppointmentClick?: (appointmentId: string, dateYmd: string) => void;
+  backLabel?: string;
   className?: string;
 };
 
@@ -24,6 +25,7 @@ export const ClienteDetailOverlay: React.FC<Props> = ({
   onClose,
   onNewAppointment,
   onAppointmentClick,
+  backLabel = 'Volver a la cita',
   className,
 }) => {
   if (!open || typeof document === 'undefined') return null;
@@ -47,7 +49,7 @@ export const ClienteDetailOverlay: React.FC<Props> = ({
             customerId={customerId}
             initialTab={initialTab}
             onBack={onClose}
-            backLabel="Volver a la cita"
+            backLabel={backLabel}
             variant="compact"
             onNewAppointment={onNewAppointment ?? onClose}
             onAppointmentClick={onAppointmentClick}
