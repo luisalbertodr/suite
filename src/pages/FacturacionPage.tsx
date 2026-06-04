@@ -6,6 +6,7 @@ import { AlbaranesSalida } from '@/components/AlbaranesSalida';
 import { Presupuestos } from '@/components/Presupuestos';
 import { PresupuestosN } from '@/components/PresupuestosN';
 import { Proveedores } from '@/components/Proveedores';
+import { Caja } from '@/components/Caja';
 import { PageWrapper } from '@/components/PageWrapper';
 import { useSearchParams } from 'react-router-dom';
 
@@ -26,8 +27,9 @@ const FacturacionPage: React.FC = () => {
   return (
     <PageWrapper resource="invoices" action="read">
       <Tabs value={tab} onValueChange={handleTabChange} className="w-full">
-        <TabsList className="grid w-full grid-cols-6">
+        <TabsList className="grid w-full grid-cols-7">
           <TabsTrigger value="facturas">Facturas</TabsTrigger>
+          <TabsTrigger value="caja">Caja</TabsTrigger>
           <TabsTrigger value="albaranes-entrada">Alb. Entrada</TabsTrigger>
           <TabsTrigger value="albaranes-salida">Alb. Salida</TabsTrigger>
           <TabsTrigger value="presupuestos">Presupuestos</TabsTrigger>
@@ -37,6 +39,9 @@ const FacturacionPage: React.FC = () => {
 
         <TabsContent value="facturas">
           <Facturas />
+        </TabsContent>
+        <TabsContent value="caja">
+          <Caja />
         </TabsContent>
         <TabsContent value="albaranes-entrada">
           <AlbaranesEntrada />

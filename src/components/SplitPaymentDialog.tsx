@@ -9,7 +9,7 @@ export type SplitPaymentState = {
   groups: BillingPaymentGroup[];
   paidGroupIds: Set<string>;
   saleGroupId: string | null;
-  completedSales: Array<{ billingCompanyId: string; ticket_number: string; total: number }>;
+  completedSales: Array<{ saleId: string; billingCompanyId: string; ticket_number: string; total: number }>;
 };
 
 type SplitPaymentDialogProps = {
@@ -24,7 +24,7 @@ type SplitPaymentDialogProps = {
     saleGroupId: string | null;
     paidCount: number;
     isLastPayment: boolean;
-  }) => Promise<{ saleGroupId: string; ticket_number: string; total: number }>;
+  }) => Promise<{ saleId: string; saleGroupId: string; ticket_number: string; total: number }>;
   processing: boolean;
 };
 
@@ -76,6 +76,7 @@ export const SplitPaymentDialog: React.FC<SplitPaymentDialogProps> = ({
       setCompletedSales((prev) => [
         ...prev,
         {
+          saleId: result.saleId,
           billingCompanyId: group.billingCompanyId,
           ticket_number: result.ticket_number,
           total: result.total,
@@ -93,6 +94,7 @@ export const SplitPaymentDialog: React.FC<SplitPaymentDialogProps> = ({
           completedSales: [
             ...completedSales,
             {
+              saleId: result.saleId,
               billingCompanyId: group.billingCompanyId,
               ticket_number: result.ticket_number,
               total: result.total,
@@ -120,6 +122,8 @@ export const SplitPaymentDialog: React.FC<SplitPaymentDialogProps> = ({
             onClick={onClose}
             className="text-gray-400 hover:text-gray-600"
             disabled={processing || !!payingGroupId}
+            title="Cerrar cobro dividido"
+            aria-label="Cerrar cobro dividido"
           >
             <X className="w-5 h-5" />
           </button>

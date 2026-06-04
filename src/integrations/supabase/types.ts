@@ -1743,6 +1743,9 @@ export type Database = {
       }
       historial_clinico: {
         Row: {
+          antecedentes_personales: string | null
+          appointment_id: string | null
+          aviso_text: string | null
           company_id: string
           created_at: string
           customer_id: string
@@ -1754,13 +1757,19 @@ export type Database = {
           fotos_antes: string[] | null
           fotos_despues: string[] | null
           id: string
+          motivo_consulta: string | null
           observaciones: string | null
+          proxima_revision_descripcion: string | null
+          proxima_revision_fecha: string | null
           tipo: string
           titulo: string
           tratamiento: string | null
           updated_at: string
         }
         Insert: {
+          antecedentes_personales?: string | null
+          appointment_id?: string | null
+          aviso_text?: string | null
           company_id: string
           created_at?: string
           customer_id: string
@@ -1772,13 +1781,19 @@ export type Database = {
           fotos_antes?: string[] | null
           fotos_despues?: string[] | null
           id?: string
+          motivo_consulta?: string | null
           observaciones?: string | null
+          proxima_revision_descripcion?: string | null
+          proxima_revision_fecha?: string | null
           tipo?: string
           titulo: string
           tratamiento?: string | null
           updated_at?: string
         }
         Update: {
+          antecedentes_personales?: string | null
+          appointment_id?: string | null
+          aviso_text?: string | null
           company_id?: string
           created_at?: string
           customer_id?: string
@@ -1790,13 +1805,23 @@ export type Database = {
           fotos_antes?: string[] | null
           fotos_despues?: string[] | null
           id?: string
+          motivo_consulta?: string | null
           observaciones?: string | null
+          proxima_revision_descripcion?: string | null
+          proxima_revision_fecha?: string | null
           tipo?: string
           titulo?: string
           tratamiento?: string | null
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "historial_clinico_appointment_id_fkey"
+            columns: ["appointment_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_appointments"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "historial_clinico_company_id_fkey"
             columns: ["company_id"]
@@ -1816,6 +1841,77 @@ export type Database = {
             columns: ["empleado_id"]
             isOneToOne: false
             referencedRelation: "agenda_employees"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      historial_clinico_revisiones: {
+        Row: {
+          appointment_id: string | null
+          company_id: string
+          created_at: string
+          customer_id: string
+          descripcion: string
+          fecha: string
+          historial_clinico_id: string
+          id: string
+          sort_order: number
+          source_key: string | null
+          updated_at: string
+        }
+        Insert: {
+          appointment_id?: string | null
+          company_id: string
+          created_at?: string
+          customer_id: string
+          descripcion?: string
+          fecha: string
+          historial_clinico_id: string
+          id?: string
+          sort_order?: number
+          source_key?: string | null
+          updated_at?: string
+        }
+        Update: {
+          appointment_id?: string | null
+          company_id?: string
+          created_at?: string
+          customer_id?: string
+          descripcion?: string
+          fecha?: string
+          historial_clinico_id?: string
+          id?: string
+          sort_order?: number
+          source_key?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "historial_clinico_revisiones_appointment_id_fkey"
+            columns: ["appointment_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_appointments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "historial_clinico_revisiones_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "historial_clinico_revisiones_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "historial_clinico_revisiones_historial_clinico_id_fkey"
+            columns: ["historial_clinico_id"]
+            isOneToOne: false
+            referencedRelation: "historial_clinico"
             referencedColumns: ["id"]
           },
         ]

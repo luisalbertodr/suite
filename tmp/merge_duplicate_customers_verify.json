@@ -1,0 +1,765 @@
+{
+  "apply": false,
+  "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+  "groups_merged": 0,
+  "customers_deleted": 0,
+  "merges": [],
+  "skipped_groups": [
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Amparo",
+      "normalized_name": "amparo",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "8a5f05dd-0d94-4118-a06b-29e682502fbe",
+          "name": "Amparo",
+          "legacy_codcli": "004911"
+        },
+        {
+          "id": "f9d9dce4-53ab-457d-9b8b-27caad4f7ef7",
+          "name": "Amparo",
+          "legacy_codcli": "002868"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Ana",
+      "normalized_name": "ana",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "748313e8-6a9e-4eae-b470-84d39f16577c",
+          "name": "Ana",
+          "legacy_codcli": "004665"
+        },
+        {
+          "id": "d57656e7-89fe-48f7-995a-b0d49123caa2",
+          "name": "Ana",
+          "legacy_codcli": "003358"
+        },
+        {
+          "id": "82c59b9d-637e-47da-974e-55aaf052d83a",
+          "name": "Ana",
+          "legacy_codcli": "003390"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Ana Lago Varela",
+      "normalized_name": "ana lago varela",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "269d4af2-4d72-41be-9cb9-08fa5cdc0196",
+          "name": "Ana Lago Varela",
+          "legacy_codcli": "002950"
+        },
+        {
+          "id": "5675597f-300e-463f-9535-1f47ba3c69c6",
+          "name": "Ana Lago Varela",
+          "legacy_codcli": "003035"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Ana Valiño Esmoris",
+      "normalized_name": "ana valino esmoris",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "38fc2178-d3f1-4319-9bde-5e9ded1e33ff",
+          "name": "Ana Valiño Esmoris",
+          "legacy_codcli": null
+        },
+        {
+          "id": "400ffa11-6f85-4d34-81ea-356b010b67a4",
+          "name": "Ana Valiño Esmoris",
+          "legacy_codcli": null
+        },
+        {
+          "id": "f2333819-2235-46a3-98af-d18e7df4acba",
+          "name": "Ana Valiño Esmoris",
+          "legacy_codcli": "007897"
+        },
+        {
+          "id": "0b8682f2-1724-4d8d-adc8-0eddfc9a2978",
+          "name": "Ana Valiño Esmoris",
+          "legacy_codcli": "002243"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Ariadna",
+      "normalized_name": "ariadna",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "1075a3b0-8613-4bea-98e7-873629705d3b",
+          "name": "Ariadna",
+          "legacy_codcli": "007981"
+        },
+        {
+          "id": "e9c2e1db-5cc8-46d6-abe1-2272b3998bd9",
+          "name": "Ariadna",
+          "legacy_codcli": "007896"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Ariadna Gomez Ferreiro",
+      "normalized_name": "ariadna gomez ferreiro",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "c0abb498-0519-4023-be56-ad0489b7fe52",
+          "name": "Ariadna Gomez Ferreiro",
+          "legacy_codcli": "004106"
+        },
+        {
+          "id": "6eb07fb8-7dc9-4698-8646-a2e8c28f5a2d",
+          "name": "Ariadna Gomez Ferreiro",
+          "legacy_codcli": "004106"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Carmen",
+      "normalized_name": "carmen",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "de39aff8-76a2-496f-9897-bbf46a1cf8ac",
+          "name": "Carmen",
+          "legacy_codcli": "004081"
+        },
+        {
+          "id": "aa3a6126-97dc-4751-9178-0a8781503286",
+          "name": "Carmen",
+          "legacy_codcli": "001504"
+        },
+        {
+          "id": "a4a1575f-e513-40e4-a556-723c857a9de1",
+          "name": "Carmen",
+          "legacy_codcli": "002553"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Carmen Benìtez Armesto",
+      "normalized_name": "carmen benitez armesto",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "05f44f66-4b65-40ef-b8a6-113a53050427",
+          "name": "Carmen Benìtez Armesto",
+          "legacy_codcli": "003589"
+        },
+        {
+          "id": "07dd5c82-2e34-4623-bd42-11aa0f8ea657",
+          "name": "Carmen Benitez Armesto",
+          "legacy_codcli": "003590"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Cristina",
+      "normalized_name": "cristina",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "2f2c1aac-8758-4a7b-81c4-1ed19adb5e0a",
+          "name": "Cristina",
+          "legacy_codcli": "002504"
+        },
+        {
+          "id": "cd7ded06-d02b-4a17-8709-17618e670c2c",
+          "name": "Cristina",
+          "legacy_codcli": "005942"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Cristina Rodriguez",
+      "normalized_name": "cristina rodriguez",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "99c92b26-3df9-4b38-a60c-33074780f3e9",
+          "name": "Cristina Rodriguez",
+          "legacy_codcli": "007872"
+        },
+        {
+          "id": "d3bba4ab-7f36-4b48-b4d9-55b93d23f3b8",
+          "name": "Cristina Rodriguez",
+          "legacy_codcli": "003293"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Dina Carballeira Carballeira",
+      "normalized_name": "dina carballeira carballeira",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "6df07927-fd6d-43a8-8c63-ca7b0e6c8a10",
+          "name": "Dina Carballeira Carballeira",
+          "legacy_codcli": null
+        },
+        {
+          "id": "77ce6981-fb2c-4b67-a152-4324c23474a9",
+          "name": "Dina Carballeira Carballeira",
+          "legacy_codcli": null
+        },
+        {
+          "id": "7c5d02c5-1231-4c01-91a7-3d0eb9ddc1be",
+          "name": "Dina Carballeira Carballeira",
+          "legacy_codcli": "005475"
+        },
+        {
+          "id": "3fc225eb-3af1-419a-b6eb-6fa3ff2ef179",
+          "name": "Dina Carballeira Carballeira",
+          "legacy_codcli": "007690"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Felipe Silva",
+      "normalized_name": "felipe silva",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "29a2ae40-b35a-43ae-b8b0-28acc176ffe0",
+          "name": "Felipe Silva",
+          "legacy_codcli": null
+        },
+        {
+          "id": "3fa736a0-d698-4585-baf0-44201de013b4",
+          "name": "Felipe Silva",
+          "legacy_codcli": null
+        },
+        {
+          "id": "7b303ffa-065d-4f93-9048-bb5fbf5f818d",
+          "name": "Felipe Silva",
+          "legacy_codcli": "004517"
+        },
+        {
+          "id": "e812bfcf-eb6a-4c4e-9986-984eb76787f0",
+          "name": "Felipe Silva",
+          "legacy_codcli": "007815"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Fina Perez Bermudez",
+      "normalized_name": "fina perez bermudez",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "8f9afd3f-21c9-4b50-aca8-8e5cb200bd6e",
+          "name": "Fina Perez Bermudez",
+          "legacy_codcli": null
+        },
+        {
+          "id": "88a2a475-c36f-4a7e-8f2b-a2a5008aeab1",
+          "name": "Fina Perez Bermudez",
+          "legacy_codcli": null
+        },
+        {
+          "id": "22aa152e-244e-40ea-946a-cc9cad16d80c",
+          "name": "Fina Perez Bermudez",
+          "legacy_codcli": "003297"
+        },
+        {
+          "id": "d9949c5d-0a6a-4b79-afba-4b4d290d3223",
+          "name": "Fina Perez Bermudez",
+          "legacy_codcli": "007783"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Isabel Lamas Pereira",
+      "normalized_name": "isabel lamas pereira",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "9cddc3af-0024-4959-8296-0569ced6cfc5",
+          "name": "Isabel Lamas Pereira",
+          "legacy_codcli": "001444"
+        },
+        {
+          "id": "6df8fca0-a19d-412a-9823-b8241a21180f",
+          "name": "Isabel Lamas Pereira",
+          "legacy_codcli": "001493"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Lucia",
+      "normalized_name": "lucia",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "9a56afb9-5501-4cbc-b057-4a4a5f6fee52",
+          "name": "Lucia",
+          "legacy_codcli": "002754"
+        },
+        {
+          "id": "12e85458-4dc0-4607-8198-c48659ad975e",
+          "name": "lucia",
+          "legacy_codcli": "002502"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Lucia Mendez Fernandez",
+      "normalized_name": "lucia mendez fernandez",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "23126604-ca6a-49fa-8b30-24db0d44dcc6",
+          "name": "Lucia Mendez Fernandez",
+          "legacy_codcli": "001971"
+        },
+        {
+          "id": "0bbe5226-88d7-4b0e-bfae-0c7bcedf5fd4",
+          "name": "Lucía Méndez Fernandez",
+          "legacy_codcli": "002086"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Luna Fernandez Ares",
+      "normalized_name": "luna fernandez ares",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "52edc2f2-54a1-478a-8b6e-f9e2d0149add",
+          "name": "Luna Fernandez Ares",
+          "legacy_codcli": "007673"
+        },
+        {
+          "id": "1324fe62-7505-404f-bc77-fd4cef458b06",
+          "name": "Luna Fernandez Ares",
+          "legacy_codcli": "007036"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Maria",
+      "normalized_name": "maria",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "5eb30fba-1aec-4ba2-83a6-3e2c4f0f0d23",
+          "name": "Maria",
+          "legacy_codcli": "005492"
+        },
+        {
+          "id": "32de437f-cf08-4178-b95a-cb19597deb4c",
+          "name": "María",
+          "legacy_codcli": "008176"
+        },
+        {
+          "id": "75a6b542-e66d-40e1-a087-57bd359edcfd",
+          "name": "Maria",
+          "legacy_codcli": "002565"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Maria Jose Fernandez Varela",
+      "normalized_name": "maria jose fernandez varela",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "365ec442-28d5-4b66-863f-9d9c0b513a00",
+          "name": "Maria Jose Fernandez Varela",
+          "legacy_codcli": "002299"
+        },
+        {
+          "id": "722e56d4-2d71-4308-a974-2b81c3a45db8",
+          "name": "Maria Jose Fernandez Varela",
+          "legacy_codcli": "002302"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Maria Jose Freire Vazquez",
+      "normalized_name": "maria jose freire vazquez",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "ae5ebb81-d78a-4595-8aad-bf662ca6da1c",
+          "name": "Maria Jose Freire Vazquez",
+          "legacy_codcli": "004968"
+        },
+        {
+          "id": "a786e770-5d90-4e02-830f-e02cb9842a44",
+          "name": "Maria Jose Freire Vazquez",
+          "legacy_codcli": "005108"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Maria Jose Vazquez Lorenzo",
+      "normalized_name": "maria jose vazquez lorenzo",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "b754b032-0e59-4d56-b788-d888269bf8f5",
+          "name": "Maria Jose Vazquez Lorenzo",
+          "legacy_codcli": "004987"
+        },
+        {
+          "id": "e46ca35f-5851-48e0-acf3-51e096d1f301",
+          "name": "Maria Jose Vazquez Lorenzo",
+          "legacy_codcli": "006062"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Maria Luisa Perez Rodriguez",
+      "normalized_name": "maria luisa perez rodriguez",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "81812fb8-7fcb-4490-b212-43ae680b6718",
+          "name": "Maria Luisa Perez Rodriguez",
+          "legacy_codcli": "001034"
+        },
+        {
+          "id": "c0fd546b-ceda-4b08-880c-ce11210bdb4a",
+          "name": "María Luisa Perez Rodriguez",
+          "legacy_codcli": "008162"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Marisol Gabriel Mourelle",
+      "normalized_name": "marisol gabriel mourelle",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "99ef85d8-5660-4c28-85b5-de13b87d88ba",
+          "name": "Marisol Gabriel Mourelle",
+          "legacy_codcli": "005639"
+        },
+        {
+          "id": "274c570e-8be7-4922-ae9c-44e006a55229",
+          "name": "Marisol Gabriel Mourelle",
+          "legacy_codcli": "006002"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Marta Perez Martinez",
+      "normalized_name": "marta perez martinez",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "50f3f5ea-a693-486b-ba62-32daeee8c5ee",
+          "name": "Marta Perez Martinez",
+          "legacy_codcli": "001263"
+        },
+        {
+          "id": "f71b6666-9c8b-4cfc-93e3-8e2b6f57ef23",
+          "name": "Marta Perez Martinez",
+          "legacy_codcli": "004471"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "María Perez",
+      "normalized_name": "maria perez",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "af8ed9a6-abad-4514-b7c1-6943d25f984d",
+          "name": "María Perez",
+          "legacy_codcli": "006346"
+        },
+        {
+          "id": "4188c563-454d-45f7-82ff-c2d89ad83b50",
+          "name": "Maria Perez",
+          "legacy_codcli": "005922"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "María Piñeiro Pais",
+      "normalized_name": "maria pineiro pais",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "86b7cbf5-ee47-49c9-82ae-df3f88cdd7c7",
+          "name": "María Piñeiro Pais",
+          "legacy_codcli": "003594"
+        },
+        {
+          "id": "d390e3e4-b7eb-4a4d-be8c-3762b8332e19",
+          "name": "Maria Piñeiro Pais",
+          "legacy_codcli": "002028"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Mercedes",
+      "normalized_name": "mercedes",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "a61fe620-a934-411a-a3be-868f451a27ee",
+          "name": "Mercedes",
+          "legacy_codcli": "003761"
+        },
+        {
+          "id": "e3925488-3572-4cc5-a4a1-4dd705f80daa",
+          "name": "Mercedes",
+          "legacy_codcli": "003599"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Mercedes Muñoz Martin",
+      "normalized_name": "mercedes munoz martin",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "656fc70e-5b51-4623-8af0-519e211d8a90",
+          "name": "Mercedes Muñoz Martin",
+          "legacy_codcli": "006250"
+        },
+        {
+          "id": "1df2d556-8857-4eee-8abc-efa644fda939",
+          "name": "Mercedes Muñoz Martín",
+          "legacy_codcli": "007147"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Monica Cambon Rodriguez",
+      "normalized_name": "monica cambon rodriguez",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "3ebf8172-4c78-49f4-a978-47ce869415a6",
+          "name": "Monica Cambon Rodriguez",
+          "legacy_codcli": "007404"
+        },
+        {
+          "id": "d66922e4-302b-4b6e-bc1f-e3da467d78ad",
+          "name": "Mónica Cambón Rodriguez",
+          "legacy_codcli": "007402"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Natalia Cañas Gende",
+      "normalized_name": "natalia canas gende",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "f4b724af-922c-468e-8659-05bf37cbaa4c",
+          "name": "Natalia Cañas Gende",
+          "legacy_codcli": "007375"
+        },
+        {
+          "id": "055e59f1-4f2e-4e08-b289-0be3a9958936",
+          "name": "Natalia Cañas Gende",
+          "legacy_codcli": "007375"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Oscar",
+      "normalized_name": "oscar",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "f82ad4ef-fc59-4dd4-acc9-6f9a03788f8d",
+          "name": "Oscar",
+          "legacy_codcli": "005191"
+        },
+        {
+          "id": "5966f9ea-8aae-4f16-a8a7-1c94b02538ba",
+          "name": "Oscar",
+          "legacy_codcli": "002872"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Pablo",
+      "normalized_name": "pablo",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "0c08a89f-c877-4357-8d6e-840a74ba5bcf",
+          "name": "Pablo",
+          "legacy_codcli": "001839"
+        },
+        {
+          "id": "98692032-7ddc-42b7-80c6-26d28acf4b10",
+          "name": "Pablo",
+          "legacy_codcli": "003572"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Raquel Fernandez Fernandez",
+      "normalized_name": "raquel fernandez fernandez",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "c689e232-e024-48fb-b572-512ca30ea63f",
+          "name": "Raquel Fernandez Fernandez",
+          "legacy_codcli": "005214"
+        },
+        {
+          "id": "c86a5bc5-dd23-44d3-9c5a-4f5080881062",
+          "name": "Raquel Fernandez Fernandez",
+          "legacy_codcli": "007832"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Sara Alvarez Recarey",
+      "normalized_name": "sara alvarez recarey",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "d4a34f72-08c7-4977-941e-fe81fc48673a",
+          "name": "Sara Alvarez Recarey",
+          "legacy_codcli": "005885"
+        },
+        {
+          "id": "91343fcc-bf9b-4974-b9eb-c126254fd0c1",
+          "name": "Sara Alvarez Recarey",
+          "legacy_codcli": "006770"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Shyra Flecha Conde",
+      "normalized_name": "shyra flecha conde",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "47e59b9d-2447-4061-88ea-23b20bcc49ed",
+          "name": "Shyra Flecha Conde",
+          "legacy_codcli": null
+        },
+        {
+          "id": "090ae0e2-02ca-4b9b-85b8-887eae904b71",
+          "name": "Shyra Flecha Conde",
+          "legacy_codcli": null
+        },
+        {
+          "id": "ace99356-a764-4c3d-b0fa-871e741cda1d",
+          "name": "Shyra Flecha Conde",
+          "legacy_codcli": "006817"
+        },
+        {
+          "id": "d94c168c-d586-450d-a86b-9047aae19ff4",
+          "name": "Shyra Flecha Conde",
+          "legacy_codcli": "007667"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Susana",
+      "normalized_name": "susana",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "f6ff971d-11b2-440b-abd8-cb1e338e0cf9",
+          "name": "Susana",
+          "legacy_codcli": "003719"
+        },
+        {
+          "id": "9472fd78-3151-4691-b778-6b32c0e13d8f",
+          "name": "Susana",
+          "legacy_codcli": "002853"
+        }
+      ]
+    },
+    {
+      "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+      "name": "Xue Jing Gao",
+      "normalized_name": "xue jing gao",
+      "reason": "multiple_with_code",
+      "members": [
+        {
+          "id": "69a5f086-fa3f-4520-8075-f2f76c42b972",
+          "name": "Xue Jing Gao",
+          "legacy_codcli": "003098"
+        },
+        {
+          "id": "3e8111c1-cbb1-4a28-b0d1-2616093ad6c4",
+          "name": "Xue Jing Gao",
+          "legacy_codcli": "001491"
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "fk_tables": [
+    "agenda_appointments.customer_id",
+    "bonos.customer_id",
+    "consentimientos.customer_id",
+    "customer_aesthetic_history.customer_id",
+    "customer_contacts.customer_id",
+    "customer_shipping_addresses.customer_id",
+    "customer_vouchers.customer_id",
+    "daily_customer_log.customer_id",
+    "delivery_notes.customer_id",
+    "historial_clinico.customer_id",
+    "historial_clinico_revisiones.customer_id",
+    "inbody_measurements.customer_id",
+    "invoices.customer_id",
+    "marketing_leads.customer_id",
+    "presupuestos_n.customer_id",
+    "quotes.customer_id",
+    "sale_groups.customer_id",
+    "sales.customer_id",
+    "vehicles.customer_id",
+    "whatsapp_chats.customer_id",
+    "work_orders.customer_id"
+  ],
+  "customers_loaded": 6963
+}

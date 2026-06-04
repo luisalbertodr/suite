@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
@@ -29,6 +30,7 @@ const emptyForm = (): ClinicalHistoryFormValues => ({
   tratamiento: '',
   proximaRevisionFecha: '',
   proximaRevisionDescripcion: '',
+  revisiones: [],
   avisoText: '',
   avisoNotifyUserId: '',
 });
@@ -149,6 +151,11 @@ export const ClinicalHistoryRecordDialog: React.FC<Props> = ({
           <DialogTitle className="text-base">
             {isEdit ? 'Editar historial clínico' : 'Nuevo registro clínico'}
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            {isEdit
+              ? 'Formulario para editar un registro del historial clínico del cliente.'
+              : 'Formulario para crear un nuevo registro en el historial clínico del cliente.'}
+          </DialogDescription>
         </DialogHeader>
         <form
           className="space-y-3"

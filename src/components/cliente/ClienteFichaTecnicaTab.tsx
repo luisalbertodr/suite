@@ -58,6 +58,16 @@ export const ClienteFichaTecnicaTab: React.FC<Props> = ({ customer, isLoading, o
           />
         </div>
         <div>
+          <Label className={fieldLabel}>Cod. cliente</Label>
+          <Input
+            value={customer.legacy_codcli || ''}
+            readOnly
+            tabIndex={-1}
+            placeholder="—"
+            className={cn(fieldInput, 'bg-muted/40 text-muted-foreground cursor-default')}
+          />
+        </div>
+        <div>
           <Label className={fieldLabel}>Fecha de nacimiento</Label>
           <div className="flex items-center gap-2 mt-0.5">
             <Input

@@ -1,5 +1,24 @@
 import { supabase } from '@/lib/supabase';
 
+export type ClinicalHistoryReview = {
+  id: string;
+  historial_clinico_id: string;
+  customer_id: string;
+  company_id: string;
+  appointment_id: string | null;
+  fecha: string;
+  descripcion: string;
+  sort_order: number;
+  created_at: string;
+};
+
+export type ClinicalHistoryFormReview = {
+  id?: string;
+  fecha: string;
+  descripcion: string;
+  appointmentId?: string | null;
+};
+
 export type ClinicalHistoryRecord = {
   id: string;
   customer_id: string;
@@ -18,6 +37,7 @@ export type ClinicalHistoryRecord = {
   observaciones: string | null;
   empleado_id: string | null;
   created_at: string;
+  revisiones: ClinicalHistoryReview[];
 };
 
 export type ClinicalHistoryFormValues = {
@@ -27,6 +47,7 @@ export type ClinicalHistoryFormValues = {
   tratamiento: string;
   proximaRevisionFecha: string;
   proximaRevisionDescripcion: string;
+  revisiones: ClinicalHistoryFormReview[];
   avisoText: string;
   avisoNotifyUserId: string;
 };
@@ -55,7 +76,58 @@ function mapRow(row: Record<string, unknown>): ClinicalHistoryRecord {
     observaciones: (row.observaciones as string) ?? null,
     empleado_id: row.empleado_id ? String(row.empleado_id) : null,
     created_at: String(row.created_at ?? ''),
+    revisiones: [],
   };
+}
+
+function mapReview(row: Record<string, unknown>): ClinicalHistoryReview {
+  return {
+    id: String(row.id),
+    historial_clinico_id: String(row.historial_clinico_id),
+    customer_id: String(row.customer_id),
+    company_id: String(row.company_id),
+    appointment_id: row.appointment_id ? String(row.appointment_id) : null,
+    fecha: String(row.fecha).slice(0, 10),
+    descripcion: String(row.descripcion ?? ''),
+    sort_order: Number(row.sort_order ?? 0),
+    created_at: String(row.created_at ?? ''),
+  };
+}
+
+function isReviewSchemaError(error: { code?: string } | null): boolean {
+  return error?.code === '42P01' || error?.code === '42703';
+}
+
+async function attachReviews(records: ClinicalHistoryRecord[]): Promise<ClinicalHistoryRecord[]> {
+  if (!records.length) return records;
+  const ids = records.map((record) => record.id);
+  const { data, error } = await supabase
+    .from('historial_clinico_revisiones')
+    .select(
+      'id, historial_clinico_id, customer_id, company_id, appointment_id, fecha, descripcion, sort_order, created_at',
+    )
+    .in('historial_clinico_id', ids)
+    .order('fecha', { ascending: true })
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    if (isReviewSchemaError(error)) return records;
+    throw error;
+  }
+
+  const byHistory = new Map<string, ClinicalHistoryReview[]>();
+  for (const row of data ?? []) {
+    const review = mapReview(row as Record<string, unknown>);
+    const list = byHistory.get(review.historial_clinico_id) ?? [];
+    list.push(review);
+    byHistory.set(review.historial_clinico_id, list);
+  }
+
+  return records.map((record) => ({
+    ...record,
+    revisiones: byHistory.get(record.id) ?? [],
+  }));
 }
 
 export async function fetchCustomerBirthDate(customerId: string): Promise<string | null> {
@@ -95,7 +167,8 @@ export async function fetchClinicalHistoryByAppointment(
     if (error.code === '42703') return null;
     throw error;
   }
-  return data ? mapRow(data as Record<string, unknown>) : null;
+  const records = data ? await attachReviews([mapRow(data as Record<string, unknown>)]) : [];
+  return records[0] ?? null;
 }
 
 export async function fetchClinicalHistoryList(customerId: string): Promise<ClinicalHistoryRecord[]> {
@@ -106,20 +179,38 @@ export async function fetchClinicalHistoryList(customerId: string): Promise<Clin
     .order('fecha', { ascending: false })
     .order('created_at', { ascending: false });
   if (error) throw error;
-  return (data ?? []).map((row) => mapRow(row as Record<string, unknown>));
+  return attachReviews((data ?? []).map((row) => mapRow(row as Record<string, unknown>)));
 }
 
 export function clinicalHistoryToFormValues(
   record: ClinicalHistoryRecord | null,
   birthDate: string | null,
 ): ClinicalHistoryFormValues {
+  const revisiones = record?.revisiones?.length
+    ? record.revisiones.map((revision) => ({
+        id: revision.id,
+        fecha: revision.fecha,
+        descripcion: revision.descripcion,
+        appointmentId: revision.appointment_id,
+      }))
+    : record?.proxima_revision_fecha || record?.proxima_revision_descripcion
+      ? [
+          {
+            fecha: record.proxima_revision_fecha ?? '',
+            descripcion: record.proxima_revision_descripcion ?? '',
+            appointmentId: null,
+          },
+        ]
+      : [];
+
   return {
     birthDate: birthDate ?? '',
     antecedentesPersonales: record?.antecedentes_personales ?? record?.descripcion ?? '',
     motivoConsulta: record?.motivo_consulta ?? record?.titulo ?? '',
     tratamiento: record?.tratamiento ?? '',
-    proximaRevisionFecha: record?.proxima_revision_fecha ?? '',
-    proximaRevisionDescripcion: record?.proxima_revision_descripcion ?? '',
+    proximaRevisionFecha: revisiones[0]?.fecha ?? '',
+    proximaRevisionDescripcion: revisiones[0]?.descripcion ?? '',
+    revisiones,
     avisoText: record?.aviso_text ?? '',
     avisoNotifyUserId: '',
   };
@@ -143,6 +234,16 @@ export async function saveClinicalHistory(params: {
   existingId?: string | null;
 }): Promise<ClinicalHistoryRecord> {
   const motivo = params.values.motivoConsulta.trim() || 'Consulta';
+  const revisiones = params.values.revisiones
+    .map((revision, index) => ({
+      id: revision.id,
+      fecha: revision.fecha.trim(),
+      descripcion: revision.descripcion.trim(),
+      appointmentId: revision.appointmentId ?? null,
+      sortOrder: index,
+    }))
+    .filter((revision) => revision.fecha || revision.descripcion);
+  const firstReview = revisiones[0];
   const payload: Record<string, unknown> = {
     customer_id: params.customerId,
     company_id: params.companyId,
@@ -154,12 +255,13 @@ export async function saveClinicalHistory(params: {
     antecedentes_personales: params.values.antecedentesPersonales.trim() || null,
     motivo_consulta: motivo,
     tratamiento: params.values.tratamiento.trim() || null,
-    proxima_revision_fecha: params.values.proximaRevisionFecha || null,
-    proxima_revision_descripcion: params.values.proximaRevisionDescripcion.trim() || null,
+    proxima_revision_fecha: firstReview?.fecha || null,
+    proxima_revision_descripcion: firstReview?.descripcion || null,
     aviso_text: params.values.avisoText.trim() || null,
     empleado_id: params.employeeId ?? null,
   };
 
+  let saved: ClinicalHistoryRecord;
   if (params.existingId) {
     const { data, error } = await supabase
       .from('historial_clinico')
@@ -168,14 +270,71 @@ export async function saveClinicalHistory(params: {
       .select(SELECT_FIELDS)
       .single();
     if (error) throw error;
-    return mapRow(data as Record<string, unknown>);
+    saved = mapRow(data as Record<string, unknown>);
+  } else {
+    const { data, error } = await supabase
+      .from('historial_clinico')
+      .insert(payload)
+      .select(SELECT_FIELDS)
+      .single();
+    if (error) throw error;
+    saved = mapRow(data as Record<string, unknown>);
   }
 
-  const { data, error } = await supabase
-    .from('historial_clinico')
-    .insert(payload)
-    .select(SELECT_FIELDS)
-    .single();
-  if (error) throw error;
-  return mapRow(data as Record<string, unknown>);
+  await saveClinicalHistoryReviews({
+    record: saved,
+    reviews: revisiones,
+  });
+
+  const withReviews = await attachReviews([saved]);
+  return withReviews[0] ?? saved;
+}
+
+async function saveClinicalHistoryReviews(params: {
+  record: ClinicalHistoryRecord;
+  reviews: Array<{
+    id?: string;
+    fecha: string;
+    descripcion: string;
+    appointmentId: string | null;
+    sortOrder: number;
+  }>;
+}): Promise<void> {
+  const keepIds = params.reviews
+    .map((review) => review.id)
+    .filter((id): id is string => Boolean(id));
+
+  let deleteQuery = supabase
+    .from('historial_clinico_revisiones')
+    .delete()
+    .eq('historial_clinico_id', params.record.id);
+  if (keepIds.length) {
+    deleteQuery = deleteQuery.not('id', 'in', `(${keepIds.join(',')})`);
+  }
+  const deleteResult = await deleteQuery;
+  if (deleteResult.error) {
+    if (isReviewSchemaError(deleteResult.error)) return;
+    throw deleteResult.error;
+  }
+
+  for (const review of params.reviews) {
+    const row = {
+      historial_clinico_id: params.record.id,
+      customer_id: params.record.customer_id,
+      company_id: params.record.company_id,
+      appointment_id: review.appointmentId || null,
+      fecha: review.fecha || params.record.fecha,
+      descripcion: review.descripcion,
+      sort_order: review.sortOrder,
+    };
+
+    const result = review.id
+      ? await supabase
+          .from('historial_clinico_revisiones')
+          .update(row)
+          .eq('id', review.id)
+      : await supabase.from('historial_clinico_revisiones').insert(row);
+
+    if (result.error) throw result.error;
+  }
 }

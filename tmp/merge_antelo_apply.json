@@ -1,0 +1,58 @@
+{
+  "apply": true,
+  "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+  "groups_merged": 1,
+  "customers_deleted": 1,
+  "merges": [
+    {
+      "name": "Maria del Carmen Antelo Collazo",
+      "winner": {
+        "id": "f724b000-4885-4946-b479-079199e37c7c",
+        "name": "Maria del Carmen Antelo Collazo",
+        "legacy_codcli": "008088"
+      },
+      "losers": [
+        {
+          "id": "2fe42f75-a53d-4346-8892-137b3d2cea4f",
+          "name": "Maria del Carmen Antelo Collazo",
+          "moved": {
+            "customer_aesthetic_history": 21,
+            "whatsapp_chats": 1
+          },
+          "field_updates": [
+            "phone",
+            "phone_mobile",
+            "dunasoft_codcli"
+          ]
+        }
+      ]
+    }
+  ],
+  "skipped_groups": [],
+  "errors": [],
+  "fk_tables": [
+    "agenda_appointments.customer_id",
+    "bonos.customer_id",
+    "consentimientos.customer_id",
+    "customer_aesthetic_history.customer_id",
+    "customer_contacts.customer_id",
+    "customer_shipping_addresses.customer_id",
+    "customer_vouchers.customer_id",
+    "daily_customer_log.customer_id",
+    "delivery_notes.customer_id",
+    "historial_clinico.customer_id",
+    "historial_clinico_revisiones.customer_id",
+    "inbody_measurements.customer_id",
+    "invoices.customer_id",
+    "marketing_leads.customer_id",
+    "presupuestos_n.customer_id",
+    "quotes.customer_id",
+    "sale_groups.customer_id",
+    "sales.customer_id",
+    "vehicles.customer_id",
+    "whatsapp_chats.customer_id",
+    "work_orders.customer_id"
+  ],
+  "mode": "manual",
+  "customers_loaded": 2
+}

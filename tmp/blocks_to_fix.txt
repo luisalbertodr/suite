@@ -1,0 +1,84 @@
+===== bloque inicia L366 =====
+366: Paciente medicina estÃ©tica:  Idalis Ãlvarez Toledo
+367: Nombre y fecha:   24/11/2925
+368: Edad: 44 aÃ±os. 
+369: 
+370: AP: 
+371: MÃ©dico.
+372: NoAMC. No alergia conocida a picadura de heminÃ³pteros.
+373: No Antecedentes de interÃ©s. MigraÃ±as. 
+374: IQ: no.
+375: NO reacciones adversas a anestesia in problemas cicatriciales. 
+376: Ttos habituales: Melatonina.
+377: Tratamientos mÃ©dico estÃ©ticos previos: no.
+378: 
+379: 
+380: Motivo de consulta:  deseo de mejorÃ­a de arrugas de expresiÃ³n y surco NG.
+381: 
+
+===== bloque inicia L641 =====
+641: Paciente medicina estÃ©tica: Layla Baamran Ezzarraoui
+642: Nombre y fecha: Laila Baamran Ezzarraoui
+643: Edad: 26
+644: AP: No AMC
+645: Hipotiroidismo a tto con Eutirox con buen control. No otro tto ni medicaciÃ³n . 
+646: No Iq. No problemas con AL
+647: No tto mÃ©dico estÃ©tico .
+648: Emplea serum de ordinary con glicÃ³lico. 
+649: Motivo de consulta: 
+650: Arrugas de expresiÃ³n, corrugadores y frontal. 
+651: 21/05 Tratamiento: se plantea botox. Explica y firma CI. Se infiltra  en orbicular, corrugador, piramidal y frontal sin incidencias tras el procedimiento.
+652: Se recomienda revisiÃ³n en 15 dÃ­as. 
+653: 
+654: Lot 23310-2 
+655: exp 06/26
+656: Relfydess de galderma. ;
+
+===== bloque inicia L853 =====
+853: Paciente medicina estÃ©tica: Maria del Carmen Antelo
+854: Nombre y fecha: 
+855: Edad: 54
+856: AP:
+857: No AMC
+858: RosÃ¡cea a tto con lÃ¡ser combinado en febrero.
+859: No medicaciÃ³n.
+860: Cicatiz ok. 
+861: Me: nada. 
+862: 
+863: 
+864: 
+865: Motivo de consulta:  flacidez
+866: Tratamiento:  
+867: se le comenta la posibilidad de ultraformer ya que no quiere pincharse e inductores de colÃ¡geno para que tenga la info, AsÃ­ mismo pedirÃ¡ cita para indiba.;
+868: 
+
+===== bloque inicia L1371 =====
+1371: Paciente medicina estÃ©tica:  Paula Varela GarcÃ­a.
+1372: Nombre y fecha:   24/11/2925
+1373: Edad: 44 aÃ±os. 
+1374: 
+1375: AP: 
+1376: NoAMC. No alergia conocida a picadura de heminÃ³pteros.
+1377: No Antecedentes de interÃ©s.
+1378: IQ: no.
+1379: NO reacciones adversas a anestesia in problemas cicatriciales. 
+1380: Ttos habituales: Alprazolam. 
+1381: Tratamientos mÃ©dico estÃ©ticos previos: no.
+1382: 
+1383: 
+1384: Motivo de consulta: deseo de mejorÃ­a de tercio inferior fundamentalmente y definiciÃ³n mandibular. No le preocupan especialmente las arrugas en tercio superior.   
+1385: 
+1386: ExploraciÃ³n:  No presenta arruga estÃ¡tica en tercio superior ni pata de gallo, gesticula poco, buena calidad de piel. No presenta mala estructura en tercio medio pero sÃ­ considero que se beneficiarÃ­a de puntos de soporte profundo de cara a descargar tercio inferior. Mala definiciÃ³n mandibular, que es lo que mÃ¡s le preocupa y le gustarÃ­a mejorar.  
+
+===== bloque inicia L1397 =====
+1397: Paciente medicina estÃ©tica: Pilar Toja Vazquez
+1398: 
+1399: Nombre y fecha: 
+1400: Edad:69
+1401: AP: No AMC.
+1402: No tto. Cicatriz bien. No antecedentes. AL bien. 
+1403: ME: lÃ³bulo rasgado.
+1404: 
+1405: Motivo de consulta: surco nasogeniano
+1406: Tratamiento: se plantea inductores/hialurÃ³nico y da presupuesto de ambos procedimientos.;
+1407: 

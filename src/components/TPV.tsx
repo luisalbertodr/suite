@@ -386,9 +386,10 @@ export const TPV: React.FC = () => {
     sale: { id: string; ticket_number: string; total_amount: number },
     saleItems: Array<{ description: string; quantity: number; unit_price: number; total_price: number }>,
     extraTickets?: Array<{ ticket_number: string; total: number; label: string }>,
+    invoiceSaleIds: string[] = sale.id ? [sale.id] : [],
   ) => {
     const ctx = appointmentChargeContext;
-    if (ctx?.appointmentId) {
+    if (ctx?.appointmentId && sale.id) {
       try {
         await persistSaleAppointmentLink(sale.id, {
           appointmentId: ctx.appointmentId,
@@ -436,44 +437,48 @@ export const TPV: React.FC = () => {
 
     let autoInvoiceDone = false;
 
-    if (
-      tpvSettings.autoInvoiceOnAppointmentCharge &&
-      ctx?.appointmentId &&
-      companyId &&
-      sale.id
-    ) {
-      try {
-        const result = await issueInvoiceFromSale(sale.id, catalogCompanyId);
-        if (result.mode === 'created') {
-          autoInvoiceDone = true;
-          setLastCompletedSale((prev) =>
-            prev ? { ...prev, invoiceId: result.invoiceId } : prev,
-          );
-          queryClient.invalidateQueries({ queryKey: ['invoices'] });
+    if (tpvSettings.autoInvoiceOnAppointmentCharge && companyId && invoiceSaleIds.length > 0) {
+      let createdCount = 0;
+      let firstInvoiceId: string | null = null;
+      for (const saleId of invoiceSaleIds) {
+        try {
+          const result = await issueInvoiceFromSale(saleId, catalogCompanyId);
+          if (result.mode === 'created') {
+            createdCount += 1;
+            firstInvoiceId ??= result.invoiceId;
+            queryClient.invalidateQueries({ queryKey: ['invoices'] });
+          } else {
+            sessionStorage.setItem(TPV_SALE_INVOICE_PREFILL_KEY, JSON.stringify(result.prefill));
+            toast({
+              title: 'Factura no automática',
+              description: result.reason,
+            });
+          }
+        } catch (e) {
+          console.error('auto invoice after TPV charge', e);
           toast({
-            title: 'Factura emitida automáticamente',
-            description: result.invoiceNumber
-              ? `Factura ${result.invoiceNumber} vinculada al ticket.`
-              : 'Factura creada y vinculada al ticket.',
-          });
-        } else {
-          sessionStorage.setItem(TPV_SALE_INVOICE_PREFILL_KEY, JSON.stringify(result.prefill));
-          toast({
-            title: 'Factura no automática',
-            description: result.reason,
+            title: 'No se pudo facturar automáticamente',
+            description: e instanceof Error ? e.message : 'Puedes facturar manualmente desde el ticket.',
+            variant: 'destructive',
           });
         }
-      } catch (e) {
-        console.error('auto invoice after appointment charge', e);
+      }
+      if (createdCount > 0) {
+        autoInvoiceDone = true;
+        setLastCompletedSale((prev) =>
+          prev && firstInvoiceId ? { ...prev, invoiceId: firstInvoiceId } : prev,
+        );
         toast({
-          title: 'No se pudo facturar automáticamente',
-          description: e instanceof Error ? e.message : 'Puedes facturar manualmente desde el ticket.',
-          variant: 'destructive',
+          title: createdCount === 1 ? 'Factura emitida automáticamente' : 'Facturas emitidas automáticamente',
+          description:
+            createdCount === 1
+              ? 'Factura creada y vinculada al ticket.'
+              : `${createdCount} facturas creadas y vinculadas a sus tickets.`,
         });
       }
     }
 
-    if (ctx?.appointmentId && saleItems?.length && !autoInvoiceDone) {
+    if (ctx?.appointmentId && sale.id && saleItems?.length && !autoInvoiceDone) {
       const prefillInvoice = buildInvoicePrefillFromSale(
         {
           id: sale.id,
@@ -906,6 +911,7 @@ export const TPV: React.FC = () => {
         paymentGroups.length,
       );
       return {
+        saleId: result.sale.id,
         saleGroupId: result.saleGroupId,
         ticket_number: result.sale.ticket_number,
         total: Number(result.sale.total_amount),
@@ -916,7 +922,7 @@ export const TPV: React.FC = () => {
   };
 
   const handleSplitComplete = async (state: {
-    completedSales: Array<{ billingCompanyId: string; ticket_number: string; total: number }>;
+    completedSales: Array<{ saleId: string; billingCompanyId: string; ticket_number: string; total: number }>;
   }) => {
     const first = state.completedSales[0];
     if (!first) return;
@@ -934,6 +940,7 @@ export const TPV: React.FC = () => {
         total: s.total,
         label: companyLabels.get(s.billingCompanyId) ?? 'Empresa',
       })),
+      state.completedSales.map((s) => s.saleId).filter(Boolean),
     );
   };
 

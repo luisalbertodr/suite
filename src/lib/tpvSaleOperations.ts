@@ -271,6 +271,7 @@ export async function issueInvoiceFromSale(
       iva_amount: iva,
       re_amount: 0,
       total_price: lineTotal,
+      article_id: it.article_id ?? null,
       variation_id: it.variation_id ?? null,
     };
   });

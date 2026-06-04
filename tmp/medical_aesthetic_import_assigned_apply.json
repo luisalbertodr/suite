@@ -1,0 +1,836 @@
+{
+  "apply": true,
+  "csv": "C:\\Users\\OportoW11\\Desktop\\Medicina Estética\\Fichas medicina.csv",
+  "blocks_total": 88,
+  "planned_records": 81,
+  "planned_reviews": 145,
+  "written_records": 81,
+  "written_reviews": 145,
+  "skipped_blocks": [
+    {
+      "line": 366,
+      "name": "Idalis Álvarez Toledo",
+      "fecha": "24/11/2925",
+      "source_key": "medicina_estetica_csv:f0d6412bbebc7ffe",
+      "issues": [
+        "invalid_date:24/11/2925"
+      ],
+      "assigned_code": "6901",
+      "reason": "missing_or_invalid_exam_date"
+    },
+    {
+      "line": 446,
+      "name": "",
+      "fecha": "2025-06-11",
+      "source_key": "medicina_estetica_csv:79109a769aa62594",
+      "issues": [
+        "missing_customer_name"
+      ],
+      "reason": "customer_not_found",
+      "candidates": []
+    },
+    {
+      "line": 641,
+      "name": "Layla Baamran Ezzarraoui",
+      "fecha": null,
+      "source_key": "medicina_estetica_csv:4f102282511e9146",
+      "issues": [
+        "missing_exam_date"
+      ],
+      "assigned_code": "7331",
+      "reason": "missing_or_invalid_exam_date"
+    },
+    {
+      "line": 853,
+      "name": "Maria del Carmen Antelo",
+      "fecha": null,
+      "source_key": "medicina_estetica_csv:67fbf358fb1fe1f9",
+      "issues": [
+        "missing_exam_date"
+      ],
+      "assigned_code": "8088",
+      "reason": "missing_or_invalid_exam_date"
+    },
+    {
+      "line": 1293,
+      "name": "Pablo Fieira Costa.",
+      "fecha": "2025-11-08",
+      "source_key": "medicina_estetica_csv:ec187fea9d5a6203",
+      "reason": "customer_not_found",
+      "candidates": []
+    },
+    {
+      "line": 1371,
+      "name": "Paula Varela García.",
+      "fecha": "24/11/2925",
+      "source_key": "medicina_estetica_csv:bca08d1596ea9624",
+      "issues": [
+        "invalid_date:24/11/2925"
+      ],
+      "assigned_code": "7376",
+      "reason": "missing_or_invalid_exam_date"
+    },
+    {
+      "line": 1397,
+      "name": "Pilar Toja Vazquez",
+      "fecha": null,
+      "source_key": "medicina_estetica_csv:bd945d3ff957eb71",
+      "issues": [
+        "missing_exam_date"
+      ],
+      "assigned_code": "314",
+      "reason": "missing_or_invalid_exam_date"
+    }
+  ],
+  "warnings": [
+    {
+      "line": 38,
+      "name": "Ana Diaz Marquez.",
+      "fecha": "2025-05-21",
+      "source_key": "medicina_estetica_csv:57c9f5d430182a60",
+      "assigned_code": "4752",
+      "reason": "review_appointment_not_found",
+      "review_line": 47,
+      "review_date": "2024-06-18",
+      "appointments": []
+    },
+    {
+      "line": 51,
+      "name": "Ana María Carballeira Carballeira",
+      "fecha": "2025-12-29",
+      "source_key": "medicina_estetica_csv:d3c219c39d92a511",
+      "reason": "review_appointment_not_found",
+      "review_line": 65,
+      "review_date": "2025-02-16",
+      "appointments": []
+    },
+    {
+      "line": 79,
+      "name": "Ana Rouco Anello.",
+      "fecha": "2025-12-31",
+      "source_key": "medicina_estetica_csv:0a4d9f56e4e97613",
+      "issues": [
+        "invalid_date:14/01/16"
+      ],
+      "reason": "review_invalid_date",
+      "review_line": 91,
+      "review_date": "14/01/16"
+    },
+    {
+      "line": 79,
+      "name": "Ana Rouco Anello.",
+      "fecha": "2025-12-31",
+      "source_key": "medicina_estetica_csv:0a4d9f56e4e97613",
+      "issues": [
+        "invalid_date:14/01/16"
+      ],
+      "reason": "review_ambiguous_appointment",
+      "review_line": 93,
+      "review_date": "2026-05-13",
+      "appointments": [
+        {
+          "id": "6c978147-9bec-42e4-8b50-5743b6ea590f",
+          "customer_id": "742ff40e-f9ff-49ec-b4db-777402cfd782",
+          "client_name": "Ana Rouco Anello",
+          "legacy_codcli": "007578",
+          "appointment_date": "2026-05-13",
+          "start_date": null,
+          "start_time": "10:00",
+          "status": "confirmed"
+        },
+        {
+          "id": "180783ba-6b05-4845-a59d-74fad70d8f65",
+          "customer_id": "742ff40e-f9ff-49ec-b4db-777402cfd782",
+          "client_name": "Ana Rouco Anello",
+          "legacy_codcli": "007578",
+          "appointment_date": "2026-05-13",
+          "start_date": null,
+          "start_time": "16:45",
+          "status": "confirmed"
+        },
+        {
+          "id": "07959549-135a-488c-9b9d-0ff32fbf9e93",
+          "customer_id": "742ff40e-f9ff-49ec-b4db-777402cfd782",
+          "client_name": "Ana Rouco Anello",
+          "legacy_codcli": "007578",
+          "appointment_date": "2026-05-13",
+          "start_date": null,
+          "start_time": "17:15",
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "line": 79,
+      "name": "Ana Rouco Anello.",
+      "fecha": "2025-12-31",
+      "source_key": "medicina_estetica_csv:0a4d9f56e4e97613",
+      "issues": [
+        "invalid_date:14/01/16"
+      ],
+      "reason": "review_ambiguous_appointment",
+      "review_line": 95,
+      "review_date": "2026-05-27",
+      "appointments": [
+        {
+          "id": "d8431da6-5cec-4815-b1f8-3f6faa308653",
+          "customer_id": "742ff40e-f9ff-49ec-b4db-777402cfd782",
+          "client_name": "Ana Rouco Anello",
+          "legacy_codcli": "007578",
+          "appointment_date": "2026-05-27",
+          "start_date": null,
+          "start_time": "15:45",
+          "status": "confirmed"
+        },
+        {
+          "id": "95a3561d-8e20-4fa4-8612-30281d29daa4",
+          "customer_id": "742ff40e-f9ff-49ec-b4db-777402cfd782",
+          "client_name": "Ana Rouco Anello",
+          "legacy_codcli": "007578",
+          "appointment_date": "2026-05-27",
+          "start_date": null,
+          "start_time": "16:30",
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "line": 135,
+      "name": "Carmen Aldo Cedeira",
+      "fecha": "2025-04-23",
+      "source_key": "medicina_estetica_csv:8cce5ae34c470260",
+      "assigned_code": "2582",
+      "reason": "main_appointment_already_linked"
+    },
+    {
+      "line": 156,
+      "name": "Carmen Aldao Cedeira",
+      "fecha": "2025-04-23",
+      "source_key": "medicina_estetica_csv:54eaa4867711cbdb",
+      "reason": "review_appointment_not_found",
+      "review_line": 181,
+      "review_date": "2026-11-12",
+      "appointments": []
+    },
+    {
+      "line": 194,
+      "name": "Carmen Fernández Rivera,",
+      "fecha": "2025-05-31",
+      "source_key": "medicina_estetica_csv:8040893f567232a7",
+      "assigned_code": "97",
+      "reason": "main_appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 194,
+      "name": "Carmen Fernández Rivera,",
+      "fecha": "2025-05-31",
+      "source_key": "medicina_estetica_csv:8040893f567232a7",
+      "assigned_code": "97",
+      "reason": "review_appointment_not_found",
+      "review_line": 196,
+      "review_date": "2025-05-31",
+      "appointments": []
+    },
+    {
+      "line": 253,
+      "name": "Doris Benalcazar Mendoza",
+      "fecha": "2025-09-27",
+      "source_key": "medicina_estetica_csv:ff34e7fcb8ff0149",
+      "assigned_code": "4187",
+      "reason": "main_appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 321,
+      "name": "Isabel Cabaleiro Maceda",
+      "fecha": "2025-05-07",
+      "source_key": "medicina_estetica_csv:489c8b27e16eb20a",
+      "assigned_code": "6349",
+      "reason": "review_appointment_not_found",
+      "review_line": 330,
+      "review_date": "2025-05-31",
+      "appointments": []
+    },
+    {
+      "line": 392,
+      "name": "Irma photis.",
+      "fecha": "2025-05-12",
+      "source_key": "medicina_estetica_csv:fe20196ee23d9a94",
+      "reason": "review_ambiguous_appointment",
+      "review_line": 413,
+      "review_date": "2025-07-30",
+      "appointments": [
+        {
+          "id": "262c2cd7-1a08-40cd-9d2d-886793d48952",
+          "customer_id": "dbac3f8b-9142-414c-8a1a-121c045e2a21",
+          "client_name": "Irma Photis",
+          "legacy_codcli": "007715",
+          "appointment_date": "2025-07-30",
+          "start_date": null,
+          "start_time": "17:15",
+          "status": "confirmed"
+        },
+        {
+          "id": "d9a4dc5e-bf5e-444a-8104-6ddfbd9bdad0",
+          "customer_id": "dbac3f8b-9142-414c-8a1a-121c045e2a21",
+          "client_name": "Irma Photis",
+          "legacy_codcli": "007715",
+          "appointment_date": "2025-07-30",
+          "start_date": null,
+          "start_time": "17:15",
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "line": 424,
+      "name": "Isabel Fernández Cabaleiro",
+      "fecha": "2025-06-11",
+      "source_key": "medicina_estetica_csv:540fd2c5f94d4f22",
+      "assigned_code": "6055",
+      "reason": "main_appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 424,
+      "name": "Isabel Fernández Cabaleiro",
+      "fecha": "2025-06-11",
+      "source_key": "medicina_estetica_csv:540fd2c5f94d4f22",
+      "assigned_code": "6055",
+      "reason": "review_appointment_not_found",
+      "review_line": 437,
+      "review_date": "2025-06-25",
+      "appointments": []
+    },
+    {
+      "line": 424,
+      "name": "Isabel Fernández Cabaleiro",
+      "fecha": "2025-06-11",
+      "source_key": "medicina_estetica_csv:540fd2c5f94d4f22",
+      "assigned_code": "6055",
+      "reason": "review_appointment_not_found",
+      "review_line": 438,
+      "review_date": "2025-12-01",
+      "appointments": []
+    },
+    {
+      "line": 424,
+      "name": "Isabel Fernández Cabaleiro",
+      "fecha": "2025-06-11",
+      "source_key": "medicina_estetica_csv:540fd2c5f94d4f22",
+      "assigned_code": "6055",
+      "reason": "review_appointment_not_found",
+      "review_line": 441,
+      "review_date": "2025-12-29",
+      "appointments": []
+    },
+    {
+      "line": 479,
+      "name": "Isabel Morales Pérez",
+      "fecha": "2025-07-09",
+      "source_key": "medicina_estetica_csv:74a8c242f45b774f",
+      "reason": "review_appointment_not_found",
+      "review_line": 497,
+      "review_date": "2026-05-12",
+      "appointments": []
+    },
+    {
+      "line": 528,
+      "name": "Jose Carlos Saa Ramos",
+      "fecha": "2025-10-08",
+      "source_key": "medicina_estetica_csv:bd239af13df319d2",
+      "assigned_code": "5304",
+      "reason": "review_ambiguous_appointment",
+      "review_line": 540,
+      "review_date": "2025-11-08",
+      "appointments": [
+        {
+          "id": "3c3cbc43-31a0-4ed5-89e9-d3b9dcc032e4",
+          "customer_id": "a2d784a6-96a7-485c-822a-7034ef6d8f4e",
+          "client_name": "Jose Carlos Saa Ramos",
+          "legacy_codcli": "005304",
+          "appointment_date": "2025-11-08",
+          "start_date": null,
+          "start_time": "10:00",
+          "status": "confirmed"
+        },
+        {
+          "id": "c4b69fb9-49e0-4959-8279-6433cfe34e56",
+          "customer_id": "a2d784a6-96a7-485c-822a-7034ef6d8f4e",
+          "client_name": "Jose Carlos Saa Ramos",
+          "legacy_codcli": "005304",
+          "appointment_date": "2025-11-08",
+          "start_date": null,
+          "start_time": "10:15",
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "line": 548,
+      "name": "Josefina Cousillas Castro",
+      "fecha": "2025-07-08",
+      "source_key": "medicina_estetica_csv:ed5d324e82107936",
+      "assigned_code": "702",
+      "reason": "main_appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 548,
+      "name": "Josefina Cousillas Castro",
+      "fecha": "2025-07-08",
+      "source_key": "medicina_estetica_csv:ed5d324e82107936",
+      "assigned_code": "702",
+      "reason": "review_ambiguous_appointment",
+      "review_line": 563,
+      "review_date": "2025-09-29",
+      "appointments": [
+        {
+          "id": "02b8e12e-1a53-40b1-8510-d462fafff2de",
+          "customer_id": "62405d0e-f30b-4538-b191-07a34df565b0",
+          "client_name": "Fini Cousillas Castro",
+          "legacy_codcli": "000702",
+          "appointment_date": "2025-09-29",
+          "start_date": null,
+          "start_time": "17:00",
+          "status": "confirmed"
+        },
+        {
+          "id": "7edda868-436a-4a0a-b55d-83e08ebff091",
+          "customer_id": "62405d0e-f30b-4538-b191-07a34df565b0",
+          "client_name": "Fini Cousillas Castro",
+          "legacy_codcli": "000702",
+          "appointment_date": "2025-09-29",
+          "start_date": null,
+          "start_time": "17:00",
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "line": 728,
+      "name": "Mar Lamas Pernas.",
+      "fecha": "2025-12-13",
+      "source_key": "medicina_estetica_csv:fb1e7f0c67e23ec7",
+      "assigned_code": "330",
+      "reason": "main_appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 773,
+      "name": "Maria Baldomir García",
+      "fecha": "2026-11-12",
+      "source_key": "medicina_estetica_csv:d8547e08dcc0d4b5",
+      "reason": "main_appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 787,
+      "name": "Maria Cambon",
+      "fecha": "2026-05-13",
+      "source_key": "medicina_estetica_csv:e96cd304bc1955a4",
+      "assigned_code": "8142",
+      "reason": "main_ambiguous_appointment",
+      "appointments": [
+        {
+          "id": "9a5261ac-d1e1-41cc-8062-da850be72afe",
+          "customer_id": "98238632-5426-4a27-8fef-86e5ba845d22",
+          "client_name": "Maria Cambon Bellon",
+          "legacy_codcli": "008142",
+          "appointment_date": "2026-05-13",
+          "start_date": null,
+          "start_time": "12:00",
+          "status": "confirmed"
+        },
+        {
+          "id": "fd3b8a73-4293-4ae7-9337-b87d73192ff2",
+          "customer_id": "98238632-5426-4a27-8fef-86e5ba845d22",
+          "client_name": "Maria Cambon Bellon",
+          "legacy_codcli": "008142",
+          "appointment_date": "2026-05-13",
+          "start_date": null,
+          "start_time": "19:30",
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "line": 803,
+      "name": "Maria Cerduela Jimenez",
+      "fecha": "2025-12-17",
+      "source_key": "medicina_estetica_csv:4a0f7425837c338c",
+      "assigned_code": "7637",
+      "reason": "review_appointment_not_found",
+      "review_line": 820,
+      "review_date": "2026-04-16",
+      "appointments": []
+    },
+    {
+      "line": 803,
+      "name": "Maria Cerduela Jimenez",
+      "fecha": "2025-12-17",
+      "source_key": "medicina_estetica_csv:4a0f7425837c338c",
+      "assigned_code": "7637",
+      "reason": "review_appointment_not_found",
+      "review_line": 822,
+      "review_date": "2026-03-15",
+      "appointments": []
+    },
+    {
+      "line": 825,
+      "name": "Maria Concepción García Dabrio",
+      "fecha": "2025-12-22",
+      "source_key": "medicina_estetica_csv:198c6eb690cc22f9",
+      "assigned_code": "7909",
+      "reason": "main_appointment_already_linked"
+    },
+    {
+      "line": 922,
+      "name": "María Dolores Seonae Longueira",
+      "fecha": "2026-04-15",
+      "source_key": "medicina_estetica_csv:61579937a0ad628d",
+      "assigned_code": "8039",
+      "reason": "main_ambiguous_appointment",
+      "appointments": [
+        {
+          "id": "2d44cc44-d1d4-4789-946d-4dfeadb2d06c",
+          "customer_id": "bf242c76-9db5-4600-8f2c-42b39c46a902",
+          "client_name": "Maria Dolores Seoane Longueira",
+          "legacy_codcli": "008039",
+          "appointment_date": "2026-04-15",
+          "start_date": null,
+          "start_time": "17:15",
+          "status": "confirmed"
+        },
+        {
+          "id": "e8cd31f7-5270-4742-b936-2ae6edc95a07",
+          "customer_id": "bf242c76-9db5-4600-8f2c-42b39c46a902",
+          "client_name": "Maria Dolores Seoane Longueira",
+          "legacy_codcli": "008039",
+          "appointment_date": "2026-04-15",
+          "start_date": null,
+          "start_time": "17:30",
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "line": 935,
+      "name": "María Jose Cano blanco.",
+      "fecha": "2026-05-27",
+      "source_key": "medicina_estetica_csv:bd6539d4df859791",
+      "reason": "main_appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 1007,
+      "name": "María Pastora Gómez Vidal.",
+      "fecha": "2026-02-04",
+      "source_key": "medicina_estetica_csv:5960cdec43f8efbf",
+      "assigned_code": "7459",
+      "reason": "main_ambiguous_appointment",
+      "appointments": [
+        {
+          "id": "04fcd1e0-b7be-4342-9f10-3d9924d2f67b",
+          "customer_id": "e82528df-8d84-443c-9597-2122e38b875b",
+          "client_name": "Maria Pastora Gomez Vidal",
+          "legacy_codcli": "007459",
+          "appointment_date": "2026-02-04",
+          "start_date": null,
+          "start_time": "17:45",
+          "status": "confirmed"
+        },
+        {
+          "id": "cf0ff2e4-3603-4968-ab69-5b7b56f28f8e",
+          "customer_id": "e82528df-8d84-443c-9597-2122e38b875b",
+          "client_name": "Maria Pastora Gomez Vidal",
+          "legacy_codcli": "007459",
+          "appointment_date": "2026-02-04",
+          "start_date": null,
+          "start_time": "18:30",
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "line": 1087,
+      "name": "Marisa Lorenzo",
+      "fecha": "2026-04-29",
+      "source_key": "medicina_estetica_csv:526acde6ce1e4678",
+      "reason": "review_appointment_not_found",
+      "review_line": 1100,
+      "review_date": "2026-05-31",
+      "appointments": []
+    },
+    {
+      "line": 1087,
+      "name": "Marisa Lorenzo",
+      "fecha": "2026-04-29",
+      "source_key": "medicina_estetica_csv:526acde6ce1e4678",
+      "reason": "review_appointment_not_found",
+      "review_line": 1104,
+      "review_date": "2026-06-03",
+      "appointments": []
+    },
+    {
+      "line": 1107,
+      "name": "Marta Simón Martín.",
+      "fecha": "2025-06-09",
+      "source_key": "medicina_estetica_csv:af9c4d2a03437c18",
+      "reason": "review_ambiguous_appointment",
+      "review_line": 1124,
+      "review_date": "2025-11-03",
+      "appointments": [
+        {
+          "id": "f9788605-a021-45b3-ba28-f283bf985113",
+          "customer_id": "31f4693b-6df9-4ed5-a2af-986130585b2c",
+          "client_name": "Marta Simon Martin",
+          "legacy_codcli": "004986",
+          "appointment_date": "2025-11-03",
+          "start_date": null,
+          "start_time": "16:00",
+          "status": "confirmed"
+        },
+        {
+          "id": "6103bfa3-2017-4fcb-8ce7-316a928e36b8",
+          "customer_id": "31f4693b-6df9-4ed5-a2af-986130585b2c",
+          "client_name": "Marta Simon Martin",
+          "legacy_codcli": "004986",
+          "appointment_date": "2025-11-03",
+          "start_date": null,
+          "start_time": "16:30",
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "line": 1143,
+      "name": "Mary Aguiar Siso",
+      "fecha": "2025-10-13",
+      "source_key": "medicina_estetica_csv:58fa312dc7ccd766",
+      "assigned_code": "6729",
+      "reason": "review_appointment_not_found",
+      "review_line": 1157,
+      "review_date": "2025-11-03",
+      "appointments": []
+    },
+    {
+      "line": 1143,
+      "name": "Mary Aguiar Siso",
+      "fecha": "2025-10-13",
+      "source_key": "medicina_estetica_csv:58fa312dc7ccd766",
+      "assigned_code": "6729",
+      "reason": "review_appointment_not_found",
+      "review_line": 1161,
+      "review_date": "2025-11-25",
+      "appointments": []
+    },
+    {
+      "line": 1171,
+      "name": "",
+      "fecha": "2025-05-09",
+      "source_key": "medicina_estetica_csv:05e88cfdac26cfd2",
+      "issues": [
+        "missing_customer_name"
+      ],
+      "assigned_code": "4545",
+      "reason": "main_appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 1184,
+      "name": "",
+      "fecha": "2025-06-11",
+      "source_key": "medicina_estetica_csv:a6319854075fc2d6",
+      "issues": [
+        "missing_customer_name"
+      ],
+      "assigned_code": "8094",
+      "reason": "main_appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 1184,
+      "name": "",
+      "fecha": "2025-06-11",
+      "source_key": "medicina_estetica_csv:a6319854075fc2d6",
+      "issues": [
+        "missing_customer_name"
+      ],
+      "assigned_code": "8094",
+      "reason": "review_appointment_not_found",
+      "review_line": 1193,
+      "review_date": "2025-06-18",
+      "appointments": []
+    },
+    {
+      "line": 1184,
+      "name": "",
+      "fecha": "2025-06-11",
+      "source_key": "medicina_estetica_csv:a6319854075fc2d6",
+      "issues": [
+        "missing_customer_name"
+      ],
+      "assigned_code": "8094",
+      "reason": "review_appointment_not_found",
+      "review_line": 1195,
+      "review_date": "2025-07-03",
+      "appointments": []
+    },
+    {
+      "line": 1250,
+      "name": "Norma Fariña Couselo",
+      "fecha": "2026-04-29",
+      "source_key": "medicina_estetica_csv:4157847c589804f8",
+      "reason": "review_appointment_not_found",
+      "review_line": 1269,
+      "review_date": "2026-12-25",
+      "appointments": []
+    },
+    {
+      "line": 1273,
+      "name": "Nuria rivera alvarez",
+      "fecha": "2026-02-02",
+      "source_key": "medicina_estetica_csv:c27052717b282911",
+      "reason": "review_appointment_not_found",
+      "review_line": 1290,
+      "review_date": "2026-02-17",
+      "appointments": []
+    },
+    {
+      "line": 1308,
+      "name": "Paqui Fernández",
+      "fecha": "2026-04-26",
+      "source_key": "medicina_estetica_csv:8c60f998593c4436",
+      "assigned_code": "8044",
+      "reason": "main_appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 1308,
+      "name": "Paqui Fernández",
+      "fecha": "2026-04-26",
+      "source_key": "medicina_estetica_csv:8c60f998593c4436",
+      "assigned_code": "8044",
+      "reason": "review_appointment_not_found",
+      "review_line": 1322,
+      "review_date": "2027-05-31",
+      "appointments": []
+    },
+    {
+      "line": 1308,
+      "name": "Paqui Fernández",
+      "fecha": "2026-04-26",
+      "source_key": "medicina_estetica_csv:8c60f998593c4436",
+      "assigned_code": "8044",
+      "reason": "review_appointment_not_found",
+      "review_line": 1330,
+      "review_date": "2026-03-25",
+      "appointments": []
+    },
+    {
+      "line": 1308,
+      "name": "Paqui Fernández",
+      "fecha": "2026-04-26",
+      "source_key": "medicina_estetica_csv:8c60f998593c4436",
+      "assigned_code": "8044",
+      "reason": "review_appointment_not_found",
+      "review_line": 1339,
+      "review_date": "2026-05-04",
+      "appointments": []
+    },
+    {
+      "line": 1308,
+      "name": "Paqui Fernández",
+      "fecha": "2026-04-26",
+      "source_key": "medicina_estetica_csv:8c60f998593c4436",
+      "assigned_code": "8044",
+      "reason": "review_appointment_not_found",
+      "review_line": 1341,
+      "review_date": "2026-05-20",
+      "appointments": []
+    },
+    {
+      "line": 1308,
+      "name": "Paqui Fernández",
+      "fecha": "2026-04-26",
+      "source_key": "medicina_estetica_csv:8c60f998593c4436",
+      "assigned_code": "8044",
+      "reason": "review_appointment_already_linked",
+      "review_line": 1344,
+      "review_date": "2026-06-03"
+    },
+    {
+      "line": 1347,
+      "name": "Paula Cristobo -Rodriguez",
+      "fecha": "2025-05-25",
+      "source_key": "medicina_estetica_csv:57ad78aad4079e0d",
+      "reason": "main_appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 1347,
+      "name": "Paula Cristobo -Rodriguez",
+      "fecha": "2025-05-25",
+      "source_key": "medicina_estetica_csv:57ad78aad4079e0d",
+      "reason": "review_appointment_not_found",
+      "review_line": 1369,
+      "review_date": "2027-05-18",
+      "appointments": []
+    },
+    {
+      "line": 1423,
+      "name": "Raquel Fariña Couselo.",
+      "fecha": "2026-02-16",
+      "source_key": "medicina_estetica_csv:2b216caa30d09a00",
+      "reason": "review_appointment_not_found",
+      "review_line": 1438,
+      "review_date": "2026-03-23",
+      "appointments": []
+    },
+    {
+      "line": 1423,
+      "name": "Raquel Fariña Couselo.",
+      "fecha": "2026-02-16",
+      "source_key": "medicina_estetica_csv:2b216caa30d09a00",
+      "reason": "review_ambiguous_appointment",
+      "review_line": 1440,
+      "review_date": "2026-04-29",
+      "appointments": [
+        {
+          "id": "8b78ed0f-c283-4553-a80c-84a8dc150539",
+          "customer_id": "b6b2d156-4416-412f-9a18-76dbea686203",
+          "client_name": "Raquel Fariña Couselo",
+          "legacy_codcli": "007133",
+          "appointment_date": "2026-04-29",
+          "start_date": null,
+          "start_time": "15:45",
+          "status": "confirmed"
+        },
+        {
+          "id": "ca2d3a8a-048e-43fd-b2d6-09b56d604f74",
+          "customer_id": "b6b2d156-4416-412f-9a18-76dbea686203",
+          "client_name": "Raquel Fariña Couselo",
+          "legacy_codcli": "007133",
+          "appointment_date": "2026-04-29",
+          "start_date": null,
+          "start_time": "15:45",
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "line": 1483,
+      "name": "Remedios Mateo Fernández",
+      "fecha": "2025-04-21",
+      "source_key": "medicina_estetica_csv:95dc831312fee0c1",
+      "reason": "review_appointment_not_found",
+      "review_line": 1518,
+      "review_date": "2025-12-03",
+      "appointments": []
+    }
+  ],
+  "assignments_loaded": 52,
+  "customers_loaded": 6963
+}

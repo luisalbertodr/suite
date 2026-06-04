@@ -3,14 +3,14 @@ import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 
 export interface TpvSettings {
-  /** Emite factura al cobrar una cita desde TPV (si hay cliente vinculado). */
+  /** Emite factura al cobrar desde TPV si hay cliente vinculado. */
   autoInvoiceOnAppointmentCharge: boolean;
 }
 
 export const TPV_SETTINGS_KEY = 'tpv_settings';
 
 export const DEFAULT_TPV_SETTINGS: TpvSettings = {
-  autoInvoiceOnAppointmentCharge: false,
+  autoInvoiceOnAppointmentCharge: true,
 };
 
 function normalize(raw: unknown): TpvSettings {

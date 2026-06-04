@@ -229,6 +229,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
     existingSales: appointmentSales,
   });
   const chargedTotal = chargeState.completedTotal;
+  const paidLocked = chargeState.completedTotal > 0;
   const saleTicketsLabel = appointmentSales
     .map((s) => s.ticket_number)
     .filter(Boolean)
@@ -373,6 +374,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                 aria-label="Fecha"
                 value={formData.date}
                 onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                disabled={paidLocked}
                 className="h-8 min-w-0 flex-1 text-xs px-2"
               />
               <Input
@@ -381,10 +383,12 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                 className="h-8 w-[5.25rem] shrink-0 text-xs px-1.5 tabular-nums"
                 value={formData.startTime}
                 onChange={(e) => setFormData({ ...formData, startTime: e.target.value })}
+                disabled={paidLocked}
               />
               <Select
                 value={formData.employeeId}
                 onValueChange={(v) => setFormData({ ...formData, employeeId: v })}
+                disabled={paidLocked}
               >
                 <SelectTrigger
                   className="h-8 min-w-0 flex-1 text-xs"
@@ -447,8 +451,15 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                 compactSlots
                 timeSlotsServicesOnly
                 onResourceConflictsChange={setResourceConflictMessages}
-                itemsLocked={chargeState.anyInvoiced}
+                itemsLocked={paidLocked}
               />
+            )}
+
+            {paidLocked && (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                Esta cita ya tiene ticket cobrado. Solo puedes cancelar la cita, añadir observaciones
+                o adjuntar documentos/fotos.
+              </div>
             )}
 
             <div>
@@ -492,7 +503,10 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                 variant="destructive"
                 size="sm"
                 forbiddenLabel="No tienes permiso para eliminar citas."
+                disabled={paidLocked}
+                title={paidLocked ? 'No se puede eliminar una cita cobrada; cancélala para dejar constancia.' : undefined}
                 onClick={() => {
+                  if (paidLocked) return;
                   if (!requirePermissionOrToast('agenda', 'delete', 'No tienes permiso para eliminar citas.')) return;
                   if (window.confirm('¿Eliminar esta cita?')) onDelete(appointment.id);
                 }}
@@ -537,7 +551,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                   disabled={resourceConflictMessages.length > 0}
                   title={resourceConflictMessages.length > 0 ? 'Hay conflicto de cabina o recurso' : undefined}
                 >
-                  <Save className="w-4 h-4 mr-1" /> Guardar
+                  <Save className="w-4 h-4 mr-1" /> {paidLocked ? 'Guardar observaciones' : 'Guardar'}
                 </Button>
               </div>
             </div>

@@ -1018,6 +1018,14 @@ export const Agenda: React.FC = () => {
     try {
       const appointment = appointments.find((apt) => apt.id === appointmentId);
       if (!appointment) return;
+      if (appointment.paymentStatus === 'paid' || appointment.paymentStatus === 'invoiced') {
+        toast({
+          title: 'Cita cobrada',
+          description: 'No se puede mover una cita con ticket cobrado.',
+          variant: 'destructive',
+        });
+        return;
+      }
 
       const [startH, startM] = appointment.startTime.split(':').map(Number);
       const [endH, endM] = appointment.endTime.split(':').map(Number);
@@ -1133,24 +1141,28 @@ export const Agenda: React.FC = () => {
 
   const handleAppointmentUpdate = async (updated: Appointment, items: AppointmentItemDraft[]) => {
     try {
-      const conflict = checkItemsResourceConflict(updated.date, updated.startTime, items, updated.id);
-      if (conflict.hasConflict) {
-        showResourceConflictDialog(conflict.messages);
-        return;
+      const current = appointments.find((apt) => apt.id === updated.id);
+      const paidLocked = current?.paymentStatus === 'paid' || current?.paymentStatus === 'invoiced';
+      if (!paidLocked) {
+        const conflict = checkItemsResourceConflict(updated.date, updated.startTime, items, updated.id);
+        if (conflict.hasConflict) {
+          showResourceConflictDialog(conflict.messages);
+          return;
+        }
       }
 
       await updateAppointment.mutateAsync({
         id: updated.id,
-        employee_id: updated.employeeId,
-        customer_id: updated.customerId ?? null,
-        title: updated.clientName,
+        employee_id: paidLocked ? current?.employeeId : updated.employeeId,
+        customer_id: paidLocked ? current?.customerId ?? null : updated.customerId ?? null,
+        title: paidLocked ? current?.clientName : updated.clientName,
         description: updated.description,
-        start_time: `${updated.date}T${updated.startTime}:00`,
-        end_time: `${updated.date}T${updated.endTime}:00`,
-        color: updated.color,
+        start_time: paidLocked ? `${current?.date}T${current?.startTime}:00` : `${updated.date}T${updated.startTime}:00`,
+        end_time: paidLocked ? `${current?.date}T${current?.endTime}:00` : `${updated.date}T${updated.endTime}:00`,
+        color: paidLocked ? current?.color : updated.color,
         status: updated.status,
       });
-      try {
+      if (!paidLocked) try {
         const previousItems = await fetchAppointmentItems(updated.id, companyId || undefined);
         await syncAppointmentItems(updated.id, items);
         try {
@@ -1191,6 +1203,15 @@ export const Agenda: React.FC = () => {
 
   const handleAppointmentDelete = async (appointmentId: string) => {
     if (!requirePermissionOrToast('agenda', 'delete', 'No tienes permiso para eliminar citas.')) return;
+    const appointment = appointments.find((apt) => apt.id === appointmentId);
+    if (appointment?.paymentStatus === 'paid' || appointment?.paymentStatus === 'invoiced') {
+      toast({
+        title: 'Cita cobrada',
+        description: 'No se puede eliminar una cita cobrada; cancélala para dejar constancia.',
+        variant: 'destructive',
+      });
+      return;
+    }
     try {
       await deleteAppointment.mutateAsync(appointmentId);
       setShowEditForm(false);

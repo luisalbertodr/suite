@@ -215,6 +215,10 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
 
   // Funciones para drag & drop
   const handleDragStart = (e: React.DragEvent, appointment: Appointment) => {
+    if (appointment.paymentStatus === 'paid' || appointment.paymentStatus === 'invoiced') {
+      e.preventDefault();
+      return;
+    }
     setDraggedAppointment(appointment.id);
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', appointment.id);
@@ -454,11 +458,12 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
             const width = `calc((100% - ${TIME_GUTTER_PX}px) / ${n} / ${overlap.total})`;
             const slotDesc =
               visibleFields.description ? slotDescriptionText(appointment) : null;
+            const lockedByPayment = appointment.paymentStatus === 'paid' || appointment.paymentStatus === 'invoiced';
 
             return (
               <div
                 key={appointment.id}
-                className="absolute z-20 cursor-move hover:opacity-80"
+                className={`absolute z-20 hover:opacity-80 ${lockedByPayment ? 'cursor-default' : 'cursor-move'}`}
                 style={{
                   top: `${topPosition}px`,
                   left,
@@ -472,8 +477,8 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
                 onDrop={(e) => handleDrop(e, appointment.employeeId, appointment.startTime)}
               >
                 <div
-                  className={`relative h-full p-0.5 text-[11px] overflow-hidden rounded border-2 border-border dark:border-border cursor-move ${employees[employeeIndex]?.color}`}
-                  draggable
+                  className={`relative h-full p-0.5 text-[11px] overflow-hidden rounded border-2 border-border dark:border-border ${lockedByPayment ? 'cursor-default' : 'cursor-move'} ${employees[employeeIndex]?.color}`}
+                  draggable={!lockedByPayment}
                   onDragStart={(e) => handleDragStart(e, appointment)}
                   onDragEnd={handleDragEnd}
                 >

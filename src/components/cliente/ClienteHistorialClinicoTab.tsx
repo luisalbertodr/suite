@@ -8,6 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -61,6 +62,9 @@ function ClinicalHistoryDetailDialog({
             {formatDateYmd(record.fecha)}
             {record.motivo_consulta ? ` · ${record.motivo_consulta}` : ''}
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            Detalle del registro clínico del cliente.
+          </DialogDescription>
         </DialogHeader>
         <dl className="space-y-3 text-sm">
           {birthDate && (
@@ -92,7 +96,8 @@ function ClinicalHistoryDetailDialog({
               <dd className="whitespace-pre-wrap">{record.tratamiento}</dd>
             </div>
           )}
-          {(record.proxima_revision_fecha || record.proxima_revision_descripcion) && (
+          {record.revisiones.length === 0 &&
+            (record.proxima_revision_fecha || record.proxima_revision_descripcion) && (
             <div>
               <dt className="text-xs font-medium text-muted-foreground">Próxima revisión</dt>
               <dd>
@@ -102,6 +107,24 @@ function ClinicalHistoryDetailDialog({
                 {record.proxima_revision_descripcion
                   ? ` — ${record.proxima_revision_descripcion}`
                   : ''}
+              </dd>
+            </div>
+          )}
+          {record.revisiones.length > 0 && (
+            <div>
+              <dt className="text-xs font-medium text-muted-foreground">Revisiones</dt>
+              <dd className="mt-1 space-y-2">
+                {record.revisiones.map((revision) => (
+                  <div key={revision.id} className="rounded-md border px-2 py-1.5">
+                    <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                      <span>{formatDateYmd(revision.fecha)}</span>
+                      <span>{revision.appointment_id ? 'Cita vinculada' : 'Sin cita vinculada'}</span>
+                    </div>
+                    {revision.descripcion && (
+                      <p className="mt-1 whitespace-pre-wrap">{revision.descripcion}</p>
+                    )}
+                  </div>
+                ))}
               </dd>
             </div>
           )}
