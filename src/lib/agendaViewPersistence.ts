@@ -6,6 +6,8 @@
 export type AgendaViewPersisted = {
   lastDateYmd: string;
   scrollByYmd: Record<string, number>;
+  /** Hora visible preferida por día (HH:mm), más fiable que scrollTop tras recargar citas. */
+  timeByYmd: Record<string, string>;
 };
 
 const PREFIX_V2 = 'suite:agenda:view:v2:';
@@ -43,12 +45,24 @@ function normalizePersisted(raw: unknown): AgendaViewPersisted | null {
       const v = scrollByYmd[k];
       if (typeof v !== 'number' || !Number.isFinite(v)) delete scrollByYmd[k];
     }
-    return { lastDateYmd: o.lastDateYmd, scrollByYmd };
+    const timeByYmd: Record<string, string> = {};
+    if (o.timeByYmd && typeof o.timeByYmd === 'object' && !Array.isArray(o.timeByYmd)) {
+      for (const [k, v] of Object.entries(o.timeByYmd as Record<string, unknown>)) {
+        if (typeof v === 'string' && /^\d{1,2}:\d{2}$/.test(v.trim())) {
+          const [h, m] = v.trim().split(':').map(Number);
+          if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+            timeByYmd[k] = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+          }
+        }
+      }
+    }
+    return { lastDateYmd: o.lastDateYmd, scrollByYmd, timeByYmd };
   }
   if (typeof o.dateYmd === 'string' && typeof o.scrollTop === 'number' && Number.isFinite(o.scrollTop)) {
     return {
       lastDateYmd: o.dateYmd,
       scrollByYmd: { [o.dateYmd]: o.scrollTop },
+      timeByYmd: {},
     };
   }
   return null;
@@ -88,20 +102,45 @@ export function mergePersistedScroll(
   prev: AgendaViewPersisted | null,
   dateYmd: string,
   scrollTop: number,
+  timeHhmm?: string | null,
 ): AgendaViewPersisted {
   const scrollByYmd = { ...(prev?.scrollByYmd ?? {}) };
+  const timeByYmd = { ...(prev?.timeByYmd ?? {}) };
   const prevTop = scrollByYmd[dateYmd] ?? 0;
   // Evita pisar scroll guardado con 0 al desmontar la cuadrícula vacía o en transición.
   if (scrollTop <= 0 && prevTop > 0) {
-    return {
+    const next: AgendaViewPersisted = {
       lastDateYmd: dateYmd,
       scrollByYmd,
+      timeByYmd,
     };
+    if (timeHhmm) {
+      next.timeByYmd = { ...timeByYmd, [dateYmd]: timeHhmm };
+    }
+    return next;
   }
   scrollByYmd[dateYmd] = scrollTop;
+  if (timeHhmm) {
+    timeByYmd[dateYmd] = timeHhmm;
+  }
   return {
     lastDateYmd: dateYmd,
     scrollByYmd,
+    timeByYmd,
+  };
+}
+
+export function mergePersistedAnchorTime(
+  prev: AgendaViewPersisted | null,
+  dateYmd: string,
+  timeHhmm: string,
+): AgendaViewPersisted {
+  const timeByYmd = { ...(prev?.timeByYmd ?? {}) };
+  timeByYmd[dateYmd] = timeHhmm;
+  return {
+    lastDateYmd: dateYmd,
+    scrollByYmd: { ...(prev?.scrollByYmd ?? {}) },
+    timeByYmd,
   };
 }
 
@@ -112,5 +151,29 @@ export function mergePersistedLastDate(
   return {
     lastDateYmd: dateYmd,
     scrollByYmd: { ...(prev?.scrollByYmd ?? {}) },
+    timeByYmd: { ...(prev?.timeByYmd ?? {}) },
   };
+}
+
+/** Calcula HH:mm aproximado según scroll vertical de la cuadrícula. */
+export function anchorTimeFromScrollTop(
+  scrollTop: number,
+  opts: {
+    headerHeight: number;
+    gridStartMin: number;
+    gridEndMin: number;
+    slotMinutes: number;
+    cellHeight: number;
+    viewportHeight: number;
+  },
+): string | null {
+  const { headerHeight, gridStartMin, gridEndMin, slotMinutes, cellHeight, viewportHeight } = opts;
+  if (slotMinutes <= 0 || cellHeight <= 0) return null;
+  const centerY = scrollTop + viewportHeight * 0.35 - headerHeight;
+  if (centerY < 0) return null;
+  const minutesFromStart = (centerY / cellHeight) * slotMinutes;
+  const targetMin = Math.max(gridStartMin, Math.min(gridEndMin, gridStartMin + minutesFromStart));
+  const h = Math.floor(targetMin / 60);
+  const m = Math.round(targetMin % 60);
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }

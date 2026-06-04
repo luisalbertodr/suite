@@ -3,7 +3,7 @@ Rehace facturas desde tickets TPV hasta una fecha.
 
 Por defecto es dry-run. Con --apply:
   - no toca facturas Verifactu sent/accepted/rejected,
-  - no toca tickets mixtos entre empresas,
+  - tickets mixtos: genera una factura por empresa (Medicina / Estética),
   - no toca tickets sin cliente,
   - recrea factura desde sales + sale_items y enlaza sales.invoice_id.
 
@@ -32,6 +32,9 @@ except ImportError:
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CATALOG = "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4"
 IVA = Decimal("0.21")
+
+sys.path.insert(0, str(ROOT / "scripts"))
+from sale_invoice_split import invoice_sale_by_billing  # noqa: E402
 
 
 def load_dotenv() -> None:
@@ -322,9 +325,6 @@ def main() -> None:
             elif not lines:
                 counts["skip_no_lines"] += 1
                 action, reason = "skip", "no_lines"
-            elif len(target_ids) != 1:
-                counts["skip_mixed"] += 1
-                action, reason = "skip", "mixed_billing_companies"
             elif vf in {"sent", "accepted", "rejected"}:
                 counts["skip_verifactu"] += 1
                 action, reason = "skip", f"verifactu_{vf}"
@@ -335,16 +335,45 @@ def main() -> None:
                 insert_audit(cur, run_id, sale_id=sale["id"], old_invoice_id=old_invoice_id, new_invoice_id=None, action=action, reason=reason, payload=dict(sale))
                 continue
 
-            target_company_id = next(iter(target_ids))
-            counts["rebuild"] += 1
+            if len(target_ids) > 1:
+                counts["rebuild_split"] += 1
+            else:
+                counts["rebuild"] += 1
             new_invoice_id = None
+            split_meta = None
             if args.apply:
+                sales_cols = table_columns(cur, "sales")
                 if old_invoice_id:
                     cur.execute("DELETE FROM public.invoice_items WHERE invoice_id=%s::uuid", (old_invoice_id,))
                     cur.execute("DELETE FROM public.invoices WHERE id=%s::uuid", (old_invoice_id,))
-                new_invoice_id = insert_invoice(cur, sale=sale, company_id=target_company_id, lines=lines, invoice_cols=invoice_cols, item_cols=item_cols)
-                cur.execute("UPDATE public.sales SET company_id=%s::uuid, invoice_id=%s::uuid WHERE id=%s::uuid", (target_company_id, new_invoice_id, sale["id"]))
-            insert_audit(cur, run_id, sale_id=sale["id"], old_invoice_id=old_invoice_id, new_invoice_id=new_invoice_id, action="rebuild", reason=None, payload={"target_company_id": target_company_id, "ticket_number": sale["ticket_number"]})
+                if "notes" not in sale and "notes" in sales_cols:
+                    cur.execute("SELECT notes FROM public.sales WHERE id=%s::uuid", (sale["id"],))
+                    nrow = cur.fetchone()
+                    if nrow:
+                        sale["notes"] = nrow.get("notes")
+                split_meta = invoice_sale_by_billing(
+                    cur,
+                    sale,
+                    catalog_company_id=args.catalog_company_id,
+                    invoice_cols=invoice_cols,
+                    item_cols=item_cols,
+                    sales_cols=sales_cols,
+                )
+                new_invoice_id = split_meta[0]["invoice_id"] if split_meta else None
+            insert_audit(
+                cur,
+                run_id,
+                sale_id=sale["id"],
+                old_invoice_id=old_invoice_id,
+                new_invoice_id=new_invoice_id,
+                action="rebuild",
+                reason=None,
+                payload={
+                    "target_company_ids": list(target_ids),
+                    "split_invoices": split_meta,
+                    "ticket_number": sale["ticket_number"],
+                },
+            )
 
         if args.apply:
             conn.commit()

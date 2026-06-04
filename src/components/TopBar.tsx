@@ -19,7 +19,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 
 const ROUTE_TITLES: Record<string, string> = {
-  '/': 'Inicio',
+  '/inicio': 'Inicio',
   '/agenda': 'Agenda',
   '/tpv': 'TPV',
   '/facturacion': 'Facturación',

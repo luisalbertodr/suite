@@ -199,6 +199,7 @@ def fetch_faccab_rows(cur, limit: int = 0) -> list[dict]:
         SELECT serfac, ejefac, numfac, fecfac, hora, codcli, totfac, impcob1, impcob2, anulada
         FROM legacy.faccab
         WHERE NULLIF(btrim(numfac::text), '') IS NOT NULL
+          AND btrim(coalesce(serfac::text, '')) = 'A'
         ORDER BY fecfac, serfac, ejefac, numfac
         {limit_sql}
         """

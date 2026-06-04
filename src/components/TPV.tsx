@@ -34,6 +34,11 @@ import { issueInvoiceFromSale } from '@/lib/tpvSaleOperations';
 import { useTpvSettings } from '@/hooks/useTpvSettings';
 import { Grid, type CellComponentProps } from 'react-window';
 import { useRegisterTopBarContent } from '@/components/TopBarContentContext';
+import {
+  ArticleFamilyPicker,
+  type AppointmentArticleOption,
+} from '@/components/forms/AppointmentArticleFamilyPicker';
+import { ARTICLE_SEARCH_MIN_CHARS } from '@/lib/articleSearch';
 
 interface CartItem {
   id: string;
@@ -303,35 +308,31 @@ export const TPV: React.FC = () => {
     [cartWithBilling, companyLabels],
   );
 
+  const searchReady = debouncedSearchTerm.trim().length >= ARTICLE_SEARCH_MIN_CHARS;
+
   const { data: articles = [], isLoading } = useQuery({
     queryKey: ['tpv-articles', debouncedSearchTerm, catalogCompanyId, isMultiEntity],
     queryFn: async () => {
-      if (!catalogCompanyId) return [];
+      if (!catalogCompanyId || !searchReady) return [];
 
-      let query = supabase
+      const searchPattern = `%${debouncedSearchTerm.trim()}%`;
+      const { data, error } = await supabase
         .from('articles')
         .select('id, descripcion, precio, stock_actual, codigo, foto_url, tipo_producto, codigo_barras, familia, billing_company_id, company_id')
         .eq('estado', 'activo')
         .eq('company_id', catalogCompanyId)
+        .or(`descripcion.ilike.${searchPattern},codigo.ilike.${searchPattern}`)
         .order('descripcion')
-        .limit(debouncedSearchTerm.trim() ? 300 : 120);
+        .limit(300);
 
-      if (debouncedSearchTerm.trim()) {
-        const searchPattern = `%${debouncedSearchTerm.trim()}%`;
-        query = query.or(`descripcion.ilike.${searchPattern},codigo.ilike.${searchPattern}`);
-      }
-      
-      const { data, error } = await query;
-      
       if (error) {
         console.error('Error fetching articles:', error);
         throw error;
       }
 
-      let rows = (data ?? []) as Article[];
-      return rows;
+      return (data ?? []) as Article[];
     },
-    enabled: !!catalogCompanyId
+    enabled: !!catalogCompanyId && searchReady,
   });
 
   const { data: variations = [] } = useQuery({
@@ -767,6 +768,18 @@ export const TPV: React.FC = () => {
     }
   };
 
+  const addPickerArticleToCart = (picked: AppointmentArticleOption) => {
+    addToCart({
+      id: picked.id,
+      descripcion: picked.descripcion,
+      precio: Number(picked.precio ?? 0),
+      stock_actual: 0,
+      codigo: picked.codigo || '',
+      tipo_producto: 'standard',
+      familia: picked.familia ?? undefined,
+    } as Article);
+  };
+
   const addVariationToCart = (variation: ArticleVariation, article: Article) => {
     if (variation.stock_actual <= 0) {
       toast({
@@ -1197,23 +1210,39 @@ export const TPV: React.FC = () => {
                 <Search className="w-5 h-5 mr-2" />
                 Productos
               </CardTitle>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
-                <Input
-                  placeholder="Buscar productos..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
+              <div className="space-y-2">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
+                  <Input
+                    placeholder={`Buscar productos (mín. ${ARTICLE_SEARCH_MIN_CHARS} caracteres)…`}
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
+                <ArticleFamilyPicker
+                  value={null}
+                  itemKind="product"
+                  placeholder="Catálogo por familias…"
+                  triggerClassName="h-9 w-full text-sm"
+                  onSelect={addPickerArticleToCart}
                 />
               </div>
             </CardHeader>
             <CardContent className="flex-1 overflow-hidden p-2">
               <div ref={productsContainerRef} className="h-full overflow-hidden">
-                {isLoading ? (
+                {!searchReady ? (
+                  <div className="h-full flex flex-col items-center justify-center py-8 px-4 text-center text-muted-foreground text-sm">
+                    <p>
+                      Escribe al menos {ARTICLE_SEARCH_MIN_CHARS} caracteres para ver la rejilla de productos,
+                      o elige un artículo desde el catálogo por familias arriba.
+                    </p>
+                  </div>
+                ) : isLoading ? (
                   <div className="h-full text-center py-8 text-muted-foreground">Cargando productos...</div>
                 ) : articles.length === 0 ? (
                   <div className="h-full text-center py-8 text-muted-foreground">
-                    {searchTerm ? 'No se encontraron productos' : 'No hay productos disponibles'}
+                    No se encontraron productos para esta búsqueda
                   </div>
                 ) : !productsGrid ? null : (
                   <Grid

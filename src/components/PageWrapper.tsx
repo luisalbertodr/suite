@@ -1,17 +1,19 @@
 
 import React from 'react';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
-import { PermissionCheck } from '@/components/PermissionCheck';
+import { PermissionCheck, type PermissionRef } from '@/components/PermissionCheck';
 
 interface PageWrapperProps {
-  resource: string;
-  action: string;
+  resource?: string;
+  action?: string;
+  anyOf?: PermissionRef[];
   children: React.ReactNode;
 }
 
 export const PageWrapper: React.FC<PageWrapperProps> = ({
   resource,
   action,
+  anyOf,
   children
 }) => {
   const { companyId, loading } = useCompanyFilter();
@@ -37,7 +39,7 @@ export const PageWrapper: React.FC<PageWrapperProps> = ({
   }
 
   return (
-    <PermissionCheck resource={resource} action={action}>
+    <PermissionCheck resource={resource} action={action} anyOf={anyOf}>
       {children}
     </PermissionCheck>
   );

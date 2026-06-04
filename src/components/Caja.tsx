@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
-import { Banknote, Plus, Lock, Unlock } from 'lucide-react';
+import { Banknote, History, Plus, Lock, Unlock } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { useToast } from '@/hooks/use-toast';
@@ -10,23 +10,17 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Badge } from '@/components/ui/badge';
+import { CashRegisterHistoryDialog } from '@/components/cash-register/CashRegisterHistoryDialog';
+import {
+  type CashSessionRow,
+  cashSessionStatusLabel,
+  formatCashMoney,
+  formatCashSessionDetailLine,
+  formatSessionDateLabel,
+} from '@/lib/cashRegisterFormat';
 
-type CashSession = {
-  id: string;
-  company_id: string;
-  session_date: string;
-  status: 'open' | 'closed' | 'cancelled';
-  opening_cash: number;
-  expected_cash: number;
-  expected_card: number;
-  counted_cash: number | null;
-  counted_card: number | null;
-  withdrawn_cash: number;
-  closing_cash: number | null;
-  cash_difference: number | null;
-  card_difference: number | null;
-  notes: string | null;
-};
+type CashSession = CashSessionRow;
 
 type CashMovement = {
   id: string;
@@ -47,10 +41,7 @@ type SaleRow = {
 };
 
 const db = supabase as any;
-
-function money(value: number | null | undefined): string {
-  return `${Number(value || 0).toFixed(2)} €`;
-}
+const RECENT_SESSIONS_LIMIT = 31;
 
 export const Caja: React.FC = () => {
   const { companyId } = useCompanyFilter();
@@ -63,6 +54,7 @@ export const Caja: React.FC = () => {
   const [countedCash, setCountedCash] = useState('');
   const [countedCard, setCountedCard] = useState('');
   const [notes, setNotes] = useState('');
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const dayStart = `${date}T00:00:00`;
   const dayEnd = `${date}T23:59:59.999`;
@@ -82,6 +74,21 @@ export const Caja: React.FC = () => {
         .maybeSingle();
       if (error) throw error;
       return data as { closing_cash: number | null; session_date: string } | null;
+    },
+  });
+
+  const { data: recentSessions = [] } = useQuery({
+    queryKey: ['cash-register-recent-sessions', companyId],
+    enabled: !!companyId,
+    queryFn: async () => {
+      const { data, error } = await db
+        .from('cash_register_sessions')
+        .select('*')
+        .eq('company_id', companyId)
+        .order('session_date', { ascending: false })
+        .limit(RECENT_SESSIONS_LIMIT);
+      if (error) throw error;
+      return (data ?? []) as CashSession[];
     },
   });
 
@@ -156,6 +163,8 @@ export const Caja: React.FC = () => {
     queryClient.invalidateQueries({ queryKey: ['cash-register-session'] });
     queryClient.invalidateQueries({ queryKey: ['cash-register-previous-session'] });
     queryClient.invalidateQueries({ queryKey: ['cash-register-movements'] });
+    queryClient.invalidateQueries({ queryKey: ['cash-register-recent-sessions'] });
+    queryClient.invalidateQueries({ queryKey: ['cash-register-history'] });
   };
 
   const openMutation = useMutation({
@@ -235,8 +244,60 @@ export const Caja: React.FC = () => {
           <Banknote className="h-5 w-5 text-emerald-600" />
           <h2 className="text-lg font-semibold">Caja diaria</h2>
         </div>
-        <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-44" />
+        <div className="flex flex-wrap items-center gap-2">
+          <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-44" />
+          <Button type="button" variant="outline" size="sm" onClick={() => setHistoryOpen(true)}>
+            <History className="mr-2 h-4 w-4" />
+            Historial
+          </Button>
+        </div>
       </div>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Últimas {RECENT_SESSIONS_LIMIT} cajas diarias</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <ul className="divide-y text-sm">
+            {recentSessions.map((row) => {
+              const isSelected = row.session_date === date;
+              return (
+                <li key={row.id}>
+                  <button
+                    type="button"
+                    onClick={() => setDate(row.session_date)}
+                    className={`flex w-full flex-wrap items-center gap-x-2 gap-y-1 px-4 py-2.5 text-left transition-colors hover:bg-muted/50 ${
+                      isSelected ? 'bg-muted/70' : ''
+                    }`}
+                  >
+                    <span className="shrink-0 font-medium tabular-nums">
+                      {formatSessionDateLabel(row.session_date)}
+                    </span>
+                    <Badge variant={row.status === 'closed' ? 'secondary' : 'outline'} className="shrink-0">
+                      {cashSessionStatusLabel(row.status)}
+                    </Badge>
+                    <span className="min-w-0 flex-1 text-muted-foreground">
+                      {formatCashSessionDetailLine(row)}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+            {recentSessions.length === 0 && (
+              <li className="px-4 py-8 text-center text-muted-foreground">
+                Aún no hay cajas registradas para esta empresa.
+              </li>
+            )}
+          </ul>
+        </CardContent>
+      </Card>
+
+      <CashRegisterHistoryDialog
+        open={historyOpen}
+        onOpenChange={setHistoryOpen}
+        companyId={companyId}
+        onPickDate={setDate}
+      />
 
       {!session ? (
         <Card>
@@ -261,9 +322,9 @@ export const Caja: React.FC = () => {
       ) : (
         <>
           <div className="grid gap-3 md:grid-cols-4">
-            <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Efectivo esperado</p><p className="text-xl font-semibold">{money(totals.expectedCash)}</p></CardContent></Card>
-            <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Tarjeta esperada</p><p className="text-xl font-semibold">{money(totals.cardSales)}</p></CardContent></Card>
-            <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Retiradas</p><p className="text-xl font-semibold">{money(totals.withdrawals)}</p></CardContent></Card>
+            <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Efectivo esperado</p><p className="text-xl font-semibold">{formatCashMoney(totals.expectedCash)}</p></CardContent></Card>
+            <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Tarjeta esperada</p><p className="text-xl font-semibold">{formatCashMoney(totals.cardSales)}</p></CardContent></Card>
+            <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Retiradas</p><p className="text-xl font-semibold">{formatCashMoney(totals.withdrawals)}</p></CardContent></Card>
             <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Estado</p><p className="text-xl font-semibold">{isClosed ? 'Cerrada' : 'Abierta'}</p></CardContent></Card>
           </div>
 
@@ -299,10 +360,10 @@ export const Caja: React.FC = () => {
           {isClosed && (
             <Card>
               <CardContent className="grid gap-3 p-4 md:grid-cols-4">
-                <div><p className="text-xs text-muted-foreground">Efectivo real</p><p className="font-semibold">{money(session.counted_cash)}</p></div>
-                <div><p className="text-xs text-muted-foreground">Tarjeta real</p><p className="font-semibold">{money(session.counted_card)}</p></div>
-                <div><p className="text-xs text-muted-foreground">Descuadre efectivo</p><p className="font-semibold">{money(session.cash_difference)}</p></div>
-                <div><p className="text-xs text-muted-foreground">Descuadre tarjeta</p><p className="font-semibold">{money(session.card_difference)}</p></div>
+                <div><p className="text-xs text-muted-foreground">Efectivo real</p><p className="font-semibold">{formatCashMoney(session.counted_cash)}</p></div>
+                <div><p className="text-xs text-muted-foreground">Tarjeta real</p><p className="font-semibold">{formatCashMoney(session.counted_card)}</p></div>
+                <div><p className="text-xs text-muted-foreground">Descuadre efectivo</p><p className="font-semibold">{formatCashMoney(session.cash_difference)}</p></div>
+                <div><p className="text-xs text-muted-foreground">Descuadre tarjeta</p><p className="font-semibold">{formatCashMoney(session.card_difference)}</p></div>
               </CardContent>
             </Card>
           )}
@@ -323,7 +384,7 @@ export const Caja: React.FC = () => {
                       <td>{sale.ticket_number || sale.id.slice(0, 8)}</td>
                       <td>{sale.customer_name || 'Cliente no indicado'}</td>
                       <td>{String(sale.payment_method || '').toLowerCase() === 'cash' ? 'Efectivo' : 'Tarjeta'}</td>
-                      <td className="text-right font-medium">{money(sale.total_amount)}</td>
+                      <td className="text-right font-medium">{formatCashMoney(sale.total_amount)}</td>
                     </tr>
                   ))}
                   {sales.length === 0 && (

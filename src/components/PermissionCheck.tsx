@@ -3,9 +3,13 @@ import React from 'react';
 import { usePermissions } from '@/hooks/usePermissions';
 import { Shield } from 'lucide-react';
 
+export type PermissionRef = { resource: string; action: string };
+
 interface PermissionCheckProps {
-  resource: string;
-  action: string;
+  resource?: string;
+  action?: string;
+  /** Si se define, basta con tener uno de estos permisos. */
+  anyOf?: PermissionRef[];
   children: React.ReactNode;
   fallback?: React.ReactNode;
 }
@@ -13,6 +17,7 @@ interface PermissionCheckProps {
 export const PermissionCheck: React.FC<PermissionCheckProps> = ({
   resource,
   action,
+  anyOf,
   children,
   fallback
 }) => {
@@ -26,7 +31,11 @@ export const PermissionCheck: React.FC<PermissionCheckProps> = ({
     );
   }
 
-  if (!hasPermission(resource, action)) {
+  const allowed = anyOf?.length
+    ? anyOf.some((p) => hasPermission(p.resource, p.action))
+    : !!(resource && action && hasPermission(resource, action));
+
+  if (!allowed) {
     if (fallback) {
       return <>{fallback}</>;
     }

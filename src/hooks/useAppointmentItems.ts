@@ -144,24 +144,25 @@ function stripPricingColumnsFromRows(
   });
 }
 
-export async function fetchAppointmentItems(
+type AppointmentItemRow = {
+  id: string;
+  kind: string;
+  label: string;
+  duration_minutes?: number;
+  occupies_time?: boolean;
+  quantity: number | null;
+  unit_price: number | null;
+  bonus_payment_mode: string | null;
+  notes?: string | null;
+  article_id: string | null;
+  customer_voucher_id: string | null;
+  articles?: { precio?: number | null } | null;
+};
+
+async function queryAppointmentItemRows(
   appointmentId: string,
-  companyId?: string
-): Promise<AppointmentItemDraft[]> {
-  const columns = [
-    'id',
-    'kind',
-    'label',
-    'duration_minutes',
-    'occupies_time',
-    'notes',
-    'article_id',
-    'customer_voucher_id',
-    'cabina_id',
-    'recurso_id',
-    'sort_order',
-    'articles(precio,familia,recurso_id)',
-  ];
+  columns: string[]
+): Promise<AppointmentItemRow[]> {
   let enabledColumns = [...columns];
   let data: any[] | null = null;
   let error: any = null;
@@ -184,20 +185,52 @@ export async function fetchAppointmentItems(
     throw error;
   }
 
-  const rows = (data || []) as Array<{
-    id: string;
-    kind: string;
-    label: string;
-    duration_minutes?: number;
-    occupies_time?: boolean;
-    quantity: number | null;
-    unit_price: number | null;
-    bonus_payment_mode: string | null;
-    notes?: string | null;
-    article_id: string | null;
-    customer_voucher_id: string | null;
-    articles?: { precio?: number | null } | null;
-  }>;
+  return (data || []) as AppointmentItemRow[];
+}
+
+const APPOINTMENT_ITEM_FETCH_COLUMNS = [
+  'id',
+  'kind',
+  'label',
+  'duration_minutes',
+  'occupies_time',
+  'quantity',
+  'unit_price',
+  'bonus_payment_mode',
+  'notes',
+  'article_id',
+  'customer_voucher_id',
+  'cabina_id',
+  'recurso_id',
+  'sort_order',
+  'articles(precio,familia,recurso_id)',
+] as const;
+
+const APPOINTMENT_ITEM_FETCH_COLUMNS_NO_EMBED = [
+  'id',
+  'kind',
+  'label',
+  'duration_minutes',
+  'occupies_time',
+  'quantity',
+  'unit_price',
+  'bonus_payment_mode',
+  'notes',
+  'article_id',
+  'customer_voucher_id',
+  'cabina_id',
+  'recurso_id',
+  'sort_order',
+] as const;
+
+export async function fetchAppointmentItems(
+  appointmentId: string,
+  companyId?: string
+): Promise<AppointmentItemDraft[]> {
+  let rows = await queryAppointmentItemRows(appointmentId, [...APPOINTMENT_ITEM_FETCH_COLUMNS]);
+  if (!rows.length) {
+    rows = await queryAppointmentItemRows(appointmentId, [...APPOINTMENT_ITEM_FETCH_COLUMNS_NO_EMBED]);
+  }
 
   const needsCatalog = rows.some((r) => {
     const fallback = parsePricingFromNotes(r.notes ?? null);

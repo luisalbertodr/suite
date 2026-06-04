@@ -108,6 +108,20 @@ function itemToRow(dayDate: string, it: DayTimelineItem): HistoryTableRow {
   };
 }
 
+const GENERIC_APPOINTMENT_DETAILS = new Set([
+  'appointment',
+  'appointments',
+  'cita',
+  'citas',
+  'evento',
+  'evento estético',
+]);
+
+function isGhostDetails(details: string): boolean {
+  const normalized = details.trim().toLowerCase();
+  return GENERIC_APPOINTMENT_DETAILS.has(normalized);
+}
+
 function buildTableRows(days: DayGroup[]): HistoryTableRow[] {
   const rows: HistoryTableRow[] = [];
   for (const day of days) {
@@ -123,7 +137,17 @@ function buildTableRows(days: DayGroup[]): HistoryTableRow[] {
       });
     }
     for (const it of day.items) {
-      rows.push(itemToRow(day.date, it));
+      const row = itemToRow(day.date, it);
+      if (
+        !row.appointmentId &&
+        !row.time &&
+        !row.employee &&
+        !row.price &&
+        isGhostDetails(row.details)
+      ) {
+        continue;
+      }
+      rows.push(row);
     }
   }
   return rows;

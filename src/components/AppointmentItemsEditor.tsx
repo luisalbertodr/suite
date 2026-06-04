@@ -22,12 +22,24 @@ import {
   type RecursoCatalogEntry,
 } from '@/lib/agendaRecursoMatch';
 import { findItemResourceConflicts, segmentsToConflictProbes } from '@/lib/agendaResourceConflicts';
-import { appointmentItemLineTotal, appointmentItemsTotal, formatAppointmentItemAmount, isBonoSessionItem } from '@/lib/agendaAppointmentPricing';
+import {
+  appointmentItemLineTotal,
+  appointmentItemsTotal,
+  formatAppointmentItemAmount,
+  formatArticleUnitPrice,
+  formatItemUnitPriceLabel,
+  isBonoSessionItem,
+} from '@/lib/agendaAppointmentPricing';
 import { AppointmentItemTimeline } from '@/components/AppointmentItemTimeline';
 import {
   AppointmentArticleFamilyPicker,
+  articleLabel,
   type AppointmentArticleOption,
 } from '@/components/forms/AppointmentArticleFamilyPicker';
+import {
+  articleMatchesAppointmentItemKind,
+  DEFAULT_APPOINTMENT_SERVICE_MINUTES,
+} from '@/lib/appointmentArticleKind';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { useCustomerActiveBonos, type CustomerActiveBono } from '@/hooks/useCustomerActiveBonos';
 import { useQuery } from '@tanstack/react-query';
@@ -83,7 +95,7 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
   compactHeader = false,
   compactSlots = false,
   timeSlotsServicesOnly = false,
-  articlePicker = 'all',
+  articlePicker = 'by-family',
   onResourceConflictsChange,
   itemsLocked = false,
 }) => {
@@ -154,32 +166,7 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
     return m;
   }, [articles, articleCache, pinnedArticles, useFamilyPicker]);
 
-  const normalizeKind = (value: string | null | undefined): string => {
-    return String(value || '')
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .trim();
-  };
-
-  const articleMatchesItemKind = useCallback(
-    (itemKind: AppointmentItemKind, article: { article_kind: string | null }) => {
-      const k = normalizeKind(article.article_kind);
-      if (itemKind === 'service') return k.includes('service') || k.includes('servicio');
-      if (itemKind === 'product') {
-        return (
-          k.includes('product') ||
-          k.includes('producto') ||
-          k.includes('standard') ||
-          k.includes('textil') ||
-          k.includes('calzado')
-        );
-      }
-      if (itemKind === 'bonus') return k.includes('bonus') || k.includes('bono');
-      return true;
-    },
-    []
-  );
+  const articleMatchesItemKind = articleMatchesAppointmentItemKind;
 
   const articleHints = useMemo(() => {
     const m = new Map<string, ArticleResourceHint>();
@@ -277,7 +264,8 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
         updateAt(index, {
           kind: nextKind,
           occupies_time: true,
-          duration_minutes: Math.max(0, Number(current?.duration_minutes || 0)) || 30,
+          duration_minutes:
+            Math.max(0, Number(current?.duration_minutes || 0)) || DEFAULT_APPOINTMENT_SERVICE_MINUTES,
         });
         return;
       }
@@ -297,7 +285,7 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
         clientKey: newClientKey(),
         kind: 'service',
         label: '',
-        duration_minutes: 30,
+        duration_minutes: DEFAULT_APPOINTMENT_SERVICE_MINUTES,
         occupies_time: true,
         quantity: 1,
         unit_price: 0,
@@ -361,22 +349,40 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
         occupies_time: isBonusKind || isProductKind ? false : true,
         duration_minutes: isBonusKind || isProductKind
           ? 0
-          : (Math.max(0, Number(a.duration_minutes || 0)) || items[index]?.duration_minutes || 30),
+          : (Math.max(0, Number(a.duration_minutes || 0))
+            || items[index]?.duration_minutes
+            || DEFAULT_APPOINTMENT_SERVICE_MINUTES),
         recurso_id: a.recurso_id ?? autoRecurso,
       });
     },
     [articleById, items, updateAt, recursosCatalog, useFamilyPicker]
   );
 
+  const renderArticleLinePrice = (item: AppointmentItemDraft) => {
+    if (isBonoSessionItem(item)) {
+      return (
+        <span className="shrink-0 text-[10px] font-semibold text-emerald-700 px-0.5">BONO</span>
+      );
+    }
+    const priceLabel = formatItemUnitPriceLabel(item);
+    if (!priceLabel) return null;
+    return (
+      <span className="shrink-0 text-[10px] tabular-nums font-semibold text-emerald-700 px-0.5">
+        {priceLabel}
+      </span>
+    );
+  };
+
   const renderTimeSlotArticleField = (index: number, item: AppointmentItemDraft) => {
     const hasLockedService = !!(item.label?.trim() || item.article_id);
     if (servicesOnly && hasLockedService) {
       return (
         <span
-          className="h-7 min-w-0 flex-1 text-[11px] px-1.5 flex items-center truncate font-medium text-foreground bg-muted/40 rounded border border-transparent"
+          className="h-7 min-w-0 flex-1 text-[11px] px-1.5 flex items-center justify-between gap-1 font-medium text-foreground bg-muted/40 rounded border border-transparent"
           title={item.label || 'Servicio'}
         >
-          {item.label || 'Servicio'}
+          <span className="truncate">{item.label || 'Servicio'}</span>
+          {renderArticleLinePrice(item)}
         </span>
       );
     }
@@ -386,6 +392,7 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
           value={item.article_id ?? null}
           itemKind="service"
           selectedLabel={item.label?.trim() || undefined}
+          selectedUnitPrice={item.unit_price}
           onSelect={(a) => applyArticleAt(index, a.id, a)}
           onClear={() => updateAt(index, { article_id: null, label: '' })}
         />
@@ -401,6 +408,7 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
           value={item.article_id ?? null}
           itemKind={item.kind}
           selectedLabel={item.label?.trim() || undefined}
+          selectedUnitPrice={item.unit_price}
           onSelect={(a) => applyArticleAt(index, a.id, a)}
           onClear={() => updateAt(index, { article_id: null, label: '' })}
         />
@@ -408,28 +416,40 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
     }
     const filteredArticles = articles.filter((a) => articleMatchesItemKind(item.kind, a));
     return (
-      <Select
-        value={item.article_id ?? 'none'}
-        onValueChange={(v) => {
-          if (v === 'none') {
-            updateAt(index, { article_id: null, label: '' });
-            return;
-          }
-          applyArticleAt(index, v);
-        }}
-      >
-        <SelectTrigger className="h-7 min-w-0 flex-1 text-[11px] px-1.5">
-          <SelectValue placeholder="Seleccionar artículo" />
-        </SelectTrigger>
-        <AppointmentSelectContent>
-          <SelectItem value="none">Sin artículo</SelectItem>
-          {filteredArticles.map((a) => (
-            <SelectItem key={a.id} value={a.id}>
-              {`${a.codigo ? `${a.codigo} - ` : ''}${a.descripcion}`.trim()}
-            </SelectItem>
-          ))}
-        </AppointmentSelectContent>
-      </Select>
+      <div className="flex min-w-0 flex-1 items-center gap-1">
+        <Select
+          value={item.article_id ?? 'none'}
+          onValueChange={(v) => {
+            if (v === 'none') {
+              updateAt(index, { article_id: null, label: '' });
+              return;
+            }
+            applyArticleAt(index, v);
+          }}
+        >
+          <SelectTrigger className="h-7 min-w-0 flex-1 text-[11px] px-1.5">
+            <SelectValue placeholder="Seleccionar artículo" />
+          </SelectTrigger>
+          <AppointmentSelectContent>
+            <SelectItem value="none">Sin artículo</SelectItem>
+            {filteredArticles.map((a) => {
+              const price = formatArticleUnitPrice(a.precio);
+              const name = articleLabel(a);
+              return (
+                <SelectItem key={a.id} value={a.id}>
+                  <span className="flex w-full items-center justify-between gap-2">
+                    <span className="truncate">{name}</span>
+                    {price ? (
+                      <span className="shrink-0 tabular-nums text-muted-foreground">{price}</span>
+                    ) : null}
+                  </span>
+                </SelectItem>
+              );
+            })}
+          </AppointmentSelectContent>
+        </Select>
+        {renderArticleLinePrice(item)}
+      </div>
     );
   };
 
@@ -647,7 +667,7 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
                 >
                   <GripVertical className="w-3.5 h-3.5" />
                 </button>
-                <div className="min-w-0 flex-1">{renderTimeSlotArticleField(index, item)}</div>
+                <div className="min-w-0 flex-1 flex items-center gap-0.5">{renderTimeSlotArticleField(index, item)}</div>
                 <Input
                   type="number"
                   min={0}
@@ -712,7 +732,9 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
                   </AppointmentSelectContent>
                 </Select>
               )}
-              {renderTimeSlotArticleField(index, item)}
+              <div className="min-w-0 flex-1 flex items-center gap-0.5">
+                {renderTimeSlotArticleField(index, item)}
+              </div>
             </div>
             <div className="flex items-center gap-0.5 h-7 mt-0.5 flex-nowrap overflow-x-auto">
                 <Input
@@ -943,7 +965,7 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
                 if (exact) applyArticleAt(index, exact.id);
               }}
             />
-            <div className={useFamilyPicker ? 'min-w-[120px] max-w-[45%]' : undefined}>
+            <div className={cn('flex min-w-0 items-center gap-1', useFamilyPicker ? 'min-w-[120px] max-w-[45%]' : 'flex-1')}>
               {renderArticlePicker(index, item)}
             </div>
             {!useFamilyPicker && (

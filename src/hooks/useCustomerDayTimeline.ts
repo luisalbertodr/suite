@@ -77,6 +77,73 @@ const refKey = (table?: string | null, id?: string | null): string | null => {
   return null;
 };
 
+const GENERIC_APPOINTMENT_LABELS = new Set([
+  'appointment',
+  'appointments',
+  'cita',
+  'citas',
+  'evento',
+  'evento estético',
+  'ítem',
+  'item',
+]);
+
+function normalizeKind(value: string | null | undefined): string {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase();
+}
+
+function isGenericAppointmentLabel(value: string | null | undefined): boolean {
+  const s = String(value ?? '').trim().toLowerCase();
+  return !s || GENERIC_APPOINTMENT_LABELS.has(s);
+}
+
+function shouldSkipDailyLogItem(it: {
+  item_kind: string;
+  title: string | null;
+  body: string | null;
+  ref_table: string | null;
+  ref_id: string | null;
+}): boolean {
+  const kind = normalizeKind(it.item_kind);
+  const displayLabel = String(it.title ?? it.item_kind ?? '').trim();
+  const body = String(it.body ?? '').trim();
+  const refTable = normalizeKind(it.ref_table);
+
+  if (kind === 'aesthetic' || refTable === 'customer_aesthetic_history') return true;
+
+  if (refTable === 'agenda_appointments' && it.ref_id) return true;
+
+  if (kind === 'appointment' || isGenericAppointmentLabel(displayLabel)) {
+    if (!body && isGenericAppointmentLabel(displayLabel)) return true;
+  }
+
+  return false;
+}
+
+/** No mostrar en Servicios: historial estético ni espejos vacíos de cita. */
+function shouldHideTimelineItem(it: DayTimelineItem): boolean {
+  if (it.id.startsWith('aesthetic:')) return true;
+  if (normalizeKind(it.refTable) === 'customer_aesthetic_history') return true;
+  if (normalizeKind(it.kind) === 'aesthetic') return true;
+  if (isGenericAppointmentLabel(it.title) && !it.appointmentDetails) {
+    if (!it.amountLabel?.trim() && !it.timeLabel?.trim()) return true;
+  }
+
+  if (it.appointmentDetails) return false;
+  if (normalizeKind(it.kind) !== 'appointment') return false;
+  if (it.amountLabel?.trim()) return false;
+  if (it.timeLabel?.trim()) return false;
+
+  const title = String(it.title ?? '').trim();
+  const subtitle = String(it.subtitle ?? '').trim();
+  if (!isGenericAppointmentLabel(title)) return false;
+  if (subtitle && !isGenericAppointmentLabel(subtitle)) return false;
+
+  return true;
+}
+
 function isInvoicePaid(inv: { status?: string | null; paid_status?: boolean | null }): boolean {
   return inv.paid_status === true || inv.status === 'paid';
 }
@@ -179,7 +246,6 @@ function mergeByDay(
   dailyRows: DailyRow[],
   historial: any[],
   consent: any[],
-  aesthetic: any[],
   bonos: any[],
   bonoUso: any[],
   bonoNameById: Map<string, string>,
@@ -214,6 +280,9 @@ function mergeByDay(
     for (const it of log.daily_customer_log_items || []) {
       if (!it) continue;
       if (it.item_kind === 'sale' && it.ref_table === 'agenda_appointments' && it.ref_id) {
+        continue;
+      }
+      if (shouldSkipDailyLogItem(it)) {
         continue;
       }
       d.items.push({
@@ -295,26 +364,7 @@ function mergeByDay(
     });
   }
 
-  for (const e of aesthetic) {
-    if (String(e.event_type || '').toUpperCase() === 'CITA_HISTORICA') continue;
-    const ymd = toYmd(e.event_date) || toYmd(e.created_at);
-    if (!ymd) continue;
-    const k = refKey('customer_aesthetic_history', e.id);
-    if (k && dailyRefKeys.has(k)) continue;
-    const d = getDay(ymd);
-    const data = (e.data && typeof e.data === 'object' ? e.data : {}) as Record<string, unknown>;
-    const treatment = (data.treatment as string) || (data.notes as string) || e.event_type;
-    d.items.push({
-      id: `aesthetic:${e.id}`,
-      kind: e.event_type || 'aesthetic',
-      title: (treatment as string) || 'Evento estético',
-      subtitle: typeof data.notes === 'string' ? data.notes : undefined,
-      timeLabel: timeFromFecha(e.event_date || e.created_at),
-      refTable: 'customer_aesthetic_history',
-      refId: e.id,
-      sortKey: 3_000_000 + sortN++,
-    });
-  }
+  // customer_aesthetic_history no se muestra en Servicios (citas vía agenda_appointments).
 
   for (const b of bonos) {
     const ymd = toYmd(b.fecha_compra);
@@ -444,6 +494,7 @@ function mergeByDay(
   }
 
   for (const g of byDay.values()) {
+    g.items = g.items.filter((it) => !shouldHideTimelineItem(it));
     g.items.sort((a, b) => a.sortKey - b.sortKey);
     enrichDayAppointmentAttachments(g);
   }
@@ -471,7 +522,6 @@ export const useCustomerDayTimeline = (
         dailyRes,
         historialRes,
         consentRes,
-        aestheticRes,
         bonosRes,
         appointmentsPage,
         invoicesRes,
@@ -495,11 +545,6 @@ export const useCustomerDayTimeline = (
           .select('*')
           .eq('customer_id', customerId)
           .order('created_at', { ascending: false }),
-        supabase
-          .from('customer_aesthetic_history')
-          .select('*')
-          .eq('customer_id', customerId)
-          .order('event_date', { ascending: false }),
         supabase
           .from('bonos')
           .select(
@@ -526,7 +571,6 @@ export const useCustomerDayTimeline = (
 
       if (historialRes.error) throw historialRes.error;
       if (consentRes.error) throw consentRes.error;
-      if (aestheticRes.error) throw aestheticRes.error;
       if (bonosRes.error) throw bonosRes.error;
       if (invoicesRes.error) throw invoicesRes.error;
       if (quotesRes.error) throw quotesRes.error;
@@ -596,7 +640,6 @@ export const useCustomerDayTimeline = (
           (dailyRes.data as DailyRow[]) || [],
           historialRes.data || [],
           consentRes.data || [],
-          aestheticRes.data || [],
           bonoList,
           bonoUsoFiltered,
           bonoNameById,

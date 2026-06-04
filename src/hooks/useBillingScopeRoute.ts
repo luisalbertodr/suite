@@ -4,6 +4,7 @@ import { useWorkCenter } from '@/hooks/useWorkCenter';
 /** Rutas donde el selector M/E cambia la empresa activa (switchCompany). */
 const BILLING_SCOPE_PATH_PREFIXES = [
   '/',
+  '/inicio',
   '/facturacion',
   '/marketing',
   '/articulos',

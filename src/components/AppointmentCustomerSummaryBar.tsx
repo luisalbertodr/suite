@@ -26,6 +26,8 @@ type Props = {
   onCharge?: () => void;
   onOpenClinicalHistory?: () => void;
   showCrearBono?: boolean;
+  /** Cita cobrada/facturada: el estado solo cambia con «Cancelar y devolver». */
+  lockStatusSelect?: boolean;
 };
 
 export const AppointmentCustomerSummaryBar: React.FC<Props> = ({
@@ -46,6 +48,7 @@ export const AppointmentCustomerSummaryBar: React.FC<Props> = ({
   onCharge,
   onOpenClinicalHistory,
   showCrearBono = true,
+  lockStatusSelect = false,
 }) => {
   const contactLine = formatCustomerContactLine(customer);
   const displayContact = contactLine || customerContactFallback(customer);
@@ -78,16 +81,22 @@ export const AppointmentCustomerSummaryBar: React.FC<Props> = ({
               Hist. clínico
             </Button>
           )}
-          <Select value={status} onValueChange={(v) => onStatusChange(v as typeof status)}>
-            <SelectTrigger className="h-6 text-[11px] px-2 min-w-[104px]">
-              <SelectValue />
-            </SelectTrigger>
-            <AppointmentSelectContent>
-              <SelectItem value="confirmed">Confirmada</SelectItem>
-              <SelectItem value="pending">Pendiente</SelectItem>
-              <SelectItem value="cancelled">Cancelada</SelectItem>
-            </AppointmentSelectContent>
-          </Select>
+          {lockStatusSelect ? (
+            <span className="h-6 inline-flex items-center px-2 rounded-md border bg-background text-[11px] font-medium">
+              {isCancelled ? 'Cancelada' : status === 'pending' ? 'Pendiente' : 'Confirmada'}
+            </span>
+          ) : (
+            <Select value={status} onValueChange={(v) => onStatusChange(v as typeof status)}>
+              <SelectTrigger className="h-6 text-[11px] px-2 min-w-[104px]">
+                <SelectValue />
+              </SelectTrigger>
+              <AppointmentSelectContent>
+                <SelectItem value="confirmed">Confirmada</SelectItem>
+                <SelectItem value="pending">Pendiente</SelectItem>
+                <SelectItem value="cancelled">Cancelada</SelectItem>
+              </AppointmentSelectContent>
+            </Select>
+          )}
         </div>
       </div>
       <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 items-center">

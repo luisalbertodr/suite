@@ -40,23 +40,82 @@ def load_dotenv() -> None:
             os.environ[k] = v
 
 
-def classify_invoices(cur, catalog_id: str, medicina_id: str) -> dict[str, str]:
-    """invoice_id -> target billing company_id (solo facturas del catálogo operativo)."""
+def count_invoices_to_medicina(cur, catalog_id: str, medicina_id: str) -> tuple[int, float]:
     cur.execute(
         """
-        SELECT i.id AS invoice_id,
-               public.resolve_invoice_billing_company_id(i.id, %s::uuid) AS target_company
+        SELECT COUNT(*)::int, COALESCE(SUM(i.total_amount), 0)::float
         FROM invoices i
-        WHERE i.company_id = %s
+        WHERE i.company_id = %s::uuid
+          AND public.resolve_invoice_billing_company_id(i.id, %s::uuid) = %s::uuid
         """,
-        (catalog_id, catalog_id),
+        (catalog_id, catalog_id, medicina_id),
     )
-    targets: dict[str, str] = {}
-    for invoice_id, target in cur.fetchall():
-        tid = str(target)
-        if tid == medicina_id:
-            targets[str(invoice_id)] = medicina_id
-    return targets
+    row = cur.fetchone()
+    return int(row[0]), float(row[1])
+
+
+def fetch_invoice_ids_to_medicina(cur, catalog_id: str, medicina_id: str) -> list[str]:
+    cur.execute(
+        """
+        SELECT i.id::text
+        FROM invoices i
+        WHERE i.company_id = %s::uuid
+          AND public.resolve_invoice_billing_company_id(i.id, %s::uuid) = %s::uuid
+        ORDER BY i.issue_date, i.id
+        """,
+        (catalog_id, catalog_id, medicina_id),
+    )
+    return [str(row[0]) for row in cur.fetchall()]
+
+
+def move_invoices_to_medicina(
+    cur,
+    conn,
+    catalog_id: str,
+    medicina_id: str,
+    *,
+    batch_size: int = 100,
+) -> int:
+    ids = fetch_invoice_ids_to_medicina(cur, catalog_id, medicina_id)
+    if not ids:
+        return 0
+    moved = 0
+    for start in range(0, len(ids), batch_size):
+        chunk = ids[start : start + batch_size]
+        cur.execute(
+            """
+            UPDATE invoices
+            SET company_id = %s::uuid, updated_at = now()
+            WHERE id = ANY(%s::uuid[])
+            """,
+            (medicina_id, chunk),
+        )
+        moved += cur.rowcount
+        conn.commit()
+        if (start + batch_size) % 500 == 0 or start + batch_size >= len(ids):
+            print(f"  facturas {min(start + batch_size, len(ids))}/{len(ids)}", flush=True)
+    return moved
+
+
+def move_linked_sales(cur, catalog_id: str, medicina_id: str) -> int:
+    cur.execute(
+        """
+        UPDATE sales s
+        SET company_id = %s::uuid
+        FROM invoices i
+        WHERE s.invoice_id = i.id
+          AND i.company_id = %s::uuid
+          AND s.company_id = %s::uuid
+          AND NOT EXISTS (
+            SELECT 1 FROM sales s2
+            WHERE s2.company_id = %s::uuid
+              AND s2.ticket_number = s.ticket_number
+              AND s2.id <> s.id
+          )
+        """,
+        (medicina_id, medicina_id, catalog_id, medicina_id),
+    )
+    return cur.rowcount
 
 
 def reset_verifactu_state(cur, company_ids: list[str], dry_run: bool) -> None:
@@ -148,51 +207,26 @@ def main() -> None:
     medicina_id = args.medicina_company_id
     wc_companies = [catalog_id, medicina_id]
 
-    targets = classify_invoices(cur, catalog_id, medicina_id)
-    print(f"Facturas a mover a medicina: {len(targets)}")
+    print("Contando facturas en Estética que deben ir a Medicina…")
+    pending_count, pending_amount = count_invoices_to_medicina(cur, catalog_id, medicina_id)
+    print(f"Facturas a mover a medicina: {pending_count} ({pending_amount:.2f} EUR)")
 
     if args.dry_run:
-        for iid in list(targets.keys())[:5]:
-            cur.execute("SELECT number, total_amount FROM invoices WHERE id=%s", (iid,))
-            print("  ejemplo:", cur.fetchone())
         reset_verifactu_state(cur, wc_companies, dry_run=True)
         conn.rollback()
+        print("(dry-run: sin cambios)")
         return
 
-    moved = 0
-    for invoice_id, target_co in targets.items():
-        cur.execute(
-            """
-            UPDATE invoices
-            SET company_id = %s::uuid,
-                updated_at = now()
-            WHERE id = %s::uuid AND company_id = %s::uuid
-            """,
-            (target_co, invoice_id, catalog_id),
-        )
-        if cur.rowcount:
-            moved += 1
-            # Evitar violar sales_ticket_number_company_unique al mover empresa.
-            cur.execute(
-                """
-                UPDATE sales s
-                SET company_id = %s::uuid
-                WHERE s.invoice_id = %s::uuid
-                  AND NOT EXISTS (
-                    SELECT 1 FROM sales s2
-                    WHERE s2.company_id = %s::uuid
-                      AND s2.ticket_number = s.ticket_number
-                      AND s2.id <> s.id
-                  )
-                """,
-                (target_co, invoice_id, target_co),
-            )
-
+    print("Resolviendo IDs a mover (puede tardar)…", flush=True)
+    moved = move_invoices_to_medicina(cur, conn, catalog_id, medicina_id)
+    sales_moved = move_linked_sales(cur, catalog_id, medicina_id)
     print(f"Facturas movidas a medicina: {moved}")
+    print(f"Ventas TPV reasignadas: {sales_moved}")
 
     reset_verifactu_state(cur, wc_companies, dry_run=False)
 
     conn.commit()
+    print("Commit final OK.", flush=True)
     cur.execute(
         "SELECT company_id, count(*) FROM invoices WHERE company_id = ANY(%s::uuid[]) GROUP BY 1",
         (wc_companies,),

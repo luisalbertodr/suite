@@ -28,6 +28,11 @@ except ImportError:
     print("pip install psycopg2-binary", file=sys.stderr)
     raise
 
+from legacy_billing_common import (
+    default_auto_invoice_through,
+    default_no_auto_from,
+    load_dotenv as load_billing_dotenv,
+)
 from legacy_company import get_company_id
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -154,22 +159,33 @@ def open_conn(dsn: str):
     return conn, cur
 
 
-def fetch_pending_sales(cur, company_id: str, limit: int) -> list[dict]:
+def fetch_pending_sales(
+    cur,
+    company_id: str,
+    limit: int,
+    *,
+    through: str,
+    no_auto_from: str,
+) -> list[dict]:
     limit_sql = f"LIMIT {int(limit)}" if limit > 0 else f"LIMIT {PAGE_SIZE}"
     cur.execute(
         f"""
-        SELECT id, customer_id, customer_name, total_amount, created_at, ticket_number, notes
-        FROM public.sales
-        WHERE company_id = %s
-          AND status = 'completed'
-          AND appointment_id IS NOT NULL
-          AND invoice_id IS NULL
-          AND customer_id IS NOT NULL
-        ORDER BY created_at
+        SELECT s.id, s.customer_id, s.customer_name, s.total_amount, s.created_at,
+               s.ticket_number, s.notes
+        FROM public.sales s
+        JOIN public.agenda_appointments a ON a.id = s.appointment_id
+        WHERE s.company_id = %s
+          AND s.status = 'completed'
+          AND s.appointment_id IS NOT NULL
+          AND s.invoice_id IS NULL
+          AND s.customer_id IS NOT NULL
+          AND COALESCE(a.appointment_date, s.created_at::date) <= %s::date
+          AND COALESCE(a.appointment_date, s.created_at::date) < %s::date
+        ORDER BY s.created_at
         FOR UPDATE SKIP LOCKED
         {limit_sql}
         """,
-        (company_id,),
+        (company_id, through, no_auto_from),
     )
     return cur.fetchall()
 
@@ -319,11 +335,22 @@ def process_one_sale(
 
 def main() -> None:
     load_dotenv()
+    load_billing_dotenv()
     ap = argparse.ArgumentParser()
     ap.add_argument("--company-id", default=get_company_id())
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--limit", type=int, default=0, help="Máximo de facturas a crear (0 = todas)")
     ap.add_argument("--commit-every", type=int, default=25, help="Commit cada N facturas")
+    ap.add_argument(
+        "--through",
+        default="",
+        help=f"Última fecha de cita incluida. Default: {default_auto_invoice_through().isoformat()}",
+    )
+    ap.add_argument(
+        "--no-auto-from",
+        default="",
+        help=f"No facturar citas >= esta fecha. Default: {default_no_auto_from().isoformat()}",
+    )
     args = ap.parse_args()
 
     dsn = os.environ.get("SUPABASE_DB_URL", "").strip()
@@ -331,6 +358,9 @@ def main() -> None:
         sys.exit("Falta SUPABASE_DB_URL")
 
     company_id = args.company_id
+    through = (args.through or "").strip() or default_auto_invoice_through().isoformat()
+    no_auto_from = (args.no_auto_from or "").strip() or default_no_auto_from().isoformat()
+    print(f"Facturación automática: citas <= {through}, sin auto desde {no_auto_from}")
     created = 0
     skipped = 0
     errors = 0
@@ -348,7 +378,13 @@ def main() -> None:
         if remaining_limit is not None:
             page_limit = min(PAGE_SIZE, remaining_limit)
 
-        sales = fetch_pending_sales(cur, company_id, page_limit)
+        sales = fetch_pending_sales(
+            cur,
+            company_id,
+            page_limit,
+            through=through,
+            no_auto_from=no_auto_from,
+        )
         if not sales:
             cur.close()
             conn.close()

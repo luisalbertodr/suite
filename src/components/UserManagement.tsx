@@ -17,11 +17,15 @@ import { toast } from 'sonner';
 import { UserListTable } from '@/components/UserListTable';
 import { useAgendaEmployees } from '@/hooks/useAgendaEmployees';
 import { UserPermissionsPanel } from '@/components/UserPermissionsPanel';
+import { UserCompanyAccessPanel } from '@/components/UserCompanyAccessPanel';
+import { useWorkCenter } from '@/hooks/useWorkCenter';
+import { RECEPTION_ROLE_NAME } from '@/lib/receptionUserAccess';
 
 export const UserManagement = () => {
   const { roles, permissions, loading: rolesLoading } = useRoles();
   const { hasPermission } = usePermissions();
   const { companyId, loading: companyLoading } = useCompanyFilter();
+  const { isMultiEntity, billingCompanies } = useWorkCenter();
   const { users, loading: usersLoading, fetchUsers, deleteUser, createUser, updateUser } = useUsers();
   const { employees: agendaEmployees, isLoading: employeesLoading } = useAgendaEmployees({ agendaOnly: false });
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -43,6 +47,7 @@ export const UserManagement = () => {
   const [editNewPasswordConfirm, setEditNewPasswordConfirm] = useState('');
   const [showEditPassword, setShowEditPassword] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
+  const [permissionsCompanyId, setPermissionsCompanyId] = useState('');
 
   const canChangePasswords = hasPermission('users', 'update');
 
@@ -72,10 +77,24 @@ export const UserManagement = () => {
     }
   };
 
+  const resolveUserCompanyId = (user: any): string | null =>
+    user?.profiles?.company_id ||
+    user?.user_company_roles?.[0]?.company_id ||
+    companyId ||
+    null;
+
+  const resolveUserRoleId = (user: any): string => {
+    const profileCompanyId = user?.profiles?.company_id;
+    const companyRole = user?.user_company_roles?.find(
+      (ucr: { company_id?: string }) => !profileCompanyId || ucr.company_id === profileCompanyId,
+    ) ?? user?.user_company_roles?.[0];
+    const roleName = companyRole?.role?.name;
+    return roleName ? (roles.find((r) => r.name === roleName)?.id || '') : '';
+  };
+
   const handleEditUser = async (user: any) => {
     setEditingUser(user);
-    const roleName = user?.user_company_roles?.[0]?.role?.name;
-    const roleId = roleName ? (roles.find((r) => r.name === roleName)?.id || '') : '';
+    const roleId = resolveUserRoleId(user);
     setEditRoleId(roleId);
     setEditEmployeeId(user?.profiles?.employee_id || 'none');
     setEditPermissionIds(Array.isArray(user?.permission_ids) ? user.permission_ids : []);
@@ -83,13 +102,28 @@ export const UserManagement = () => {
     setEditNewPassword('');
     setEditNewPasswordConfirm('');
     setShowEditPassword(false);
+    const profileCompanyId = resolveUserCompanyId(user);
+    setPermissionsCompanyId(profileCompanyId ?? companyId ?? '');
     setIsEditOpen(true);
-    // Pre-cargar permisos heredados del rol para el panel de overrides
-    if (roleId) {
-      const inherited = await getRoleDefaultPermissionIds(roleId);
+    const roleIdForPanel = resolveUserRoleId(user);
+    if (roleIdForPanel) {
+      const inherited = await getRoleDefaultPermissionIds(roleIdForPanel);
       setEditRolePermissionIds(inherited);
     } else {
       setEditRolePermissionIds([]);
+    }
+  };
+
+  const handlePermissionsCompanyChange = async (nextCompanyId: string) => {
+    setPermissionsCompanyId(nextCompanyId);
+    if (!editingUser) return;
+    const companyRole = editingUser.user_company_roles?.find(
+      (ucr: { company_id?: string; role?: { name: string } }) => ucr.company_id === nextCompanyId,
+    );
+    const roleName = companyRole?.role?.name;
+    const roleId = roleName ? (roles.find((r) => r.name === roleName)?.id || '') : '';
+    if (roleId) {
+      setEditRolePermissionIds(await getRoleDefaultPermissionIds(roleId));
     }
   };
 
@@ -195,16 +229,19 @@ export const UserManagement = () => {
 
   const handleUpdateUser = async () => {
     if (!editingUser?.id) return;
-    if (!companyId) {
-      toast.error('No se ha podido resolver la empresa activa');
+    const profileCompanyId = resolveUserCompanyId(editingUser);
+    if (!profileCompanyId) {
+      toast.error('No se ha podido resolver la empresa del usuario');
       return;
     }
+    const originalRoleId = resolveUserRoleId(editingUser);
+    const roleChanged = !!editRoleId && editRoleId !== originalRoleId;
     setUpdatingUser(true);
     try {
       const ok = await updateUser({
         userId: editingUser.id,
-        role_id: editRoleId || undefined,
-        company_id: companyId,
+        ...(roleChanged ? { role_id: editRoleId } : {}),
+        company_id: profileCompanyId,
         employee_id: editEmployeeId === 'none' ? null : editEmployeeId,
         ...(editPermissionsTouched ? { permission_ids: editPermissionIds } : {}),
       });
@@ -350,7 +387,10 @@ export const UserManagement = () => {
           <Tabs defaultValue="datos" className="mt-2">
             <TabsList className={`grid w-full ${canChangePasswords ? 'grid-cols-3' : 'grid-cols-2'}`}>
               <TabsTrigger value="datos">Datos y rol</TabsTrigger>
-              <TabsTrigger value="excepciones" disabled={!companyId || !editingUser?.id}>
+              <TabsTrigger
+                value="excepciones"
+                disabled={(!permissionsCompanyId && !resolveUserCompanyId(editingUser)) || !editingUser?.id}
+              >
                 Excepciones de permisos
               </TabsTrigger>
               {canChangePasswords && (
@@ -362,7 +402,7 @@ export const UserManagement = () => {
 
             <TabsContent value="datos" className="space-y-3">
               <div className="space-y-1.5">
-                <Label>Rol base</Label>
+                <Label>Rol base (empresa del perfil)</Label>
                 <Select value={editRoleId} onValueChange={handleEditRoleChange}>
                   <SelectTrigger>
                     <SelectValue placeholder="Seleccionar rol" />
@@ -424,24 +464,79 @@ export const UserManagement = () => {
                   ALLOW/DENY usa la pestaña <em>Excepciones de permisos</em>.
                 </p>
               </div>
+
+              {isMultiEntity && billingCompanies.length > 1 && editingUser?.id && (
+                <>
+                  <div className="rounded-md border border-sky-200 bg-sky-50/80 dark:border-sky-900 dark:bg-sky-950/40 p-3 text-xs text-sky-900 dark:text-sky-200 space-y-1">
+                    <p className="font-medium">Centro Medicina + Estética</p>
+                    <p>
+                      Asigna el rol <strong>{RECEPTION_ROLE_NAME}</strong> en{' '}
+                      <strong>ambas empresas</strong> (bloque inferior). Marketing solo en Estética;
+                      WhatsApp y llamadas perdidas en las dos.
+                    </p>
+                  </div>
+                  <UserCompanyAccessPanel
+                    userId={editingUser.id}
+                    userEmail={editingUser.email}
+                    companies={billingCompanies.map((c) => ({
+                      id: c.id,
+                      name: c.short_name?.trim() || c.name,
+                      tax_id: c.tax_id,
+                    }))}
+                    assignedRoles={editingUser.user_company_roles ?? []}
+                    roles={roles}
+                    onChanged={fetchUsers}
+                  />
+                </>
+              )}
+
               <div className="flex justify-end gap-2 pt-2">
                 <Button type="button" variant="outline" onClick={() => setIsEditOpen(false)}>
                   Cancelar
                 </Button>
-                <Button type="button" onClick={handleUpdateUser} disabled={updatingUser || !companyId}>
+                <Button
+                  type="button"
+                  onClick={handleUpdateUser}
+                  disabled={updatingUser || !resolveUserCompanyId(editingUser)}
+                >
                   {updatingUser ? 'Guardando...' : 'Guardar cambios'}
                 </Button>
               </div>
             </TabsContent>
 
             <TabsContent value="excepciones">
-              {companyId && editingUser?.id ? (
-                <UserPermissionsPanel
-                  userId={editingUser.id}
-                  companyId={companyId}
-                  permissions={permissions}
-                  rolePermissionIds={rolePermissionIdsSet}
-                />
+              {permissionsCompanyId && editingUser?.id ? (
+                <>
+                  {isMultiEntity && billingCompanies.length > 1 ? (
+                    <div className="space-y-1.5 mb-3">
+                      <Label>Empresa para excepciones de permisos</Label>
+                      <Select
+                        value={permissionsCompanyId}
+                        onValueChange={(v) => void handlePermissionsCompanyChange(v)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Empresa" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {billingCompanies.map((c) => (
+                            <SelectItem key={c.id} value={c.id}>
+                              {c.short_name?.trim() || c.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-[11px] text-muted-foreground">
+                        Los permisos dependen de la empresa activa del usuario. Configura Estética y Medicina por separado.
+                      </p>
+                    </div>
+                  ) : null}
+                  <UserPermissionsPanel
+                    userId={editingUser.id}
+                    companyId={permissionsCompanyId}
+                    permissions={permissions}
+                    rolePermissionIds={rolePermissionIdsSet}
+                  />
+                </>
               ) : (
                 <div className="p-4 text-center text-sm text-muted-foreground">
                   Selecciona un usuario y empresa para gestionar sus excepciones.

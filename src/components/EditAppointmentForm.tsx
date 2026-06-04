@@ -38,6 +38,7 @@ import { PermissionButton } from '@/components/PermissionButton';
 import { usePermissionGuard } from '@/hooks/usePermissionGuard';
 import { resolveAppointmentClientPick } from '@/lib/appointmentCustomerResolve';
 import { normalizeLegacyAppointmentDescription } from '@/lib/legacyAppointmentItems';
+import { isAppointmentFinanciallyClosed } from '@/lib/appointmentLifecycle';
 import { AppointmentResourceConflictDialog } from '@/components/AppointmentResourceConflictDialog';
 import { AppointmentClinicalHistoryPanel } from '@/components/AppointmentClinicalHistoryPanel';
 import type { ClienteDetailTab } from '@/types/clienteDetail';
@@ -69,6 +70,8 @@ interface EditAppointmentFormProps {
   onCharge?: (appointment: Appointment, items: AppointmentItemDraft[]) => void;
   onNotify?: (appointment: Appointment, recipientUserId: string, message: string) => Promise<void> | void;
   onDelete: (appointmentId: string) => void;
+  onCancelAndRefund?: (appointmentId: string) => void | Promise<void>;
+  paymentStatus?: AgendaAppointment['paymentStatus'];
   onCancel: () => void;
   returnCustomerId?: string | null;
   onReturnToCustomerHistory?: () => void;
@@ -136,6 +139,8 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
   onCharge,
   onNotify,
   onDelete,
+  onCancelAndRefund,
+  paymentStatus,
   onCancel,
   returnCustomerId,
   onReturnToCustomerHistory,
@@ -174,8 +179,16 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
     if (itemsLoading || loadedItems === undefined) return;
     const normalizeQty = (list: AppointmentItemDraft[]) =>
       list.map((it) => ({ ...it, quantity: 1 }));
-    if (loadedItems.length > 0) setItems(normalizeQty(removeRedundantProducts(loadedItems)));
-    else setItems(normalizeQty(seedItemsFromAppointment(appointment)));
+    if (loadedItems.length > 0) {
+      setItems(normalizeQty(removeRedundantProducts(loadedItems)));
+      return;
+    }
+    // Cita ya guardada sin ítems visibles: no inventar línea a 0 € desde observaciones (p. ej. "cab 3").
+    if (appointment.id) {
+      setItems([]);
+      return;
+    }
+    setItems(normalizeQty(seedItemsFromAppointment(appointment)));
   }, [itemsLoading, loadedItems, appointment]);
 
   const articleIdsForItems = useMemo(
@@ -229,7 +242,9 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
     existingSales: appointmentSales,
   });
   const chargedTotal = chargeState.completedTotal;
-  const paidLocked = chargeState.completedTotal > 0;
+  const paidLocked =
+    isAppointmentFinanciallyClosed(paymentStatus) || chargeState.completedTotal > 0;
+  const financiallyClosed = isAppointmentFinanciallyClosed(paymentStatus);
   const saleTicketsLabel = appointmentSales
     .map((s) => s.ticket_number)
     .filter(Boolean)
@@ -426,6 +441,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                 onOpenVouchers={() => { setCustomerHistoryTab('vouchers'); setShowCustomerHistory(true); }}
                 onOpenFacturacion={() => { setCustomerHistoryTab('timeline'); setShowCustomerHistory(true); }}
                 onOpenClinicalHistory={() => setShowClinicalHistory(true)}
+                lockStatusSelect={paidLocked}
                 onViewInvoice={linkedInvoice
                   ? () => navigate(`/facturacion?invoice=${linkedInvoice.id}`)
                   : undefined}
@@ -433,6 +449,12 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                   ? () => onCharge({ ...appointment, ...formData }, items)
                   : undefined}
               />
+            )}
+            {!itemsLoading && loadedItems !== undefined && loadedItems.length === 0 && appointment.id && (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+                No se han podido cargar los servicios de esta cita. Recarga la página; si persiste,
+                contacta con soporte (los ítems pueden existir en base de datos pero no ser visibles por permisos).
+              </div>
             )}
             {itemsLoading || loadedItems === undefined ? (
               <Skeleton className="h-28 w-full rounded-md" />
@@ -450,6 +472,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                 compactHeader
                 compactSlots
                 timeSlotsServicesOnly
+                articlePicker="by-family"
                 onResourceConflictsChange={setResourceConflictMessages}
                 itemsLocked={paidLocked}
               />
@@ -457,8 +480,12 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
 
             {paidLocked && (
               <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                Esta cita ya tiene ticket cobrado. Solo puedes cancelar la cita, añadir observaciones
-                o adjuntar documentos/fotos.
+                Esta cita está cerrada (cobrada o facturada). No se puede modificar el servicio ni
+                borrar el registro. Usa «Cancelar y devolver» para anular tickets no facturados y
+                dejar la cita como cancelada; luego puedes crear una cita nueva con los cambios.
+                {financiallyClosed && linkedInvoice
+                  ? ' Los importes facturados requieren factura rectificativa.'
+                  : null}
               </div>
             )}
 
@@ -496,23 +523,41 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
             )}
 
             <div className="flex justify-between pt-2">
-              <PermissionButton
-                resource="agenda"
-                action="delete"
-                type="button"
-                variant="destructive"
-                size="sm"
-                forbiddenLabel="No tienes permiso para eliminar citas."
-                disabled={paidLocked}
-                title={paidLocked ? 'No se puede eliminar una cita cobrada; cancélala para dejar constancia.' : undefined}
-                onClick={() => {
-                  if (paidLocked) return;
-                  if (!requirePermissionOrToast('agenda', 'delete', 'No tienes permiso para eliminar citas.')) return;
-                  if (window.confirm('¿Eliminar esta cita?')) onDelete(appointment.id);
-                }}
-              >
-                <Trash2 className="w-4 h-4 mr-1" /> Eliminar
-              </PermissionButton>
+              {paidLocked && onCancelAndRefund ? (
+                <PermissionButton
+                  resource="agenda"
+                  action="delete"
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  forbiddenLabel="No tienes permiso para cancelar citas."
+                  onClick={() => {
+                    if (!requirePermissionOrToast('agenda', 'delete', 'No tienes permiso para cancelar citas.')) {
+                      return;
+                    }
+                    onCancelAndRefund(appointment.id);
+                  }}
+                >
+                  <Trash2 className="w-4 h-4 mr-1" /> Cancelar y devolver
+                </PermissionButton>
+              ) : (
+                <PermissionButton
+                  resource="agenda"
+                  action="delete"
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  forbiddenLabel="No tienes permiso para eliminar citas."
+                  onClick={() => {
+                    if (!requirePermissionOrToast('agenda', 'delete', 'No tienes permiso para eliminar citas.')) return;
+                    if (window.confirm('¿Eliminar esta cita? El borrado quedará registrado en el historial de actividad.')) {
+                      onDelete(appointment.id);
+                    }
+                  }}
+                >
+                  <Trash2 className="w-4 h-4 mr-1" /> Eliminar
+                </PermissionButton>
+              )}
               <div className="flex gap-2">
                 {onNotify && (
                   <Button

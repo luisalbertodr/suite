@@ -4,6 +4,8 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Trash2, Barcode } from 'lucide-react';
 import { ArticleSearch } from './ArticleSearch';
+import { ARTICLE_SEARCH_MIN_CHARS } from '@/lib/articleSearch';
+import { escapeIlikePattern } from '@/lib/appointmentArticleKind';
 import { BarcodeScanner } from './BarcodeScanner';
 import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
@@ -71,22 +73,23 @@ export const InvoiceItemRow: React.FC<InvoiceItemRowProps> = ({
   const { data: searchResults, isLoading: isSearching } = useQuery({
     queryKey: ['articles-search-realtime', searchTerm, companyId],
     queryFn: async () => {
-      if (!companyId || !searchTerm || searchTerm.length < 2) {
+      if (!companyId || !searchTerm || searchTerm.length < ARTICLE_SEARCH_MIN_CHARS) {
         return [];
       }
 
+      const pattern = `%${escapeIlikePattern(searchTerm)}%`;
       const { data, error } = await supabase
         .from('articles')
         .select('id, codigo, descripcion, precio, iva_percentage, codigo_barras')
         .eq('company_id', companyId)
         .eq('estado', 'activo')
-        .or(`descripcion.ilike.%${searchTerm}%,codigo.ilike.%${searchTerm}%,codigo_barras.ilike.%${searchTerm}%`)
-        .limit(5);
+        .or(`descripcion.ilike.${pattern},codigo.ilike.${pattern},codigo_barras.ilike.${pattern}`)
+        .limit(8);
 
       if (error) throw error;
       return data as Article[];
     },
-    enabled: !!companyId && searchTerm.length >= 2,
+    enabled: !!companyId && searchTerm.length >= ARTICLE_SEARCH_MIN_CHARS,
   });
 
   // Calculate totals when relevant fields change
@@ -184,7 +187,7 @@ export const InvoiceItemRow: React.FC<InvoiceItemRowProps> = ({
     onUpdate(index, 'description', value);
     setSearchTerm(value);
     
-    if (value.length >= 2) {
+    if (value.length >= ARTICLE_SEARCH_MIN_CHARS) {
       setShowArticleDropdown(true);
     } else {
       setShowArticleDropdown(false);
@@ -192,7 +195,7 @@ export const InvoiceItemRow: React.FC<InvoiceItemRowProps> = ({
   };
 
   const handleInputFocus = () => {
-    if (item.description.length >= 2) {
+    if (item.description.length >= ARTICLE_SEARCH_MIN_CHARS) {
       setSearchTerm(item.description);
       setShowArticleDropdown(true);
     }

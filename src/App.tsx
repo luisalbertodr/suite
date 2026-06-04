@@ -32,13 +32,14 @@ function App() {
   return (
     <Router
       future={{
-        v7_startTransition: true,
         v7_relativeSplatPath: true,
       }}
     >
       <Routes>
-        {/* Default: redirect to Agenda */}
         <Route path="/" element={
+          <ProtectedLayout><Navigate to="/agenda" replace /></ProtectedLayout>
+        } />
+        <Route path="/inicio" element={
           <ProtectedLayout><DashboardPage /></ProtectedLayout>
         } />
         <Route path="/agenda" element={
@@ -95,7 +96,7 @@ function App() {
           </SuperuserProtectedRoute>
         } />
         {/* Catch-all */}
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<Navigate to="/agenda" replace />} />
       </Routes>
     </Router>
   );

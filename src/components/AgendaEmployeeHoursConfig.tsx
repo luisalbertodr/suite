@@ -9,9 +9,9 @@ import { useAgendaEmployees, type AgendaEmployee } from '@/hooks/useAgendaEmploy
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { useToast } from '@/hooks/use-toast';
 import { DeactivateAgendaEmployeeDialog } from '@/components/DeactivateAgendaEmployeeDialog';
+import { AgendaWeeklyHoursEditor } from '@/components/AgendaWeeklyHoursEditor';
 import {
   type AgendaDayHoursMap,
-  type AgendaTimeSegment,
   type AgendaUnavailabilityEntry,
   DEFAULT_AGENDA_CENTER_HOURS,
   parseAgendaDayHoursMap,
@@ -19,21 +19,6 @@ import {
 } from '@/lib/agendaHours';
 import { format } from 'date-fns';
 import { Plus, Trash2 } from 'lucide-react';
-
-const DAY_ROWS: { key: string; label: string }[] = [
-  { key: '0', label: 'Domingo' },
-  { key: '1', label: 'Lunes' },
-  { key: '2', label: 'Martes' },
-  { key: '3', label: 'Miércoles' },
-  { key: '4', label: 'Jueves' },
-  { key: '5', label: 'Viernes' },
-  { key: '6', label: 'Sábado' },
-];
-
-function firstSeg(day: AgendaTimeSegment[] | undefined): { open: string; close: string } {
-  const s = day?.[0];
-  return { open: s?.open ?? '10:00', close: s?.close ?? '20:30' };
-}
 
 type EmpEdit = {
   useCustom: boolean;
@@ -147,8 +132,8 @@ export const AgendaEmployeeHoursConfig: React.FC = () => {
         <CardDescription>
           Activa o desactiva cada profesional en la vista de agenda, define la posición de su columna (número más
           bajo = más a la izquierda) y el horario. Los inactivos se pueden editar y reactivar aquí. Por defecto aplica
-          el horario del centro; «Horario personalizado» marca tramos sombreados (orientativo). Las excepciones «No
-          disponible» sí impiden reservar en esos tramos.
+          el horario del centro; «Horario personalizado» permite varias franjas por día (mañana/tarde, etc.) y marca
+          tramos sombreados (orientativo). Las excepciones «No disponible» sí impiden reservar en esos tramos.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-8">
@@ -223,88 +208,11 @@ export const AgendaEmployeeHoursConfig: React.FC = () => {
               </div>
 
               {st.useCustom && (
-                <div className="space-y-3 pl-1">
-                  {DAY_ROWS.map(({ key, label }) => {
-                    const segs = st.weekly[key] ?? [];
-                    const closed = segs.length === 0;
-                    const { open, close } = firstSeg(segs);
-                    return (
-                      <div key={key} className="flex flex-wrap items-end gap-3 border-b border-dashed pb-2">
-                        <div className="w-24 text-xs font-medium text-muted-foreground">{label}</div>
-                        <div className="flex items-center gap-2">
-                          <Checkbox
-                            id={`e-${emp.id}-${key}-closed`}
-                            checked={closed}
-                            onCheckedChange={(v) => {
-                              const on = v === true;
-                              setEdits((prev) => {
-                                const cur = prev[emp.id] ?? empToEdit(emp);
-                                return {
-                                  ...prev,
-                                  [emp.id]: {
-                                    ...cur,
-                                    weekly: {
-                                      ...cur.weekly,
-                                      [key]: on ? [] : [{ open: '10:00', close: '20:30' }],
-                                    },
-                                  },
-                                };
-                              });
-                            }}
-                          />
-                          <Label htmlFor={`e-${emp.id}-${key}-closed`} className="text-xs cursor-pointer">
-                            Cerrado
-                          </Label>
-                        </div>
-                        {!closed && (
-                          <div className="flex flex-wrap gap-2">
-                            <Input
-                              type="time"
-                              className="h-8 w-28"
-                              value={open}
-                              onChange={(e) =>
-                                setEdits((prev) => {
-                                  const cur = prev[emp.id] ?? empToEdit(emp);
-                                  return {
-                                    ...prev,
-                                    [emp.id]: {
-                                      ...cur,
-                                      weekly: {
-                                        ...cur.weekly,
-                                        [key]: [{ open: e.target.value, close }],
-                                      },
-                                    },
-                                  };
-                                })
-                              }
-                            />
-                            <Input
-                              type="time"
-                              className="h-8 w-28"
-                              step={300}
-                              value={close}
-                              onChange={(e) =>
-                                setEdits((prev) => {
-                                  const cur = prev[emp.id] ?? empToEdit(emp);
-                                  return {
-                                    ...prev,
-                                    [emp.id]: {
-                                      ...cur,
-                                      weekly: {
-                                        ...cur.weekly,
-                                        [key]: [{ open, close: e.target.value }],
-                                      },
-                                    },
-                                  };
-                                })
-                              }
-                            />
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+                <AgendaWeeklyHoursEditor
+                  idPrefix={`e-${emp.id}`}
+                  value={st.weekly}
+                  onChange={(weekly) => patchEdit(emp.id, { weekly })}
+                />
               )}
 
               <div className="space-y-2">

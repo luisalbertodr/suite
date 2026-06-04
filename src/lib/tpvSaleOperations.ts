@@ -6,6 +6,7 @@ import {
   type AppointmentSaleInfo,
 } from '@/lib/appointmentSales';
 import { runMarketingPresentadaInvoicedSyncForCompany } from '@/lib/marketingPresentadaSync';
+import { createInvoicesForSale } from '@/lib/saleInvoiceByBilling';
 
 export type SaleItemRow = {
   id: string;
@@ -32,34 +33,6 @@ export type UpdateSaleTicketInput = {
   customer_name?: string | null;
   notes?: string | null;
 };
-
-async function generateInvoiceNumber(companyId: string): Promise<string> {
-  const tryNew = async () => {
-    const { data, error } = await supabase.rpc('generate_invoice_number', {
-      p_company_id: companyId,
-      p_is_corrective: false,
-    });
-    if (error) throw error;
-    return String(data);
-  };
-  const tryLegacy = async () => {
-    const { data, error } = await supabase.rpc('generate_invoice_number', {
-      company_id: companyId,
-      prefix: 'FAC',
-    });
-    if (error) throw error;
-    return String(data);
-  };
-  try {
-    return await tryNew();
-  } catch (e: unknown) {
-    const err = e as { code?: string; message?: string };
-    if (err?.code === 'PGRST202' || String(err?.message || '').includes('Could not find the function')) {
-      return tryLegacy();
-    }
-    throw e;
-  }
-}
 
 export async function fetchSaleTicketDetail(saleId: string): Promise<SaleTicketDetail | null> {
   const saleRes = await supabase
@@ -179,7 +152,12 @@ export async function resolveSaleCustomerId(
 }
 
 export type IssueInvoiceResult =
-  | { mode: 'created'; invoiceId: string; invoiceNumber: string }
+  | {
+      mode: 'created';
+      invoiceId: string;
+      invoiceNumber: string;
+      splitInvoices?: Array<{ invoiceId: string; invoiceNumber: string; companyLabel: string }>;
+    }
   | { mode: 'manual_required'; reason: string; prefill: ReturnType<typeof buildInvoicePrefillFromSale> };
 
 /** Emite factura automática si hay cliente identificado; si no, devuelve prefill para el formulario. */
@@ -215,85 +193,31 @@ export async function issueInvoiceFromSale(
     };
   }
 
-  const today = new Date().toISOString().split('T')[0];
-  const number = await generateInvoiceNumber(billingCompanyId);
-
-  const subtotal =
-    sale.subtotal != null && sale.subtotal > 0
-      ? Number(sale.subtotal)
-      : Number((sale.total_amount / 1.21).toFixed(2));
-  const taxAmount =
-    sale.tax_amount != null && sale.tax_amount > 0
-      ? Number(sale.tax_amount)
-      : Number((sale.total_amount - subtotal).toFixed(2));
-
-  const invoiceNotes =
-    `Factura del ticket ${sale.ticket_number}` +
-    (sale.appointment_id ? ` · Cita ${sale.appointment_id.slice(0, 8)}` : '');
-
-  const { data: invoice, error: invError } = await supabase
-    .from('invoices')
-    .insert({
-      company_id: billingCompanyId,
-      customer_id: customerId,
-      number,
-      issue_date: today,
-      due_date: today,
-      subtotal,
-      tax_amount: taxAmount,
-      total_amount: Number(sale.total_amount),
-      re_total: 0,
-      status: 'paid',
-      paid_status: true,
-      paid_date: new Date().toISOString(),
-      currency: 'EUR',
-      notes: invoiceNotes,
-      is_intracomunitario: false,
-    })
-    .select('id, number')
-    .single();
-
-  if (invError) throw invError;
-
-  const invoiceItems = items.map((it) => {
-    const lineTotal = Number(it.total_price ?? 0);
-    const lineBase = Number((lineTotal / 1.21).toFixed(2));
-    const iva = Number((lineTotal - lineBase).toFixed(2));
-    return {
-      invoice_id: invoice.id,
-      description: it.description,
-      quantity: Number(it.quantity ?? 1),
-      unit_price: Number((Number(it.unit_price ?? 0) / 1.21).toFixed(2)),
-      discount_percentage: 0,
-      iva_percentage: 21,
-      re_percentage: 0,
-      subtotal_after_discount: lineBase,
-      iva_amount: iva,
-      re_amount: 0,
-      total_price: lineTotal,
-      article_id: it.article_id ?? null,
-      variation_id: it.variation_id ?? null,
-    };
-  });
-
-  const { error: itemsError } = await supabase.from('invoice_items').insert(invoiceItems);
-  if (itemsError) {
-    await supabase.from('invoices').delete().eq('id', invoice.id);
-    throw itemsError;
-  }
-
-  const { error: linkError } = await supabase
-    .from('sales')
-    .update({ invoice_id: invoice.id })
-    .eq('id', saleId);
-
-  if (linkError) throw linkError;
+  const created = await createInvoicesForSale(detail, customerCatalogId, customerId);
 
   if (sale.appointment_id && customerId) {
-    void runMarketingPresentadaInvoicedSyncForCompany(billingCompanyId, {
-      customerIds: [customerId],
-    }).catch((e) => console.warn('Marketing sync tras factura cita:', e));
+    for (const inv of created) {
+      void runMarketingPresentadaInvoicedSyncForCompany(inv.companyId, {
+        customerIds: [customerId],
+      }).catch((e) => console.warn('Marketing sync tras factura cita:', e));
+    }
   }
 
-  return { mode: 'created', invoiceId: String(invoice.id), invoiceNumber: String(invoice.number) };
+  const primary = created.reduce((best, cur) =>
+    cur.totalAmount > best.totalAmount ? cur : best,
+  );
+
+  return {
+    mode: 'created',
+    invoiceId: primary.invoiceId,
+    invoiceNumber: primary.invoiceNumber,
+    splitInvoices:
+      created.length > 1
+        ? created.map((inv) => ({
+            invoiceId: inv.invoiceId,
+            invoiceNumber: inv.invoiceNumber,
+            companyLabel: inv.companyLabel,
+          }))
+        : undefined,
+  };
 }

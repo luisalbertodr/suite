@@ -1,6 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { usePermissions } from '@/hooks/usePermissions';
+import { canAccessPhone } from '@/lib/phonePermissions';
 
 function yesterdayDateString(): string {
   const date = new Date();
@@ -11,11 +13,13 @@ function yesterdayDateString(): string {
 export function usePhoneMissedCalls() {
   const queryClient = useQueryClient();
   const { companyId, loading } = useCompanyFilter();
+  const { hasPermission, loading: permissionsLoading } = usePermissions();
+  const canSyncMissed = canAccessPhone(hasPermission);
   const from = yesterdayDateString();
 
   useQuery({
     queryKey: ['phone-missed-sync', companyId, from],
-    enabled: !!companyId && !loading,
+    enabled: !!companyId && !loading && !permissionsLoading && canSyncMissed,
     staleTime: 45_000,
     refetchInterval: 60_000,
     refetchIntervalInBackground: true,
@@ -39,7 +43,7 @@ export function usePhoneMissedCalls() {
 
   const unreadQuery = useQuery({
     queryKey: ['phone-missed-unread', companyId],
-    enabled: !!companyId && !loading,
+    enabled: !!companyId && !loading && !permissionsLoading && canSyncMissed,
     staleTime: 15_000,
     refetchInterval: 30_000,
     refetchIntervalInBackground: true,

@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 
 DEFAULT_COMPANY_ID = "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4"
+MEDICINA_COMPANY_ID = "816af484-92a0-4f65-a5a7-1c907aa4bb3d"
 
 # Alias para compatibilidad con scripts antiguos
 DEFAULT_COMPANY = DEFAULT_COMPANY_ID

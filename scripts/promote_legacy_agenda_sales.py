@@ -36,7 +36,12 @@ except ImportError:
     print("pip install psycopg2-binary", file=sys.stderr)
     raise
 
-from legacy_company import get_company_id
+from legacy_billing_common import (
+    default_auto_invoice_through,
+    default_no_auto_from,
+    load_dotenv as load_billing_dotenv,
+)
+from legacy_company import MEDICINA_COMPANY_ID, get_company_id
 from legacy_cobro import (
     cli_lookup_keys,
     faccab_impcob,
@@ -227,9 +232,20 @@ def allocate_shared_cobro(
 
 def main() -> None:
     load_dotenv()
+    load_billing_dotenv()
     ap = argparse.ArgumentParser()
     ap.add_argument("--company-id", default=get_company_id())
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument(
+        "--through",
+        default="",
+        help=f"Última fecha de cita incluida (YYYY-MM-DD). Default: {default_auto_invoice_through().isoformat()}",
+    )
+    ap.add_argument(
+        "--no-auto-from",
+        default="",
+        help=f"No crear tickets con cita >= esta fecha (default hoy: {default_no_auto_from().isoformat()})",
+    )
     ap.add_argument(
         "--include-fallback",
         action="store_true",
@@ -242,6 +258,8 @@ def main() -> None:
         sys.exit("Falta SUPABASE_DB_URL")
 
     company_id = args.company_id
+    through = (args.through or "").strip() or default_auto_invoice_through().isoformat()
+    no_auto_from = (args.no_auto_from or "").strip() or default_no_auto_from().isoformat()
     today = date.today().isoformat()
 
     conn = psycopg2.connect(dsn)
@@ -464,6 +482,8 @@ def main() -> None:
 
     created = 0
     skipped = 0
+    skipped_future = 0
+    skipped_after_through = 0
     errors = 0
     batch_size = 500
 
@@ -476,6 +496,14 @@ def main() -> None:
 
         status = ctx["status"]
         apt_date = ctx["apt_date"]
+        if apt_date >= no_auto_from:
+            skipped_future += 1
+            skipped += 1
+            continue
+        if apt_date > through:
+            skipped_after_through += 1
+            skipped += 1
+            continue
         legacy_idplan = ctx["legacy_idplan"]
         cli_keys = ctx["cli_keys"]
         priced_items = ctx["priced_items"]
@@ -555,11 +583,20 @@ def main() -> None:
         )
         customer_name = str(apt.get("customer_name") or "").strip() or None
 
+        pay_method = "card"
+        if company_id == MEDICINA_COMPANY_ID:
+            if revenue_source == "albcab_impcob" or (
+                revenue_source == "faccab_impcob" and cobrado > 0 and facturado <= cobrado
+            ):
+                pay_method = "cash"
+            elif revenue_source == "fallback_items":
+                pay_method = "cash"
+
         sale_row: dict = {
             "company_id": company_id,
             "ticket_number": ticket_number,
             "total_amount": float(items_total),
-            "payment_method": "card",
+            "payment_method": pay_method,
             "status": "completed",
             "created_at": resolve_created_at(apt, apt_date),
         }
@@ -638,8 +675,13 @@ def main() -> None:
     conn.close()
 
     print(f"Citas legacy revisadas: {len(appointments)}")
+    print(f"Corte: citas <= {through}, sin auto desde {no_auto_from}")
     print(f"Tickets creados: {created}")
     print(f"Omitidas (ya cobradas/sin señal): {skipped}")
+    if skipped_future:
+        print(f"  · citas hoy o futuras (manual): {skipped_future}")
+    if skipped_after_through:
+        print(f"  · citas posteriores a --through: {skipped_after_through}")
     if errors:
         print(f"Errores al insertar: {errors}")
 

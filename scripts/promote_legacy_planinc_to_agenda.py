@@ -1,22 +1,24 @@
 """
-Promueve filas de legacy.planinc a public.agenda_appointments.
+Promueve citas Dunasoft (legacy.plan2009 y/o legacy.planinc) a public.agenda_appointments.
 
-- Tramos consecutivos del mismo IDPLAN (mismo día, cliente y empleado Dunasoft) se fusionan
-  en una sola cita. No se fusionan citas con IDPLAN distinto aunque sean consecutivas.
-- PLANINC guarda historial: varias filas comparten IDPLAN (código de seguimiento). Para la agenda
-  solo se usa la última versión (mayor FECHORINC / idplaninc como desempate). El resto queda en
-  legacy.planinc para auditoría.
-- PROMOTE_EXCLUDE_TIPINC: valores de TIPINC que indican borrado (coma-separados; se comparan en mayúsculas).
-  Por defecto se usa BORRAR (Dunasoft Style). Si defines la variable vacía, no se excluye ningún TIPINC.
+Fuente recomendada (PROMOTE_AGENDA_SOURCE=plan2009, por defecto):
+  legacy.plan2009 es la tabla maestra que usa la agenda de Dunasoft Style (estado actual por IDPLAN).
+  legacy.planinc solo guarda historial de cambios; muchas citas nuevas existen en plan2009 sin filas planinc.
+
+Fuente alternativa (PROMOTE_AGENDA_SOURCE=planinc):
+  Última versión por IDPLAN en planinc; omite citas que solo están en plan2009 (~5900 en un volcado típico).
+
+- Tramos consecutivos del mismo IDPLAN (mismo día, cliente y empleado Dunasoft) se fusionan en una cita.
+- Con planinc: PROMOTE_EXCLUDE_TIPINC excluye TIPINC de borrado (por defecto BORRAR).
 
 Variables (.env o entorno):
   SUPABASE_DB_URL
+  PROMOTE_AGENDA_SOURCE   plan2009 | planinc   (default plan2009)
   PROMOTE_COMPANY_ID / LEGACY_COMPANY_ID  (default: scripts/legacy_company.py)
   PROMOTE_CLEAR        legacy_only | all   (sin --clean-import)
   PROMOTE_STATUS       ej. confirmed
   PROMOTE_MERGE_CONSECUTIVE  1|0   (default 1: fusionar tramos consecutivos)
   PROMOTE_MERGE_GAP_MINUTES  minutos máximos entre fin de un tramo e inicio del siguiente
-                              para seguir considerándolos consecutivos (default 15; p. ej. hueco de un slot)
   PROMOTE_EXCLUDE_TIPINC   coma-separados; por defecto BORRAR. Vacío = no excluir por TIPINC
 
 Reimportación el día del corte a producción (Style Dunasoft → Suite):
@@ -222,6 +224,216 @@ def exclude_tipinc_set() -> set[str]:
     return {"BORRAR"}
 
 
+def agenda_source_mode() -> str:
+    raw = os.environ.get("PROMOTE_AGENDA_SOURCE", "plan2009").strip().lower()
+    if raw in ("plan2009", "planinc"):
+        return raw
+    raise SystemExit(f"PROMOTE_AGENDA_SOURCE no válido: {raw!r} (usa plan2009 o planinc)")
+
+
+def effective_planinc_codemp(r: dict) -> str:
+    """Empleado vigente en pantalla Dunasoft cuando existe codempx."""
+    xval = str(r.get("codempx") or "").strip()
+    base = str(r.get("codemp") or "").strip()
+    return xval or base
+
+
+def map_codemp_to_employee(
+    codemp_raw: str,
+    employee_map: dict[str, str],
+    fallback_employee_id: str,
+) -> tuple[str, str]:
+    codemp_norm = codemp_raw.lstrip("0") or "0"
+    employee_id = employee_map.get(codemp_norm) or employee_map.get(codemp_raw) or fallback_employee_id
+    return codemp_raw, employee_id
+
+
+def planinc_enrichment_by_idplan(
+    source_rows: list[dict],
+    exclude_tip: set[str],
+) -> dict[str, dict]:
+    """Última fila planinc por IDPLAN (texto/planart/planinc_id), excluyendo borrados."""
+    winners: dict[str, tuple[tuple[int, int], dict]] = {}
+    for r in source_rows:
+        idplan_s = norm_idplan(r.get("idplan"))
+        if not idplan_s:
+            continue
+        sk = planinc_row_sort_key(r)
+        prev = winners.get(idplan_s)
+        if prev is None or sk > prev[0]:
+            winners[idplan_s] = (sk, r)
+    out: dict[str, dict] = {}
+    for idplan_s, (_sk, r) in winners.items():
+        tip_u = str(r.get("tipinc") or "").strip().upper()
+        if exclude_tip and tip_u in exclude_tip:
+            continue
+        out[idplan_s] = r
+    return out
+
+
+def segment_from_plan_row(
+    r: dict,
+    *,
+    employee_map: dict[str, str],
+    fallback_employee_id: str,
+    date: str,
+    start_time: str,
+    end_time: str,
+    codemp_raw: str,
+    enrichment: dict | None = None,
+) -> dict | None:
+    try:
+        sm = time_to_minutes(start_time)
+        em = time_to_minutes(end_time)
+    except ValueError:
+        return None
+    if em < sm:
+        return None
+
+    enrich = enrichment or {}
+    nomcli = str(r.get("nomcli") or enrich.get("nomcli") or "").strip()
+    codcli = str(r.get("codcli") or enrich.get("codcli") or "").strip()
+    client_name = nomcli or codcli or "Cliente"
+    _codemp_raw, employee_id = map_codemp_to_employee(codemp_raw, employee_map, fallback_employee_id)
+
+    planart_raw = effective_planinc_text(enrich, "planart") if enrich else ""
+    if not planart_raw:
+        planart_raw = str(r.get("planart") or "").strip()
+    planart_txt = planart_raw
+    texto = effective_planinc_text(enrich, "texto") if enrich else str(r.get("texto") or "").strip()
+    if not texto:
+        texto = str(r.get("texto") or "").strip()
+    description = appointment_description_from_seg({"texto": texto, "planart_txt": planart_txt}) or "Cita importada"
+
+    planinc_id = enrich.get("idplaninc") if enrich else r.get("idplaninc")
+    legacy_planinc_id = int(planinc_id) if str(planinc_id or "").strip().isdigit() else None
+    idplan_s = norm_idplan(r.get("idplan") or enrich.get("idplan"))
+
+    return {
+        "date": date,
+        "start_time": start_time,
+        "end_time": end_time,
+        "start_min": sm,
+        "end_min": em,
+        "codemp_raw": codemp_raw,
+        "employee_id": employee_id,
+        "codcli": codcli,
+        "cli_key": norm_cli_key(codcli),
+        "client_name": client_name,
+        "description": description[:1000],
+        "planart_txt": planart_txt,
+        "planart_raw": planart_raw,
+        "texto": texto,
+        "idplan": idplan_s,
+        "legacy_planinc_id": legacy_planinc_id,
+    }
+
+
+def build_segments_from_plan2009(
+    plan2009_rows: list[dict],
+    enrichment: dict[str, dict],
+    employee_map: dict[str, str],
+    fallback_employee_id: str,
+) -> list[dict]:
+    segments: list[dict] = []
+    for r in plan2009_rows:
+        date = norm_date(r.get("fecha"))
+        if not date:
+            continue
+        start_time = norm_time(r.get("horini"))
+        end_time = norm_time(r.get("horfin"), start_time)
+        idplan_s = norm_idplan(r.get("idplan"))
+        enrich = enrichment.get(idplan_s) if idplan_s else None
+        codemp_raw = str(r.get("codemp") or "").strip()
+        seg = segment_from_plan_row(
+            r,
+            employee_map=employee_map,
+            fallback_employee_id=fallback_employee_id,
+            date=date,
+            start_time=start_time,
+            end_time=end_time,
+            codemp_raw=codemp_raw,
+            enrichment=enrich,
+        )
+        if seg:
+            segments.append(seg)
+    return segments
+
+
+def build_segments_from_planinc(
+    source_rows: list[dict],
+    employee_map: dict[str, str],
+    fallback_employee_id: str,
+    exclude_tip: set[str],
+    types: dict[str, str],
+) -> tuple[list[dict], int]:
+    winners_by_idplan: dict[str, tuple[tuple[int, int], dict]] = {}
+    by_planinc_only: "OrderedDict[str, dict]" = OrderedDict()
+
+    for r in source_rows:
+        date = effective_planinc_date(r)
+        if not date:
+            continue
+
+        start_time = effective_planinc_time(r, "horini")
+        end_time = effective_planinc_time(r, "horfin", start_time)
+        codemp_raw = effective_planinc_codemp(r)
+        seg = segment_from_plan_row(
+            r,
+            employee_map=employee_map,
+            fallback_employee_id=fallback_employee_id,
+            date=date,
+            start_time=start_time,
+            end_time=end_time,
+            codemp_raw=codemp_raw,
+        )
+        if not seg:
+            continue
+        seg["tipinc"] = str(r.get("tipinc") or "").strip()
+
+        idplan_s = seg["idplan"]
+        sk = planinc_row_sort_key(r)
+        if idplan_s:
+            wk = f"idplan:{idplan_s}"
+            prev = winners_by_idplan.get(wk)
+            if prev is None or sk > prev[0]:
+                winners_by_idplan[wk] = (sk, seg)
+            continue
+
+        legacy_planinc_id = seg["legacy_planinc_id"]
+        if legacy_planinc_id is not None and "legacy_planinc_id" in types:
+            dedupe_key = f"planinc:{legacy_planinc_id}"
+        else:
+            dedupe_key = "|".join(
+                [
+                    str(legacy_planinc_id or ""),
+                    date,
+                    start_time,
+                    codemp_raw,
+                    seg["codcli"],
+                    seg["client_name"],
+                    seg["description"],
+                ]
+            )
+        if dedupe_key in by_planinc_only:
+            continue
+        by_planinc_only[dedupe_key] = seg
+
+    dropped_deleted = 0
+    segments: list[dict] = []
+    for _wk, (_sk, seg) in winners_by_idplan.items():
+        tip_u = str(seg.get("tipinc") or "").strip().upper()
+        if exclude_tip and tip_u in exclude_tip:
+            dropped_deleted += 1
+            continue
+        seg.pop("tipinc", None)
+        segments.append(seg)
+    for seg in by_planinc_only.values():
+        seg.pop("tipinc", None)
+        segments.append(seg)
+    return segments, dropped_deleted
+
+
 def table_column_types(cur, table: str) -> dict[str, str]:
     cur.execute(
         """
@@ -379,6 +591,12 @@ def main() -> None:
         default="",
         help=f"UUID empresa (default: env PROMOTE_COMPANY_ID / {DEFAULT_COMPANY_ID})",
     )
+    ap.add_argument(
+        "--source",
+        choices=("plan2009", "planinc"),
+        default="",
+        help="Fuente de citas (default: PROMOTE_AGENDA_SOURCE o plan2009)",
+    )
     args = ap.parse_args()
 
     url = os.environ.get("SUPABASE_DB_URL", "").strip()
@@ -388,8 +606,8 @@ def main() -> None:
     clear_mode = "all" if args.clean_import else os.environ.get("PROMOTE_CLEAR", "legacy_only").strip().lower()
     if args.clean_import and not args.dry_run:
         print(
-            "Importación limpia: se eliminarán todas las filas de public.agenda_appointments "
-            f"con company_id={company_id} y se insertarán de nuevo desde legacy.planinc."
+            "Importación limpia: se eliminarán las citas sin cobro de public.agenda_appointments "
+            f"con company_id={company_id} y se insertarán de nuevo desde legacy.plan2009 (o planinc)."
         )
     status_default = os.environ.get("PROMOTE_STATUS", "confirmed").strip()
 
@@ -515,107 +733,43 @@ def main() -> None:
             customer_by_legacy[code] = cid
             customer_by_legacy[code.lstrip("0") or "0"] = cid
 
-    cur.execute("SELECT * FROM legacy.planinc")
-    source_rows = cur.fetchall()
-
-    # idplan -> mejor fila (última modificación por FECHORINC / idplaninc)
-    winners_by_idplan: dict[str, tuple[tuple[int, int], dict]] = {}
-    # sin idplan: una fila por idplaninc (comportamiento anterior)
-    by_planinc_only: "OrderedDict[str, dict]" = OrderedDict()
-
-    for r in source_rows:
-        date = effective_planinc_date(r)
-        if not date:
-            continue
-
-        start_time = effective_planinc_time(r, "horini")
-        end_time = effective_planinc_time(r, "horfin", start_time)
-        codemp_raw = str(r.get("codemp") or "").strip()
-        codemp_norm = codemp_raw.lstrip("0") or "0"
-        employee_id = employee_map.get(codemp_norm) or employee_map.get(codemp_raw) or fallback_employee_id
-
-        nomcli = str(r.get("nomcli") or "").strip()
-        codcli = str(r.get("codcli") or "").strip()
-        client_name = nomcli or codcli or "Cliente"
-
-        planart_raw = effective_planinc_text(r, "planart")
-        planart_txt = planart_raw
-        texto = effective_planinc_text(r, "texto")
-        description = appointment_description_from_seg({"texto": texto, "planart_txt": planart_txt}) or "Cita importada"
-
-        planinc_id = r.get("idplaninc")
-        legacy_planinc_id = int(planinc_id) if str(planinc_id or "").strip().isdigit() else None
-
-        try:
-            sm = time_to_minutes(start_time)
-            em = time_to_minutes(end_time)
-        except ValueError:
-            continue
-        if em < sm:
-            continue
-
-        idplan_s = norm_idplan(r.get("idplan"))
-        tipinc_s = str(r.get("tipinc") or "").strip()
-        sk = planinc_row_sort_key(r)
-
-        seg = {
-            "date": date,
-            "start_time": start_time,
-            "end_time": end_time,
-            "start_min": sm,
-            "end_min": em,
-            "codemp_raw": codemp_raw,
-            "employee_id": employee_id,
-            "codcli": codcli,
-            "cli_key": norm_cli_key(codcli),
-            "client_name": client_name,
-            "description": description[:1000],
-            "planart_txt": planart_txt,
-            "planart_raw": planart_raw,
-            "texto": texto,
-            "idplan": idplan_s,
-            "legacy_planinc_id": legacy_planinc_id,
-            "tipinc": tipinc_s,
-        }
-
-        if idplan_s:
-            wk = f"idplan:{idplan_s}"
-            prev = winners_by_idplan.get(wk)
-            if prev is None or sk > prev[0]:
-                winners_by_idplan[wk] = (sk, seg)
-            continue
-
-        if legacy_planinc_id is not None and "legacy_planinc_id" in types:
-            dedupe_key = f"planinc:{legacy_planinc_id}"
-        else:
-            dedupe_key = "|".join(
-                [
-                    str(legacy_planinc_id or ""),
-                    date,
-                    start_time,
-                    codemp_raw,
-                    codcli,
-                    client_name,
-                    description,
-                ]
-            )
-        if dedupe_key in by_planinc_only:
-            continue
-        by_planinc_only[dedupe_key] = seg
-
+    source_mode = (args.source or "").strip() or agenda_source_mode()
     exclude_tip = exclude_tipinc_set()
     dropped_deleted = 0
-    segments: list[dict] = []
-    for _wk, (_sk, seg) in winners_by_idplan.items():
-        tip_u = str(seg.get("tipinc") or "").strip().upper()
-        if exclude_tip and tip_u in exclude_tip:
-            dropped_deleted += 1
-            continue
-        seg.pop("tipinc", None)
-        segments.append(seg)
-    for seg in by_planinc_only.values():
-        seg.pop("tipinc", None)
-        segments.append(seg)
+
+    cur.execute("SELECT * FROM legacy.planinc")
+    planinc_rows = cur.fetchall()
+    enrichment = planinc_enrichment_by_idplan(planinc_rows, exclude_tip)
+
+    if source_mode == "plan2009":
+        cur.execute("SELECT to_regclass('legacy.plan2009') AS t")
+        if not cur.fetchone()["t"]:
+            raise SystemExit("Falta legacy.plan2009 (importa PLAN2009.DBF con LEGACY_IMPORT_SCOPE=all).")
+        cur.execute("SELECT * FROM legacy.plan2009")
+        plan2009_rows = cur.fetchall()
+        segments = build_segments_from_plan2009(
+            plan2009_rows,
+            enrichment,
+            employee_map,
+            fallback_employee_id,
+        )
+        only_plan2009 = sum(
+            1 for r in plan2009_rows if norm_idplan(r.get("idplan")) and norm_idplan(r.get("idplan")) not in enrichment
+        )
+        print("Fuente: legacy.plan2009 (agenda vigente Dunasoft)")
+        print("legacy.plan2009 filas leídas:", len(plan2009_rows))
+        print("IDPLAN sin historial planinc (solo plan2009):", only_plan2009)
+    else:
+        segments, dropped_deleted = build_segments_from_planinc(
+            planinc_rows,
+            employee_map,
+            fallback_employee_id,
+            exclude_tip,
+            types,
+        )
+        print("Fuente: legacy.planinc (historial de cambios)")
+
+    print("legacy.planinc filas leídas:", len(planinc_rows))
     segments.sort(
         key=lambda s: (
             s["date"],
@@ -700,8 +854,7 @@ def main() -> None:
         payload.append(row_out)
         items_for_appointments.append((appt_id, item_templates))
 
-    print("legacy.planinc filas leídas:", len(source_rows))
-    print("tramos (última versión por IDPLAN / FECHORINC + filas sin IDPLAN):", len(segments))
+    print("tramos a promover:", len(segments))
     if exclude_tip:
         print("omitidas última versión = borrado (TIPINC en PROMOTE_EXCLUDE_TIPINC):", dropped_deleted)
     print("fusionado consecutivos:", "sí" if merge_on else "no", f"(hueco máx. {gap_max} min)")
@@ -719,13 +872,37 @@ def main() -> None:
 
     if clear_mode == "all":
         cur.execute(
-            "SELECT count(*)::bigint AS n FROM public.agenda_appointments WHERE company_id = %s",
+            """
+            SELECT count(*)::bigint AS n
+            FROM public.agenda_appointments a
+            WHERE a.company_id = %s
+              AND NOT public.appointment_has_completed_sale(a.id)
+            """,
             (company_id,),
         )
         n_del = cur.fetchone()["n"]
-        cur.execute("DELETE FROM public.agenda_appointments WHERE company_id = %s", (company_id,))
+        cur.execute(
+            """
+            SELECT count(*)::bigint AS n
+            FROM public.agenda_appointments a
+            WHERE a.company_id = %s
+              AND public.appointment_has_completed_sale(a.id)
+            """,
+            (company_id,),
+        )
+        n_keep = cur.fetchone()["n"]
+        cur.execute(
+            """
+            DELETE FROM public.agenda_appointments a
+            WHERE a.company_id = %s
+              AND NOT public.appointment_has_completed_sale(a.id)
+            """,
+            (company_id,),
+        )
         label = "PROMOTE_CLEAR=all" if not args.clean_import else "--clean-import"
-        print(f"Eliminadas {n_del} citas de la empresa ({label}).")
+        print(f"Eliminadas {n_del} citas sin cobro ({label}).")
+        if n_keep:
+            print(f"Conservadas {n_keep} citas con venta completada (no se pueden borrar).")
     elif "legacy_planinc_id" in types or "legacy_idplan" in types:
         parts: list[str] = []
         if "legacy_planinc_id" in types:
@@ -734,10 +911,15 @@ def main() -> None:
             parts.append("(legacy_idplan IS NOT NULL AND legacy_idplan <> '')")
         if parts:
             cur.execute(
-                f"DELETE FROM public.agenda_appointments WHERE company_id = %s AND ({' OR '.join(parts)})",
+                f"""
+                DELETE FROM public.agenda_appointments a
+                WHERE a.company_id = %s
+                  AND ({' OR '.join(parts)})
+                  AND NOT public.appointment_has_completed_sale(a.id)
+                """,
                 (company_id,),
             )
-            print("Eliminadas citas importadas legacy (PROMOTE_CLEAR=legacy_only).")
+            print("Eliminadas citas importadas legacy sin cobro (PROMOTE_CLEAR=legacy_only).")
     else:
         print(
             "Aviso: agenda_appointments no tiene legacy_planinc_id; no se borró nada. "
@@ -750,6 +932,34 @@ def main() -> None:
         cur.close()
         conn.close()
         return
+
+    if "legacy_idplan" in types:
+        cur2 = conn.cursor()
+        cur2.execute(
+            """
+            SELECT DISTINCT btrim(legacy_idplan)
+            FROM public.agenda_appointments
+            WHERE company_id = %s
+              AND legacy_idplan IS NOT NULL
+              AND btrim(legacy_idplan) <> ''
+              AND public.appointment_has_completed_sale(id)
+            """,
+            (company_id,),
+        )
+        paid_idplans = {str(r[0]).strip() for r in cur2.fetchall()}
+        cur2.close()
+        if paid_idplans:
+            before = len(payload)
+            payload = [
+                row
+                for row in payload
+                if str(row.get("legacy_idplan") or "").strip() not in paid_idplans
+            ]
+            keep_ids = {row.get("id") for row in payload}
+            items_for_appointments = [pair for pair in items_for_appointments if pair[0] in keep_ids]
+            skipped = before - len(payload)
+            if skipped:
+                print(f"Omitidas {skipped} citas cuyo IDPLAN ya tiene cita cobrada en Suite.")
 
     insert_cols: list[str] = []
     seen_cols: set[str] = set()

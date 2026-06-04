@@ -134,6 +134,28 @@ async function resolveRolePermissionIds(
   return (rolePerms || []).map((rp: any) => rp.permission_id).filter(Boolean);
 }
 
+async function fetchUserProfileForList(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  userId: string,
+  scopeCompanyId: string | null,
+) {
+  let query = supabaseAdmin
+    .from("user_profiles")
+    .select("company_id, employee_id, companies:company_id(name)")
+    .eq("user_id", userId);
+  if (scopeCompanyId) {
+    query = query.eq("company_id", scopeCompanyId);
+  }
+  const { data, error } = await query
+    .order("updated_at", { ascending: false })
+    .limit(1);
+  if (error) {
+    console.error("user_profiles list fetch failed", userId, error.message);
+    return null;
+  }
+  return data?.[0] ?? null;
+}
+
 async function listUsers(input: { isSuperuser?: boolean }, req: Request) {
   const supabaseAdmin = createAdminClient();
   const caller = await resolveCaller(supabaseAdmin, req);
@@ -156,11 +178,12 @@ async function listUsers(input: { isSuperuser?: boolean }, req: Request) {
 
   const users = await Promise.all(
     (authData?.users || []).map(async (user) => {
-      const { data: profile } = await supabaseAdmin
-        .from("user_profiles")
-        .select("company_id, employee_id, companies:company_id(name)")
-        .eq("user_id", user.id)
-        .maybeSingle();
+      const profileCompanyScope = !isSuperuser ? targetCompanyId : null;
+      const profile = await fetchUserProfileForList(
+        supabaseAdmin,
+        user.id,
+        profileCompanyScope,
+      );
 
       let employeeName: string | null = null;
       if (profile?.employee_id) {
@@ -172,18 +195,25 @@ async function listUsers(input: { isSuperuser?: boolean }, req: Request) {
         employeeName = employee?.name ?? null;
       }
 
-      const { data: roles } = await supabaseAdmin
+      let rolesQuery = supabaseAdmin
         .from("user_company_roles")
         .select("id, role:roles(name, description), company_id")
         .eq("user_id", user.id);
+      if (profile?.company_id) {
+        rolesQuery = rolesQuery.eq("company_id", profile.company_id);
+      } else if (targetCompanyId) {
+        rolesQuery = rolesQuery.eq("company_id", targetCompanyId);
+      }
+      const { data: roles } = await rolesQuery;
 
       let permissionIds: string[] = [];
-      if (profile?.company_id) {
+      const permCompanyId = profile?.company_id ?? targetCompanyId;
+      if (permCompanyId) {
         const { data: perms } = await supabaseAdmin
           .from("user_permissions")
           .select("permission_id")
           .eq("user_id", user.id)
-          .eq("company_id", profile.company_id);
+          .eq("company_id", permCompanyId);
         permissionIds = (perms || []).map((p: any) => p.permission_id).filter(Boolean);
       }
 
@@ -428,8 +458,16 @@ async function updateUser(
         employee_id: input.employee_id ?? null,
       }, { onConflict: "company_id,user_id" });
     if (profileError) {
+      const duplicateEmployee = profileError.code === "23505" &&
+        String(profileError.message || "").includes("idx_user_profiles_company_employee_unique");
       return jsonResponse(
-        { success: false, error: `profile_update_failed: ${profileError.message}`, code: profileError.code },
+        {
+          success: false,
+          error: duplicateEmployee
+            ? "Ese empleado de agenda ya está vinculado a otro usuario de la empresa."
+            : `profile_update_failed: ${profileError.message}`,
+          code: profileError.code,
+        },
         400,
       );
     }
@@ -438,7 +476,21 @@ async function updateUser(
   const shouldUpdateRole = typeof input.role_id === "string" && input.role_id.length > 0;
   const hasExplicitPermissionSet = Array.isArray(input.permission_ids);
 
-  if (shouldUpdateRole) {
+  let skipRoleSync = false;
+  if (shouldUpdateRole && !hasExplicitPermissionSet) {
+    const { data: existingRoles } = await supabaseAdmin
+      .from("user_company_roles")
+      .select("role_id")
+      .eq("user_id", input.userId)
+      .eq("company_id", companyId)
+      .limit(1);
+    const currentRoleId = existingRoles?.[0]?.role_id;
+    if (currentRoleId === input.role_id) {
+      skipRoleSync = true;
+    }
+  }
+
+  if (shouldUpdateRole && !skipRoleSync) {
     await supabaseAdmin.from("user_company_roles").delete()
       .eq("user_id", input.userId)
       .eq("company_id", companyId);

@@ -81,7 +81,7 @@ def build_pipeline_step_list(
 
         promote_tail: list[PipelineStepDef] = [
             PipelineStepDef(
-                "Citas planinc",
+                "Citas agenda (plan2009)",
                 lambda: py("promote_legacy_planinc_to_agenda.py", *planinc_args),
             ),
             PipelineStepDef(

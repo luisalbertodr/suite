@@ -22,7 +22,7 @@ const PlaceholderPage: React.FC = () => {
           Este módulo está en desarrollo. Pronto estará disponible con todas las funcionalidades del sistema MOGES.
         </p>
         <Link
-          to="/"
+          to="/agenda"
           className="flex items-center space-x-2 px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg hover:from-blue-600 hover:to-blue-700 transition-all shadow-lg"
         >
           <ArrowLeft className="w-4 h-4" />

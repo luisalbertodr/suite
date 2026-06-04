@@ -19,7 +19,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
   const menuItems = [
     {
       label: 'Dashboard',
-      path: '/',
+      path: '/inicio',
       icon: LayoutDashboard,
       permission: { resource: 'dashboard', action: 'read' }
     },
@@ -121,7 +121,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
     >
       <div className="p-4">
         <div className="flex items-center justify-between">
-          <Link to="/" className="text-lg font-semibold">
+          <Link to="/agenda" className="text-lg font-semibold">
             Admin Panel
           </Link>
           <button onClick={onClose} className="text-gray-400 hover:text-white focus:outline-none">

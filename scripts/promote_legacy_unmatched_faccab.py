@@ -29,7 +29,17 @@ except ImportError:
     print("pip install psycopg2-binary", file=sys.stderr)
     raise
 
-from legacy_company import get_company_id
+from legacy_billing_common import (
+    default_auto_invoice_through,
+    default_no_auto_from,
+    load_dotenv as load_billing_dotenv,
+)
+from legacy_company import DEFAULT_COMPANY_ID, MEDICINA_COMPANY_ID, get_company_id
+from legacy_faccab_company import (
+    load_article_billing_map,
+    load_faclin_by_key,
+    resolve_faccab_billing_company,
+)
 from legacy_cobro import (
     cli_lookup_keys,
     faccab_impcob,
@@ -194,9 +204,20 @@ def load_customers(cur, company_id: str) -> tuple[dict[str, dict], dict[str, str
 
 def main() -> None:
     load_dotenv()
+    load_billing_dotenv()
     ap = argparse.ArgumentParser()
     ap.add_argument("--company-id", default=get_company_id())
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument(
+        "--through",
+        default="",
+        help=f"Última fecfac incluida. Default: {default_auto_invoice_through().isoformat()}",
+    )
+    ap.add_argument(
+        "--no-auto-from",
+        default="",
+        help=f"No importar faccab >= esta fecha. Default: {default_no_auto_from().isoformat()}",
+    )
     args = ap.parse_args()
 
     dsn = os.environ.get("SUPABASE_DB_URL", "").strip()
@@ -204,6 +225,9 @@ def main() -> None:
         sys.exit("Falta SUPABASE_DB_URL")
 
     company_id = args.company_id
+    through = (args.through or "").strip() or default_auto_invoice_through().isoformat()
+    no_auto_from = (args.no_auto_from or "").strip() or default_no_auto_from().isoformat()
+    print(f"FACCAB sin cita: fecfac <= {through}, sin auto desde {no_auto_from}")
     conn = psycopg2.connect(dsn)
     conn.autocommit = False
     cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -218,10 +242,13 @@ def main() -> None:
     existing_keys = load_existing_keys(cur, company_id)
     customers_by_key, _ = load_customers(cur, company_id)
     number_seq = InvoiceNumberSeq(cur, company_id)
+    catalog_id = DEFAULT_COMPANY_ID
+    article_map = load_article_billing_map(cur, catalog_id, DEFAULT_COMPANY_ID)
+    faclin_by_key = load_faclin_by_key(cur)
 
     cur.execute(
         """
-        SELECT codcli, fecfac, numfac, totfac, impcob1, impcob2, serfac
+        SELECT serfac, ejefac, codcli, fecfac, numfac, totfac, impcob1, impcob2
         FROM legacy.faccab
         WHERE NULLIF(btrim(codcli::text), '') IS NOT NULL
         ORDER BY fecfac, numfac
@@ -234,11 +261,20 @@ def main() -> None:
     skipped_exists = 0
     skipped_zero = 0
     skipped_no_customer = 0
+    skipped_future = 0
+    skipped_after_through = 0
+    skipped_other_company = 0
     errors = 0
 
     for row in faccab_rows:
         d = norm_date(row.get("fecfac"))
         if not d:
+            continue
+        if d >= no_auto_from:
+            skipped_future += 1
+            continue
+        if d > through:
+            skipped_after_through += 1
             continue
         cod = str(row.get("codcli") or "").strip()
         legacy_key = faccab_key(row)
@@ -253,6 +289,17 @@ def main() -> None:
 
         if legacy_key in existing_keys:
             skipped_exists += 1
+            continue
+
+        billing_company = resolve_faccab_billing_company(
+            row,
+            faclin_by_key,
+            article_map,
+            estetica_id=DEFAULT_COMPANY_ID,
+            medicina_id=MEDICINA_COMPANY_ID,
+        )
+        if billing_company != company_id:
+            skipped_other_company += 1
             continue
 
         facturado = money(parse_decimal(row.get("totfac")))
@@ -355,6 +402,12 @@ def main() -> None:
     print(f"Omitidas (ya importadas): {skipped_exists}")
     print(f"Omitidas (totfac=0): {skipped_zero}")
     print(f"Omitidas (sin cliente): {skipped_no_customer}")
+    if skipped_future:
+        print(f"Omitidas (hoy o futuras, manual): {skipped_future}")
+    if skipped_after_through:
+        print(f"Omitidas (fecfac > --through): {skipped_after_through}")
+    if skipped_other_company:
+        print(f"Omitidas (empresa emisora distinta): {skipped_other_company}")
     if errors:
         print(f"Errores: {errors}")
 

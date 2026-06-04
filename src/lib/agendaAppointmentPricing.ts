@@ -31,3 +31,19 @@ export function formatAppointmentItemAmount(item: AppointmentItemDraft): string 
   if (isBonoSessionItem(item)) return 'BONO';
   return `${appointmentItemLineTotal(item).toFixed(2)} €`;
 }
+
+/** Precio unitario de catálogo o ítem (null si es 0 o bono). */
+export function formatArticleUnitPrice(
+  precio: number | null | undefined,
+  opts?: { hideZero?: boolean }
+): string | null {
+  if (precio == null) return null;
+  const p = Number(precio);
+  if (!Number.isFinite(p) || (opts?.hideZero !== false && p <= 0)) return null;
+  return `${p.toFixed(2)} €`;
+}
+
+export function formatItemUnitPriceLabel(item: AppointmentItemDraft): string | null {
+  if (isBonoSessionItem(item)) return null;
+  return formatArticleUnitPrice(item.unit_price);
+}

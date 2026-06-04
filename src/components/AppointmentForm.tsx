@@ -45,6 +45,7 @@ export type AppointmentFormInitialPrefill = {
   date?: string;
   startTime?: string;
   employeeId?: string;
+  items?: AppointmentItemDraft[];
 };
 
 interface AppointmentFormProps {
@@ -100,7 +101,7 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
       clientKey: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `k-${Date.now()}`,
       kind: 'service',
       label: '',
-      duration_minutes: 30,
+      duration_minutes: 15,
       occupies_time: true,
       quantity: 1,
       unit_price: 0,
@@ -164,6 +165,9 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
       startTime: initialPrefill.startTime ?? f.startTime,
       employeeId: initialPrefill.employeeId ?? f.employeeId,
     }));
+    if (initialPrefill.items?.length) {
+      setItems(initialPrefill.items);
+    }
   }, [initialPrefill]);
 
   const selectedCustomerId = clientPick?.kind === 'customer' ? clientPick.customerId : null;

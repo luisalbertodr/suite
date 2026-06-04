@@ -16,6 +16,12 @@ import { VerifactuQueueMonitor } from './VerifactuQueueMonitor';
 import { Plus, Search, FileText, Settings, History, File, ListOrdered, ChevronLeft, ChevronRight } from 'lucide-react';
 import { format } from 'date-fns';
 import { TPV_SALE_INVOICE_PREFILL_KEY } from '@/lib/appointmentSales';
+import {
+  buildCorrectivePrefillForInvoice,
+  CORRECTIVE_INVOICE_PREFILL_KEY,
+  type CorrectiveInvoicePrefill,
+} from '@/lib/correctiveInvoicePrefill';
+import { useToast } from '@/hooks/use-toast';
 import { buildInvoiceSearchOrFilter, searchCustomerIdsByIlike } from '@/lib/customerSearch';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { useWorkCenter } from '@/hooks/useWorkCenter';
@@ -46,6 +52,7 @@ const INVOICE_LIST_SELECT = `
 export const Facturas: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { toast } = useToast();
   const [selectedInvoice, setSelectedInvoice] = useState<any>(null);
   const [showForm, setShowForm] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -69,7 +76,6 @@ export const Facturas: React.FC = () => {
   const billingCompanyIds = companyId ? [companyId] : [];
 
   const loadInvoiceById = useCallback(async (invoiceId: string) => {
-    if (!companyId) return null;
     const { data, error } = await supabase
       .from('invoices')
       .select(`
@@ -78,7 +84,6 @@ export const Facturas: React.FC = () => {
         companies(name)
       `)
       .eq('id', invoiceId)
-      .eq('company_id', companyId)
       .maybeSingle();
     if (error) {
       console.error('Error loading invoice:', error);
@@ -193,6 +198,25 @@ export const Facturas: React.FC = () => {
     }
   }, [location.search]);
 
+  const openAgendaCorrectivePrefill = useCallback(() => {
+    const stored = sessionStorage.getItem(CORRECTIVE_INVOICE_PREFILL_KEY);
+    if (!stored) return;
+    try {
+      setBudgetData(JSON.parse(stored) as CorrectiveInvoicePrefill);
+      setShowForm(true);
+      sessionStorage.removeItem(CORRECTIVE_INVOICE_PREFILL_KEY);
+    } catch (error) {
+      console.error('Error parsing corrective invoice prefill:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    const urlParams = new URLSearchParams(location.search);
+    if (urlParams.get('from') === 'agenda-corrective') {
+      openAgendaCorrectivePrefill();
+    }
+  }, [location.search, openAgendaCorrectivePrefill]);
+
   const openTpvPrefill = useCallback(() => {
     const stored = sessionStorage.getItem(TPV_SALE_INVOICE_PREFILL_KEY);
     if (!stored) return;
@@ -245,6 +269,33 @@ export const Facturas: React.FC = () => {
       <FacturaForm 
         onClose={handleFormClose}
         onCreated={async (created) => {
+          const pending = budgetData?.pending_originals as
+            | CorrectiveInvoicePrefill['pending_originals']
+            | undefined;
+          const appointmentId = budgetData?.appointment_id as string | undefined;
+
+          if (pending?.length && appointmentId) {
+            const next = pending[0];
+            const rest = pending.slice(1);
+            try {
+              const nextPrefill = await buildCorrectivePrefillForInvoice(
+                next.original_invoice_id,
+                { appointmentId },
+              );
+              if (nextPrefill) {
+                nextPrefill.pending_originals = rest;
+                setBudgetData(nextPrefill);
+                toast({
+                  title: 'Rectificativa guardada',
+                  description: `Siguiente: factura original ${next.original_invoice_number}.`,
+                });
+                return;
+              }
+            } catch (err) {
+              console.error('corrective queue:', err);
+            }
+          }
+
           setBudgetData(null);
           setShowForm(false);
           const full = await loadInvoiceById(String(created.id));

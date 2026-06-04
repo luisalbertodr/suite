@@ -3,7 +3,15 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
-import { Calendar as CalendarIcon, Clock, ChevronLeft, ChevronRight, AlertCircle } from 'lucide-react';
+import {
+  Calendar as CalendarIcon,
+  Clock,
+  ChevronLeft,
+  ChevronRight,
+  AlertCircle,
+  ClipboardPaste,
+  X,
+} from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { AgendaGrid } from './AgendaGrid';
@@ -23,7 +31,16 @@ import { useAgendaPreferences } from '@/hooks/useAgendaPreferences';
 import { appointmentItemsQueryKey, fetchAppointmentItems, syncAppointmentItems } from '@/hooks/useAppointmentItems';
 import { applyBonoSessionDelta } from '@/lib/consumeBonoSessions';
 import type { AppointmentItemDraft, Appointment } from '@/types/agenda';
-import { buildAppointmentTimeSegments, occupiedEndTimeFromItems } from '@/lib/agendaAppointmentItems';
+import {
+  buildAppointmentTimeSegments,
+  calcEndFromStart,
+  occupiedEndTimeFromItems,
+} from '@/lib/agendaAppointmentItems';
+import {
+  buildClipboardPayload,
+  prepareItemsForPaste,
+} from '@/lib/agendaAppointmentClipboard';
+import { useAgendaAppointmentClipboard } from '@/hooks/useAgendaAppointmentClipboard';
 import { toRecursoCatalogEntries, type ArticleResourceHint } from '@/lib/agendaRecursoMatch';
 import { checkAppointmentItemsResourceConflict } from '@/lib/agendaResourceConflicts';
 import { useAuth } from '@/hooks/useAuth';
@@ -34,6 +51,7 @@ import { fetchCatalogCustomers } from '@/lib/customerSearch';
 import {
   loadAgendaViewPersisted,
   loadInitialAgendaDateYmd,
+  mergePersistedAnchorTime,
   mergePersistedLastDate,
   saveAgendaViewPersisted,
 } from '@/lib/agendaViewPersistence';
@@ -44,7 +62,18 @@ import {
   type AgendaUnavailabilityEntry,
 } from '@/lib/agendaHours';
 import { appointmentItemLineTotal } from '@/lib/agendaAppointmentPricing';
-import { canChargeAppointment, appointmentChargeableTotal, fetchAppointmentSalesMap, summarizeAppointmentChargeState } from '@/lib/appointmentSales';
+import {
+  canChargeAppointment,
+  appointmentChargeableTotal,
+  fetchAppointmentSales,
+  fetchAppointmentSalesMap,
+  summarizeAppointmentChargeState,
+} from '@/lib/appointmentSales';
+import {
+  attachPendingCorrectives,
+  prepareCorrectivePrefillsForAppointment,
+  storeCorrectiveInvoicePrefill,
+} from '@/lib/correctiveInvoicePrefill';
 import { buildAgendaPrefillFromLead } from '@/lib/marketingLeadAgendaPrefill';
 import { buildCustomerHistoryUrl } from '@/lib/agendaCustomerNavigation';
 import { BillingEntityToggle } from '@/components/BillingEntityToggle';
@@ -65,6 +94,14 @@ import {
   resolveAppointmentBillingIds,
 } from '@/lib/workCenterAudit';
 import { useRegisterTopBarContent } from '@/components/TopBarContentContext';
+import { resolveAppointmentClientPick } from '@/lib/appointmentCustomerResolve';
+import {
+  cancelAppointmentWithRefund,
+  cloneItemsForNewAppointment,
+  deleteOpenAppointment,
+  describeCancelRefundResult,
+  isAppointmentFinanciallyClosed,
+} from '@/lib/appointmentLifecycle';
 
 interface Employee {
   id: string;
@@ -138,6 +175,8 @@ export const Agenda: React.FC = () => {
   const processedMarketingLeadPrefillRef = useRef<string | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { clipboard, setPayload: setClipboard, clear: clearClipboard } = useAgendaAppointmentClipboard();
+  const pasteBusyRef = useRef(false);
 
   const selectedDateYmd = useMemo(() => format(selectedDate, 'yyyy-MM-dd'), [selectedDate]);
   const selectedDateYmdRef = useRef(selectedDateYmd);
@@ -365,7 +404,6 @@ export const Agenda: React.FC = () => {
     isLoading: appointmentsLoading,
     createAppointment,
     updateAppointment,
-    deleteAppointment,
   } = useAgendaAppointments(selectedDateYmd);
 
   const agendaAppointmentIds = useMemo(
@@ -885,8 +923,38 @@ export const Agenda: React.FC = () => {
         value={agendaBillingView}
         onChange={setAgendaBillingView}
       />
+      {clipboard ? (
+        <div className="flex items-center gap-1.5 rounded-md border border-emerald-300/80 bg-emerald-50 dark:bg-emerald-950/40 px-2 h-7 text-xs text-emerald-900 dark:text-emerald-100 max-w-[14rem]">
+          <ClipboardPaste className="w-3.5 h-3.5 shrink-0" />
+          <span className="truncate">
+            {clipboard.mode === 'cut' ? 'Cortar' : 'Copiar'}: {clipboard.clientName || 'Cita'}
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-5 w-5 p-0 shrink-0"
+            title="Cancelar portapapeles (Esc)"
+            onClick={() => clearClipboard()}
+          >
+            <X className="w-3 h-3" />
+          </Button>
+        </div>
+      ) : null}
     </>
-  ), [agendaBillingView, datePickerOpen, selectAgendaDate, selectedDate]);
+  ), [agendaBillingView, clipboard, clearClipboard, datePickerOpen, selectAgendaDate, selectedDate]);
+
+  useEffect(() => {
+    if (!clipboard) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      clearClipboard();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [clipboard, clearClipboard]);
 
   useRegisterTopBarContent(
     {
@@ -1002,7 +1070,196 @@ export const Agenda: React.FC = () => {
     setResourceConflictDialogOpen(true);
   };
 
-  const handleSlotClick = (employeeId: string, time: string) => {
+  const putAppointmentOnClipboard = useCallback(
+    (appointment: Appointment, mode: 'copy' | 'cut') => {
+      if (isAppointmentFinanciallyClosed(appointment.paymentStatus)) {
+        toast({
+          title: 'Cita cerrada',
+          description: 'No se puede copiar ni cortar una cita ya cobrada o facturada.',
+          variant: 'destructive',
+        });
+        return;
+      }
+      const items = appointmentItemsByAppt[appointment.id] ?? [];
+      setClipboard(
+        buildClipboardPayload({
+          mode,
+          sourceAppointmentId: appointment.id,
+          sourceDateYmd: appointment.date,
+          customerId: appointment.customerId ?? null,
+          clientName: appointment.clientName,
+          description: appointment.description,
+          color: appointment.color,
+          status: appointment.status,
+          items,
+        }),
+      );
+      toast({
+        title: mode === 'copy' ? 'Cita copiada' : 'Cita cortada',
+        description:
+          'Haz clic en un hueco libre para pegar. Cambia de día en el calendario si lo necesitas. Mayús+clic = nueva cita vacía.',
+      });
+    },
+    [appointmentItemsByAppt, setClipboard, toast],
+  );
+
+  const pasteAppointmentAt = useCallback(
+    async (employeeId: string, startTime: string, dateYmd: string) => {
+      if (!clipboard || pasteBusyRef.current) return;
+      pasteBusyRef.current = true;
+      try {
+        const items = prepareItemsForPaste(clipboard.items, clipboard.mode);
+        const endTime = calcEndFromStart(startTime, clipboard.occupiedMinutes);
+
+        if (clipboard.mode === 'cut') {
+          const source = appointments.find((a) => a.id === clipboard.sourceAppointmentId);
+          if (!source) {
+            clearClipboard();
+            toast({
+              title: 'Cita no encontrada',
+              description: 'La cita cortada ya no está en la agenda.',
+              variant: 'destructive',
+            });
+            return;
+          }
+          if (isAppointmentFinanciallyClosed(source.paymentStatus)) {
+            clearClipboard();
+            toast({
+              title: 'Cita cerrada',
+              description: 'No se puede mover una cita cobrada o facturada.',
+              variant: 'destructive',
+            });
+            return;
+          }
+
+          const conflict = checkItemsResourceConflict(
+            dateYmd,
+            startTime,
+            items,
+            clipboard.sourceAppointmentId,
+          );
+          if (conflict.hasConflict) {
+            showResourceConflictDialog(conflict.messages);
+            return;
+          }
+
+          await updateAppointment.mutateAsync({
+            id: clipboard.sourceAppointmentId,
+            employee_id: employeeId,
+            customer_id: clipboard.customerId,
+            title: clipboard.clientName,
+            description: clipboard.description,
+            start_time: `${dateYmd}T${startTime}:00`,
+            end_time: `${dateYmd}T${endTime}:00`,
+            color: clipboard.color,
+            status: clipboard.status,
+          });
+
+          try {
+            const previousItems = await fetchAppointmentItems(
+              clipboard.sourceAppointmentId,
+              companyId || undefined,
+            );
+            await syncAppointmentItems(clipboard.sourceAppointmentId, items);
+            await applyBonoSessionDelta(previousItems, items, {
+              appointmentId: clipboard.sourceAppointmentId,
+              appointmentDate: dateYmd,
+              employeeId,
+            });
+            await registerAppointmentHistory(
+              clipboard.customerId,
+              dateYmd,
+              items,
+              clipboard.sourceAppointmentId,
+            );
+            await queryClient.invalidateQueries({
+              queryKey: appointmentItemsQueryKey(clipboard.sourceAppointmentId),
+            });
+          } catch (e) {
+            console.error('paste cut items', e);
+            toast({
+              title: 'Cita movida, pero falló la sincronización de ítems',
+              description: (e as Error)?.message,
+              variant: 'destructive',
+            });
+          }
+
+          clearClipboard();
+          if (dateYmd !== selectedDateYmd) {
+            const parsed = parse(dateYmd, 'yyyy-MM-dd', new Date());
+            if (isValid(parsed)) selectAgendaDate(parsed, { syncUrl: false });
+          }
+          toast({ title: 'Cita movida' });
+          return;
+        }
+
+        const createConflict = checkItemsResourceConflict(dateYmd, startTime, items);
+        if (createConflict.hasConflict) {
+          showResourceConflictDialog(createConflict.messages);
+          return;
+        }
+
+        const created = await createAppointment.mutateAsync({
+          employee_id: employeeId,
+          customer_id: clipboard.customerId,
+          title: clipboard.clientName,
+          description: clipboard.description,
+          start_time: `${dateYmd}T${startTime}:00`,
+          end_time: `${dateYmd}T${endTime}:00`,
+          color: clipboard.color,
+          status: clipboard.status,
+        });
+
+        try {
+          await syncAppointmentItems(created.id, items);
+          await registerAppointmentHistory(clipboard.customerId, dateYmd, items, created.id);
+          await queryClient.invalidateQueries({ queryKey: appointmentItemsQueryKey(created.id) });
+        } catch (e) {
+          console.error('paste copy items', e);
+          toast({
+            title: 'Cita pegada, pero falló guardar ítems',
+            description: (e as Error)?.message,
+            variant: 'destructive',
+          });
+        }
+
+        if (dateYmd !== selectedDateYmd) {
+          const parsed = parse(dateYmd, 'yyyy-MM-dd', new Date());
+          if (isValid(parsed)) selectAgendaDate(parsed, { syncUrl: false });
+        }
+        toast({ title: 'Cita pegada' });
+      } catch {
+        toast({ title: 'Error al pegar la cita', variant: 'destructive' });
+      } finally {
+        pasteBusyRef.current = false;
+      }
+    },
+    [
+      appointments,
+      checkItemsResourceConflict,
+      clearClipboard,
+      clipboard,
+      companyId,
+      createAppointment,
+      queryClient,
+      registerAppointmentHistory,
+      selectAgendaDate,
+      selectedDateYmd,
+      showResourceConflictDialog,
+      toast,
+      updateAppointment,
+    ],
+  );
+
+  const handleSlotClick = (employeeId: string, time: string, opts?: { forceNew?: boolean }) => {
+    if (user?.id) {
+      const prev = loadAgendaViewPersisted(user.id);
+      saveAgendaViewPersisted(user.id, mergePersistedAnchorTime(prev, selectedDateYmd, time));
+    }
+    if (clipboard && !opts?.forceNew) {
+      void pasteAppointmentAt(employeeId, time, selectedDateYmd);
+      return;
+    }
     setAppointmentPrefill(null);
     setAppointmentPrefillLeadId(null);
     setSelectedSlot({ employeeId, time });
@@ -1204,20 +1461,103 @@ export const Agenda: React.FC = () => {
   const handleAppointmentDelete = async (appointmentId: string) => {
     if (!requirePermissionOrToast('agenda', 'delete', 'No tienes permiso para eliminar citas.')) return;
     const appointment = appointments.find((apt) => apt.id === appointmentId);
-    if (appointment?.paymentStatus === 'paid' || appointment?.paymentStatus === 'invoiced') {
+    if (appointment && isAppointmentFinanciallyClosed(appointment.paymentStatus)) {
       toast({
-        title: 'Cita cobrada',
-        description: 'No se puede eliminar una cita cobrada; cancélala para dejar constancia.',
+        title: 'Cita cerrada',
+        description: 'Usa «Cancelar y devolver» para conservar el historial y gestionar la devolución.',
         variant: 'destructive',
       });
       return;
     }
     try {
-      await deleteAppointment.mutateAsync(appointmentId);
+      await deleteOpenAppointment(appointmentId);
+      await queryClient.invalidateQueries({ queryKey: ['agenda-appointments'] });
+      await queryClient.invalidateQueries({ queryKey: ['audit_events'] });
+      toast({
+        title: 'Cita eliminada',
+        description: 'El borrado quedó registrado en el historial de actividad.',
+      });
       setShowEditForm(false);
       setSelectedAppointment(null);
     } catch (error) {
       console.error('Error deleting:', error);
+      toast({
+        title: 'Error al eliminar cita',
+        description: (error as Error)?.message || 'No se pudo eliminar la cita.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleAppointmentCancelAndRefund = async (appointmentId: string) => {
+    if (!requirePermissionOrToast('agenda', 'delete', 'No tienes permiso para cancelar citas.')) return;
+    const appointment = appointments.find((apt) => apt.id === appointmentId);
+    if (!appointment) return;
+
+    const invoiced = appointment.paymentStatus === 'invoiced' || appointment.paymentStatus === 'paid';
+    const confirmMsg = invoiced
+      ? 'Se cancelará la cita (sin borrarla) y se abrirá el borrador de factura(s) rectificativa(s) para revisar y guardar. ¿Continuar?'
+      : 'Se marcará la cita como cancelada y se anularán los tickets TPV no facturados. ¿Continuar?';
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      const salesBefore = await fetchAppointmentSales(appointmentId);
+      const result = await cancelAppointmentWithRefund(appointmentId, {
+        reason: 'cancelacion_cita_agenda',
+      });
+      const prefills = await prepareCorrectivePrefillsForAppointment(appointmentId, salesBefore);
+      const correctiveBundle = attachPendingCorrectives(prefills);
+
+      const toastMsg = describeCancelRefundResult(result, invoiced, !!correctiveBundle);
+      toast({
+        title: toastMsg.title,
+        description: toastMsg.description,
+        variant: toastMsg.variant,
+      });
+
+      await queryClient.invalidateQueries({ queryKey: ['agenda-appointments'] });
+      await queryClient.invalidateQueries({ queryKey: ['appointment-sales', appointmentId] });
+      await queryClient.invalidateQueries({ queryKey: ['audit_events'] });
+
+      const items = appointmentItemsByAppt[appointmentId] ?? (await fetchAppointmentItems(appointmentId, companyId || undefined));
+      setShowEditForm(false);
+      setSelectedAppointment(null);
+
+      if (correctiveBundle) {
+        storeCorrectiveInvoicePrefill(correctiveBundle);
+        navigate('/facturacion?from=agenda-corrective');
+        return;
+      }
+
+      if (
+        window.confirm(
+          '¿Crear una cita nueva con los mismos servicios y datos (sin sustituir la cancelada)?',
+        )
+      ) {
+        const clientPick = resolveAppointmentClientPick(appointment.clientName, agendaCustomers, {
+          customerId: appointment.customerId,
+          legacyCodcli: appointment.legacyClientCode,
+        });
+        const dateYmd = appointment.date || selectedDateYmd;
+        selectAgendaDate(parse(dateYmd, 'yyyy-MM-dd', new Date()), { syncUrl: false });
+        setSelectedSlot({ employeeId: appointment.employeeId, time: appointment.startTime });
+        setAppointmentPrefill({
+          clientPick,
+          description: appointment.description,
+          date: dateYmd,
+          startTime: appointment.startTime,
+          employeeId: appointment.employeeId,
+          items: cloneItemsForNewAppointment(items),
+        });
+        setShowAppointmentForm(true);
+      }
+    } catch (error) {
+      console.error('Error cancelling appointment:', error);
+      toast({
+        title: 'Error al cancelar',
+        description: (error as Error)?.message || 'No se pudo cancelar la cita.',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -1420,6 +1760,10 @@ export const Agenda: React.FC = () => {
           onSlotClick={handleSlotClick}
           onAppointmentClick={handleAppointmentClick}
           onAppointmentMove={handleAppointmentMove}
+          appointmentClipboard={clipboard ? { mode: clipboard.mode } : null}
+          onAppointmentCopy={(apt) => putAppointmentOnClipboard(apt, 'copy')}
+          onAppointmentCut={(apt) => putAppointmentOnClipboard(apt, 'cut')}
+          onSlotPaste={(employeeId, time) => void pasteAppointmentAt(employeeId, time, selectedDateYmd)}
           persistUserId={user?.id ?? null}
           viewDateYmd={selectedDateYmd}
           goToTodayRequestId={goToTodayRequestId}
@@ -1472,6 +1816,8 @@ export const Agenda: React.FC = () => {
           onCharge={handleChargeAppointment}
           onNotify={handleNotifyAppointment}
           onDelete={handleAppointmentDelete}
+          onCancelAndRefund={handleAppointmentCancelAndRefund}
+          paymentStatus={selectedAppointment.paymentStatus}
           onCancel={() => {
             setShowEditForm(false);
             setSelectedAppointment(null);

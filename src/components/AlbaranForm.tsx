@@ -8,6 +8,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { ArrowLeft, Plus, Trash2, Save, Search } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { ArticleFamilyPicker } from '@/components/forms/AppointmentArticleFamilyPicker';
+import { ARTICLE_SEARCH_MIN_CHARS } from '@/lib/articleSearch';
 
 interface Supplier {
   id: string;
@@ -155,18 +157,22 @@ export const AlbaranForm: React.FC<AlbaranFormProps> = ({ deliveryNote, onClose 
   };
 
   const getFilteredArticles = (searchTerm: string): Article[] => {
-    if (!searchTerm || !articles) return [];
-    
-    return articles.filter(article =>
-      article.descripcion.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      article.codigo.toLowerCase().includes(searchTerm.toLowerCase())
-    ).slice(0, 5);
+    if (!searchTerm || searchTerm.trim().length < ARTICLE_SEARCH_MIN_CHARS || !articles) return [];
+
+    const q = searchTerm.toLowerCase();
+    return articles
+      .filter(
+        (article) =>
+          article.descripcion.toLowerCase().includes(q) ||
+          article.codigo.toLowerCase().includes(q),
+      )
+      .slice(0, 8);
   };
 
   const handleDescriptionChange = (index: number, value: string) => {
     setSearchTerms(prev => ({ ...prev, [index]: value }));
     updateItem(index, 'description', value);
-    setShowSuggestions(prev => ({ ...prev, [index]: value.length > 2 }));
+    setShowSuggestions(prev => ({ ...prev, [index]: value.trim().length >= ARTICLE_SEARCH_MIN_CHARS }));
   };
 
   const selectArticle = (index: number, article: Article) => {
@@ -443,17 +449,43 @@ export const AlbaranForm: React.FC<AlbaranFormProps> = ({ deliveryNote, onClose 
             <div className="space-y-4">
               {items.map((item, index) => (
                 <div key={index} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end p-4 border rounded-lg">
-                  <div className="md:col-span-1 relative">
+                  <div className="md:col-span-1 relative space-y-1.5">
                     <Label>Descripción</Label>
                     <div className="relative">
                       <Input
                         value={searchTerms[index] || item.description}
                         onChange={(e) => handleDescriptionChange(index, e.target.value)}
-                        placeholder="Buscar artículo..."
+                        placeholder={`Buscar artículo (mín. ${ARTICLE_SEARCH_MIN_CHARS} caracteres)…`}
                       />
-                      <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                      <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4 pointer-events-none" />
                     </div>
-                    
+                    <ArticleFamilyPicker
+                      value={item.article_id ?? null}
+                      itemKind="product"
+                      selectedLabel={item.description || undefined}
+                      selectedUnitPrice={item.unit_price}
+                      triggerClassName="h-9 w-full text-sm"
+                      onSelect={(a) => {
+                        const hit = articles?.find((x) => x.id === a.id);
+                        selectArticle(
+                          index,
+                          hit ?? {
+                            id: a.id,
+                            codigo: a.codigo || '',
+                            descripcion: a.descripcion,
+                            precio: Number(a.precio ?? 0),
+                            precio_compra: Number(a.precio ?? 0),
+                            stock_actual: 0,
+                          },
+                        );
+                      }}
+                      onClear={() => {
+                        updateItem(index, 'article_id', undefined);
+                        updateItem(index, 'description', '');
+                        setSearchTerms((prev) => ({ ...prev, [index]: '' }));
+                      }}
+                    />
+
                     {showSuggestions[index] && searchTerms[index] && (
                       <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-40 overflow-y-auto">
                         {getFilteredArticles(searchTerms[index]).map((article) => (
@@ -470,7 +502,9 @@ export const AlbaranForm: React.FC<AlbaranFormProps> = ({ deliveryNote, onClose 
                         ))}
                         {getFilteredArticles(searchTerms[index]).length === 0 && (
                           <div className="px-3 py-2 text-sm text-gray-500">
-                            No se encontraron artículos
+                            {searchTerms[index].trim().length < ARTICLE_SEARCH_MIN_CHARS
+                              ? `Escribe al menos ${ARTICLE_SEARCH_MIN_CHARS} caracteres o usa el catálogo por familias.`
+                              : 'No se encontraron artículos'}
                           </div>
                         )}
                       </div>

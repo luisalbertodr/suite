@@ -9,15 +9,19 @@ export const useInvoiceOperations = () => {
   const queryClient = useQueryClient();
   const { companyId } = useCompanyFilter();
 
-  const generateInvoiceNumber = async (isCorrectiveInvoice: boolean = false) => {
-    if (!companyId) {
+  const generateInvoiceNumber = async (
+    isCorrectiveInvoice: boolean = false,
+    overrideCompanyId?: string,
+  ) => {
+    const billingCompanyId = overrideCompanyId ?? companyId;
+    if (!billingCompanyId) {
       console.error('No company ID available for invoice number generation');
       throw new Error('No company ID available');
     }
 
     const tryNewSignature = async () => {
       const { data, error } = await supabase.rpc('generate_invoice_number', {
-        p_company_id: companyId,
+        p_company_id: billingCompanyId,
         p_is_corrective: isCorrectiveInvoice,
       });
       if (error) throw error;
@@ -27,7 +31,7 @@ export const useInvoiceOperations = () => {
     const tryLegacySignature = async () => {
       const prefix = isCorrectiveInvoice ? 'R-FAC' : 'FAC';
       const { data, error } = await supabase.rpc('generate_invoice_number', {
-        company_id: companyId,
+        company_id: billingCompanyId,
         prefix,
       });
       if (error) throw error;
@@ -75,7 +79,7 @@ export const useInvoiceOperations = () => {
         .from('invoices')
         .insert({
           ...invoiceData,
-          company_id: companyId,
+          company_id: invoiceData.company_id ?? companyId,
         })
         .select()
         .single();

@@ -1,13 +1,21 @@
 
 import React from 'react';
 import { format } from 'date-fns';
-import { CheckCircle, Clock, XCircle, Receipt, Banknote, FileText } from 'lucide-react';
+import { CheckCircle, Clock, XCircle, Receipt, Banknote, FileText, Copy, Scissors, ClipboardPaste } from 'lucide-react';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { AppointmentAttachmentIcons } from '@/components/AppointmentAttachmentIcons';
 import { hasAttachmentHints } from '@/lib/appointmentAttachmentHints';
 import { Employee, Appointment, TimeSlot } from '@/types/agenda';
 import { slotOverlapsOccupiedTime } from '@/lib/agendaAppointmentItems';
 import { segmentAppearance } from '@/lib/agendaResourceColors';
 import {
+  anchorTimeFromScrollTop,
   loadAgendaViewPersisted,
   mergePersistedScroll,
   saveAgendaViewPersisted,
@@ -22,12 +30,18 @@ import {
   type AgendaUnavailabilityEntry,
 } from '@/lib/agendaHours';
 
+export type AgendaSlotClickOptions = { forceNew?: boolean };
+
 interface AgendaGridProps {
   employees: Employee[];
   appointments: Appointment[];
-  onSlotClick: (employeeId: string, time: string) => void;
+  onSlotClick: (employeeId: string, time: string, opts?: AgendaSlotClickOptions) => void;
   onAppointmentClick?: (appointment: Appointment) => void;
   onAppointmentMove?: (appointmentId: string, newEmployeeId: string, newTime: string) => void;
+  appointmentClipboard?: { mode: 'copy' | 'cut' } | null;
+  onAppointmentCopy?: (appointment: Appointment) => void;
+  onAppointmentCut?: (appointment: Appointment) => void;
+  onSlotPaste?: (employeeId: string, time: string) => void;
   /** Usuario autenticado: restaura/guarda scroll y día en localStorage */
   persistUserId?: string | null;
   /** yyyy-MM-dd: clave del scroll guardado por día */
@@ -103,6 +117,10 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
   onSlotClick,
   onAppointmentClick,
   onAppointmentMove,
+  appointmentClipboard = null,
+  onAppointmentCopy,
+  onAppointmentCut,
+  onSlotPaste,
   persistUserId = null,
   viewDateYmd,
   goToTodayRequestId = 0,
@@ -125,6 +143,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
   const lastScrollTopRef = React.useRef(0);
   const lastHandledGoTodayRef = React.useRef(0);
   const lastHandledScrollToTimeRef = React.useRef(0);
+  const lastHandledPersistedAnchorRef = React.useRef<string | null>(null);
   const scrollSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [nowLineTick, setNowLineTick] = React.useState(0);
 
@@ -297,9 +316,33 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
     return out;
   }, [appointments]);
 
+  const scrollToAnchorTime = React.useCallback(
+    (timeHhmm: string) => {
+      const scrollEl = scrollRootRef.current;
+      const headerEl = stickyHeaderRef.current;
+      if (!scrollEl) return;
+      const [hStr, mStr] = String(timeHhmm || '').split(':');
+      const h = Number(hStr);
+      const m = Number(mStr);
+      if (!Number.isFinite(h) || !Number.isFinite(m)) return;
+
+      const targetMin = h * 60 + m;
+      const clamped = Math.max(gridStartMin, Math.min(gridEndMin, targetMin));
+      const lineTopInGrid = ((clamped - gridStartMin) / slotMinutes) * cellHeight;
+      const headerH = headerEl?.offsetHeight ?? 52;
+      const anchor = headerH + lineTopInGrid - scrollEl.clientHeight * 0.35;
+      const maxScroll = Math.max(0, scrollEl.scrollHeight - scrollEl.clientHeight);
+      const top = Math.max(0, Math.min(anchor, maxScroll));
+      scrollEl.scrollTop = top;
+      lastScrollTopRef.current = top;
+    },
+    [gridStartMin, gridEndMin, slotMinutes, cellHeight],
+  );
+
   const flushScrollToStorage = React.useCallback(() => {
     if (!persistUserId || !viewDateYmd) return;
     const el = scrollRootRef.current;
+    const headerEl = stickyHeaderRef.current;
     let scrollTop: number;
     if (el) {
       scrollTop = el.scrollTop;
@@ -309,25 +352,58 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
       // Desmontaje sin DOM: no guardar 0 y borrar la posición previa.
       if (scrollTop <= 0) return;
     }
+    const anchorTime =
+      el && scrollTop > 0
+        ? anchorTimeFromScrollTop(scrollTop, {
+            headerHeight: headerEl?.offsetHeight ?? 52,
+            gridStartMin,
+            gridEndMin,
+            slotMinutes,
+            cellHeight,
+            viewportHeight: el.clientHeight,
+          })
+        : null;
     const prev = loadAgendaViewPersisted(persistUserId);
-    saveAgendaViewPersisted(persistUserId, mergePersistedScroll(prev, viewDateYmd, scrollTop));
-  }, [persistUserId, viewDateYmd]);
+    saveAgendaViewPersisted(
+      persistUserId,
+      mergePersistedScroll(prev, viewDateYmd, scrollTop, anchorTime),
+    );
+  }, [persistUserId, viewDateYmd, gridStartMin, gridEndMin, slotMinutes, cellHeight]);
 
   React.useLayoutEffect(() => {
     if (!persistUserId || !viewDateYmd) return;
     const el = scrollRootRef.current;
     if (!el) return;
+
+    const anchorKey = `${viewDateYmd}|${employees.length}|${slotMinutes}|${cellHeight}`;
+    if (lastHandledPersistedAnchorRef.current === anchorKey) return;
+
     const p = loadAgendaViewPersisted(persistUserId);
-    const top = p?.scrollByYmd[viewDateYmd] ?? 0;
-    lastScrollTopRef.current = top;
+    const savedTime = p?.timeByYmd?.[viewDateYmd];
     const run = () => {
       if (!scrollRootRef.current) return;
+      if (savedTime) {
+        scrollToAnchorTime(savedTime);
+        return;
+      }
+      const top = p?.scrollByYmd[viewDateYmd] ?? 0;
+      lastScrollTopRef.current = top;
       scrollRootRef.current.scrollTop = top;
     };
+
     run();
     const id = requestAnimationFrame(() => requestAnimationFrame(run));
+    lastHandledPersistedAnchorRef.current = anchorKey;
     return () => cancelAnimationFrame(id);
-  }, [persistUserId, viewDateYmd, employees.length, slotMinutes, cellHeight, appointments.length]);
+  }, [
+    persistUserId,
+    viewDateYmd,
+    employees.length,
+    slotMinutes,
+    cellHeight,
+    appointments.length,
+    scrollToAnchorTime,
+  ]);
 
   /** Tras restaurar scroll guardado: «Hoy» vuelve a posicionar en la hora actual. */
   React.useLayoutEffect(() => {
@@ -356,28 +432,14 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
   React.useLayoutEffect(() => {
     if (!scrollToTimeRequest?.requestId) return;
     if (scrollToTimeRequest.requestId === lastHandledScrollToTimeRef.current) return;
-    const scrollEl = scrollRootRef.current;
-    const headerEl = stickyHeaderRef.current;
-    if (!scrollEl) return;
-    const [hStr, mStr] = String(scrollToTimeRequest.time || '').split(':');
-    const h = Number(hStr);
-    const m = Number(mStr);
-    if (!Number.isFinite(h) || !Number.isFinite(m)) return;
+    if (!scrollRootRef.current) return;
+    if (!Number.isFinite(Number(String(scrollToTimeRequest.time || '').split(':')[0]))) return;
 
     lastHandledScrollToTimeRef.current = scrollToTimeRequest.requestId;
-    const targetMin = h * 60 + m;
-    const clamped = Math.max(gridStartMin, Math.min(gridEndMin, targetMin));
-    const lineTopInGrid = ((clamped - gridStartMin) / slotMinutes) * cellHeight;
-    const headerH = headerEl?.offsetHeight ?? 52;
-    const anchor = headerH + lineTopInGrid - scrollEl.clientHeight * 0.35;
-    const maxScroll = Math.max(0, scrollEl.scrollHeight - scrollEl.clientHeight);
-    const run = () => {
-      if (!scrollRootRef.current) return;
-      scrollRootRef.current.scrollTop = Math.max(0, Math.min(anchor, maxScroll));
-    };
+    const run = () => scrollToAnchorTime(scrollToTimeRequest.time);
     run();
     requestAnimationFrame(() => requestAnimationFrame(run));
-  }, [scrollToTimeRequest, gridStartMin, gridEndMin, slotMinutes, cellHeight]);
+  }, [scrollToTimeRequest, scrollToAnchorTime]);
 
   React.useEffect(() => {
     if (!persistUserId || !viewDateYmd) return;
@@ -460,28 +522,13 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
               visibleFields.description ? slotDescriptionText(appointment) : null;
             const lockedByPayment = appointment.paymentStatus === 'paid' || appointment.paymentStatus === 'invoiced';
 
-            return (
+            const appointmentBlock = (
               <div
-                key={appointment.id}
-                className={`absolute z-20 hover:opacity-80 ${lockedByPayment ? 'cursor-default' : 'cursor-move'}`}
-                style={{
-                  top: `${topPosition}px`,
-                  left,
-                  width,
-                  height: `${height}px`,
-                  paddingRight: '1px'
-                }}
-                onClick={() => onAppointmentClick?.(appointment)}
-                onDragOver={(e) => handleDragOver(e, appointment.employeeId, appointment.startTime)}
-                onDragLeave={handleDragLeave}
-                onDrop={(e) => handleDrop(e, appointment.employeeId, appointment.startTime)}
+                className={`relative h-full p-0.5 text-[11px] overflow-hidden rounded border-2 border-border dark:border-border ${lockedByPayment ? 'cursor-default' : 'cursor-move'} ${employees[employeeIndex]?.color}`}
+                draggable={!lockedByPayment}
+                onDragStart={(e) => handleDragStart(e, appointment)}
+                onDragEnd={handleDragEnd}
               >
-                <div
-                  className={`relative h-full p-0.5 text-[11px] overflow-hidden rounded border-2 border-border dark:border-border ${lockedByPayment ? 'cursor-default' : 'cursor-move'} ${employees[employeeIndex]?.color}`}
-                  draggable={!lockedByPayment}
-                  onDragStart={(e) => handleDragStart(e, appointment)}
-                  onDragEnd={handleDragEnd}
-                >
                   {segments.map((seg) => {
                     const segStart = timeToMinutes(seg.startTime);
                     const segEnd = timeToMinutes(seg.endTime);
@@ -562,7 +609,51 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
                     )}
                   </div>
                 </div>
-              </div>
+            );
+
+            return (
+              <ContextMenu key={appointment.id}>
+                <ContextMenuTrigger asChild disabled={lockedByPayment}>
+                  <div
+                    className={`absolute z-20 hover:opacity-80 ${lockedByPayment ? 'cursor-default' : 'cursor-move'}`}
+                    style={{
+                      top: `${topPosition}px`,
+                      left,
+                      width,
+                      height: `${height}px`,
+                      paddingRight: '1px',
+                    }}
+                    onClick={() => onAppointmentClick?.(appointment)}
+                    onDragOver={(e) => handleDragOver(e, appointment.employeeId, appointment.startTime)}
+                    onDragLeave={handleDragLeave}
+                    onDrop={(e) => handleDrop(e, appointment.employeeId, appointment.startTime)}
+                  >
+                    {appointmentBlock}
+                  </div>
+                </ContextMenuTrigger>
+                {!lockedByPayment && (onAppointmentCopy || onAppointmentCut) ? (
+                  <ContextMenuContent className="z-[130]">
+                    {onAppointmentCopy ? (
+                      <ContextMenuItem
+                        onClick={() => onAppointmentCopy(appointment)}
+                        className="gap-2"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                        Copiar
+                      </ContextMenuItem>
+                    ) : null}
+                    {onAppointmentCut ? (
+                      <ContextMenuItem
+                        onClick={() => onAppointmentCut(appointment)}
+                        className="gap-2"
+                      >
+                        <Scissors className="h-3.5 w-3.5" />
+                        Cortar
+                      </ContextMenuItem>
+                    ) : null}
+                  </ContextMenuContent>
+                ) : null}
+              </ContextMenu>
             );
           })}
 
@@ -638,10 +729,15 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
                   );
                   const shade = !bookable && !isOccupied;
                   const canSchedule = !isOccupied && schedulingAllowed;
-                  
-                  return (
+                  const canPaste = canSchedule && !!appointmentClipboard && !!onSlotPaste;
+                  const pasteHint = canPaste
+                    ? appointmentClipboard!.mode === 'cut'
+                      ? 'Clic para mover la cita aquí (Mayús+clic = nueva cita)'
+                      : 'Clic para pegar la cita (Mayús+clic = nueva cita)'
+                    : undefined;
+
+                  const slotCell = (
                     <div
-                      key={`${employee.id}-${slot.time}`}
                       className={`relative border-r border-border transition-colors ${
                         isHourMark ? 'border-t-2 border-border' : 'border-t border-border'
                       } ${
@@ -652,20 +748,49 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
                               ? UNAVAILABLE_CELL_BLOCKED
                               : `${UNAVAILABLE_CELL} cursor-pointer hover:bg-accent/50`
                             : 'bg-card cursor-pointer hover:bg-accent/40'
-                      } ${isHighlighted ? 'bg-blue-100 dark:bg-blue-950/40 border-blue-300 dark:border-blue-700' : ''}`}
+                      } ${isHighlighted ? 'bg-blue-100 dark:bg-blue-950/40 border-blue-300 dark:border-blue-700' : ''} ${
+                        canPaste ? 'ring-1 ring-inset ring-emerald-400/50 dark:ring-emerald-600/40' : ''
+                      }`}
                       style={{ height: `${cellHeight}px` }}
                       title={
-                        shade && canSchedule
+                        pasteHint ??
+                        (shade && canSchedule
                           ? 'Fuera del horario habitual — clic para cita excepcional'
                           : blocked
                             ? 'No disponible (bloqueo de agenda)'
-                            : undefined
+                            : undefined)
                       }
-                      onClick={() => canSchedule && onSlotClick(employee.id, slot.time)}
+                      onClick={(e) => {
+                        if (!canSchedule) return;
+                        onSlotClick(employee.id, slot.time, { forceNew: e.shiftKey });
+                      }}
                       onDragOver={(e) => canSchedule && handleDragOver(e, employee.id, slot.time)}
                       onDragLeave={handleDragLeave}
                       onDrop={(e) => canSchedule && handleDrop(e, employee.id, slot.time)}
                     />
+                  );
+
+                  if (!canPaste) {
+                    return <React.Fragment key={`${employee.id}-${slot.time}`}>{slotCell}</React.Fragment>;
+                  }
+
+                  return (
+                    <ContextMenu key={`${employee.id}-${slot.time}`}>
+                      <ContextMenuTrigger asChild>{slotCell}</ContextMenuTrigger>
+                      <ContextMenuContent className="z-[130]">
+                        <ContextMenuItem
+                          className="gap-2"
+                          onClick={() => onSlotPaste!(employee.id, slot.time)}
+                        >
+                          <ClipboardPaste className="h-3.5 w-3.5" />
+                          {appointmentClipboard!.mode === 'cut' ? 'Pegar (mover)' : 'Pegar'}
+                        </ContextMenuItem>
+                        <ContextMenuSeparator />
+                        <ContextMenuItem onClick={() => onSlotClick(employee.id, slot.time, { forceNew: true })}>
+                          Nueva cita vacía
+                        </ContextMenuItem>
+                      </ContextMenuContent>
+                    </ContextMenu>
                   );
                 })}
               </div>

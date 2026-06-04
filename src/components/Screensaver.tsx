@@ -1,11 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Lock } from 'lucide-react';
+import { useWorkCenterBranding } from '@/hooks/useWorkCenterBranding';
 
 const INACTIVITY_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 
 export const Screensaver: React.FC = () => {
   const [isActive, setIsActive] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const { logoUrlLight, logoUrlDark, displayName, isLoading: brandingLoading } = useWorkCenterBranding();
+  const logoUrl = logoUrlDark || logoUrlLight;
 
   const resetTimer = useCallback(() => {
     setIsActive(false);
@@ -67,9 +70,19 @@ export const Screensaver: React.FC = () => {
 
       {/* Logo */}
       <div className="relative mb-8">
-        <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shadow-2xl shadow-blue-500/20">
-          <span className="text-3xl font-black text-white tracking-tighter">L</span>
-        </div>
+        {logoUrl && !brandingLoading ? (
+          <img
+            src={logoUrl}
+            alt=""
+            className="h-24 w-auto max-w-[280px] object-contain drop-shadow-2xl"
+          />
+        ) : (
+          <div className="flex h-20 min-w-[5rem] items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 px-6 shadow-2xl shadow-blue-500/20">
+            <span className="text-xl font-bold tracking-tight text-white">
+              {displayName.trim() || 'Lipoout'}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Clock */}

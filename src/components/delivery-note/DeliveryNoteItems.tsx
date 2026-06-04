@@ -108,6 +108,7 @@ export const DeliveryNoteItems: React.FC<DeliveryNoteItemsProps> = ({
                 <Label>Descripción del Artículo</Label>
                 <ArticleDescriptionInput
                   value={item.description || ''}
+                  articleId={item.article_id ?? null}
                   onChange={(value) => handleDescriptionChange(index, value)}
                   onArticleSelect={(article) => handleArticleSelect(index, article)}
                   articles={articles}

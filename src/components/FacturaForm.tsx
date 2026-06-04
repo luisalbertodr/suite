@@ -97,7 +97,10 @@ export const FacturaForm: React.FC<FacturaFormProps> = ({ invoice, onClose, onCr
 
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [isCorrectiveInvoice, setIsCorrectiveInvoice] = useState(false);
+  const [correctiveReason, setCorrectiveReason] = useState('');
+  const [originalInvoiceId, setOriginalInvoiceId] = useState<string | null>(null);
   const [isGeneratingNumber, setIsGeneratingNumber] = useState(false);
+  const billingCompanyIdOverride = budgetData?.company_id ? String(budgetData.company_id) : null;
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -132,14 +135,14 @@ export const FacturaForm: React.FC<FacturaFormProps> = ({ invoice, onClose, onCr
   useEffect(() => {
     if (budgetData) {
       const fromTpv = budgetData.source === 'tpv_sale';
+      const fromAgendaCancel = budgetData.source === 'agenda_appointment_cancel';
       const today = new Date().toISOString().split('T')[0];
       const customerId = String(budgetData.customer_id || '').trim();
-      // Pre-populate form with budget data
       setFormData({
         number: '',
         customer_id: customerId,
         issue_date: today,
-        due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        due_date: today,
         notes: budgetData.notes || '',
         status: fromTpv ? 'paid' : 'draft',
         currency: 'EUR',
@@ -148,25 +151,44 @@ export const FacturaForm: React.FC<FacturaFormProps> = ({ invoice, onClose, onCr
         is_intracomunitario: false,
       });
 
-      // Map budget items to invoice items
-      const invoiceItems = budgetData.items.map((item: any) => ({
-        description: item.description,
-        quantity: Number(item.quantity),
-        unit_price: Number(item.unit_price),
-        discount_percentage: 0,
-        iva_percentage: 21,
-        re_percentage: 0,
-        subtotal_after_discount: Number(item.total_price),
-        iva_amount: Number(item.total_price) * 0.21,
-        re_amount: 0,
-        total_price: Number(item.total_price) * 1.21,
-      }));
-
-      setItems(invoiceItems);
-      
-      // Generate invoice number
-      if (companyId) {
-        handleGenerateInvoiceNumber(false);
+      if (fromAgendaCancel) {
+        setIsCorrectiveInvoice(true);
+        setCorrectiveReason(String(budgetData.corrective_reason || ''));
+        setOriginalInvoiceId(String(budgetData.original_invoice_id || '') || null);
+        const invoiceItems = (budgetData.items || []).map((item: Record<string, unknown>) => ({
+          description: String(item.description ?? ''),
+          quantity: Number(item.quantity ?? 1),
+          unit_price: Number(item.unit_price ?? 0),
+          discount_percentage: Number(item.discount_percentage ?? 0),
+          iva_percentage: Number(item.iva_percentage ?? 21),
+          re_percentage: Number(item.re_percentage ?? 0),
+          subtotal_after_discount: Number(item.subtotal_after_discount ?? 0),
+          iva_amount: Number(item.iva_amount ?? 0),
+          re_amount: Number(item.re_amount ?? 0),
+          total_price: Number(item.total_price ?? 0),
+          variation_id: (item.variation_id as string | null) ?? null,
+        }));
+        if (invoiceItems.length) setItems(invoiceItems);
+        if (companyId || billingCompanyIdOverride) {
+          void handleGenerateInvoiceNumber(true, billingCompanyIdOverride ?? undefined);
+        }
+      } else {
+        const invoiceItems = budgetData.items.map((item: Record<string, unknown>) => ({
+          description: String(item.description ?? ''),
+          quantity: Number(item.quantity ?? 1),
+          unit_price: Number(item.unit_price ?? 0),
+          discount_percentage: 0,
+          iva_percentage: 21,
+          re_percentage: 0,
+          subtotal_after_discount: Number(item.total_price ?? 0),
+          iva_amount: Number(item.total_price ?? 0) * 0.21,
+          re_amount: 0,
+          total_price: Number(item.total_price ?? 0) * 1.21,
+        }));
+        setItems(invoiceItems);
+        if (companyId) {
+          void handleGenerateInvoiceNumber(false);
+        }
       }
     } else if (invoice) {
       setFormData({
@@ -234,8 +256,11 @@ export const FacturaForm: React.FC<FacturaFormProps> = ({ invoice, onClose, onCr
     }
   }, [formData.customer_id, customers, items, updateItem]);
 
-  const handleGenerateInvoiceNumber = async (isCorrectiveInvoice: boolean) => {
-    if (!companyId) {
+  const handleGenerateInvoiceNumber = async (
+    forCorrective: boolean,
+    overrideCompanyId?: string,
+  ) => {
+    if (!companyId && !overrideCompanyId) {
       console.error('No company ID available for invoice number generation');
       toast({
         title: "Error",
@@ -247,7 +272,7 @@ export const FacturaForm: React.FC<FacturaFormProps> = ({ invoice, onClose, onCr
 
     setIsGeneratingNumber(true);
     try {
-      const newNumber = await generateInvoiceNumber(isCorrectiveInvoice);
+      const newNumber = await generateInvoiceNumber(forCorrective, overrideCompanyId);
       setFormData(prev => ({ ...prev, number: String(newNumber || '') }));
       console.log('Invoice number generated successfully:', newNumber);
     } catch (error) {
@@ -264,8 +289,8 @@ export const FacturaForm: React.FC<FacturaFormProps> = ({ invoice, onClose, onCr
 
   const handleCorrectiveInvoiceChange = (checked: boolean) => {
     setIsCorrectiveInvoice(checked);
-    if (!invoice && companyId) {
-      handleGenerateInvoiceNumber(checked);
+    if (!invoice && (companyId || billingCompanyIdOverride)) {
+      void handleGenerateInvoiceNumber(checked, billingCompanyIdOverride ?? undefined);
     }
   };
 
@@ -316,6 +341,24 @@ export const FacturaForm: React.FC<FacturaFormProps> = ({ invoice, onClose, onCr
       });
       return;
     }
+
+    if (isCorrectiveInvoice && !correctiveReason.trim()) {
+      toast({
+        title: "Error",
+        description: "Indica el motivo de la rectificación.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (isCorrectiveInvoice && !originalInvoiceId) {
+      toast({
+        title: "Error",
+        description: "Falta la referencia a la factura original.",
+        variant: "destructive",
+      });
+      return;
+    }
     
     const validItems = items.filter(item => item.description.trim() !== '');
     if (validItems.length === 0) {
@@ -347,6 +390,10 @@ export const FacturaForm: React.FC<FacturaFormProps> = ({ invoice, onClose, onCr
         total_amount: calculatedTotalAmount,
         re_total: calculatedReTotal,
         paid_date: formData.paid_status && formData.paid_date ? new Date(formData.paid_date).toISOString() : null,
+        company_id: billingCompanyIdOverride ?? companyId,
+        is_corrective: isCorrectiveInvoice,
+        original_invoice_id: isCorrectiveInvoice ? originalInvoiceId : null,
+        corrective_reason: isCorrectiveInvoice ? correctiveReason.trim() || null : null,
       };
 
       console.log('Submitting invoice data:', invoiceData);
@@ -500,9 +547,20 @@ export const FacturaForm: React.FC<FacturaFormProps> = ({ invoice, onClose, onCr
           Volver
         </Button>
         <h1 className="text-3xl font-bold text-gray-900">
-          {invoice ? 'Editar Factura' : 'Nueva Factura'}
+          {invoice ? 'Editar Factura' : isCorrectiveInvoice ? 'Factura rectificativa' : 'Nueva Factura'}
         </h1>
       </div>
+
+      {budgetData?.source === 'agenda_appointment_cancel' && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Rectificativa por cancelación de cita. Revisa importes (en negativo al guardar), guarda la
+          factura en el sistema y comprueba la factura original{' '}
+          <strong>{budgetData.original_invoice_number || budgetData.original_invoice_id}</strong>.
+          {budgetData.pending_originals?.length
+            ? ` Quedan ${budgetData.pending_originals.length} factura(s) más por rectificar después.`
+            : null}
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <Card>
@@ -524,7 +582,9 @@ export const FacturaForm: React.FC<FacturaFormProps> = ({ invoice, onClose, onCr
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => handleGenerateInvoiceNumber(isCorrectiveInvoice)}
+                  onClick={() =>
+                    handleGenerateInvoiceNumber(isCorrectiveInvoice, billingCompanyIdOverride ?? undefined)
+                  }
                   disabled={isGeneratingNumber}
                 >
                   {isGeneratingNumber ? 'Generando...' : 'Generar'}
@@ -587,9 +647,29 @@ export const FacturaForm: React.FC<FacturaFormProps> = ({ invoice, onClose, onCr
                 id="is_corrective"
                 checked={isCorrectiveInvoice}
                 onCheckedChange={handleCorrectiveInvoiceChange}
+                disabled={budgetData?.source === 'agenda_appointment_cancel'}
               />
               <Label htmlFor="is_corrective">Factura Rectificativa</Label>
             </div>
+            {isCorrectiveInvoice && (
+              <>
+                <div className="md:col-span-2">
+                  <Label htmlFor="corrective_reason">Motivo de rectificación</Label>
+                  <Input
+                    id="corrective_reason"
+                    value={correctiveReason}
+                    onChange={(e) => setCorrectiveReason(e.target.value)}
+                    placeholder="Ej. Cancelación de cita y devolución"
+                    required
+                  />
+                </div>
+                {originalInvoiceId && (
+                  <div className="md:col-span-2 text-xs text-muted-foreground">
+                    Factura original: {budgetData?.original_invoice_number || originalInvoiceId}
+                  </div>
+                )}
+              </>
+            )}
           </CardContent>
         </Card>
 
