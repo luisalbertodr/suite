@@ -57,6 +57,12 @@ def main() -> int:
         default="",
         help=f"No tocar facturas con issue_date >= esta fecha (default hoy: {default_no_auto_from().isoformat()})",
     )
+    ap.add_argument(
+        "--scope",
+        choices=("legacy", "company"),
+        default="legacy",
+        help="company: todas las facturas de la empresa (evita colisiones al fusionar)",
+    )
     args = ap.parse_args()
 
     dsn = os.environ.get("SUPABASE_DB_URL", "").strip()
@@ -78,6 +84,7 @@ def main() -> int:
         date_filter = " AND i.issue_date <= %s"
         params.append(through)
 
+    legacy_filter = f"AND {LEGACY_INVOICE_SQL}" if args.scope == "legacy" else ""
     cur.execute(
         f"""
         SELECT i.id, i.number, i.issue_date, i.company_id, i.verifactu_status
@@ -86,7 +93,7 @@ def main() -> int:
           AND i.issue_date < %s::date
           {date_filter}
           AND COALESCE(i.verifactu_status, '') NOT IN ('sent', 'accepted', 'rejected')
-          AND {LEGACY_INVOICE_SQL}
+          {legacy_filter}
         ORDER BY i.company_id, i.issue_date, i.created_at, i.id
         """,
         params,

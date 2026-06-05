@@ -27,6 +27,7 @@ import type { CustomerSearchRow } from '@/lib/customerSearch';
 import { useCustomerActiveBonos } from '@/hooks/useCustomerActiveBonos';
 import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useCustomerPendingInvoiceDebt } from '@/hooks/useCustomerPendingInvoiceDebt';
 import {
   filterEmployeesForBillingCompanies,
   resolveRequiredBillingCompanyIds,
@@ -327,21 +328,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
   const { data: activeBonos = [] } = useCustomerActiveBonos(effectiveCustomerId);
   const activeVouchersCount = activeBonos.length;
 
-  const { data: pendingDebt = 0 } = useQuery({
-    queryKey: ['edit-appointment-customer-debt-summary', companyId, effectiveCustomerId],
-    enabled: !!companyId && !!effectiveCustomerId,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('invoices')
-        .select('total_amount,paid_status,status')
-        .eq('company_id', companyId)
-        .eq('customer_id', effectiveCustomerId)
-        .eq('status', 'issued')
-        .or('paid_status.is.null,paid_status.eq.false');
-      if (error) throw error;
-      return (data || []).reduce((sum: number, r: any) => sum + Math.max(0, Number(r.total_amount || 0)), 0);
-    },
-  });
+  const { data: pendingDebt = 0 } = useCustomerPendingInvoiceDebt(companyId, effectiveCustomerId);
 
   const handleItemsChange = (next: AppointmentItemDraft[]) => {
     setItems(next.map((it) => ({ ...it, quantity: 1 })));

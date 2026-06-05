@@ -348,6 +348,7 @@ def main() -> None:
                 "status": "paid" if is_paid else "sent",
                 "paid_status": is_paid,
                 "paid_date": d if is_paid else None,
+                "amount_paid": float(min(cobrado, facturado)),
                 "currency": "EUR",
                 "created_at": datetime.fromisoformat(f"{d}T12:00:00"),
                 "notes": marker,

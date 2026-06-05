@@ -85,7 +85,9 @@ def move_invoices_to_medicina(
         cur.execute(
             """
             UPDATE invoices
-            SET company_id = %s::uuid, updated_at = now()
+            SET company_id = %s::uuid,
+                number = 'TMP-MIG-' || replace(id::text, '-', ''),
+                updated_at = now()
             WHERE id = ANY(%s::uuid[])
             """,
             (medicina_id, chunk),
@@ -222,6 +224,27 @@ def main() -> None:
     sales_moved = move_linked_sales(cur, catalog_id, medicina_id)
     print(f"Facturas movidas a medicina: {moved}")
     print(f"Ventas TPV reasignadas: {sales_moved}")
+
+    if moved:
+        print("Renumerando facturas Medicina (evita solapes F{YYYY}-…)…", flush=True)
+        import subprocess
+        import sys
+
+        ren = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "scripts" / "rebuild_legacy_invoices_sequential.py"),
+                "--apply",
+                "--company-id",
+                medicina_id,
+                "--scope",
+                "company",
+            ],
+            cwd=str(ROOT),
+            env=os.environ.copy(),
+        )
+        if ren.returncode != 0:
+            raise SystemExit(f"Renumeración Medicina falló (código {ren.returncode})")
 
     reset_verifactu_state(cur, wc_companies, dry_run=False)
 

@@ -192,17 +192,32 @@ def load_article_map(cur, catalog_company_id: str, default_billing_id: str) -> d
     return out
 
 
-def fetch_faccab_rows(cur, limit: int = 0) -> list[dict]:
+def fetch_faccab_rows(
+    cur,
+    limit: int = 0,
+    from_date: str | None = None,
+    to_date: str | None = None,
+) -> list[dict]:
     limit_sql = f"LIMIT {int(limit)}" if limit > 0 else ""
+    date_filters = ""
+    params: list = []
+    if from_date:
+        date_filters += " AND fecfac::date >= %s::date"
+        params.append(from_date)
+    if to_date:
+        date_filters += " AND fecfac::date < %s::date"
+        params.append(to_date)
     cur.execute(
         f"""
         SELECT serfac, ejefac, numfac, fecfac, hora, codcli, totfac, impcob1, impcob2, anulada
         FROM legacy.faccab
         WHERE NULLIF(btrim(numfac::text), '') IS NOT NULL
           AND btrim(coalesce(serfac::text, '')) = 'A'
+          {date_filters}
         ORDER BY fecfac, serfac, ejefac, numfac
         {limit_sql}
-        """
+        """,
+        params,
     )
     return [dict(r) for r in cur.fetchall()]
 
@@ -376,6 +391,8 @@ def main() -> None:
     ap.add_argument("--reset-existing", action="store_true")
     ap.add_argument("--create-placeholder-customers", action="store_true")
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--from-date", default="", help="fecfac >= (YYYY-MM-DD)")
+    ap.add_argument("--to-date", default="", help="fecfac < (YYYY-MM-DD)")
     ap.add_argument("--commit-every", type=int, default=1000)
     args = ap.parse_args()
 
@@ -403,7 +420,9 @@ def main() -> None:
 
     customers = load_customers(cur, args.catalog_company_id)
     article_map = load_article_map(cur, args.catalog_company_id, args.estetica_company_id)
-    faccab_rows = fetch_faccab_rows(cur, args.limit)
+    from_date = (args.from_date or "").strip() or None
+    to_date = (args.to_date or "").strip() or None
+    faccab_rows = fetch_faccab_rows(cur, args.limit, from_date=from_date, to_date=to_date)
     faclin_by_key = fetch_faclin_rows(cur)
 
     counters = Counter()
@@ -481,6 +500,7 @@ def main() -> None:
                 "status": "paid" if is_paid else "sent",
                 "paid_status": is_paid,
                 "paid_date": d if is_paid else None,
+                "amount_paid": float(min(cobrado, abs(total))),
                 "currency": "EUR",
                 "created_at": created_at,
                 "notes": notes,

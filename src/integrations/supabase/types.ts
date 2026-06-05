@@ -2012,6 +2012,7 @@ export type Database = {
           notes: string | null
           number: string
           original_invoice_id: string | null
+          amount_paid: number
           paid_date: string | null
           paid_status: boolean | null
           payment_method: string | null
@@ -2054,6 +2055,7 @@ export type Database = {
           notes?: string | null
           number: string
           original_invoice_id?: string | null
+          amount_paid?: number
           paid_date?: string | null
           paid_status?: boolean | null
           payment_method?: string | null
@@ -2096,6 +2098,7 @@ export type Database = {
           notes?: string | null
           number?: string
           original_invoice_id?: string | null
+          amount_paid?: number
           paid_date?: string | null
           paid_status?: boolean | null
           payment_method?: string | null

@@ -222,6 +222,7 @@ def process_one_sale(
 ) -> tuple[bool, str | None]:
     sale_id = str(sale["id"])
     cobrado = money(sale["total_amount"])
+    sale_amount_paid = money(sale.get("amount_paid") or 0)
     if cobrado <= 0:
         return False, "zero_total"
 
@@ -297,6 +298,11 @@ def process_one_sale(
         "status": inv_status,
         "paid_status": paid_in_full,
         "paid_date": issue_iso if paid_in_full else None,
+        "amount_paid": float(
+            min(sale_amount_paid, total_amount)
+            if sale_amount_paid > 0
+            else (total_amount if paid_in_full else 0)
+        ),
         "currency": "EUR",
         "created_at": issue_date if isinstance(issue_date, datetime) else f"{issue_iso}T12:00:00",
         "notes": f"Factura legacy automática · ticket {sale.get('ticket_number') or sale_id[:8]}",

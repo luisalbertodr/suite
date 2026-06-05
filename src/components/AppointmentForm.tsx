@@ -22,6 +22,7 @@ import { useCustomerActiveBonos } from '@/hooks/useCustomerActiveBonos';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useCustomerPendingInvoiceDebt } from '@/hooks/useCustomerPendingInvoiceDebt';
 import { ClienteDetailOverlay } from '@/components/cliente/ClienteDetailOverlay';
 import { AppointmentResourceConflictDialog } from '@/components/AppointmentResourceConflictDialog';
 import {
@@ -234,21 +235,7 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
   const { data: activeBonos = [] } = useCustomerActiveBonos(selectedCustomerId);
   const activeVouchersCount = activeBonos.length;
 
-  const { data: pendingDebt = 0 } = useQuery({
-    queryKey: ['appointment-customer-debt-summary', companyId, selectedCustomerId],
-    enabled: !!companyId && !!selectedCustomerId,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('invoices')
-        .select('total_amount,paid_status,status')
-        .eq('company_id', companyId)
-        .eq('customer_id', selectedCustomerId)
-        .eq('status', 'issued')
-        .or('paid_status.is.null,paid_status.eq.false');
-      if (error) throw error;
-      return (data || []).reduce((sum: number, r: any) => sum + Math.max(0, Number(r.total_amount || 0)), 0);
-    },
-  });
+  const { data: pendingDebt = 0 } = useCustomerPendingInvoiceDebt(companyId, selectedCustomerId);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
