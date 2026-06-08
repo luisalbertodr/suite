@@ -33,8 +33,14 @@ export function usePhoneMissedCalls() {
           limit: 500,
         },
       });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
+      if (error) {
+        console.warn('issabel-calls sync omitido:', error.message);
+        return { ok: false, skipped: true, created: 0, missed: 0 };
+      }
+      if (data?.error) {
+        console.warn('issabel-calls sync omitido:', data.error);
+        return { ok: false, skipped: true, created: 0, missed: 0 };
+      }
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
       queryClient.invalidateQueries({ queryKey: ['phone-missed-unread', companyId] });
       return data;

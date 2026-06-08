@@ -1,0 +1,18 @@
+Copia de referencia de los parches aplicados en `C:\Duna\Export\PROGS\funciones.prg`
+(Reservas_Incidencia, líneas ~4264):
+
+```foxpro
+TRY
+   IF TYPE("plSuiteSyncEnabled")="L" AND plSuiteSyncEnabled
+      DO CASE
+         CASE UPPER(ALLTRIM(tctipinc))=="BORRAR"
+            DO Suite_SyncPushDelete WITH ... IN suite_reservas_sync.prg
+         CASE UPPER(ALLTRIM(tctipinc))=="MODIFICAR"
+            DO Suite_SyncAfterIncidencia WITH tctipinc, tnidplan IN suite_reservas_sync.prg
+      ENDCASE
+   ENDIF
+CATCH
+ENDTRY
+```
+
+El fuente editable está solo en `C:\Duna\Export\PROGS\funciones.prg` (no en este repo).

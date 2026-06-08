@@ -7,17 +7,25 @@ import { useRegisterTopBarContent } from '@/components/TopBarContentContext';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { usePermissions } from '@/hooks/usePermissions';
 import { getPhoneCallsScope } from '@/lib/phonePermissions';
+import {
+  callDisplayClasses,
+  callDisplayLabels,
+  callRecordingSource,
+  canListenCallRecording,
+  getCallDisplayType,
+  type CallDisplayType,
+} from '@/lib/lipooutPhone';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
-type CallDirection = 'outbound' | 'inbound' | 'missed';
-
 interface IssabelCall {
   id: string;
-  direction: CallDirection;
+  direction: 'outbound' | 'inbound' | 'missed';
+  display_type?: CallDisplayType;
+  display_party?: string;
   started_at: string;
   caller: string;
   callee: string;
@@ -31,10 +39,7 @@ interface IssabelCall {
   missed_reason?: 'voicemail' | 'no_answer' | 'missed' | null;
   recording_url?: string | null;
   recording_path?: string | null;
-}
-
-function recordingSource(call: IssabelCall): string | null {
-  return call.recording_path || call.recording_url || null;
+  can_listen_recording?: boolean;
 }
 
 async function fetchCallRecordingBlob(call: IssabelCall, source: string): Promise<Blob> {
@@ -74,8 +79,16 @@ async function fetchCallRecordingBlob(call: IssabelCall, source: string): Promis
   return response.blob();
 }
 
-const CallRecordingPlayer: React.FC<{ call: IssabelCall }> = ({ call }) => {
-  const source = recordingSource(call);
+const CallRecordingPlayer: React.FC<{
+  call: IssabelCall;
+  phoneScope: ReturnType<typeof getPhoneCallsScope>;
+}> = ({ call, phoneScope }) => {
+  const source = call.recording_path ||
+    (phoneScope === 'all' && (call.duration_seconds ?? 0) > 0 ? `uniqueid:${call.id}` : null) ||
+    call.recording_url ||
+    null;
+  const allowed = canListenCallRecording(phoneScope, call);
+  const displayType = getCallDisplayType(call);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [audioSrc, setAudioSrc] = useState<string | null>(null);
@@ -84,7 +97,7 @@ const CallRecordingPlayer: React.FC<{ call: IssabelCall }> = ({ call }) => {
     if (audioSrc) URL.revokeObjectURL(audioSrc);
   }, [audioSrc]);
 
-  if (!source) {
+  if (!source || !allowed) {
     return <span className="text-muted-foreground">—</span>;
   }
 
@@ -110,6 +123,8 @@ const CallRecordingPlayer: React.FC<{ call: IssabelCall }> = ({ call }) => {
     );
   }
 
+  const listenLabel = displayType === 'voicemail' ? 'Escuchar mensaje' : 'Escuchar grabación';
+
   return (
     <div className="flex flex-col gap-0.5">
       <Button
@@ -121,24 +136,14 @@ const CallRecordingPlayer: React.FC<{ call: IssabelCall }> = ({ call }) => {
         onClick={() => void load()}
       >
         <Headphones className="mr-1 h-3.5 w-3.5" />
-        {loading ? 'Cargando…' : 'Escuchar'}
+        {loading ? 'Cargando…' : listenLabel}
       </Button>
       {error ? <span className="text-xs text-destructive">{error}</span> : null}
     </div>
   );
 };
 
-const directionLabels: Record<CallDirection, string> = {
-  outbound: 'Realizada',
-  inbound: 'Recibida',
-  missed: 'Perdida',
-};
-
-const directionClasses: Record<CallDirection, string> = {
-  outbound: 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-300',
-  inbound: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300',
-  missed: 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300',
-};
+type DirectionFilter = 'all' | CallDisplayType;
 
 function toDateInputValue(date: Date): string {
   return date.toISOString().slice(0, 10);
@@ -165,10 +170,6 @@ function formatDateTime(value: string): string {
   });
 }
 
-function digitsOnly(value: string | undefined | null): string {
-  return (value ?? '').replace(/\D/g, '');
-}
-
 export const Telefono: React.FC = () => {
   const [searchParams] = useSearchParams();
   const { companyId } = useCompanyFilter();
@@ -182,15 +183,17 @@ export const Telefono: React.FC = () => {
     return date;
   }, []);
 
-  const initialDirection: 'all' | CallDirection = missedOnly || searchParams.get('filter') === 'missed'
+  const initialDirection: DirectionFilter = missedOnly || searchParams.get('filter') === 'missed'
     ? 'missed'
     : 'all';
   const [from, setFrom] = useState(toDateInputValue(yesterday));
   const [to, setTo] = useState(toDateInputValue(today));
-  const [direction, setDirection] = useState<'all' | CallDirection>(initialDirection);
+  const [direction, setDirection] = useState<DirectionFilter>(initialDirection);
   const [search, setSearch] = useState('');
 
-  const effectiveDirection: 'all' | CallDirection = missedOnly ? 'missed' : direction;
+  const effectiveDirection: DirectionFilter = missedOnly
+    ? (direction === 'all' ? 'all' : direction === 'voicemail' ? 'voicemail' : 'missed')
+    : direction;
 
   const callsQuery = useQuery({
     queryKey: ['issabel-calls', companyId, from, to, effectiveDirection, phoneScope],
@@ -203,7 +206,7 @@ export const Telefono: React.FC = () => {
           from,
           to,
           direction: effectiveDirection === 'all' ? undefined : effectiveDirection,
-          limit: 300,
+          limit: 1000,
         },
       });
 
@@ -217,15 +220,19 @@ export const Telefono: React.FC = () => {
   const filteredCalls = calls.filter((call) => {
     const needle = search.trim().toLowerCase();
     if (!needle) return true;
-    return [call.caller, call.callee, call.customer_phone, call.customer?.name, call.disposition]
+    const displayType = getCallDisplayType(call);
+    return [
+      call.display_party,
+      call.customer_phone,
+      call.customer?.name,
+      callDisplayLabels[displayType],
+    ]
       .filter(Boolean)
-      .some((value) => value.toLowerCase().includes(needle));
+      .some((value) => value!.toLowerCase().includes(needle));
   });
 
-  const renderParty = (value: string, call: IssabelCall) => {
-    const partyDigits = digitsOnly(value);
-    const customerDigits = digitsOnly(call.customer_phone);
-    if (call.customer && partyDigits && customerDigits && partyDigits.endsWith(customerDigits.slice(-9))) {
+  const renderCustomer = (call: IssabelCall) => {
+    if (call.customer) {
       return (
         <Link
           to={`/clientes?customer=${call.customer.id}`}
@@ -235,24 +242,37 @@ export const Telefono: React.FC = () => {
         </Link>
       );
     }
-    return value || '-';
+    return call.display_party || call.customer_phone || '-';
   };
+
+  const filterButtons: { value: DirectionFilter; label: string }[] = missedOnly
+    ? [
+        { value: 'all', label: 'Perdidas y buzón' },
+        { value: 'missed', label: 'Perdida' },
+        { value: 'voicemail', label: 'Buzón de voz' },
+      ]
+    : [
+        { value: 'all', label: 'Todas' },
+        { value: 'outbound', label: 'Saliente' },
+        { value: 'inbound', label: 'Entrante' },
+        { value: 'missed', label: 'Perdida' },
+        { value: 'voicemail', label: 'Buzón de voz' },
+      ];
 
   const topBarActions = useMemo(() => (
     <>
-      {!missedOnly &&
-        (['all', 'outbound', 'inbound', 'missed'] as const).map((value) => (
-          <Button
-            key={value}
-            type="button"
-            size="sm"
-            variant={direction === value ? 'default' : 'outline'}
-            onClick={() => setDirection(value)}
-            className="h-7 px-2 text-xs"
-          >
-            {value === 'all' ? 'Todas' : directionLabels[value]}
-          </Button>
-        ))}
+      {filterButtons.map(({ value, label }) => (
+        <Button
+          key={value}
+          type="button"
+          size="sm"
+          variant={direction === value ? 'default' : 'outline'}
+          onClick={() => setDirection(value)}
+          className="h-7 px-2 text-xs"
+        >
+          {label}
+        </Button>
+      ))}
       <Button
         onClick={() => callsQuery.refetch()}
         variant="outline"
@@ -264,7 +284,7 @@ export const Telefono: React.FC = () => {
         Actualizar
       </Button>
     </>
-  ), [callsQuery, direction, missedOnly]);
+  ), [callsQuery, direction, filterButtons]);
 
   useRegisterTopBarContent(
     {
@@ -281,11 +301,6 @@ export const Telefono: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      {missedOnly ? (
-        <p className="text-sm text-muted-foreground">
-          Solo puedes consultar llamadas perdidas y mensajes de buzón de voz.
-        </p>
-      ) : null}
       <Card>
         <CardHeader>
           <div className="grid gap-2 md:grid-cols-[170px_170px_minmax(220px,1fr)]">
@@ -296,7 +311,7 @@ export const Telefono: React.FC = () => {
               <Input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Buscar extensión, número o estado..."
+                placeholder="Buscar cliente, teléfono o tipo..."
                 className="pl-9"
               />
             </div>
@@ -317,40 +332,37 @@ export const Telefono: React.FC = () => {
                 <TableRow>
                   <TableHead>Fecha</TableHead>
                   <TableHead>Tipo</TableHead>
-                  <TableHead>Origen</TableHead>
-                  <TableHead>Destino</TableHead>
+                  <TableHead>Cliente / teléfono</TableHead>
                   <TableHead>Duración</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead>Grabación</TableHead>
+                  <TableHead>Audio</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredCalls.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
+                    <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
                       No hay llamadas para los filtros seleccionados.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredCalls.map((call) => (
-                    <TableRow key={call.id}>
-                      <TableCell className="whitespace-nowrap">{formatDateTime(call.started_at)}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className={directionClasses[call.direction]}>
-                          {directionLabels[call.direction]}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>{renderParty(call.caller, call)}</TableCell>
-                      <TableCell>{renderParty(call.callee, call)}</TableCell>
-                      <TableCell>{formatDuration(call.duration_seconds)}</TableCell>
-                      <TableCell>
-                        {call.missed_reason === 'voicemail' ? 'Buzón de voz' : call.disposition || '-'}
-                      </TableCell>
-                      <TableCell>
-                        <CallRecordingPlayer call={call} />
-                      </TableCell>
-                    </TableRow>
-                  ))
+                  filteredCalls.map((call) => {
+                    const displayType = getCallDisplayType(call);
+                    return (
+                      <TableRow key={call.id}>
+                        <TableCell className="whitespace-nowrap">{formatDateTime(call.started_at)}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={callDisplayClasses[displayType]}>
+                            {callDisplayLabels[displayType]}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>{renderCustomer(call)}</TableCell>
+                        <TableCell>{formatDuration(call.duration_seconds)}</TableCell>
+                        <TableCell>
+                          <CallRecordingPlayer call={call} phoneScope={phoneScope} />
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>

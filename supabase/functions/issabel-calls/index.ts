@@ -8,13 +8,14 @@ const corsHeaders = {
 };
 
 type CallDirection = 'outbound' | 'inbound' | 'missed';
+type CallDisplayType = 'outbound' | 'inbound' | 'missed' | 'voicemail';
 
 type Body = {
   action: 'calls.list' | 'calls.sync_missed' | 'calls.recording';
   company_id?: string;
   from?: string;
   to?: string;
-  direction?: CallDirection;
+  direction?: CallDirection | 'voicemail';
   limit?: number;
   recording?: string;
   call_id?: string;
@@ -123,6 +124,8 @@ function normalizeDate(value: string): string {
 
 const BUSINESS_PHONE = '881242909';
 const INBOUND_DESTINATION = '100';
+/** Teléfono público, grupo y extensiones Lipoout (no son el cliente en pantalla). */
+const LIPOOUT_INFRA_DIGITS = new Set(['881242909', '100', '1001', '1002']);
 /** Destinos de buzón de voz en Issabel (vms1002 es el activo en centralita). */
 const VOICEMAIL_DESTINATIONS = new Set(['vms1002', 'vms102']);
 
@@ -136,6 +139,53 @@ function digitsOnly(value: string): string {
   return value.replace(/\D/g, '');
 }
 
+function isExternalCustomerPhone(value: string): boolean {
+  const digits = digitsOnly(value);
+  if (digits.length < 9) return false;
+  return !LIPOOUT_INFRA_DIGITS.has(digits);
+}
+
+function computeDisplayType(call: Pick<NormalizedCall, 'direction' | 'missed_reason'>): CallDisplayType {
+  if (call.missed_reason === 'voicemail') return 'voicemail';
+  if (call.direction === 'outbound') return 'outbound';
+  if (call.direction === 'inbound') return 'inbound';
+  return 'missed';
+}
+
+function isCustomerFacingCall(call: Pick<NormalizedCall, 'customer_phone'>): boolean {
+  return isExternalCustomerPhone(call.customer_phone);
+}
+
+function canListenRecording(
+  call: Pick<NormalizedCall, 'missed_reason' | 'recording_path' | 'recording_url' | 'duration_seconds' | 'id'>,
+  phoneAccess: PhoneAccess,
+): boolean {
+  if (!call.recording_path && !(phoneAccess === 'all' && call.duration_seconds > 0 && call.id)) {
+    return false;
+  }
+  if (phoneAccess === 'all') return true;
+  if (phoneAccess === 'missed') return call.missed_reason === 'voicemail';
+  return false;
+}
+
+function resolveDisplayParty(
+  call: Pick<NormalizedCall, 'customer_phone'>,
+  customer: CustomerMatch | null | undefined,
+): string {
+  if (customer?.name) return customer.name;
+  const digits = digitsOnly(call.customer_phone);
+  if (isExternalCustomerPhone(digits)) return call.customer_phone || digits;
+  return call.customer_phone || '-';
+}
+
+function matchesDirectionFilter(call: NormalizedCall, direction?: Body['direction']): boolean {
+  if (!direction) return true;
+  const displayType = computeDisplayType(call);
+  if (direction === 'voicemail') return displayType === 'voicemail';
+  if (direction === 'missed') return displayType === 'missed';
+  return displayType === direction;
+}
+
 function customerPhoneForCall(row: RawCdr): string {
   const source = pick(row, ['src', 'source', 'caller', 'callerid', 'clid']);
   const destination = pick(row, ['dst', 'destination', 'callee', 'did']);
@@ -144,6 +194,8 @@ function customerPhoneForCall(row: RawCdr): string {
 }
 
 function isSuccessfullyAnswered(row: RawCdr): boolean {
+  const destination = pick(row, ['dst', 'destination', 'callee', 'did']).toLowerCase();
+  if (isVoicemailDestination(destination)) return false;
   const disposition = pick(row, ['disposition', 'status', 'dstchannel']).toUpperCase();
   const billsec = pickNumber(row, ['billsec', 'answered_seconds']);
   const duration = pickNumber(row, ['duration', 'duration_seconds']);
@@ -155,14 +207,13 @@ function deriveDirection(row: RawCdr, internalExtensionPattern: RegExp): CallDir
   const destination = pick(row, ['dst', 'destination', 'callee', 'did']).toLowerCase();
   const source = pick(row, ['src', 'source', 'caller', 'callerid', 'clid']);
 
+  if (isVoicemailDestination(destination)) return 'missed';
+
   // Contestada con conversación: nunca es perdida (evita CDR duplicados de ring/buzón).
   if (isSuccessfullyAnswered(row)) {
     if (digitsOnly(source) === BUSINESS_PHONE) return 'outbound';
     return 'inbound';
   }
-
-  // Buzón de voz: siempre perdida aunque el CDR diga entrante/recibida.
-  if (isVoicemailDestination(destination)) return 'missed';
 
   const explicit = pick(row, ['direction', 'call_direction', 'type', 'call_type']).toLowerCase();
   if (['outbound', 'saliente', 'realizada'].includes(explicit)) return 'outbound';
@@ -201,9 +252,23 @@ function recordingsBaseUrl(): string | null {
   }
 }
 
-function resolveRecordingUrl(row: RawCdr): string | null {
+function resolveRecordingPath(row: RawCdr, call: Pick<NormalizedCall, 'missed_reason' | 'id'>): string | null {
   const raw = pick(row, ['recording_url', 'recordingfile', 'recording']);
-  if (!raw) return null;
+  if (raw) return raw;
+  if (call.missed_reason === 'voicemail') {
+    const uid = pick(row, ['uniqueid', 'id']) || call.id;
+    if (uid) return `uniqueid:${uid}`;
+  }
+  return null;
+}
+
+function resolveRecordingUrl(row: RawCdr, recordingPath: string | null): string | null {
+  if (!recordingPath) return null;
+  if (/^https?:\/\//i.test(recordingPath)) return recordingPath;
+  if (recordingPath.startsWith('uniqueid:')) {
+    return buildRecordingFetchUrl(recordingPath);
+  }
+  const raw = recordingPath;
   if (/^https?:\/\//i.test(raw)) return raw;
 
   const base = recordingsBaseUrl();
@@ -226,19 +291,56 @@ function issabelAuthHeaders(): Record<string, string> {
   return headers;
 }
 
+function extractUniqueidFromRecording(recording: string): string | null {
+  const base = stripMonitorPath(recording).split('/').pop() ?? recording;
+  const match = base.match(/(\d+\.\d+)(?:\.(?:wav|gsm|WAV|GSM))?$/);
+  return match ? match[1] : null;
+}
+
+function buildCdrRecordingUrl(
+  cdrUrl: string,
+  params: { uniqueid?: string; file?: string },
+): string {
+  const url = new URL(cdrUrl);
+  if (params.uniqueid) {
+    url.searchParams.set('format', 'wav');
+    url.searchParams.set('uniqueid', params.uniqueid);
+  } else if (params.file) {
+    url.searchParams.set('file', params.file);
+  }
+  return url.toString();
+}
+
 function buildRecordingFetchUrl(recording: string): string | null {
+  const cdrUrl = Deno.env.get('ISSABEL_CDR_URL');
+
+  if (recording.startsWith('uniqueid:')) {
+    const uniqueid = recording.slice('uniqueid:'.length);
+    const template = Deno.env.get('ISSABEL_RECORDINGS_URL');
+    if (template) return template.replaceAll('{uniqueid}', uniqueid);
+    if (cdrUrl) return buildCdrRecordingUrl(cdrUrl, { uniqueid });
+    return null;
+  }
+
   if (/^https?:\/\//i.test(recording)) return recording;
 
+  const monitorFile = stripMonitorPath(recording);
   const apiUrl = Deno.env.get('ISSABEL_RECORDINGS_URL');
   if (apiUrl) {
     const url = new URL(apiUrl);
-    url.searchParams.set('file', stripMonitorPath(recording));
+    url.searchParams.set('file', monitorFile);
     return url.toString();
+  }
+
+  if (cdrUrl) {
+    const uniqueid = extractUniqueidFromRecording(monitorFile);
+    if (uniqueid) return buildCdrRecordingUrl(cdrUrl, { uniqueid });
+    return buildCdrRecordingUrl(cdrUrl, { file: monitorFile });
   }
 
   const base = recordingsBaseUrl();
   if (!base) return null;
-  return `${base}/${stripMonitorPath(recording)}`;
+  return `${base}/${monitorFile}`;
 }
 
 type NormalizedCall = {
@@ -276,7 +378,6 @@ function normalizeCall(row: RawCdr, index: number, internalExtensionPattern: Reg
         ? 'no_answer'
         : 'missed'
     : null;
-  const recordingPath = pick(row, ['recording_url', 'recordingfile', 'recording']) || null;
 
   let dispositionLabel = dispositionRaw;
   if (isVoicemailDestination(destination)) {
@@ -286,6 +387,8 @@ function normalizeCall(row: RawCdr, index: number, internalExtensionPattern: Reg
   } else if (!dispositionLabel && direction === 'missed') {
     dispositionLabel = 'Perdida';
   }
+
+  const recordingPath = resolveRecordingPath(row, { missed_reason: missedReason, id });
 
   return {
     id,
@@ -298,7 +401,7 @@ function normalizeCall(row: RawCdr, index: number, internalExtensionPattern: Reg
     duration_seconds: pickNumber(row, ['billsec', 'duration_seconds', 'duration']),
     disposition: dispositionLabel,
     missed_reason: missedReason,
-    recording_url: resolveRecordingUrl(row),
+    recording_url: resolveRecordingUrl(row, recordingPath),
     recording_path: recordingPath,
     answered,
   };
@@ -357,9 +460,13 @@ function callDedupeRank(call: NormalizedCall): number {
   return 0;
 }
 
+function isVoicemailLeg(call: NormalizedCall): boolean {
+  return call.missed_reason === 'voicemail' || isVoicemailDestination(call.callee.toLowerCase());
+}
+
 /**
  * Varias extensiones del mismo grupo generan varios CDR.
- * Si alguna contesta → una sola Recibida; si todas fallan a la vez → una Perdida.
+ * Si alguna contesta → una sola Recibida; si va a buzón → Buzón de voz; si todas fallan → Perdida.
  */
 function aggregateCallGroups(calls: NormalizedCall[], internalPattern: RegExp): NormalizedCall[] {
   const groups = new Map<string, NormalizedCall[]>();
@@ -378,8 +485,24 @@ function aggregateCallGroups(calls: NormalizedCall[], internalPattern: RegExp): 
       continue;
     }
 
+    const voicemailLegs = legs.filter((l) => isVoicemailLeg(l));
+    if (voicemailLegs.length > 0) {
+      const best = pickBestMissedLeg(voicemailLegs);
+      const recordingPath = best.recording_path ?? `uniqueid:${best.id}`;
+      result.push({
+        ...best,
+        direction: 'missed',
+        answered: false,
+        missed_reason: 'voicemail',
+        disposition: 'Buzón de voz',
+        recording_path: recordingPath,
+        recording_url: buildRecordingFetchUrl(recordingPath),
+      });
+      continue;
+    }
+
     const ringLegs = legs.filter((l) => isInboundRingLeg(l, internalPattern));
-    const answeredLegs = legs.filter((l) => l.answered);
+    const answeredLegs = legs.filter((l) => l.answered && !isVoicemailLeg(l));
     const missedRingLegs = ringLegs.filter(
       (l) => l.direction === 'missed' || l.missed_reason !== null,
     );
@@ -402,7 +525,7 @@ function aggregateCallGroups(calls: NormalizedCall[], internalPattern: RegExp): 
         ...best,
         direction: 'missed',
         answered: false,
-        disposition: best.missed_reason === 'voicemail' ? 'Buzón de voz' : 'Perdida',
+        disposition: 'Perdida',
       });
       continue;
     }
@@ -511,8 +634,10 @@ function buildIssabelUrl(baseUrl: string, body: Body): string {
   const url = new URL(baseUrl);
   if (body.from) url.searchParams.set('from', body.from);
   if (body.to) url.searchParams.set('to', body.to);
-  if (body.direction) url.searchParams.set('direction', body.direction);
-  url.searchParams.set('limit', String(Math.min(Math.max(body.limit ?? 300, 1), 1000)));
+  if (body.direction === 'outbound' || body.direction === 'inbound' || body.direction === 'missed') {
+    url.searchParams.set('direction', body.direction);
+  }
+  url.searchParams.set('limit', String(Math.min(Math.max(body.limit ?? 1000, 1), 2000)));
   return url.toString();
 }
 
@@ -566,17 +691,47 @@ async function loadCustomerMatches(
   return matches;
 }
 
+function applyRecordingAccess(
+  call: NormalizedCall & { display_type?: CallDisplayType; display_party?: string; customer?: CustomerMatch | null },
+  phoneAccess: PhoneAccess,
+) {
+  let recording_path = call.recording_path;
+  if (phoneAccess === 'all' && !recording_path && call.duration_seconds > 0 && call.id) {
+    recording_path = `uniqueid:${call.id}`;
+  }
+  const recording_url = recording_path ? buildRecordingFetchUrl(recording_path) : null;
+  return {
+    ...call,
+    recording_path,
+    recording_url,
+    can_listen_recording: canListenRecording({ ...call, recording_path, recording_url }, phoneAccess),
+  };
+}
+
 async function enrichCallsWithCustomers(
   admin: ReturnType<typeof createClient>,
   companyId: string | null,
   calls: Array<ReturnType<typeof normalizeCall>>,
+  phoneAccess: PhoneAccess,
 ) {
-  if (!companyId) return calls.map((call) => ({ ...call, customer: null }));
+  if (!companyId) {
+    return calls.map((call) => applyRecordingAccess({
+      ...call,
+      display_type: computeDisplayType(call),
+      display_party: resolveDisplayParty(call, null),
+      customer: null,
+    }, phoneAccess));
+  }
   const matches = await loadCustomerMatches(admin, companyId, calls);
-  return calls.map((call) => ({
-    ...call,
-    customer: matches.get(digitsOnly(call.customer_phone)) ?? null,
-  }));
+  return calls.map((call) => {
+    const customer = matches.get(digitsOnly(call.customer_phone)) ?? null;
+    return applyRecordingAccess({
+      ...call,
+      display_type: computeDisplayType(call),
+      display_party: resolveDisplayParty(call, customer),
+      customer,
+    }, phoneAccess);
+  });
 }
 
 function yesterdayDateString(): string {
@@ -691,8 +846,8 @@ serve(async (req) => {
           internalPattern,
         );
         const call = calls.find((row) => row.id === callId);
-        if (!call || call.direction !== 'missed') {
-          return err('Solo puede escuchar grabaciones de llamadas perdidas', 403);
+        if (!call || call.missed_reason !== 'voicemail') {
+          return err('Solo puede escuchar mensajes del buzón de voz', 403);
         }
       } catch (e) {
         return err(e instanceof Error ? e.message : 'Error al validar la llamada', 502);
@@ -704,16 +859,23 @@ serve(async (req) => {
       return err('Falta configurar ISSABEL_RECORDINGS_BASE_URL o ISSABEL_RECORDINGS_URL', 500);
     }
     const recordingResponse = await fetch(targetUrl, { headers: issabelAuthHeaders() });
+    const contentType = recordingResponse.headers.get('Content-Type') ?? '';
+    const bodyBytes = await recordingResponse.arrayBuffer();
     if (!recordingResponse.ok) {
-      const details = await recordingResponse.text();
-      return err(`No se pudo obtener la grabación (${recordingResponse.status}): ${details.slice(0, 200)}`, 502);
+      const details = new TextDecoder().decode(bodyBytes).slice(0, 200);
+      return err(`No se pudo obtener la grabación (${recordingResponse.status}): ${details}`, 502);
     }
-    const contentType = recordingResponse.headers.get('Content-Type') ?? 'audio/wav';
-    return new Response(recordingResponse.body, {
+    if (contentType.includes('application/json') || contentType.includes('text/')) {
+      return err(
+        'Issabel no devolvió audio. Hay que habilitar descarga WAV en api_cdr.php (recordingfile o format=wav).',
+        502,
+      );
+    }
+    return new Response(bodyBytes, {
       status: 200,
       headers: {
         ...corsHeaders,
-        'Content-Type': contentType,
+        'Content-Type': contentType || 'audio/wav',
       },
     });
   }
@@ -721,29 +883,49 @@ serve(async (req) => {
   const companyId = await resolveCompanyId(admin, user.id, body.company_id);
 
   let listBody: Body = { ...body };
-  if (phoneAccess === 'missed') {
-    listBody = { ...listBody, direction: 'missed' };
+  if (phoneAccess === 'missed' && (listBody.direction === 'outbound' || listBody.direction === 'inbound')) {
+    listBody.direction = undefined;
   }
 
   let calls: Array<ReturnType<typeof normalizeCall>>;
   try {
-    const fetchBody = listBody.action === 'calls.sync_missed' || listBody.direction === 'missed'
-      ? { ...listBody, from: listBody.from ?? yesterdayDateString(), direction: undefined, limit: listBody.limit ?? 500 }
+    const needsWideFetch = listBody.action === 'calls.sync_missed' ||
+      listBody.direction === 'missed' ||
+      listBody.direction === 'voicemail' ||
+      !listBody.direction;
+    const fetchBody = needsWideFetch
+      ? { ...listBody, direction: undefined, limit: listBody.limit ?? 1000 }
       : listBody;
     calls = await fetchNormalizedCalls(fetchBody, internalPattern);
   } catch (e) {
     return err(e instanceof Error ? e.message : 'Error Issabel', 502);
   }
 
-  const filtered = listBody.direction
-    ? calls.filter((call) => call.direction === listBody.direction)
-    : calls;
-  const enriched = await enrichCallsWithCustomers(admin, companyId, filtered);
+  let filtered = calls.filter(isCustomerFacingCall);
+  if (phoneAccess === 'missed') {
+    filtered = filtered.filter((call) => {
+      const displayType = computeDisplayType(call);
+      return displayType === 'missed' || displayType === 'voicemail';
+    });
+    if (listBody.direction === 'missed' || listBody.direction === 'voicemail') {
+      filtered = filtered.filter((call) => matchesDirectionFilter(call, listBody.direction));
+    }
+  } else {
+    filtered = filtered.filter((call) => matchesDirectionFilter(call, listBody.direction));
+  }
+  const enriched = await enrichCallsWithCustomers(admin, companyId, filtered, phoneAccess);
 
   if (body.action === 'calls.sync_missed') {
     if (!companyId) return err('Sin empresa activa', 400);
-    const sync = await syncMissedCallNotifications(admin, user.id, companyId, enriched);
-    return json({ ok: true, ...sync, calls: enriched.filter((call) => call.direction === 'missed') });
+    const missedCalls = enriched.filter((call) =>
+      call.display_type === 'missed' || call.display_type === 'voicemail'
+    );
+    const sync = await syncMissedCallNotifications(admin, user.id, companyId, missedCalls);
+    return json({
+      ok: true,
+      ...sync,
+      calls: missedCalls,
+    });
   }
 
   return json({ ok: true, calls: enriched });

@@ -21,6 +21,7 @@ import {
 const ROUTE_TITLES: Record<string, string> = {
   '/inicio': 'Inicio',
   '/agenda': 'Agenda',
+  '/agenda-suite': 'Agenda Suite',
   '/tpv': 'TPV',
   '/facturacion': 'Facturación',
   '/clientes': 'Clientes',

@@ -1,0 +1,8 @@
+# Copiar a la carpeta de Style (junto a mscomctl.exe) como SuiteSync.cfg
+# Obtener SYNC_TOKEN tras migración:
+#   SELECT sync_token FROM style_reservas_sync_config WHERE company_id = '5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4';
+
+SYNC_URL=https://supabase.lipoout.com/functions/v1/style-reservas-sync
+SYNC_TOKEN=PEGAR_TOKEN_AQUI
+SYNC_MAC=STYLE-VM
+SYNC_INTERVAL=30

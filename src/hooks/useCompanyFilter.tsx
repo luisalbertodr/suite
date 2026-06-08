@@ -53,6 +53,16 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     const { data, error } = await supabase.rpc('get_user_accessible_companies');
     if (error) {
       console.error('get_user_accessible_companies failed:', error);
+      const code = (error as { code?: string }).code;
+      const status = (error as { status?: number }).status;
+      const message = error.message ?? '';
+      if (
+        status === 401 ||
+        code === 'PGRST301' ||
+        /jwt|session|not authenticated/i.test(message)
+      ) {
+        await supabase.auth.signOut();
+      }
       return [];
     }
     return (data ?? []) as AccessibleCompany[];

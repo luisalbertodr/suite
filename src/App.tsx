@@ -10,6 +10,7 @@ import PlanillasPage from '@/pages/PlanillasPage';
 import FacturacionPage from '@/pages/FacturacionPage';
 import TPVPage from '@/pages/TPVPage';
 import AgendaPage from '@/pages/AgendaPage';
+import DunasoftAgendaPage from '@/pages/DunasoftAgendaPage';
 import GestionDocumentalPage from '@/pages/GestionDocumentalPage';
 import ConfiguracionPage from '@/pages/ConfiguracionPage';
 import RecursosCabinasPage from '@/pages/RecursosCabinasPage';
@@ -43,6 +44,9 @@ function App() {
           <ProtectedLayout><DashboardPage /></ProtectedLayout>
         } />
         <Route path="/agenda" element={
+          <ProtectedLayout><DunasoftAgendaPage /></ProtectedLayout>
+        } />
+        <Route path="/agenda-suite" element={
           <ProtectedLayout><AgendaPage /></ProtectedLayout>
         } />
         <Route path="/tpv" element={

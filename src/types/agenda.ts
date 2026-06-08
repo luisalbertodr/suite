@@ -58,6 +58,8 @@ export interface Appointment {
   status: 'confirmed' | 'pending' | 'cancelled';
   /** Cobro TPV / factura asociada a la cita. */
   paymentStatus?: 'paid' | 'invoiced' | 'pending_charge' | 'none';
+  /** Teléfono cliente (p. ej. réplica Dunasoft plan2009.tel1cli). */
+  clientPhone?: string;
   /** Fotos / documentos / consentimientos en daily_customer_log_assets. */
   attachments?: AppointmentAttachmentHints;
 }
