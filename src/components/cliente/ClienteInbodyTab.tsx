@@ -20,12 +20,14 @@ import {
 import { InbodyMetricRow, InbodyRangeBar } from './inbody/InbodyRangeBar';
 import { InbodyHistoryChart } from './inbody/InbodyHistoryChart';
 import { InbodySegmentalSilhouette } from './inbody/InbodySegmentalSilhouette';
+import { InbodyReportExport } from './inbody/InbodyReportExport';
 import { InbodyMetricHelp, InbodySectionHelp } from './inbody/InbodyMetricHelp';
 
 interface Props {
   customerId: string;
   taxId?: string | null;
   companyId?: string | null;
+  customerName?: string | null;
   compact?: boolean;
 }
 
@@ -223,7 +225,7 @@ function MeasurementReport({ measurement, compact }: { measurement: InbodyMeasur
   );
 }
 
-export const ClienteInbodyTab: React.FC<Props> = ({ customerId, taxId, companyId, compact }) => {
+export const ClienteInbodyTab: React.FC<Props> = ({ customerId, taxId, companyId, customerName, compact }) => {
   const { data: measurements, isLoading, error } = useInbodyMeasurements(customerId, taxId, companyId);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -272,6 +274,14 @@ export const ClienteInbodyTab: React.FC<Props> = ({ customerId, taxId, companyId
           measurements={measurements}
           selected={selected}
           onSelect={setSelectedId}
+          compact={compact}
+        />
+      )}
+
+      {selected && (
+        <InbodyReportExport
+          measurement={selected}
+          customerName={customerName ?? undefined}
           compact={compact}
         />
       )}

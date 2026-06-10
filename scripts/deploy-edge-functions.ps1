@@ -90,9 +90,9 @@ if ($toDeploy.Count -gt 0 -and (Test-Path $sharedDir)) {
 }
 
 if (-not $SkipRestart) {
-  Write-Host "Reiniciando $Container ..." -ForegroundColor Green
-  ssh $SshTarget "docker restart $Container && sleep 2 && docker logs --tail 15 $Container"
-  if ($LASTEXITCODE -ne 0) { throw "docker restart falló" }
+  Write-Host "Aplicando $Container (compose up, incluye env ISSABEL_*, etc.) ..." -ForegroundColor Green
+  ssh $SshTarget "cd /root/supabase-project && docker compose up -d functions && sleep 2 && docker logs --tail 15 $Container"
+  if ($LASTEXITCODE -ne 0) { throw "docker compose up functions falló" }
   # Kong cachea la IP de `functions`; sin esto → 502 en /functions/v1/*
   Write-Host "Reiniciando supabase-kong (DNS edge) ..." -ForegroundColor Green
   ssh $SshTarget "docker restart supabase-kong"

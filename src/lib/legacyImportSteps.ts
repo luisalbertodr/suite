@@ -53,11 +53,11 @@ export const LEGACY_IMPORT_STEPS: LegacyImportStep[] = [
   },
   {
     id: 'validate',
-    title: '6. Validar ingresos cobrados',
+    title: '6. Validar facturación vs Dunasoft',
     description:
-      'Compare totales con Dunasoft (faccab serie A, impcob1+impcob2). Revise el dashboard: solo cuenta facturas pagadas y ventas completadas.',
+      'Compare totales con Dunasoft (faccab serie A, totfac). El dashboard suma facturas emitidas (issue_date) más TPV sin facturar; las importaciones legacy usan rebuild faccab 1:1.',
     kind: 'manual',
-    command: 'python scripts/diagnose_cobrado_vs_facturado.py',
+    command: 'python scripts/audit_dunasoft_monthly_medicina_estetica.py',
   },
 ];
 

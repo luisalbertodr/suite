@@ -1,8 +1,8 @@
 # Parches VFP Style → Suite
 
-Fuente maestro para compilar: `C:\Duna\Export\`  
-Guía completa: `C:\Duna\Export\REFox-COMPILAR.md`
+Fuente maestro: `C:\Duna\Export\PROGS\`  
+Guía: `C:\Duna\Export\REFox-COMPILAR.md`
 
-Los `.prg` de este directorio (`suite_reservas_sync.prg`, `suite_full_unlock.prg`) deben mantenerse **sincronizados** con `C:\Duna\Export\PROGS\`.
+**Despliegue en Style:** copiar solo `suite_full_unlock.prg` + `SuiteSync.cfg` a la raíz junto a `duna.exe` (el sync va embebido en ese PRG).
 
-Parches ReFox para `http.vcx`: ver `patches/httpasp_*.prg`.
+Recompilar exe cuando cambien `general.prg` o `funciones.prg` (Replace component ReFox).

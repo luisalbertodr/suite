@@ -85,11 +85,13 @@ $out | Set-Content $envPath -Encoding UTF8
     ""
 ) | Set-Content (Join-Path $StyleRemote "SuiteSync.cfg") -Encoding ASCII
 
-Copy-Item (Join-Path $VfpLocal "suite_reservas_sync.prg") (Join-Path $StyleRemote "suite_reservas_sync.prg") -Force
 Copy-Item (Join-Path $VfpLocal "suite_full_unlock.prg") (Join-Path $StyleRemote "suite_full_unlock.prg") -Force
-Copy-Item (Join-Path $ExportProgs "funciones.prg") (Join-Path $StyleRemote "funciones.prg") -Force
-Copy-Item (Join-Path $ExportProgs "general.prg") (Join-Path $StyleRemote "general.prg") -Force
 Copy-Item (Join-Path $VfpLocal "activar_suite_sync.prg") (Join-Path $StyleRemote "activar_suite_sync.prg") -Force
+Copy-Item (Join-Path $VfpLocal "TestStyleSync.ps1") (Join-Path $StyleRemote "TestStyleSync.ps1") -Force
+Copy-Item (Join-Path $VfpLocal "IniciarStyle.bat") (Join-Path $StyleRemote "IniciarStyle.bat") -Force
+# No copiar suite_reservas_sync.prg: puede pisar la version embebida en suite_full_unlock.prg
+$oldSync = Join-Path $StyleRemote "suite_reservas_sync.prg"
+if (Test-Path $oldSync) { Remove-Item $oldSync -Force; Write-Host "Eliminado suite_reservas_sync.prg obsoleto" }
 
 $progsDest = Join-Path $StyleRemote "PROGS"
 New-Item -ItemType Directory -Force -Path $progsDest | Out-Null

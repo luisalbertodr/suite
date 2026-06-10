@@ -80,7 +80,20 @@ export interface InbodyMeasurement {
 export type InbodyRangeStatus = 'low' | 'normal' | 'high' | 'unknown';
 
 export function normInbodyUserId(value: string | null | undefined): string {
-  return (value || '').replace(/[\s\-.]/g, '').toUpperCase();
+  return (value || '').replace(/[\s\-.]/g, '').replace(/\u0000/g, '').toUpperCase();
+}
+
+const SPANISH_DNI_LETTERS = 'TRWAGMYFPDXBNJZSQVHLCKE';
+
+/** Completa letra de control si el ID InBody trae solo 7-8 dígitos (p. ej. 36108902 → 36108902Y). */
+export function completeSpanishDni(userId: string | null | undefined): string {
+  const norm = normInbodyUserId(userId);
+  if (/^\d{7,8}$/.test(norm)) {
+    const num = parseInt(norm.padStart(8, '0'), 10);
+    const letter = SPANISH_DNI_LETTERS[num % 23] ?? '';
+    return `${norm.padStart(8, '0')}${letter}`;
+  }
+  return norm;
 }
 
 /** Parte numérica del DNI/NIE sin letra de control (clave de cruce entre variantes). */

@@ -1,22 +1,20 @@
 #!/usr/bin/env python3
 """
-Orquesta la restauración de cobros/facturas legacy y cierres de caja Dunasoft.
+Orquesta la restauración de cobros/facturas legacy alineada con Dunasoft (faccab).
 
 Orden:
   1. link_agenda_customer_ids
-  2. promote_legacy_agenda_sales (tickets LEG-*)
-  3. promote_legacy_sales_invoices
-  4. promote_legacy_unmatched_faccab
-  5. rebuild_legacy_invoices_sequential (numeración F{YYYY}-{NNNNN})
-  6. promote_legacy_cash_register
+  2. align_billing_with_dunasoft_faccab (purga + rebuild 1:1 desde legacy.faccab)
+  3. promote_legacy_cash_register (opcional)
 
-Por defecto no toca citas/tickets/facturas de hoy en adelante (--no-auto-from hoy).
+Los pasos promote_legacy_agenda_sales / promote_legacy_sales_invoices quedaron
+obsoletos: generaban doble conteo frente a totfac Dunasoft.
 
 Uso:
   python scripts/run_legacy_billing_restore.py --dry-run
   python scripts/run_legacy_billing_restore.py --apply
   python scripts/run_legacy_billing_restore.py --apply --skip-cash
-  python scripts/run_legacy_billing_restore.py --apply --only renumber,cash
+  python scripts/run_legacy_billing_restore.py --apply --only align,cash
 """
 from __future__ import annotations
 
@@ -38,10 +36,7 @@ PYTHON = sys.executable
 
 STEPS = (
     "link",
-    "sales",
-    "invoices",
-    "unmatched",
-    "renumber",
+    "align",
     "cash",
 )
 
@@ -76,7 +71,6 @@ def main() -> int:
         help=f"Sin auto desde (default hoy: {default_no_auto_from().isoformat()})",
     )
     ap.add_argument("--skip-cash", action="store_true")
-    ap.add_argument("--skip-renumber", action="store_true")
     ap.add_argument(
         "--only",
         default="",
@@ -120,42 +114,13 @@ def main() -> int:
             link_argv.extend(company_args)
         plan.append(("link", link_argv))
 
-    if want("sales"):
-        plan.append(
-            (
-                "sales",
-                ["promote_legacy_agenda_sales.py"] + company_args + date_args
-                + (["--dry-run"] if dry_run else []),
-            )
-        )
-    if want("invoices"):
-        plan.append(
-            (
-                "invoices",
-                ["promote_legacy_sales_invoices.py"] + company_args + date_args
-                + (["--dry-run"] if dry_run else []),
-            )
-        )
-    if want("unmatched"):
-        plan.append(
-            (
-                "unmatched",
-                ["promote_legacy_unmatched_faccab.py"] + company_args + date_args
-                + (["--dry-run"] if dry_run else []),
-            )
-        )
-    if want("renumber") and not args.skip_renumber:
-        ren_argv = ["rebuild_legacy_invoices_sequential.py"] + company_args + [
-            "--no-auto-from",
-            no_auto,
-            "--through",
-            through,
-        ]
+    if want("align"):
+        align_argv = ["align_billing_with_dunasoft_faccab.py"]
         if args.apply:
-            ren_argv.append("--apply")
+            align_argv.append("--apply")
         else:
-            ren_argv.append("--dry-run")
-        plan.append(("renumber", ren_argv))
+            align_argv.append("--dry-run")
+        plan.append(("align", align_argv))
 
     if want("cash") and not args.skip_cash:
         cash_argv = ["promote_legacy_cash_register.py"] + company_args + [

@@ -1,18 +1,23 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Headphones, Phone, RefreshCw, Search } from 'lucide-react';
+import { Headphones, Megaphone, Phone, RefreshCw, Search } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useRegisterTopBarContent } from '@/components/TopBarContentContext';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { usePermissions } from '@/hooks/usePermissions';
 import { getPhoneCallsScope } from '@/lib/phonePermissions';
+import { metaLeadForCall, usePhoneMetaLeadMatch } from '@/hooks/usePhoneMetaLeadMatch';
+import type { MarketingLead } from '@/hooks/useMarketingLeads';
+import { MarketingPromoteToCustomerDialog } from '@/components/marketing/MarketingPromoteToCustomerDialog';
+import { isRecentMetaLead } from '@/components/whatsapp/whatsappUtils';
 import {
   callDisplayClasses,
   callDisplayLabels,
   callRecordingSource,
   canListenCallRecording,
   getCallDisplayType,
+  PHONE_CALLS_POLL_INTERVAL_MS,
   type CallDisplayType,
 } from '@/lib/lipooutPhone';
 import { Button } from '@/components/ui/button';
@@ -172,8 +177,11 @@ function formatDateTime(value: string): string {
 
 export const Telefono: React.FC = () => {
   const [searchParams] = useSearchParams();
+  const queryClient = useQueryClient();
   const { companyId } = useCompanyFilter();
   const { hasPermission } = usePermissions();
+  const [promoteLead, setPromoteLead] = useState<MarketingLead | null>(null);
+  const [loadingPromoteLeadId, setLoadingPromoteLeadId] = useState<string | null>(null);
   const phoneScope = getPhoneCallsScope(hasPermission);
   const missedOnly = phoneScope === 'missed';
   const today = useMemo(() => new Date(), []);
@@ -198,6 +206,9 @@ export const Telefono: React.FC = () => {
   const callsQuery = useQuery({
     queryKey: ['issabel-calls', companyId, from, to, effectiveDirection, phoneScope],
     enabled: !!companyId && phoneScope !== 'none',
+    staleTime: PHONE_CALLS_POLL_INTERVAL_MS - 2_000,
+    refetchInterval: PHONE_CALLS_POLL_INTERVAL_MS,
+    refetchIntervalInBackground: true,
     queryFn: async () => {
       const { data, error } = await supabase.functions.invoke('issabel-calls', {
         body: {
@@ -206,7 +217,7 @@ export const Telefono: React.FC = () => {
           from,
           to,
           direction: effectiveDirection === 'all' ? undefined : effectiveDirection,
-          limit: 1000,
+          limit: 500,
         },
       });
 
@@ -217,14 +228,38 @@ export const Telefono: React.FC = () => {
   });
 
   const calls = callsQuery.data ?? [];
+  const { metaLeadByPhoneNorm } = usePhoneMetaLeadMatch(calls);
+
+  const openPromoteLead = async (leadId: string) => {
+    setLoadingPromoteLeadId(leadId);
+    try {
+      const { data, error } = await supabase
+        .from('marketing_leads')
+        .select('*')
+        .eq('id', leadId)
+        .maybeSingle();
+      if (error) throw error;
+      if (data) setPromoteLead(data);
+    } catch (e) {
+      console.error('No se pudo cargar el lead Meta', e);
+    } finally {
+      setLoadingPromoteLeadId(null);
+    }
+  };
+
   const filteredCalls = calls.filter((call) => {
     const needle = search.trim().toLowerCase();
     if (!needle) return true;
     const displayType = getCallDisplayType(call);
+    const metaLead = metaLeadForCall(call, metaLeadByPhoneNorm);
     return [
       call.display_party,
       call.customer_phone,
       call.customer?.name,
+      metaLead?.name,
+      metaLead?.campaign,
+      metaLead?.formName,
+      'meta',
       callDisplayLabels[displayType],
     ]
       .filter(Boolean)
@@ -242,6 +277,40 @@ export const Telefono: React.FC = () => {
         </Link>
       );
     }
+
+    const metaLead = metaLeadForCall(call, metaLeadByPhoneNorm);
+    if (metaLead) {
+      const isLoadingLead = loadingPromoteLeadId === metaLead.id;
+      return (
+        <div className="flex flex-col gap-0.5">
+          <button
+            type="button"
+            disabled={isLoadingLead}
+            onClick={() => void openPromoteLead(metaLead.id)}
+            className="inline-flex w-fit max-w-full items-center gap-1.5 text-left font-medium text-blue-600 hover:underline disabled:opacity-60"
+            title="Crear cliente con datos del lead Meta"
+          >
+            <span className="truncate">{metaLead.name}</span>
+            <span
+              className={`inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                isRecentMetaLead(metaLead.externalCreatedAt)
+                  ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200'
+                  : 'bg-sky-50 text-sky-700 dark:bg-sky-950 dark:text-sky-300'
+              }`}
+            >
+              <Megaphone className="h-2.5 w-2.5" />
+              META
+            </span>
+          </button>
+          {(call.customer_phone || call.display_party) && (
+            <span className="text-xs text-muted-foreground">
+              {call.customer_phone || call.display_party}
+            </span>
+          )}
+        </div>
+      );
+    }
+
     return call.display_party || call.customer_phone || '-';
   };
 
@@ -301,6 +370,17 @@ export const Telefono: React.FC = () => {
 
   return (
     <div className="space-y-4">
+      <MarketingPromoteToCustomerDialog
+        lead={promoteLead}
+        open={!!promoteLead}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPromoteLead(null);
+            void queryClient.invalidateQueries({ queryKey: ['issabel-calls'] });
+            void queryClient.invalidateQueries({ queryKey: ['phone-meta-leads'] });
+          }
+        }}
+      />
       <Card>
         <CardHeader>
           <div className="grid gap-2 md:grid-cols-[170px_170px_minmax(220px,1fr)]">

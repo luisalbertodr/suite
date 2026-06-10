@@ -596,7 +596,10 @@ async function fetchNormalizedCalls(
     ? { ...body, from: body.from ?? yesterdayDateString(), direction: undefined, limit: body.limit ?? 500 }
     : body;
 
-  const response = await fetch(buildIssabelUrl(cdrUrl, effectiveBody as Body), { headers });
+  const response = await fetch(buildIssabelUrl(cdrUrl, effectiveBody as Body), {
+    headers,
+    signal: AbortSignal.timeout(25_000),
+  });
   if (!response.ok) {
     const details = await response.text();
     throw new Error(`Issabel respondió HTTP ${response.status}: ${details.slice(0, 300)}`);
@@ -663,6 +666,13 @@ function phoneMatches(candidate: string | null | undefined, phone: string): bool
   return min >= 6 && (a.endsWith(b.slice(-min)) || b.endsWith(a.slice(-min)));
 }
 
+function phoneSuffix(phone: string): string | null {
+  const d = digitsOnly(phone);
+  if (d.length >= 9) return d.slice(-9);
+  if (d.length >= 6) return d;
+  return null;
+}
+
 async function loadCustomerMatches(
   admin: ReturnType<typeof createClient>,
   companyId: string,
@@ -672,15 +682,36 @@ async function loadCustomerMatches(
   const matches = new Map<string, CustomerMatch>();
   if (phones.length === 0) return matches;
 
-  const { data, error } = await admin
-    .from('customers')
-    .select('id, name, phone, phone_mobile, phone_home')
-    .eq('company_id', companyId)
-    .limit(10000);
-  if (error) throw error;
+  const suffixes = [...new Set(
+    phones.map((phone) => phoneSuffix(phone)).filter((suffix): suffix is string => !!suffix),
+  )];
 
-  const customers = (data ?? []) as CustomerMatch[];
+  const customers: CustomerMatch[] = [];
+  const chunkSize = 200;
+  for (let i = 0; i < suffixes.length; i += chunkSize) {
+    const chunk = suffixes.slice(i, i + chunkSize);
+    const { data, error } = await admin
+      .from('customers')
+      .select('id, name, phone, phone_mobile, phone_home, phone_norm')
+      .eq('company_id', companyId)
+      .in('phone_norm', chunk);
+    if (error) throw error;
+    customers.push(...((data ?? []) as CustomerMatch[]));
+  }
+
+  const byNorm = new Map<string, CustomerMatch>();
+  for (const row of customers) {
+    const norm = phoneSuffix((row as CustomerMatch & { phone_norm?: string | null }).phone_norm ?? '');
+    if (norm && !byNorm.has(norm)) byNorm.set(norm, row);
+  }
+
   for (const phone of phones) {
+    const suffix = phoneSuffix(phone);
+    const exact = suffix ? byNorm.get(suffix) : undefined;
+    if (exact) {
+      matches.set(phone, exact);
+      continue;
+    }
     const customer = customers.find((row) =>
       phoneMatches(row.phone, phone) ||
       phoneMatches(row.phone_mobile, phone) ||
@@ -747,20 +778,33 @@ async function syncMissedCallNotifications(
   calls: Awaited<ReturnType<typeof enrichCallsWithCustomers>>,
 ) {
   const missed = calls.filter((call) => call.direction === 'missed');
-  let created = 0;
+  if (missed.length === 0) return { created: 0, missed: 0 };
 
-  for (const call of missed) {
-    const { data: existing, error: existingError } = await admin
-      .from('notifications')
-      .select('id')
-      .eq('company_id', companyId)
-      .eq('user_id', userId)
-      .eq('type', 'phone_missed_call')
-      .contains('metadata', { issabel_call_id: call.id })
-      .limit(1);
-    if (existingError) throw existingError;
-    if (existing?.length) continue;
+  const candidateIds = missed.slice(0, 100).map((call) => call.id);
+  if (candidateIds.length === 0) return { created: 0, missed: missed.length };
 
+  const orFilter = candidateIds
+    .map((id) => `metadata->>issabel_call_id.eq.${id}`)
+    .join(',');
+  const { data: existingRows, error: existingError } = await admin
+    .from('notifications')
+    .select('metadata')
+    .eq('company_id', companyId)
+    .eq('user_id', userId)
+    .eq('type', 'phone_missed_call')
+    .or(orFilter);
+  if (existingError) throw existingError;
+
+  const existingIds = new Set<string>();
+  for (const row of existingRows ?? []) {
+    const meta = row.metadata as { issabel_call_id?: string } | null;
+    if (meta?.issabel_call_id) existingIds.add(String(meta.issabel_call_id));
+  }
+
+  const pending = missed.filter((call) => !existingIds.has(call.id)).slice(0, 100);
+  if (pending.length === 0) return { created: 0, missed: missed.length };
+
+  const inserts = pending.map((call) => {
     const customerName = call.customer?.name;
     const phone = call.customer_phone || call.caller || 'número desconocido';
     const isVoicemail = call.missed_reason === 'voicemail';
@@ -772,7 +816,7 @@ async function syncMissedCallNotifications(
         ? `${phone} dejó un mensaje en el buzón de voz.`
         : `${phone} ha llamado y no se ha respondido.`;
 
-    const { error: insertError } = await admin.from('notifications').insert({
+    return {
       company_id: companyId,
       user_id: userId,
       from_user_id: userId,
@@ -790,12 +834,13 @@ async function syncMissedCallNotifications(
         recording_url: call.recording_url ?? null,
         recording_path: call.recording_path ?? null,
       },
-    });
-    if (insertError) throw insertError;
-    created += 1;
-  }
+    };
+  });
 
-  return { created, missed: missed.length };
+  const { error: insertError } = await admin.from('notifications').insert(inserts);
+  if (insertError) throw insertError;
+
+  return { created: inserts.length, missed: missed.length };
 }
 
 serve(async (req) => {
@@ -894,7 +939,7 @@ serve(async (req) => {
       listBody.direction === 'voicemail' ||
       !listBody.direction;
     const fetchBody = needsWideFetch
-      ? { ...listBody, direction: undefined, limit: listBody.limit ?? 1000 }
+      ? { ...listBody, direction: undefined, limit: Math.min(listBody.limit ?? 300, 500) }
       : listBody;
     calls = await fetchNormalizedCalls(fetchBody, internalPattern);
   } catch (e) {
@@ -913,20 +958,21 @@ serve(async (req) => {
   } else {
     filtered = filtered.filter((call) => matchesDirectionFilter(call, listBody.direction));
   }
-  const enriched = await enrichCallsWithCustomers(admin, companyId, filtered, phoneAccess);
 
   if (body.action === 'calls.sync_missed') {
     if (!companyId) return err('Sin empresa activa', 400);
-    const missedCalls = enriched.filter((call) =>
-      call.display_type === 'missed' || call.display_type === 'voicemail'
-    );
-    const sync = await syncMissedCallNotifications(admin, user.id, companyId, missedCalls);
+    const missedRaw = filtered.filter((call) => {
+      const displayType = computeDisplayType(call);
+      return displayType === 'missed' || displayType === 'voicemail';
+    });
+    const enrichedMissed = await enrichCallsWithCustomers(admin, companyId, missedRaw, phoneAccess);
+    const sync = await syncMissedCallNotifications(admin, user.id, companyId, enrichedMissed);
     return json({
       ok: true,
       ...sync,
-      calls: missedCalls,
     });
   }
 
+  const enriched = await enrichCallsWithCustomers(admin, companyId, filtered, phoneAccess);
   return json({ ok: true, calls: enriched });
 });

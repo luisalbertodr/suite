@@ -90,7 +90,15 @@ def build_pipeline_step_list(
             ),
         ]
 
-        if not no_sales:
+        if not no_invoices:
+            promote_tail.append(
+                PipelineStepDef(
+                    "Facturación Dunasoft (faccab rebuild)",
+                    lambda: py("align_billing_with_dunasoft_faccab.py", "--apply"),
+                ),
+            )
+        elif not no_sales:
+            # Caso excepcional: solo tickets TPV por cita (sin facturas faccab).
             sales_args = list(company_args)
             if include_fallback:
                 sales_args.append("--include-fallback")
@@ -99,24 +107,6 @@ def build_pipeline_step_list(
                     "Ventas legacy (impcob)",
                     lambda: py("promote_legacy_agenda_sales.py", *sales_args),
                 ),
-            )
-
-        if not no_invoices:
-            promote_tail.extend(
-                [
-                    PipelineStepDef(
-                        "Facturas legacy",
-                        lambda: py("promote_legacy_sales_invoices.py", *company_args),
-                    ),
-                    PipelineStepDef(
-                        "Facturas faccab sin cita",
-                        lambda: py("promote_legacy_unmatched_faccab.py", *company_args),
-                    ),
-                    PipelineStepDef(
-                        "Corregir fechas factura",
-                        lambda: py("fix_legacy_invoice_dates.py", *company_args),
-                    ),
-                ],
             )
 
         steps.extend(promote_tail)

@@ -18,7 +18,22 @@ type InvoiceRow = {
 type SaleRow = {
   total_amount?: number | null;
   created_at?: string | null;
+  ticket_number?: string | null;
+  notes?: string | null;
 };
+
+/** Ventas TPV legacy sin factura que duplican totfac ya importado desde faccab. */
+export function isLegacyOrphanSaleForRevenue(row: {
+  ticket_number?: string | null;
+  notes?: string | null;
+}): boolean {
+  const ticket = String(row.ticket_number ?? '').trim();
+  if (ticket.startsWith('LEG-') || /^FAC-\d/i.test(ticket)) return true;
+  const notes = String(row.notes ?? '');
+  if (notes.includes('legacy_revenue') || notes.includes('Legacy FACCAB')) return true;
+  if (/legacy/i.test(notes) && notes.includes('appointment_id')) return true;
+  return false;
+}
 
 const PAGE = 1000;
 
@@ -96,10 +111,10 @@ async function loadSalesWithoutInvoice(
   toIso: string,
 ): Promise<SaleRow[]> {
   try {
-    return await fetchAllPages<SaleRow>((from, to) =>
+    const rows = await fetchAllPages<SaleRow>((from, to) =>
       supabase
         .from('sales')
-        .select('total_amount, created_at')
+        .select('total_amount, created_at, ticket_number, notes')
         .eq('company_id', companyId)
         .eq('status', 'completed')
         .is('invoice_id', null)
@@ -108,6 +123,7 @@ async function loadSalesWithoutInvoice(
         .order('created_at')
         .range(from, to),
     );
+    return rows.filter((row) => !isLegacyOrphanSaleForRevenue(row));
   } catch (err) {
     if (!isSchemaColumnError(err as { code?: string; message?: string })) throw err;
     return [];
@@ -123,6 +139,11 @@ function sumInvoices(rows: InvoiceRow[]): number {
 
 function sumSales(rows: SaleRow[]): number {
   return rows.reduce((s, row) => s + Number(row.total_amount ?? 0), 0);
+}
+
+/** Facturación alineada con Dunasoft (totfac / devengo): solo facturas emitidas. */
+function billingTotalFromInvoices(invoiceTotal: number): number {
+  return invoiceTotal;
 }
 
 function bucketInvoices(rows: InvoiceRow[]): Map<string, number> {
@@ -175,7 +196,7 @@ export async function fetchDashboardBilling(
     const monthStart = new Date(d.getFullYear(), d.getMonth(), 1);
     const monthEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
     const key = localMonthKey(monthStart);
-    const total = (invBuckets.get(key) ?? 0) + (saleBuckets.get(key) ?? 0);
+    const total = invBuckets.get(key) ?? 0;
     series.push({ monthStart, monthEnd, total });
   }
 
@@ -194,7 +215,7 @@ export async function fetchDashboardBilling(
     currentMonth: {
       invoices: invTotal,
       salesWithoutInvoice: salesTotal,
-      total: invTotal + salesTotal,
+      total: billingTotalFromInvoices(invTotal),
     },
     series,
   };
@@ -220,7 +241,7 @@ export async function fetchPeriodRevenue(
   return {
     invoices: invTotal,
     salesWithoutInvoice: salesTotal,
-    total: invTotal + salesTotal,
+    total: billingTotalFromInvoices(invTotal),
   };
 }
 
@@ -264,7 +285,9 @@ export async function fetchSalesWithoutInvoiceRows(
 
   if (res.error) throw res.error;
 
-  return (res.data ?? []).filter((row) => !(row as SaleRevenueRow).invoice_id) as SaleRevenueRow[];
+  return (res.data ?? [])
+    .filter((row) => !(row as SaleRevenueRow).invoice_id)
+    .filter((row) => !isLegacyOrphanSaleForRevenue(row as SaleRevenueRow)) as SaleRevenueRow[];
 }
 
 /** Serie mensual de facturación (preferir fetchDashboardBilling en el dashboard). */

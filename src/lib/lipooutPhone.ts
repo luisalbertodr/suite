@@ -1,5 +1,8 @@
 import type { PhoneCallsScope } from '@/lib/phonePermissions';
 
+/** Intervalo de sondeo de llamadas nuevas (Issabel). */
+export const PHONE_CALLS_POLL_INTERVAL_MS = 15_000;
+
 /** Teléfono público, grupo de llamadas y extensiones internas Lipoout (no mostrar como cliente). */
 export const LIPOOUT_INFRA_DIGITS = new Set(['881242909', '100', '1001', '1002']);
 

@@ -1,20 +1,20 @@
-* Activar sync Suite + unlock completo (sin servidores Dunasoft).
+* Activar sync Suite manualmente (si duna.exe aun no lleva general.prg parcheado).
+* En Style, ventana de comandos VFP: DO activar_suite_sync.prg
 
-* Ejecutar tras abrir Style: DO activar_suite_sync.prg
-
-* O en acceso directo: Style.exe -cDO activar_suite_sync
-
-
-
-SET PROCEDURE TO suite_full_unlock ADDITIVE
-
-SET PROCEDURE TO suite_reservas_sync ADDITIVE
-
-SET PROCEDURE TO funciones ADDITIVE
-
-DO SuiteApplyFullUnlock
-
+LOCAL lcb
+lcb = ADDBS(SYS(5)+SYS(2003))
+IF FILE(lcb+"suite_full_unlock.prg")
+   SET PROCEDURE TO (lcb+"suite_full_unlock.prg") ADDITIVE
+ELSE
+   IF FILE(lcb+"PROGS\suite_full_unlock.prg")
+      SET PROCEDURE TO (lcb+"PROGS\suite_full_unlock.prg") ADDITIVE
+   ELSE
+      MESSAGEBOX("No se encuentra suite_full_unlock.prg en "+lcb, 16, "Suite sync")
+      RETURN
+   ENDIF
+ENDIF
+IF TYPE("SuiteApplyFullUnlock")#"U"
+   DO SuiteApplyFullUnlock
+ENDIF
 DO Suite_SyncInit
-
-WAIT WINDOW NOWAIT "Suite: sync activo, Dunasoft offline, funciones deslimitadas"
-
+WAIT WINDOW NOWAIT "Suite sync activado. Log: Usuarios\_suite_sync.log"

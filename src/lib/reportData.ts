@@ -402,26 +402,11 @@ async function fetchFacturacionMensual(scope: Scope, filters: ReportFilters) {
     monthly[mes].numFacturas += 1;
   }
 
-  for (const cid of scope.billingCompanyIds) {
-    const tpv = await fetchSalesWithoutInvoiceRows(
-      cid,
-      filters.fechaDesde ? new Date(`${dateFrom(filters)}T00:00:00`).toISOString() : undefined,
-      dateToIsoEnd(filters),
-      filters.cliente && filters.cliente !== 'todos' ? filters.cliente : undefined,
-    );
-    for (const sale of tpv) {
-      const mes = format(new Date(sale.created_at), 'MMMM yyyy', { locale: es });
-      if (!monthly[mes]) monthly[mes] = { totalFacturado: 0, numFacturas: 0, numTickets: 0 };
-      monthly[mes].totalFacturado += Number(sale.total_amount ?? 0);
-      monthly[mes].numTickets += 1;
-    }
-  }
-
   return Object.entries(monthly).map(([mes, d]) => ({
     mes,
     totalFacturado: d.totalFacturado,
     numFacturas: d.numFacturas,
-    variacion: d.numTickets > 0 ? `${d.numTickets} TPV` : '—',
+    variacion: '—',
   }));
 }
 
@@ -439,21 +424,11 @@ async function fetchFacturacionPorCliente(scope: Scope, filters: ReportFilters) 
     byClient[name].numFacturas += 1;
   }
 
-  for (const cid of scope.billingCompanyIds) {
-    const tpv = await fetchSalesWithoutInvoiceRows(cid);
-    for (const sale of tpv) {
-      const name = sale.customer_name || 'Cliente desconocido';
-      if (!byClient[name]) byClient[name] = { totalFacturado: 0, numFacturas: 0, numTickets: 0 };
-      byClient[name].totalFacturado += Number(sale.total_amount ?? 0);
-      byClient[name].numTickets += 1;
-    }
-  }
-
   return Object.entries(byClient).map(([cliente, d]) => ({
     cliente,
     totalFacturado: d.totalFacturado,
-    numFacturas: d.numFacturas + d.numTickets,
-    promedio: d.numFacturas + d.numTickets > 0 ? d.totalFacturado / (d.numFacturas + d.numTickets) : 0,
+    numFacturas: d.numFacturas,
+    promedio: d.numFacturas > 0 ? d.totalFacturado / d.numFacturas : 0,
   }));
 }
 

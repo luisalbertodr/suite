@@ -73,7 +73,16 @@ type QueueRow = {
   operation: string;
   idplan: number;
   payload: Record<string, unknown>;
+  created_at: string;
 };
+
+function formatTsCompact(iso: string): string {
+  const t = iso.trim();
+  if (/^\d+$/.test(t) && t.length >= 10) return t;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return String(Math.floor(d.getTime() / 1000));
+}
 
 function payloadField(payload: Record<string, unknown>, key: string): string {
   const v = payload[key];
@@ -117,6 +126,11 @@ function buildGetReservasXml(rows: QueueRow[], macand: string): string {
     parts.push(`<eliminar>${isDelete ? 'SI' : 'NO'}</eliminar>`);
     parts.push(`<collet>${xmlEscape(payloadField(newBlock, 'collet'))}</collet>`);
     parts.push(`<colfon>${xmlEscape(payloadField(newBlock, 'colfon'))}</colfon>`);
+    const modificado =
+      payloadField(newBlock, 'suite_updated_at') ||
+      payloadField(p, 'suite_updated_at') ||
+      formatTsCompact(row.created_at);
+    parts.push(`<modificado>${xmlEscape(modificado)}</modificado>`);
     parts.push('</reservas_web>');
   }
   parts.push('</raiz>');
@@ -166,7 +180,7 @@ serve(async (req) => {
     const { data: rows, error } = await admin
       .schema('dunasoft')
       .from('style_reservas_queue')
-      .select('id, operation, idplan, payload')
+      .select('id, operation, idplan, payload, created_at')
       .eq('company_id', companyId)
       .is('delivered_at', null)
       .order('id', { ascending: true })
@@ -202,6 +216,7 @@ serve(async (req) => {
       p_servicios: pick(params, 'servicios'),
       p_colfon: parseNumeric(pick(params, 'colfon')),
       p_collet: parseNumeric(pick(params, 'collet')),
+      p_style_modified_at: pick(params, 'modificado') || null,
     });
 
     if (error) {

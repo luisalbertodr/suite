@@ -127,7 +127,7 @@ def main() -> None:
         co = str(r["billing_co"])
         inv_by_ym_billing.setdefault(ym, {})[co] = Decimal(str(r["total"] or 0))
 
-    # Suite: TPV / ventas sin factura (created_at) — atribuir por company_id de la venta
+    # Suite: TPV / ventas sin factura (created_at) — excluir huérfanas legacy (duplican faccab)
     cur.execute(
         f"""
         SELECT to_char(s.created_at AT TIME ZONE 'Europe/Madrid', 'YYYY-MM') AS ym,
@@ -140,6 +140,16 @@ def main() -> None:
           AND s.created_at >= %s::timestamptz
           AND s.created_at < %s::timestamptz
           AND s.company_id IN (%s::uuid, %s::uuid)
+          AND NOT (
+            s.ticket_number LIKE 'LEG-%%'
+            OR s.ticket_number ~ '^FAC-[0-9]'
+            OR COALESCE(s.notes, '') ILIKE '%%legacy_revenue%%'
+            OR COALESCE(s.notes, '') ILIKE '%%Legacy FACCAB%%'
+            OR (
+              COALESCE(s.notes, '') ILIKE '%%legacy%%'
+              AND COALESCE(s.notes, '') ILIKE '%%appointment_id%%'
+            )
+          )
         GROUP BY 1, 2
         ORDER BY 1, 2
         """,
@@ -188,11 +198,8 @@ def main() -> None:
         est_inv = inv_by_ym_billing.get(ym, {}).get(ESTETICA, Decimal("0"))
         med_sales = sales_by_ym_co.get(ym, {}).get(MEDICINA, Decimal("0"))
         est_sales = sales_by_ym_co.get(ym, {}).get(ESTETICA, Decimal("0"))
-        medicina = med_inv + med_sales
-        estetica = est_inv + est_sales
-        # Por company_id (post-migración fiscal)
-        med_co = inv_co_by_ym.get(ym, {}).get(MEDICINA, Decimal("0")) + med_sales
-        est_co = inv_co_by_ym.get(ym, {}).get(ESTETICA, Decimal("0")) + est_sales
+        medicina = med_inv
+        estetica = est_inv
         suite_sum = medicina + estetica
         diff = suite_sum - duna
         ok = abs(diff) < Decimal("0.02")
@@ -211,7 +218,7 @@ def main() -> None:
             f"  {ym}: medicina inv={inv.get(MEDICINA, 0):.2f}  "
             f"estética inv={inv.get(ESTETICA, 0):.2f}"
         )
-    print("Detalle ventas TPV sin factura (created_at) por company_id:")
+    print("Detalle ventas TPV sin factura (created_at) — no suman al OK Dunasoft:")
     for ym in months:
         sal = sales_by_ym_co.get(ym, {})
         print(

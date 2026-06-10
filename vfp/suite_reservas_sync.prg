@@ -1,5 +1,5 @@
-* suite_reservas_sync.prg — Canal único Style ↔ Suite (sin ComRed / sin licencia Android)
-* Copiar junto a funciones.prg y SET PROCEDURE TO suite_reservas_sync.prg ADDITIVE en general.prg
+* suite_reservas_sync.prg — sync embebido en suite_full_unlock.prg; este fichero es copia opcional.
+* Multisesion: candado _suite_sync.lock entre procesos.
 
 PUBLIC pcSuiteSyncUrl, pcSuiteSyncToken, pcSuiteSyncMac, gnSuiteSyncInterval, gnSuiteSyncTimerId
 PUBLIC plSuiteSyncBusy, plSuiteSyncEnabled
@@ -12,6 +12,30 @@ gnSuiteSyncTimerId = 0
 plSuiteSyncBusy = .F.
 plSuiteSyncEnabled = .F.
 
+**
+FUNCTION SuiteSyncTryLock
+ LOCAL lcf, lh, lcb
+ lcb = ADDBS(SYS(5)+SYS(2003))
+ lcf = lcb+"Usuarios\_suite_sync.lock"
+ IF  .NOT. DIRECTORY(lcb+"Usuarios")
+    MD (lcb+"Usuarios")
+ ENDIF
+ IF  .NOT. FILE(lcf)
+    STRTOFILE("0", lcf)
+ ENDIF
+ lh = FOPEN(lcf, 11)
+ IF lh < 0
+    RETURN 0
+ ENDIF
+ RETURN lh
+ENDFUNC
+**
+PROCEDURE SuiteSyncReleaseLock
+ PARAMETER tnHandle
+ IF TYPE("tnHandle")="N" AND tnHandle > 0
+    = FCLOSE(tnHandle)
+ ENDIF
+ENDPROC
 **
 PROCEDURE Suite_SyncInit
  LOCAL lcfichero, lcline, lckey, lcval, lccontent, lnlines, i
@@ -53,15 +77,24 @@ PROCEDURE Suite_SyncStartTimer
  IF gnSuiteSyncTimerId > 0
     RETURN
  ENDIF
+ IF TYPE("_SCREEN.oSuiteSyncTimer") = "O"
+    _SCREEN.oSuiteSyncTimer.Interval = MAX(gnSuiteSyncInterval, 15) * 1000
+    _SCREEN.oSuiteSyncTimer.Enabled = .T.
+    gnSuiteSyncTimerId = 1
+    RETURN
+ ENDIF
+ _SCREEN.AddObject("oSuiteSyncTimer", "SuiteSyncTimer")
+ _SCREEN.oSuiteSyncTimer.Interval = MAX(gnSuiteSyncInterval, 15) * 1000
+ _SCREEN.oSuiteSyncTimer.Enabled = .T.
  gnSuiteSyncTimerId = 1
- INTERVAL gnSuiteSyncInterval, "DO Suite_SyncCycle"
 ENDPROC
 **
 PROCEDURE Suite_SyncStopTimer
- IF gnSuiteSyncTimerId > 0
-    CLEAR INTERVAL
-    gnSuiteSyncTimerId = 0
+ IF TYPE("_SCREEN.oSuiteSyncTimer") = "O"
+    _SCREEN.oSuiteSyncTimer.Enabled = .F.
+    _SCREEN.oSuiteSyncTimer.Release()
  ENDIF
+ gnSuiteSyncTimerId = 0
 ENDPROC
 **
 FUNCTION Suite_HttpPost
@@ -93,7 +126,15 @@ FUNCTION Suite_HttpPostOk
 ENDFUNC
 **
 PROCEDURE Suite_SyncCycle
- IF plSuiteSyncBusy OR  .NOT. plSuiteSyncEnabled
+ LOCAL lnSyncLock
+ IF  .NOT. plSuiteSyncEnabled
+    RETURN
+ ENDIF
+ IF plSuiteSyncBusy
+    RETURN
+ ENDIF
+ lnSyncLock = SuiteSyncTryLock()
+ IF lnSyncLock <= 0
     RETURN
  ENDIF
  plSuiteSyncBusy = .T.
@@ -103,18 +144,27 @@ PROCEDURE Suite_SyncCycle
  CATCH TO oerr
  ENDTRY
  plSuiteSyncBusy = .F.
+ DO SuiteSyncReleaseLock WITH lnSyncLock
 ENDPROC
 **
 PROCEDURE Suite_SyncAfterIncidencia
  PARAMETER tctipinc, tnidplan
+ LOCAL lnSyncLock
  IF  .NOT. plSuiteSyncEnabled
     RETURN
  ENDIF
  IF UPPER(ALLTRIM(tctipinc))=="BORRAR"
-    * BORRAR se empuja antes del DELETE en Reservas_Incidencia hook extendido
     RETURN
  ENDIF
- DO Suite_SyncPushOne WITH tnidplan
+ lnSyncLock = SuiteSyncTryLock()
+ IF lnSyncLock <= 0
+    RETURN
+ ENDIF
+ TRY
+    DO Suite_SyncPushOne WITH tnidplan
+ CATCH TO oerr
+ ENDTRY
+ DO SuiteSyncReleaseLock WITH lnSyncLock
 ENDPROC
 **
 FUNCTION Suite_BuildServiciosPlan
@@ -368,7 +418,14 @@ ENDPROC
 **
 PROCEDURE Suite_SyncPushDelete
  PARAMETER tnidplan, tccodemp, tccodcli, tdfecha, tchorini, tchorfin, pctexto, tccodrec, pcnomcli, pctel1cli, tlfacturado, pccamposerv, tncolfon, tncollet
- LOCAL lcparams, lcfec, lcfact, llok
+ LOCAL lcparams, lcfec, lcfact, llok, lnSyncLock
+ IF  .NOT. plSuiteSyncEnabled
+    RETURN
+ ENDIF
+ lnSyncLock = SuiteSyncTryLock()
+ IF lnSyncLock <= 0
+    RETURN
+ ENDIF
  lcfec = ALLTRIM(STR(YEAR(tdfecha)))+"-"+PADL(ALLTRIM(STR(MONTH(tdfecha))), 2, "0")+"-"+PADL(ALLTRIM(STR(DAY(tdfecha))), 2, "0")
  lcfact = IIF(tlfacturado, "SI", "NO")
  lcparams = "id="+ALLTRIM(pcSuiteSyncToken)+"&tag=stylereservas"
@@ -390,5 +447,15 @@ PROCEDURE Suite_SyncPushDelete
  lcparams = lcparams+"&idand=0"
  lcparams = lcparams+"&macand="+ALLTRIM(pcSuiteSyncMac)
  llok = Suite_HttpPostOk(pcSuiteSyncUrl, lcparams)
+ DO SuiteSyncReleaseLock WITH lnSyncLock
 ENDPROC
+**
+DEFINE CLASS SuiteSyncTimer AS Timer
+ Interval = 30000
+ Enabled = .F.
+**
+ PROCEDURE Timer
+  DO Suite_SyncCycle
+ ENDPROC
+ENDDEFINE
 **

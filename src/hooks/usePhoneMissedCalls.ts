@@ -1,8 +1,10 @@
+import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { usePermissions } from '@/hooks/usePermissions';
 import { canAccessPhone } from '@/lib/phonePermissions';
+import { PHONE_CALLS_POLL_INTERVAL_MS } from '@/lib/lipooutPhone';
 
 function yesterdayDateString(): string {
   const date = new Date();
@@ -16,12 +18,22 @@ export function usePhoneMissedCalls() {
   const { hasPermission, loading: permissionsLoading } = usePermissions();
   const canSyncMissed = canAccessPhone(hasPermission);
   const from = yesterdayDateString();
+  const [syncReady, setSyncReady] = useState(false);
+
+  useEffect(() => {
+    if (!companyId || loading || permissionsLoading || !canSyncMissed) {
+      setSyncReady(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setSyncReady(true), 4000);
+    return () => window.clearTimeout(timer);
+  }, [companyId, loading, permissionsLoading, canSyncMissed]);
 
   useQuery({
     queryKey: ['phone-missed-sync', companyId, from],
-    enabled: !!companyId && !loading && !permissionsLoading && canSyncMissed,
-    staleTime: 45_000,
-    refetchInterval: 60_000,
+    enabled: !!companyId && !loading && !permissionsLoading && canSyncMissed && syncReady,
+    staleTime: PHONE_CALLS_POLL_INTERVAL_MS - 2_000,
+    refetchInterval: PHONE_CALLS_POLL_INTERVAL_MS,
     refetchIntervalInBackground: true,
     retry: 1,
     queryFn: async () => {
@@ -30,7 +42,7 @@ export function usePhoneMissedCalls() {
           action: 'calls.sync_missed',
           company_id: companyId,
           from,
-          limit: 500,
+          limit: 250,
         },
       });
       if (error) {
@@ -43,6 +55,9 @@ export function usePhoneMissedCalls() {
       }
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
       queryClient.invalidateQueries({ queryKey: ['phone-missed-unread', companyId] });
+      if ((data?.created ?? 0) > 0) {
+        queryClient.invalidateQueries({ queryKey: ['issabel-calls'] });
+      }
       return data;
     },
   });
@@ -50,8 +65,8 @@ export function usePhoneMissedCalls() {
   const unreadQuery = useQuery({
     queryKey: ['phone-missed-unread', companyId],
     enabled: !!companyId && !loading && !permissionsLoading && canSyncMissed,
-    staleTime: 15_000,
-    refetchInterval: 30_000,
+    staleTime: PHONE_CALLS_POLL_INTERVAL_MS - 2_000,
+    refetchInterval: PHONE_CALLS_POLL_INTERVAL_MS,
     refetchIntervalInBackground: true,
     queryFn: async (): Promise<number> => {
       if (!companyId) return 0;
