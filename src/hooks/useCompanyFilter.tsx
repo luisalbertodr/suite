@@ -4,13 +4,13 @@ import {
   useCallback,
   useContext,
   useEffect,
-  useRef,
   useState,
   type ReactNode,
 } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabase';
+import { waitForAuthBootstrap, runWhenAuthReady, isAuthLockError, sleep } from '@/lib/authSession';
 
 export interface AccessibleCompany {
   id: string;
@@ -42,30 +42,46 @@ const debugLog = (...args: unknown[]) => {
 
 export function CompanyProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
-  const { user, loading: authLoading } = useAuth();
+  const { user, session, loading: authLoading } = useAuth();
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [accessibleCompanies, setAccessibleCompanies] = useState<AccessibleCompany[]>([]);
   const [loading, setLoading] = useState(true);
   const [switching, setSwitching] = useState(false);
-  const setupInProgressForUser = useRef<string | null>(null);
 
   const loadAccessibleCompanies = useCallback(async (): Promise<AccessibleCompany[]> => {
-    const { data, error } = await supabase.rpc('get_user_accessible_companies');
-    if (error) {
+    const maxAttempts = 4;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (attempt > 1) {
+        await sleep(250 * attempt);
+      }
+
+      const { data, error } = await runWhenAuthReady(() =>
+        supabase.rpc('get_user_accessible_companies'),
+      );
+      if (!error) {
+        return (data ?? []) as AccessibleCompany[];
+      }
+
+      if (isAuthLockError(error) && attempt < maxAttempts) {
+        debugLog(`get_user_accessible_companies lock retry ${attempt}/${maxAttempts}`);
+        continue;
+      }
+
       console.error('get_user_accessible_companies failed:', error);
       const code = (error as { code?: string }).code;
       const status = (error as { status?: number }).status;
       const message = error.message ?? '';
       if (
-        status === 401 ||
-        code === 'PGRST301' ||
-        /jwt|session|not authenticated/i.test(message)
+        !isAuthLockError(error) &&
+        (status === 401 ||
+          code === 'PGRST301' ||
+          /jwt|session|not authenticated/i.test(message))
       ) {
         await supabase.auth.signOut();
       }
       return [];
     }
-    return (data ?? []) as AccessibleCompany[];
+    return [];
   }, []);
 
   const resolveActiveCompany = useCallback(
@@ -112,29 +128,26 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const userId = user?.id ?? null;
-    const setupKey = authLoading ? null : (userId ?? '__anonymous__');
 
-    if (setupKey && setupInProgressForUser.current === setupKey) {
-      return;
-    }
-    if (setupKey) {
-      setupInProgressForUser.current = setupKey;
-    }
+    if (authLoading) return;
 
     let cancelled = false;
+    let deferTimer: ReturnType<typeof setTimeout> | undefined;
 
     const setup = async () => {
-      if (authLoading) return;
-
-      if (!user) {
+      if (!userId || !session?.access_token) {
         if (cancelled) return;
         setCompanyId(null);
         setAccessibleCompanies([]);
-        sessionStorage.removeItem('current_company_id');
-        sessionStorage.removeItem('current_user_id');
+        if (!userId) {
+          sessionStorage.removeItem('current_company_id');
+          sessionStorage.removeItem('current_user_id');
+        }
         setLoading(false);
         return;
       }
+
+      await waitForAuthBootstrap();
 
       try {
         setLoading(true);
@@ -142,25 +155,30 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
 
         const cachedId = sessionStorage.getItem('current_company_id');
         const cachedUserId = sessionStorage.getItem('current_user_id');
-        let preferredId = cachedUserId === user.id ? cachedId : null;
+        let preferredId = cachedUserId === userId ? cachedId : null;
 
         if (!preferredId && companies.length > 0) {
-          const { data: profiles } = await supabase
-            .from('user_profiles')
-            .select('company_id')
-            .eq('user_id', user.id)
-            .order('updated_at', { ascending: false })
-            .limit(1);
+          const { data: profiles, error: profileError } = await runWhenAuthReady(() =>
+            supabase
+              .from('user_profiles')
+              .select('company_id')
+              .eq('user_id', userId)
+              .order('updated_at', { ascending: false })
+              .limit(1),
+          );
 
+          if (profileError && isAuthLockError(profileError)) {
+            await sleep(400);
+          }
           preferredId = profiles?.[0]?.company_id ?? null;
         }
 
         let activeId = resolveActiveCompany(companies, preferredId);
 
         if (activeId && !companies.some((c) => c.id === activeId)) {
-          const { error: rpcError } = await supabase.rpc('set_active_company_id', {
-            p_company_id: activeId,
-          });
+          const { error: rpcError } = await runWhenAuthReady(() =>
+            supabase.rpc('set_active_company_id', { p_company_id: activeId! }),
+          );
           if (rpcError) {
             debugLog('set_active_company_id fallback failed:', rpcError.message);
           } else {
@@ -172,16 +190,16 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
         if (cancelled) return;
         setAccessibleCompanies(companies);
         if (activeId) {
-          const { error: syncError } = await supabase.rpc('set_active_company_id', {
-            p_company_id: activeId,
-          });
+          const { error: syncError } = await runWhenAuthReady(() =>
+            supabase.rpc('set_active_company_id', { p_company_id: activeId! }),
+          );
           if (syncError) {
             debugLog('set_active_company_id on setup failed:', syncError.message);
           }
         }
         setCompanyId(activeId);
         if (activeId) {
-          persistActiveCompany(activeId, user.id);
+          persistActiveCompany(activeId, userId);
         }
         debugLog('Company context ready:', { activeId, count: companies.length });
       } catch (error) {
@@ -190,26 +208,19 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
         setCompanyId(null);
         setAccessibleCompanies([]);
       } finally {
-        if (!cancelled) setLoading(false);
+        setLoading(false);
       }
     };
 
-    void setup();
+    deferTimer = setTimeout(() => {
+      void setup();
+    }, 100);
 
     return () => {
       cancelled = true;
-      if (setupKey && setupInProgressForUser.current === setupKey) {
-        setupInProgressForUser.current = null;
-      }
+      if (deferTimer) clearTimeout(deferTimer);
     };
-  }, [
-    user?.id,
-    authLoading,
-    loadAccessibleCompanies,
-    resolveActiveCompany,
-    persistActiveCompany,
-    user,
-  ]);
+  }, [user?.id, authLoading, loadAccessibleCompanies, resolveActiveCompany, persistActiveCompany]);
 
   const switchCompany = useCallback(
     async (nextCompanyId: string): Promise<boolean> => {

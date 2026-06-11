@@ -86,19 +86,19 @@ export const InbodyReportExport: React.FC<Props> = ({ measurement, customerName,
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        <div className="rounded-lg border bg-white overflow-hidden flex justify-center">
+        <div className="rounded-lg border bg-white overflow-hidden flex justify-center max-h-[min(80vh,900px)] relative min-h-[120px]">
+          <canvas
+            ref={canvasRef}
+            className={`max-w-full h-auto object-contain transition-opacity ${loading ? 'opacity-0' : 'opacity-100'}`}
+            aria-label="Vista previa informe InBody"
+            aria-hidden={loading}
+          />
           {loading ? (
-            <div className="flex items-center justify-center py-16 text-sm text-muted-foreground gap-2">
+            <div className="absolute inset-0 flex items-center justify-center py-16 text-sm text-muted-foreground gap-2">
               <Loader2 className="h-4 w-4 animate-spin" />
               Generando vista previa…
             </div>
-          ) : (
-            <canvas
-              ref={canvasRef}
-              className="max-w-full h-auto"
-              aria-label="Vista previa informe InBody"
-            />
-          )}
+          ) : null}
         </div>
 
         {error ? <p className="text-xs text-destructive">{error}</p> : null}

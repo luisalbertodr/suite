@@ -1,7 +1,8 @@
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
+import { waitForAuthBootstrap, markAuthReady, resetAuthReadyBarrier } from '@/lib/authSession';
 
 const debugLog = (...args: unknown[]) => {
   if (import.meta.env.DEV && import.meta.env.VITE_DEBUG_AUTH === '1') {
@@ -27,68 +28,46 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-let initialSessionPromise: ReturnType<typeof supabase.auth.getSession> | null = null;
-
-function getInitialSessionOnce() {
-  if (!initialSessionPromise) {
-    initialSessionPromise = supabase.auth.getSession().finally(() => {
-      initialSessionPromise = null;
-    });
-  }
-  return initialSessionPromise;
-}
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [isSuperuser, setIsSuperuser] = useState(false);
+  const superuserCheckScheduled = useRef(false);
 
-  // Función para verificar si es superusuario (vía /superuser-login)
   const checkSuperuserStatus = () => {
     const superuserSession = localStorage.getItem('superuser_session');
     const loginTime = localStorage.getItem('superuser_login_time');
-    
+
     if (superuserSession === 'true' && loginTime) {
       const timeDiff = Date.now() - parseInt(loginTime);
       const hours = timeDiff / (1000 * 60 * 60);
-      
-      // Sesión válida por 24 horas
+
       if (hours < 24) {
         setIsSuperuser(true);
         return true;
-      } else {
-        // Limpiar sesión expirada
-        localStorage.removeItem('superuser_session');
-        localStorage.removeItem('superuser_login_time');
-        localStorage.removeItem('superuser_data');
-        setIsSuperuser(false);
       }
+
+      localStorage.removeItem('superuser_session');
+      localStorage.removeItem('superuser_login_time');
+      localStorage.removeItem('superuser_data');
+      setIsSuperuser(false);
     }
     return false;
   };
 
-  /**
-   * Verificación adicional: si el usuario está logueado con Supabase Auth
-   * (login normal) Y su email coincide con un superusuario activo en
-   * public.superusers, lo marcamos como superuser automáticamente.
-   * Esto unifica los dos flujos sin obligar al usuario a pasar por
-   * /superuser-login cada vez.
-   */
   const detectSupabaseSuperuser = async (): Promise<boolean> => {
     try {
       const { data, error } = await supabase.rpc('current_user_is_superuser');
       if (error) {
-        // Entornos que aún no tienen la RPC desplegada: ignorar silenciosamente.
         const code = (error as { code?: string }).code;
         if (code === '42883' || code === 'PGRST202') return false;
         debugError('current_user_is_superuser error:', error);
         return false;
       }
       if (data === true) {
-        debugLog('✨ Supabase Auth user detectado como superuser por email');
+        debugLog('Supabase Auth user detectado como superuser por email');
         setIsSuperuser(true);
-        // Persistir como sesión superuser para evitar consultas repetidas
         localStorage.setItem('superuser_session', 'true');
         localStorage.setItem('superuser_login_time', Date.now().toString());
         return true;
@@ -100,7 +79,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // Auth methods
+  const scheduleSuperuserCheck = () => {
+    if (superuserCheckScheduled.current) return;
+    superuserCheckScheduled.current = true;
+    void waitForAuthBootstrap().then(async () => {
+      superuserCheckScheduled.current = false;
+      if (!checkSuperuserStatus()) {
+        await detectSupabaseSuperuser();
+      }
+    });
+  };
+
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({
       email,
@@ -111,122 +100,79 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signUp = async (email: string, password: string) => {
     const redirectUrl = `${window.location.origin}/`;
-    
+
     const { error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        emailRedirectTo: redirectUrl
-      }
+        emailRedirectTo: redirectUrl,
+      },
     });
     return { error };
   };
 
   const signOut = async () => {
-    debugLog('🚪 Auth signOut called - clearing all session data');
-    
-    // Clear superuser session if exists
+    debugLog('Auth signOut called');
+
     localStorage.removeItem('superuser_session');
     localStorage.removeItem('superuser_login_time');
     localStorage.removeItem('superuser_data');
     setIsSuperuser(false);
-    
-    // IMPORTANT: Clear company session data
+
     sessionStorage.removeItem('current_company_id');
     sessionStorage.removeItem('current_user_id');
-    debugLog('🧹 Cleared company and user session data');
-    
+
     await supabase.auth.signOut();
   };
 
   useEffect(() => {
-    // Verificar estado de superusuario al inicializar
     checkSuperuserStatus();
 
-    // Configurar listener para auth state
     let cancelled = false;
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        debugLog('🔐 Auth state changed:', event, session?.user?.email);
-        
-        // Si el usuario cambió, limpiar datos de empresa cacheados
-        if (event === 'SIGNED_IN' && session?.user) {
+    const applySession = (nextSession: Session | null) => {
+      if (cancelled) return;
+      setSession(nextSession);
+      setUser(nextSession?.user ?? null);
+      setLoading(false);
+    };
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      debugLog('Auth state changed:', event, nextSession?.user?.email);
+
+      // El cliente Supabase ya gestiona el token; re-renderizar aquí provoca
+      // bucle de refrescos (refresh_token_not_found / 400) en useCompanyFilter.
+      if (event === 'TOKEN_REFRESHED') {
+        return;
+      }
+
+      if (event === 'SIGNED_OUT') {
+        sessionStorage.removeItem('current_company_id');
+        sessionStorage.removeItem('current_user_id');
+        setIsSuperuser(false);
+        resetAuthReadyBarrier();
+      }
+
+      if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN') {
+        if (nextSession?.user) {
           const currentUserId = sessionStorage.getItem('current_user_id');
-          if (currentUserId && currentUserId !== session.user.id) {
-            debugLog('🔄 Different user detected, clearing company cache');
+          if (currentUserId && currentUserId !== nextSession.user.id) {
             sessionStorage.removeItem('current_company_id');
           }
-          // Guardar el ID del usuario actual
-          sessionStorage.setItem('current_user_id', session.user.id);
-          // Gotrue mantiene un lock interno mientras ejecuta este callback.
-          // Cualquier llamada a Supabase debe salir del callback para evitar
-          // el aviso "Lock ... was not released within 5000ms".
-          setTimeout(() => {
-            if (!cancelled) void detectSupabaseSuperuser();
-          }, 0);
+          sessionStorage.setItem('current_user_id', nextSession.user.id);
+          scheduleSuperuserCheck();
         }
-        
-        // Si se desloguea, limpiar todo
-        if (event === 'SIGNED_OUT') {
-          debugLog('🚪 User signed out, clearing all cached data');
-          sessionStorage.removeItem('current_company_id');
-          sessionStorage.removeItem('current_user_id');
-        }
-        
-        setSession(session);
-        setUser(session?.user ?? null);
-        setLoading(false);
+        markAuthReady();
       }
-    );
 
-    // Obtener sesión inicial
-    const getInitialSession = async () => {
-      try {
-        const { data: { session }, error } = await getInitialSessionOnce();
-        if (cancelled) return;
-        if (error) {
-          debugError('Error getting session:', error);
-        } else {
-          debugLog('🔍 Initial session check:', session?.user?.email || 'No user');
-          setSession(session);
-          setUser(session?.user ?? null);
-          
-          // Si hay sesión, verificar consistencia del usuario cacheado
-          if (session?.user) {
-            const currentUserId = sessionStorage.getItem('current_user_id');
-            if (currentUserId && currentUserId !== session.user.id) {
-              debugLog('🔄 Initial check: Different user detected, clearing company cache');
-              sessionStorage.removeItem('current_company_id');
-            }
-            sessionStorage.setItem('current_user_id', session.user.id);
-            // Si aún no hemos marcado como superuser por localStorage,
-            // intentar autodetectar por la RPC (email coincide con superuser activo).
-            if (!checkSuperuserStatus()) {
-              await detectSupabaseSuperuser();
-            }
-          }
-        }
-      } catch (error) {
-        debugError('Error in getInitialSession:', error);
-      } finally {
-        setLoading(false);
+      if (!cancelled) {
+        applySession(nextSession);
       }
-    };
-
-    getInitialSession();
-
-    // Listener para cambios en localStorage (para superusuario)
-    const handleStorageChange = () => {
-      checkSuperuserStatus();
-    };
-
-    window.addEventListener('storage', handleStorageChange);
+    });
 
     return () => {
       cancelled = true;
       subscription.unsubscribe();
-      window.removeEventListener('storage', handleStorageChange);
     };
   }, []);
 
@@ -237,14 +183,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isSuperuser,
     signIn,
     signUp,
-    signOut
+    signOut,
   };
 
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

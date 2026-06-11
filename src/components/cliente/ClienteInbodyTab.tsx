@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { Activity, ChevronDown } from 'lucide-react';
@@ -22,6 +22,7 @@ import { InbodyHistoryChart } from './inbody/InbodyHistoryChart';
 import { InbodySegmentalSilhouette } from './inbody/InbodySegmentalSilhouette';
 import { InbodyReportExport } from './inbody/InbodyReportExport';
 import { InbodyMetricHelp, InbodySectionHelp } from './inbody/InbodyMetricHelp';
+import { InbodyCsvImportPanel } from '@/components/InbodyCsvImportPanel';
 
 interface Props {
   customerId: string;
@@ -86,6 +87,13 @@ function ImpedanceTable({ measurement }: { measurement: InbodyMeasurement }) {
   );
 }
 
+function sessionLabel(m: InbodyMeasurement, index: number, total: number): string {
+  const date = format(new Date(m.measured_at), 'dd/MM/yyyy HH:mm', { locale: es });
+  const weight = m.weight_kg != null ? formatInbodyNumber(m.weight_kg, 1, ' kg') : 'sin peso';
+  const pbf = m.pbf_pct != null ? ` · PGC ${formatInbodyNumber(m.pbf_pct, 1, '%')}` : '';
+  return `${total - index}. ${date} · ${weight}${pbf}`;
+}
+
 function MeasurementSessionBar({
   measurements,
   selected,
@@ -101,23 +109,18 @@ function MeasurementSessionBar({
 
   return (
     <div className="space-y-2">
-      {measurements.length > 1 && (
-        <Select value={selected.id} onValueChange={onSelect}>
-          <SelectTrigger className={compact ? 'h-8 text-xs' : ''}>
-            <SelectValue placeholder="Seleccionar medición" />
-          </SelectTrigger>
-          <SelectContent>
-            {measurements.map((m) => (
-              <SelectItem key={m.id} value={m.id}>
-                {format(new Date(m.measured_at), 'dd/MM/yyyy HH:mm', { locale: es })}
-                {' · '}
-                {formatInbodyNumber(m.weight_kg, 1, ' kg')}
-                {m.pbf_pct != null ? ` · PGC ${formatInbodyNumber(m.pbf_pct, 1, '%')}` : ''}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      )}
+      <Select value={selected.id} onValueChange={onSelect}>
+        <SelectTrigger className={compact ? 'h-8 text-xs' : ''}>
+          <SelectValue placeholder="Seleccionar medición" />
+        </SelectTrigger>
+        <SelectContent>
+          {measurements.map((m, idx) => (
+            <SelectItem key={m.id} value={m.id}>
+              {sessionLabel(m, idx, measurements.length)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
 
       <div className={compact ? 'text-xs' : 'text-sm'}>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
@@ -229,6 +232,12 @@ export const ClienteInbodyTab: React.FC<Props> = ({ customerId, taxId, companyId
   const { data: measurements, isLoading, error } = useInbodyMeasurements(customerId, taxId, companyId);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (measurements?.length) {
+      setSelectedId((prev) => (prev && measurements.some((m) => m.id === prev) ? prev : measurements[0].id));
+    }
+  }, [measurements]);
+
   const selected = useMemo(() => {
     if (!measurements?.length) return null;
     if (selectedId) return measurements.find((m) => m.id === selectedId) ?? measurements[0];
@@ -247,22 +256,38 @@ export const ClienteInbodyTab: React.FC<Props> = ({ customerId, taxId, companyId
 
   if (error) {
     return (
-      <div className="text-center py-10 text-sm text-destructive">
-        No se pudieron cargar las mediciones InBody.
+      <div className="space-y-4">
+        <div className="text-center py-10 text-sm text-destructive">
+          No se pudieron cargar las mediciones InBody.
+        </div>
+        <InbodyCsvImportPanel
+          embedded
+          customerId={customerId}
+          taxId={taxId}
+          customerName={customerName}
+        />
       </div>
     );
   }
 
   if (!measurements?.length) {
     return (
-      <div className="text-center py-12 text-muted-foreground">
-        <Activity className="h-10 w-10 mx-auto mb-3 opacity-30" />
-        <p className="font-medium text-foreground">Sin mediciones InBody</p>
-        <p className="text-sm mt-1 max-w-sm mx-auto">
-          {taxId
-            ? 'No hay registros vinculados a este DNI. Importa datos desde Configuración → General → Importar.'
-            : 'Añade el DNI del cliente para vincular mediciones por ID de Lookin\'Body.'}
-        </p>
+      <div className="space-y-4">
+        <div className="text-center py-12 text-muted-foreground">
+          <Activity className="h-10 w-10 mx-auto mb-3 opacity-30" />
+          <p className="font-medium text-foreground">Sin mediciones InBody</p>
+          <p className="text-sm mt-1 max-w-sm mx-auto">
+            {taxId
+              ? 'No hay registros vinculados a este DNI. Importa un CSV de Lookin\'Body abajo.'
+              : 'Añade el DNI del cliente para vincular mediciones por ID de Lookin\'Body.'}
+          </p>
+        </div>
+        <InbodyCsvImportPanel
+          embedded
+          customerId={customerId}
+          taxId={taxId}
+          customerName={customerName}
+        />
       </div>
     );
   }
@@ -274,14 +299,6 @@ export const ClienteInbodyTab: React.FC<Props> = ({ customerId, taxId, companyId
           measurements={measurements}
           selected={selected}
           onSelect={setSelectedId}
-          compact={compact}
-        />
-      )}
-
-      {selected && (
-        <InbodyReportExport
-          measurement={selected}
-          customerName={customerName ?? undefined}
           compact={compact}
         />
       )}
@@ -306,6 +323,21 @@ export const ClienteInbodyTab: React.FC<Props> = ({ customerId, taxId, companyId
       )}
 
       {selected && <MeasurementReport measurement={selected} compact={compact} />}
+
+      {selected && (
+        <InbodyReportExport
+          measurement={selected}
+          customerName={customerName ?? undefined}
+          compact={compact}
+        />
+      )}
+
+      <InbodyCsvImportPanel
+        embedded
+        customerId={customerId}
+        taxId={taxId}
+        customerName={customerName}
+      />
 
       <p className="text-[10px] text-muted-foreground italic text-center pt-2">
         Utilice sus resultados como referencia cuando consulte a su médico o entrenador personal.

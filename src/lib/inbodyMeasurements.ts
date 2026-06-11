@@ -75,6 +75,9 @@ export interface InbodyMeasurement {
   edema: Record<string, number | null>;
   source: string;
   import_batch: string;
+  bca?: Record<string, unknown>;
+  lb?: Record<string, unknown>;
+  imp?: Record<string, InbodyImpedanceFreq> | Record<string, unknown>;
 }
 
 export type InbodyRangeStatus = 'low' | 'normal' | 'high' | 'unknown';
@@ -234,4 +237,51 @@ export function inbodyBarScale(
   const normalStartPct = ((min - start) / total) * 100;
   const normalEndPct = ((max - start) / total) * 100;
   return { start, end, markerPct, normalStartPct, normalEndPct };
+}
+
+const BCA_NUMERIC_FIELDS: (keyof InbodyMeasurement)[] = [
+  'height_cm', 'age_years', 'weight_kg', 'weight_min_kg', 'weight_max_kg',
+  'smm_kg', 'smm_min_kg', 'smm_max_kg', 'body_fat_kg', 'body_fat_min_kg', 'body_fat_max_kg',
+  'tbw_kg', 'tbw_min_kg', 'tbw_max_kg', 'ffm_kg', 'ffm_min_kg', 'ffm_max_kg', 'slm_kg',
+  'bmi', 'bmi_min', 'bmi_max', 'pbf_pct', 'pbf_min_pct', 'pbf_max_pct',
+  'whr', 'whr_min', 'whr_max', 'bmr_kcal', 'bmr_min_kcal', 'bmr_max_kcal',
+  'fat_control_kg', 'muscle_control_kg',
+];
+
+function parseBcaNumber(value: unknown): number | null {
+  if (value == null || value === '') return null;
+  const n = typeof value === 'number' ? value : Number(String(value).replace(',', '.'));
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Rellena columnas vacías desde bca/lb/imp (importaciones CSV parciales). */
+export function normalizeInbodyMeasurement(raw: InbodyMeasurement): InbodyMeasurement {
+  const bca = (raw.bca && typeof raw.bca === 'object' ? raw.bca : {}) as Record<string, unknown>;
+  const lb = (raw.lb && typeof raw.lb === 'object' ? raw.lb : {}) as Record<string, unknown>;
+  const imp = (raw.imp && typeof raw.imp === 'object' ? raw.imp : {}) as Record<string, unknown>;
+
+  const out: InbodyMeasurement = { ...raw };
+
+  for (const field of BCA_NUMERIC_FIELDS) {
+    if (out[field] != null) continue;
+    const fromBca = parseBcaNumber(bca[field as string]);
+    if (fromBca != null) (out as Record<string, unknown>)[field] = fromBca;
+  }
+
+  if (!out.sex && typeof bca.sex === 'string') out.sex = bca.sex;
+
+  const leanFromLb = lb.segmental_lean as InbodySegmentalLean | undefined;
+  const fatFromLb = lb.segmental_fat as InbodySegmentalFat | undefined;
+  if (leanFromLb && Object.keys(leanFromLb).length > 0) {
+    out.segmental_lean = { ...out.segmental_lean, ...leanFromLb };
+  }
+  if (fatFromLb && Object.keys(fatFromLb).length > 0) {
+    out.segmental_fat = { ...out.segmental_fat, ...fatFromLb };
+  }
+
+  if ((!out.impedance || Object.keys(out.impedance).length === 0) && Object.keys(imp).length > 0) {
+    out.impedance = imp as Record<string, InbodyImpedanceFreq>;
+  }
+
+  return out;
 }

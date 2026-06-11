@@ -267,14 +267,21 @@ export const Telefono: React.FC = () => {
   });
 
   const renderCustomer = (call: IssabelCall) => {
+    const phoneLine = call.customer_phone?.trim() || null;
+
     if (call.customer) {
       return (
-        <Link
-          to={`/clientes?customer=${call.customer.id}`}
-          className="font-medium text-blue-600 hover:underline"
-        >
-          {call.customer.name}
-        </Link>
+        <div className="flex flex-col gap-0.5">
+          <Link
+            to={`/clientes?customer=${call.customer.id}`}
+            className="font-medium text-blue-600 hover:underline"
+          >
+            {call.customer.name}
+          </Link>
+          {phoneLine ? (
+            <span className="font-medium text-foreground">{phoneLine}</span>
+          ) : null}
+        </div>
       );
     }
 
@@ -302,16 +309,23 @@ export const Telefono: React.FC = () => {
               META
             </span>
           </button>
-          {(call.customer_phone || call.display_party) && (
-            <span className="text-xs text-muted-foreground">
-              {call.customer_phone || call.display_party}
-            </span>
-          )}
+          {phoneLine ? (
+            <span className="font-medium text-foreground">{phoneLine}</span>
+          ) : null}
         </div>
       );
     }
 
-    return call.display_party || call.customer_phone || '-';
+    if (call.display_party && phoneLine && call.display_party !== phoneLine) {
+      return (
+        <div className="flex flex-col gap-0.5">
+          <span className="font-medium">{call.display_party}</span>
+          <span className="font-medium text-foreground">{phoneLine}</span>
+        </div>
+      );
+    }
+
+    return call.display_party || phoneLine || '-';
   };
 
   const filterButtons: { value: DirectionFilter; label: string }[] = missedOnly
@@ -412,7 +426,7 @@ export const Telefono: React.FC = () => {
                 <TableRow>
                   <TableHead>Fecha</TableHead>
                   <TableHead>Tipo</TableHead>
-                  <TableHead>Cliente / teléfono</TableHead>
+                  <TableHead>Cliente</TableHead>
                   <TableHead>Duración</TableHead>
                   <TableHead>Audio</TableHead>
                 </TableRow>

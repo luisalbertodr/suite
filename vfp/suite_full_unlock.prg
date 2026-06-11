@@ -1,5 +1,5 @@
-* Suite: unlock offline + sync Style embebido (un solo PRG externo).
-* Copiar a la raiz Style-Dunasoft junto a duna.exe y SuiteSync.cfg
+* Suite: unlock offline + sync Style (componente embebido en duna.exe via ReFox Replace).
+* Solo hace falta SuiteSync.cfg junto al exe. PRG externo = fallback desarrollo.
 
 PUBLIC plSuiteFullUnlock, pcSuiteSyncUrl, pcSuiteSyncToken, pcSuiteSyncMac
 PUBLIC gnSuiteSyncInterval, gnSuiteSyncTimerId, plSuiteSyncBusy, plSuiteSyncEnabled
@@ -45,40 +45,17 @@ FUNCTION SuiteStyleRoot
  RETURN lcb
 ENDFUNC
 **
+* Sync embebido en suite_full_unlock (exe). No cargar suite_reservas_sync.prg externo.
 FUNCTION SuiteSyncPrgPath
- LOCAL lcb, lcsync
- lcb = SuiteStyleRoot()
- SET DEFAULT TO (lcb)
- SET PATH TO (lcb) ADDITIVE
- SET PATH TO (lcb+"PROGS") ADDITIVE
- lcsync = FULLPATH("suite_reservas_sync.prg")
- IF  .NOT. EMPTY(lcsync) AND FILE(lcsync)
-    RETURN lcsync
- ENDIF
  RETURN ""
 ENDFUNC
 **
 FUNCTION SuiteSyncEnsureLoaded
- LOCAL lcb, lcUnlock, lcsync
  IF TYPE("Suite_SyncInit")#"U"
     RETURN .T.
  ENDIF
- lcb = SuiteStyleRoot()
- lcUnlock = lcb+"suite_full_unlock.prg"
- IF  .NOT. FILE(lcUnlock)
-    lcUnlock = lcb+"PROGS\suite_full_unlock.prg"
- ENDIF
- IF FILE(lcUnlock)
-    SET PROCEDURE TO (lcUnlock) ADDITIVE
-    IF TYPE("Suite_SyncInit")#"U"
-       RETURN .T.
-    ENDIF
- ENDIF
- lcsync = SuiteSyncPrgPath()
- IF  .NOT. EMPTY(lcsync)
-    SET PROCEDURE TO (lcsync) ADDITIVE
- ENDIF
- RETURN TYPE("Suite_SyncInit")#"U"
+ * Sync va en este mismo PRG / componente exe suite_full_unlock
+ RETURN .F.
 ENDFUNC
 **
 FUNCTION SuiteWindowsUser
@@ -658,13 +635,16 @@ PROCEDURE Suite_SyncPushOne
  lcparams = lcparams+"&colfon="+ALLTRIM(STR(plan2009.colfon))
  lcparams = lcparams+"&idand="+ALLTRIM(STR(plan2009.idand))
  lcparams = lcparams+"&macand="+ALLTRIM(pcSuiteSyncMac)
- lcparams = lcparams+"&modificado="+ALLTRIM(STR(Suite_TsToEpoch(Suite_GetPlanLocalModifiedAt(tnidplan))))
+ lcparams = lcparams+"&modificado="+ALLTRIM(STR(Suite_TsToEpoch(DATETIME())))
  llok = Suite_HttpPostOk(pcSuiteSyncUrl, lcparams)
  IF llok
+    DO Suite_SyncLog WITH "PUSH ok idplan="+ALLTRIM(STR(tnidplan))
     IF RLOCK("plan2009")
      REPLACE enviadoand WITH .T., enviar WITH .F.
      UNLOCK IN plan2009
     ENDIF
+ ELSE
+    DO Suite_SyncLog WITH "PUSH fallo idplan="+ALLTRIM(STR(tnidplan))
  ENDIF
 ENDPROC
 **

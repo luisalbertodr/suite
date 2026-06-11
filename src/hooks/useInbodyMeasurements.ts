@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import {
   dniMatchKeys,
+  normalizeInbodyMeasurement,
   type InbodyMeasurement,
 } from '@/lib/inbodyMeasurements';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
@@ -42,7 +43,7 @@ export function useInbodyMeasurements(
         const key = `${row.inbody_user_id}|${row.measured_at}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        deduped.push(row);
+        deduped.push(normalizeInbodyMeasurement(row));
       }
       return deduped;
     },

@@ -1,20 +1,29 @@
-* Activar sync Suite manualmente (si duna.exe aun no lleva general.prg parcheado).
-* En Style, ventana de comandos VFP: DO activar_suite_sync.prg
+* Fallback manual si el exe no lleva suite_full_unlock embebido (Replace ReFox).
 
 LOCAL lcb
 lcb = ADDBS(SYS(5)+SYS(2003))
-IF FILE(lcb+"suite_full_unlock.prg")
-   SET PROCEDURE TO (lcb+"suite_full_unlock.prg") ADDITIVE
-ELSE
-   IF FILE(lcb+"PROGS\suite_full_unlock.prg")
-      SET PROCEDURE TO (lcb+"PROGS\suite_full_unlock.prg") ADDITIVE
+ON ERROR *
+SET PROCEDURE TO suite_full_unlock ADDITIVE
+SET CLASSLIB TO suite_full_unlock ADDITIVE
+IF TYPE("SuiteApplyFullUnlock")="U"
+   IF FILE(lcb+"suite_full_unlock.prg")
+      SET PROCEDURE TO (lcb+"suite_full_unlock.prg") ADDITIVE
+      SET CLASSLIB TO (lcb+"suite_full_unlock.prg") ADDITIVE
    ELSE
-      MESSAGEBOX("No se encuentra suite_full_unlock.prg en "+lcb, 16, "Suite sync")
-      RETURN
+      IF FILE(lcb+"PROGS\suite_full_unlock.prg")
+         SET PROCEDURE TO (lcb+"PROGS\suite_full_unlock.prg") ADDITIVE
+         SET CLASSLIB TO (lcb+"PROGS\suite_full_unlock.prg") ADDITIVE
+      ENDIF
    ENDIF
 ENDIF
-IF TYPE("SuiteApplyFullUnlock")#"U"
-   DO SuiteApplyFullUnlock
+ON ERROR
+IF TYPE("SuiteApplyFullUnlock")="U"
+   MESSAGEBOX("No sync embebida ni suite_full_unlock.prg en "+lcb+CHR(13)+CHR(13)+"Recompila duna.exe con ReFox Replace (general, funciones, suite_full_unlock).", 16, "Suite sync")
+   RETURN
 ENDIF
-DO Suite_SyncInit
+DO SuiteStartSyncIfReady
+IF TYPE("SuiteStartSyncIfReady")="U"
+   DO SuiteApplyFullUnlock
+   DO Suite_SyncInit
+ENDIF
 WAIT WINDOW NOWAIT "Suite sync activado. Log: Usuarios\_suite_sync.log"

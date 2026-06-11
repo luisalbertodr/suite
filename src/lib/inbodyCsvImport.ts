@@ -173,7 +173,7 @@ function toFloat(value: string | undefined): number | null {
 }
 
 function pick(row: Record<string, string>, field: string): string | undefined {
-  const aliases = HEADER_ALIASES[field] || [field];
+  const aliases = [field, ...(HEADER_ALIASES[field] || [])];
   for (const alias of aliases) {
     if (row[alias] != null && row[alias] !== '') return row[alias];
   }
