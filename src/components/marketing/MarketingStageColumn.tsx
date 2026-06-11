@@ -211,7 +211,7 @@ export const MarketingStageColumn = memo(function MarketingStageColumn({
           <TooltipProvider delayDuration={300}>
             <div
               className={[
-                'flex-1 overflow-y-auto px-2 pb-3 scrollbar-kanban min-h-0 contain-paint',
+                'flex-1 overflow-y-auto px-2 pb-3 scrollbar-kanban min-h-0',
                 compact ? 'space-y-1' : 'space-y-2',
               ].join(' ')}
             >

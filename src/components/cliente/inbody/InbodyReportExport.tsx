@@ -3,8 +3,11 @@ import { Download, Loader2, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import type { InbodyMeasurement } from '@/lib/inbodyMeasurements';
+import { useToast } from '@/hooks/use-toast';
+import { useWorkCenterBranding } from '@/hooks/useWorkCenterBranding';
 import {
   downloadInbodyReport,
+  loadInbodyReportLogo,
   loadInbodyReportTemplate,
   renderInbodyReportCanvas,
   shareInbodyReport,
@@ -21,6 +24,8 @@ export const InbodyReportExport: React.FC<Props> = ({ measurement, customerName,
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<'download' | 'share' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { toast } = useToast();
+  const { logoUrlLight } = useWorkCenterBranding();
 
   useEffect(() => {
     let cancelled = false;
@@ -29,9 +34,16 @@ export const InbodyReportExport: React.FC<Props> = ({ measurement, customerName,
 
     (async () => {
       try {
-        const template = await loadInbodyReportTemplate();
+        const [template, logo] = await Promise.all([
+          loadInbodyReportTemplate(),
+          loadInbodyReportLogo(logoUrlLight),
+        ]);
         if (cancelled) return;
-        const canvas = renderInbodyReportCanvas(template, measurement);
+        const canvas = renderInbodyReportCanvas(template, measurement, {
+          customerName,
+          logo,
+          logoUrl: logoUrlLight,
+        });
         const preview = canvasRef.current;
         if (preview) {
           preview.width = canvas.width;
@@ -51,12 +63,12 @@ export const InbodyReportExport: React.FC<Props> = ({ measurement, customerName,
     return () => {
       cancelled = true;
     };
-  }, [measurement]);
+  }, [measurement, customerName, logoUrlLight]);
 
   const handleDownload = async () => {
     setBusy('download');
     try {
-      await downloadInbodyReport(measurement, customerName);
+      await downloadInbodyReport(measurement, customerName, { logoUrl: logoUrlLight });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al descargar');
     } finally {
@@ -67,7 +79,14 @@ export const InbodyReportExport: React.FC<Props> = ({ measurement, customerName,
   const handleShare = async () => {
     setBusy('share');
     try {
-      await shareInbodyReport(measurement, customerName);
+      const result = await shareInbodyReport(measurement, customerName, { logoUrl: logoUrlLight });
+      if (result === 'downloaded') {
+        toast({
+          title: 'Informe descargado',
+          description:
+            'Tu navegador no permite compartir archivos en este equipo; se ha guardado el JPG.',
+        });
+      }
     } catch (e) {
       if (e instanceof Error && e.name !== 'AbortError') {
         setError(e.message);

@@ -235,7 +235,7 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
         onClick={onClick}
         style={{ contentVisibility: 'auto', containIntrinsicSize: compact ? '0 88px' : '0 160px' }}
         className={[
-          'group relative cursor-pointer rounded-lg border shadow-sm',
+          'group relative z-0 cursor-pointer rounded-lg border shadow-sm hover:z-10',
           compact ? '' : 'rounded-xl transition-all hover:shadow-md hover:-translate-y-0.5',
           isWon
             ? 'border-amber-300/70 bg-amber-50/70 dark:border-amber-700/50 dark:bg-amber-950/30'
@@ -504,7 +504,13 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
                   {noteCount > 0 ? <CounterBadge count={noteCount} /> : null}
                 </Button>
               </TooltipTrigger>
-              <TooltipContent className="max-w-[280px]">
+              <TooltipContent
+                side="top"
+                align="end"
+                sideOffset={6}
+                collisionPadding={12}
+                className="max-w-[280px]"
+              >
                 {noteCount === 0 ? (
                   <p className="text-[11px]">Sin notas. Click para añadir.</p>
                 ) : (

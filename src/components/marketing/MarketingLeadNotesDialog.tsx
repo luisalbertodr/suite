@@ -31,7 +31,7 @@ export const MarketingLeadNotesDialog: React.FC<MarketingLeadNotesDialogProps> =
             Registra llamadas, motivos de rechazo, próximos contactos…
           </DialogDescription>
         </DialogHeader>
-        <MarketingLeadNotesPanel leadId={lead.id} />
+        <MarketingLeadNotesPanel leadId={lead.id} companyId={lead.company_id ?? undefined} />
       </DialogContent>
     </Dialog>
   );

@@ -32,6 +32,7 @@ import { resolveLeadAppointmentParts } from '@/lib/marketingLeadAppointment';
 
 interface MarketingLeadDetailDialogProps {
   lead: MarketingLead | null;
+  companyId: string;
   stages: MarketingLeadStage[];
   matchedCustomer: CustomerLookupRow | null;
   open: boolean;
@@ -40,13 +41,14 @@ interface MarketingLeadDetailDialogProps {
 
 export const MarketingLeadDetailDialog: React.FC<MarketingLeadDetailDialogProps> = ({
   lead,
+  companyId,
   stages,
   matchedCustomer,
   open,
   onOpenChange,
 }) => {
   const { toast } = useToast();
-  const { updateLead, deleteLead, archiveLead } = useMarketingLeads();
+  const { updateLead, deleteLead, archiveLead } = useMarketingLeads(companyId);
   const navigate = useNavigate();
   const { hasPermission } = usePermissions();
   const canUseWhatsapp = hasPermission('whatsapp', 'read');
@@ -156,7 +158,8 @@ export const MarketingLeadDetailDialog: React.FC<MarketingLeadDetailDialogProps>
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="flex max-h-[90vh] max-w-3xl flex-col gap-0 overflow-hidden p-0">
+        <div className="flex-1 overflow-y-auto px-6 pt-6 pb-4">
         <DialogHeader>
           <DialogTitle>Detalle del lead</DialogTitle>
           <DialogDescription>
@@ -291,23 +294,31 @@ export const MarketingLeadDetailDialog: React.FC<MarketingLeadDetailDialogProps>
             </Select>
           </div>
           <div className="space-y-2 md:col-span-2">
-            <Label htmlFor="lead-notes">Notas internas</Label>
+            <Label htmlFor="lead-notes">Observaciones del lead</Label>
             <Textarea
               id="lead-notes"
-              rows={3}
+              rows={2}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Anotaciones, recordatorios, etc."
+              placeholder="Texto libre guardado en la ficha del lead (distinto del historial de actividad)."
             />
           </div>
         </div>
 
-        <div className="mt-4">
+        <div className="mt-4 rounded-lg border bg-muted/20 p-3">
           <h4 className="mb-2 text-sm font-semibold">Actividad y notas</h4>
-          <MarketingLeadNotesPanel leadId={lead.id} compact />
+          <p className="mb-2 text-[11px] text-muted-foreground">
+            Llamadas, rechazos, reagendados y anotaciones del equipo.
+          </p>
+          <MarketingLeadNotesPanel
+            leadId={lead.id}
+            companyId={lead.company_id ?? companyId}
+            compact
+          />
+        </div>
         </div>
 
-        <DialogFooter className="flex items-center justify-between gap-2 sm:justify-between">
+        <DialogFooter className="flex shrink-0 items-center justify-between gap-2 border-t px-6 py-4 sm:justify-between">
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={handleArchive} disabled={archiveLead.isPending}>
               <Archive className="mr-2 h-3.5 w-3.5" /> Archivar

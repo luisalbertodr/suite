@@ -1,13 +1,11 @@
-import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Search,
   LayoutGrid,
   RefreshCw,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import {
@@ -49,6 +47,7 @@ import {
 } from './marketing/marketingFilterUtils';
 import { useMarketingInvoicedValueSync } from '@/hooks/useMarketingInvoicedValueSync';
 import { useRegisterTopBarContent } from '@/components/TopBarContentContext';
+import { MarketingSearchInput } from './marketing/MarketingSearchInput';
 
 const COLLAPSED_STAGES_STORAGE_KEY = 'marketing-kanban-collapsed-stage-ids';
 const COMPACT_CARDS_STORAGE_KEY = 'marketing-kanban-compact-cards';
@@ -92,7 +91,7 @@ export const Marketing: React.FC = () => {
   const { viewedLeadIds } = useMarketingLeadViewedSet(companyId ?? null);
   const markLeadViewed = useMarkMarketingLeadViewed();
 
-  const [search, setSearch] = useState('');
+  const [filterQuery, setFilterQuery] = useState('');
   const [sortField, setSortField] = useState<SortField>('external_created_at');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [filters, setFilters] = useState<MarketingFilters>(DEFAULT_MARKETING_FILTERS);
@@ -163,7 +162,9 @@ export const Marketing: React.FC = () => {
     });
   }, []);
 
-  const deferredSearch = useDeferredValue(search);
+  const handleFilterQueryChange = useCallback((q: string) => {
+    setFilterQuery(q);
+  }, []);
 
   const visibleCardFields = useMemo(
     () =>
@@ -237,10 +238,10 @@ export const Marketing: React.FC = () => {
 
   const filteredLeads = useMemo(() => {
     return leads.filter((l) => {
-      if (!matchesQuery(l, deferredSearch)) return false;
+      if (!matchesQuery(l, filterQuery)) return false;
       return leadMatchesFilters(l, filters, matchedCustomerByLead.get(l.id) ?? null);
     });
-  }, [leads, deferredSearch, filters, matchedCustomerByLead]);
+  }, [leads, filterQuery, filters, matchedCustomerByLead]);
 
   const formNames = useMemo(
     () => collectDistinctValues(leads, (l) => l.form_name),
@@ -445,15 +446,7 @@ export const Marketing: React.FC = () => {
         ) : null}
       </div>
 
-      <div className="relative">
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Buscar leads…"
-          className="h-7 w-[170px] pl-8 text-xs lg:w-[220px]"
-        />
-      </div>
+      <MarketingSearchInput onQueryChange={handleFilterQueryChange} />
 
       <MarketingFiltersPopover
         sortField={sortField}
@@ -487,8 +480,8 @@ export const Marketing: React.FC = () => {
     filters,
     formNames,
     handleManualRefresh,
+    handleFilterQueryChange,
     linkedInView,
-    search,
     sortDir,
     sortField,
     sources,
@@ -607,6 +600,7 @@ export const Marketing: React.FC = () => {
       {activeLead ? (
         <MarketingLeadDetailDialog
           lead={activeLead}
+          companyId={companyId}
           stages={stages}
           matchedCustomer={matchedCustomerByLead.get(activeLead.id) ?? null}
           open

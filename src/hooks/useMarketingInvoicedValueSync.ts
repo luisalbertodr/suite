@@ -7,7 +7,6 @@ import {
   runMarketingPresentadaInvoicedSync,
   type MarketingPresentadaSyncResult,
 } from '@/lib/marketingPresentadaSync';
-import { leadInvoicingSinceDate } from '@/lib/marketingInvoicedTotals';
 
 export type MarketingInvoicedValueSyncResult = MarketingPresentadaSyncResult;
 
@@ -64,24 +63,15 @@ export const useMarketingInvoicedValueSync = (input: {
     return result;
   }, [companyId, stages, leads, matchCustomer, queryClient]);
 
-  const syncFingerprint = useMemo(() => {
-    const stageIds = new Set(stages.map((s) => s.id));
-    return leads
-      .map((l) => {
-        const since = leadInvoicingSinceDate(l);
-        return `${l.id}:${l.stage_id ?? ''}:${l.customer_id ?? ''}:${since}:${l.value ?? 0}:${stageIds.has(l.stage_id ?? '')}`;
-      })
-      .sort()
-      .join('|');
-  }, [stages, leads]);
-
+  // Solo reaccionar a cambios de facturación (invoiceTick), no a cada movimiento manual
+  // de lead en el kanban — evita revertir etapas que acaba de cambiar el usuario.
   useEffect(() => {
     if (!enabled || !companyId || syncingRef.current) return;
 
     let cancelled = false;
     syncingRef.current = true;
     runSync()
-      .catch((e) => console.warn('Sync facturación → Presentada con éxito:', e))
+      .catch((e) => console.warn('Sync facturación → Presentada:', e))
       .finally(() => {
         if (!cancelled) syncingRef.current = false;
       });
@@ -89,7 +79,7 @@ export const useMarketingInvoicedValueSync = (input: {
     return () => {
       cancelled = true;
     };
-  }, [enabled, companyId, syncFingerprint, invoiceTick, runSync]);
+  }, [enabled, companyId, invoiceTick, runSync]);
 
   return { runSync };
 };

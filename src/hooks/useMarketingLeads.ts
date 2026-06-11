@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { withSupabaseTimeout } from '@/lib/marketingNotesApi';
 import type { Database, Json } from '@/integrations/supabase/types';
 
 export type MarketingLead = Database['public']['Tables']['marketing_leads']['Row'];
@@ -380,27 +381,33 @@ export const useMarketingLeads = (scopeCompanyId?: string | null) => {
       }
       return { prev };
     },
+    onSuccess: (data) => {
+      queryClient.setQueryData<MarketingLead[]>(['marketing-leads', companyId], (prev) =>
+        prev ? prev.map((l) => (l.id === data.id ? data : l)) : prev,
+      );
+    },
     onError: (_err, _vars, ctx) => {
       if (ctx?.prev) {
         queryClient.setQueryData(['marketing-leads', companyId], ctx.prev);
       }
     },
-    onSettled: invalidate,
   });
 
   const moveLeadToStage = useMutation({
     mutationFn: async (input: { id: string; stage_id: string | null; position_in_stage: number }) => {
-      const { data, error } = await supabase
-        .from('marketing_leads')
-        .update({
-          stage_id: input.stage_id,
-          position_in_stage: input.position_in_stage,
-        })
-        .eq('id', input.id)
-        .select('*')
-        .single();
-      if (error) throw error;
-      return data;
+      return withSupabaseTimeout('Mover lead', async () => {
+        let q = supabase
+          .from('marketing_leads')
+          .update({
+            stage_id: input.stage_id,
+            position_in_stage: input.position_in_stage,
+          })
+          .eq('id', input.id);
+        if (companyId) q = q.eq('company_id', companyId);
+        const { data, error } = await q.select('*').single();
+        if (error) throw error;
+        return data;
+      });
     },
     onMutate: async ({ id, stage_id, position_in_stage }) => {
       await queryClient.cancelQueries({ queryKey: ['marketing-leads', companyId] });
@@ -415,12 +422,16 @@ export const useMarketingLeads = (scopeCompanyId?: string | null) => {
       }
       return { prev };
     },
+    onSuccess: (data) => {
+      queryClient.setQueryData<MarketingLead[]>(['marketing-leads', companyId], (prev) =>
+        prev ? prev.map((l) => (l.id === data.id ? data : l)) : prev,
+      );
+    },
     onError: (_err, _vars, ctx) => {
       if (ctx?.prev) {
         queryClient.setQueryData(['marketing-leads', companyId], ctx.prev);
       }
     },
-    onSettled: invalidate,
   });
 
   const createLead = useMutation({
