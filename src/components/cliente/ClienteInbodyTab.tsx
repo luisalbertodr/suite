@@ -233,6 +233,10 @@ export const ClienteInbodyTab: React.FC<Props> = ({ customerId, taxId, companyId
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
+    setSelectedId(null);
+  }, [customerId]);
+
+  useEffect(() => {
     if (measurements?.length) {
       setSelectedId((prev) => (prev && measurements.some((m) => m.id === prev) ? prev : measurements[0].id));
     }
@@ -326,6 +330,8 @@ export const ClienteInbodyTab: React.FC<Props> = ({ customerId, taxId, companyId
 
       {selected && (
         <InbodyReportExport
+          key={`${customerId}-${selected.id}-${selected.measured_at}`}
+          customerId={customerId}
           measurement={selected}
           customerName={customerName ?? undefined}
           compact={compact}

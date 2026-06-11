@@ -7,6 +7,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useWorkCenterBranding } from '@/hooks/useWorkCenterBranding';
 import {
   downloadInbodyReport,
+  INBODY_REPORT_TEMPLATE_VERSION,
   loadInbodyReportLogo,
   loadInbodyReportTemplate,
   renderInbodyReportCanvas,
@@ -15,11 +16,27 @@ import {
 
 interface Props {
   measurement: InbodyMeasurement;
+  customerId?: string;
   customerName?: string;
   compact?: boolean;
 }
 
-export const InbodyReportExport: React.FC<Props> = ({ measurement, customerName, compact }) => {
+function clearPreviewCanvas(canvas: HTMLCanvasElement | null) {
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  if (ctx && canvas.width > 0 && canvas.height > 0) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+  canvas.width = 0;
+  canvas.height = 0;
+}
+
+export const InbodyReportExport: React.FC<Props> = ({
+  measurement,
+  customerId,
+  customerName,
+  compact,
+}) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<'download' | 'share' | null>(null);
@@ -31,6 +48,7 @@ export const InbodyReportExport: React.FC<Props> = ({ measurement, customerName,
     let cancelled = false;
     setLoading(true);
     setError(null);
+    clearPreviewCanvas(canvasRef.current);
 
     (async () => {
       try {
@@ -63,7 +81,15 @@ export const InbodyReportExport: React.FC<Props> = ({ measurement, customerName,
     return () => {
       cancelled = true;
     };
-  }, [measurement, customerName, logoUrlLight]);
+  }, [
+    customerId,
+    customerName,
+    logoUrlLight,
+    measurement,
+    measurement.id,
+    measurement.measured_at,
+    INBODY_REPORT_TEMPLATE_VERSION,
+  ]);
 
   const handleDownload = async () => {
     setBusy('download');
