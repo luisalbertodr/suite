@@ -330,7 +330,7 @@ export const ClienteInbodyTab: React.FC<Props> = ({ customerId, taxId, companyId
 
       {selected && (
         <InbodyReportExport
-          key={`${customerId}-${selected.id}-${selected.measured_at}`}
+          key={`inbody-report-${customerId}-${selected.id}`}
           customerId={customerId}
           measurement={selected}
           customerName={customerName ?? undefined}

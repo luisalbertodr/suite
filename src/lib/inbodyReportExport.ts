@@ -11,7 +11,7 @@ import {
 } from '@/lib/inbodyMeasurements';
 
 /** Versión de plantilla: cambiar al subir PNG nueva para invalidar caché del navegador. */
-export const INBODY_REPORT_TEMPLATE_VERSION = '20260614';
+export const INBODY_REPORT_TEMPLATE_VERSION = '20260624';
 export const INBODY_REPORT_TEMPLATE_URL = `/inbody/inbody-report-template-980x1200.png?v=${INBODY_REPORT_TEMPLATE_VERSION}`;
 
 /** Plantilla y coordenadas en píxeles reales 980×1200 (origen arriba-izquierda). */
@@ -24,13 +24,12 @@ const fs = (base: number) => Math.round(base * FONT_SCALE);
 const EXERCISE_DURATION_MIN = 30;
 const EXERCISE_KCAL_COEFF = 0.0084;
 
-/** MET por icono del planificador (4 filas × 6 columnas). */
+/** MET por icono del planificador (3 filas × 6 columnas). */
 const EXERCISE_COLS = 6;
 const EXERCISE_METS: number[][] = [
   [4.8, 3.5, 3.0, 2.5, 4.5, 4.0],
   [7.0, 6.5, 10.0, 9.0, 7.0, 6.8],
   [7.0, 10.0, 9.0, 7.0, 10.0, 6.0],
-  [3.0, 3.5, 8.0, 4.5, 3.5, 3.0],
 ];
 
 type RefRect = { x1: number; y1: number; x2: number; y2: number };
@@ -50,28 +49,42 @@ const REGIONS = {
   fatSegmental: { x1: 732, y1: 357, x2: 937, y2: 558 },
   exercise: { x1: 45, y1: 832, x2: 652, y2: 985 },
   dailyKcal: { x1: 671, y1: 1092, x2: 911, y2: 1118 },
-  exerciseWeight: { x1: 290, y1: 693, x2: 345, y2: 706 },
+  exerciseWeight: { x1: 345, y1: 817, x2: 400, y2: 830 },
 } as const satisfies Record<string, RefRect>;
 
-/** Desplazamiento fino composición corporal (dx derecha, dy arriba = negativo). */
-const COMPOSITION_SHIFT_X = 50;
-const COMPOSITION_SHIFT_Y = -20;
-
 /**
- * Composición corporal — columnas calibradas sobre plantilla 980×1200.
- * Marcador solo en Bajo/Normal/Alto; el valor kg va en UNIDAD:% (después de x=340).
+ * Composición corporal — calibrado contra inbody-report-example.png escalado a 980×1200.
+ * Marcador en zonas Bajo/Normal/Alto; valor kg en UNIDAD:%; rango+estado en Valor normal.
  */
-const COMPOSITION_BAR = { x1: 142 + COMPOSITION_SHIFT_X, x2: 340 + COMPOSITION_SHIFT_X };
-const COMPOSITION_UNIT = { x1: 341 + COMPOSITION_SHIFT_X, x2: 433 + COMPOSITION_SHIFT_X };
-const COMPOSITION_NORM = { x1: 434 + COMPOSITION_SHIFT_X, x2: 507 + COMPOSITION_SHIFT_X };
+const COMPOSITION_GRAPH_DX = 33;
+const COMPOSITION_GRAPH_DY = -17;
+const COMPOSITION_BAR = {
+  x1: 142 + COMPOSITION_GRAPH_DX,
+  x2: 340 + COMPOSITION_GRAPH_DX,
+};
+const COMPOSITION_UNIT = {
+  x1: 358 + COMPOSITION_GRAPH_DX,
+  x2: 448 + COMPOSITION_GRAPH_DX,
+};
+const COMPOSITION_NORM = {
+  x1: 468 + COMPOSITION_GRAPH_DX,
+  x2: 542 + COMPOSITION_GRAPH_DX,
+};
 
-/** Centros Y de fila (Peso, MME, Masa grasa) en plantilla 980×1200. */
-const COMPOSITION_ROW_Y = [150 + COMPOSITION_SHIFT_Y, 197 + COMPOSITION_SHIFT_Y, 244 + COMPOSITION_SHIFT_Y] as const;
+/** Centros Y de fila (Peso, MME, Masa grasa). */
+const COMPOSITION_ROW_Y = [150, 197, 244] as const;
+const compositionGraphY = (y: number) => y + COMPOSITION_GRAPH_DY;
+
+/** Centros X/Y del planificador (6 columnas × 3 filas), medidos en informe oficial 980×1200. */
+const EXERCISE_PLANNER_DX = -30;
+const EXERCISE_PLANNER_DY = 15;
+const EXERCISE_COL_X = [147, 248, 366, 451, 552, 653] as const;
+/** 3 filas repartidas entre Y 858 y 957 (antes 4 filas). */
+const EXERCISE_ROW_Y = [858, 908, 957] as const;
+const exercisePlannerX = (x: number) => x + EXERCISE_PLANNER_DX;
+const exercisePlannerY = (y: number) => y + EXERCISE_PLANNER_DY;
 
 type SegmentKey = 'right_arm' | 'left_arm' | 'trunk' | 'right_leg' | 'left_leg';
-
-/** Posición duración planificador (min). */
-const EXERCISE_DURATION = { x: 315, y: 776 };
 
 /** Posiciones X segmentales (extremidades +20 px de separación horizontal). */
 const SEGMENT_X: Record<SegmentKey, number> = {
@@ -400,22 +413,24 @@ function drawComposition(ctx: CanvasRenderingContext2D, w: number, h: number, m:
   ];
 
   for (const item of rows) {
-    drawCompositionMarker(ctx, w, h, item.yRef, item.value, item.min, item.max);
+    const yGraph = compositionGraphY(item.yRef);
 
-    drawTextAtY(ctx, w, h, item.yRef, COMPOSITION_UNIT, fmt(item.value, 1), {
+    drawCompositionMarker(ctx, w, h, yGraph, item.value, item.min, item.max);
+
+    drawTextAtY(ctx, w, h, yGraph, COMPOSITION_UNIT, fmt(item.value, 1), {
       size: fs(13),
       bold: true,
     });
 
     const rangeText = fmtRange(item.min, item.max);
     const status = inbodyStatusLabel(inbodyRangeStatus(item.value, item.min, item.max));
-    drawTextAtY(ctx, w, h, item.yRef, COMPOSITION_NORM, rangeText, { size: fs(11) }, 0.35);
+    drawTextAtY(ctx, w, h, yGraph, COMPOSITION_NORM, rangeText, { size: fs(11) }, 0.35);
     if (status !== '—') {
       drawTextAtY(
         ctx,
         w,
         h,
-        item.yRef,
+        yGraph,
         COMPOSITION_NORM,
         status,
         { size: fs(11), color: '#374151', bold: true },
@@ -554,21 +569,15 @@ function drawExercisePlanner(ctx: CanvasRenderingContext2D, w: number, h: number
     bold: true,
   });
 
-  const durPos = px(w, h, EXERCISE_DURATION.x, EXERCISE_DURATION.y);
-  drawText(ctx, String(EXERCISE_DURATION_MIN), durPos.x, durPos.y, {
-    size: fs(11),
-    bold: true,
-    align: 'center',
-  });
-
-  const rect = REGIONS.exercise;
   EXERCISE_METS.forEach((row, rowIdx) => {
+    const yRef = EXERCISE_ROW_Y[rowIdx];
+    if (yRef == null) return;
     row.forEach((met, colIdx) => {
       if (colIdx >= EXERCISE_COLS || met <= 0) return;
+      const xRef = EXERCISE_COL_X[colIdx];
+      if (xRef == null) return;
       const kcal = exerciseKcal(weight, met);
-      const x = colCenterX(rect, colIdx, EXERCISE_COLS);
-      const y = rowCenterY(rect, rowIdx, EXERCISE_METS.length);
-      const p = px(w, h, x, y);
+      const p = px(w, h, exercisePlannerX(xRef), exercisePlannerY(yRef));
       drawText(ctx, String(kcal), p.x, p.y, { size: fs(10), align: 'center', bold: true });
     });
   });
@@ -582,8 +591,15 @@ function drawExercisePlanner(ctx: CanvasRenderingContext2D, w: number, h: number
   }
 }
 
-export async function loadInbodyReportTemplate(): Promise<HTMLImageElement> {
-  const response = await fetch(INBODY_REPORT_TEMPLATE_URL, { cache: 'no-store' });
+export function inbodyReportSessionKey(measurement: InbodyMeasurement): string {
+  return `${measurement.id}-${measurement.measured_at}`;
+}
+
+export async function loadInbodyReportTemplate(sessionKey?: string): Promise<HTMLImageElement> {
+  const url = sessionKey
+    ? `${INBODY_REPORT_TEMPLATE_URL}&s=${encodeURIComponent(sessionKey)}`
+    : INBODY_REPORT_TEMPLATE_URL;
+  const response = await fetch(url, { cache: 'no-store' });
   if (!response.ok) {
     throw new Error('No se pudo cargar la plantilla InBody');
   }
@@ -620,7 +636,7 @@ async function renderReportCanvas(
   measurement: InbodyMeasurement,
   options: InbodyReportRenderOptions = {},
 ): Promise<HTMLCanvasElement> {
-  const template = await loadInbodyReportTemplate();
+  const template = await loadInbodyReportTemplate(inbodyReportSessionKey(measurement));
   const logo = options.logo ?? (await loadInbodyReportLogo(options.logoUrl));
   return renderInbodyReportCanvas(template, measurement, { ...options, logo });
 }

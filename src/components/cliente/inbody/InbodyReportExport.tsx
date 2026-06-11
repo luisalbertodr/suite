@@ -8,6 +8,7 @@ import { useWorkCenterBranding } from '@/hooks/useWorkCenterBranding';
 import {
   downloadInbodyReport,
   INBODY_REPORT_TEMPLATE_VERSION,
+  inbodyReportSessionKey,
   loadInbodyReportLogo,
   loadInbodyReportTemplate,
   renderInbodyReportCanvas,
@@ -43,6 +44,7 @@ export const InbodyReportExport: React.FC<Props> = ({
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
   const { logoUrlLight } = useWorkCenterBranding();
+  const sessionKey = inbodyReportSessionKey(measurement);
 
   useEffect(() => {
     let cancelled = false;
@@ -53,7 +55,7 @@ export const InbodyReportExport: React.FC<Props> = ({
     (async () => {
       try {
         const [template, logo] = await Promise.all([
-          loadInbodyReportTemplate(),
+          loadInbodyReportTemplate(sessionKey),
           loadInbodyReportLogo(logoUrlLight),
         ]);
         if (cancelled) return;
@@ -81,15 +83,7 @@ export const InbodyReportExport: React.FC<Props> = ({
     return () => {
       cancelled = true;
     };
-  }, [
-    customerId,
-    customerName,
-    logoUrlLight,
-    measurement,
-    measurement.id,
-    measurement.measured_at,
-    INBODY_REPORT_TEMPLATE_VERSION,
-  ]);
+  }, [customerId, customerName, logoUrlLight, sessionKey, INBODY_REPORT_TEMPLATE_VERSION]);
 
   const handleDownload = async () => {
     setBusy('download');
