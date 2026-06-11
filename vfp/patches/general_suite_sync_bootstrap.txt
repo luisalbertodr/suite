@@ -1,0 +1,5 @@
+Parches en C:\Duna\Export\PROGS\general.prg (copiar a VM PROGS\general.prg + recompilar general.fxp):
+
+- SuiteBootstrapLog: escribe Usuarios\_suite_sync.log aunque suite_full_unlock no cargue
+- SuiteLoadUnlockProgram: PROGS\suite_full_unlock.fxp antes que exe embebido
+- SuiteStartSyncIfReady: reintenta carga y registra error si falta sync

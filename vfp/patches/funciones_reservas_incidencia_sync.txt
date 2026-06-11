@@ -3,16 +3,27 @@ Copia de referencia de los parches aplicados en `C:\Duna\Export\PROGS\funciones.
 
 ```foxpro
 TRY
+   IF TYPE("SuiteSyncEnsureLoaded")#"U"
+      = SuiteSyncEnsureLoaded()
+   ENDIF
+   IF TYPE("Suite_SyncInit")#"U" AND (TYPE("plSuiteSyncEnabled")#"L" OR .NOT. plSuiteSyncEnabled)
+      IF FILE(SuiteStyleRoot()+"SuiteSync.cfg")
+         DO Suite_SyncInit
+      ENDIF
+   ENDIF
    IF TYPE("plSuiteSyncEnabled")="L" AND plSuiteSyncEnabled
       DO CASE
          CASE UPPER(ALLTRIM(tctipinc))=="BORRAR"
-            DO Suite_SyncPushDelete WITH ... IN suite_reservas_sync.prg
+            DO Suite_SyncPushDelete WITH tnidplan, ...
          CASE UPPER(ALLTRIM(tctipinc))=="MODIFICAR"
-            DO Suite_SyncAfterIncidencia WITH tctipinc, tnidplan IN suite_reservas_sync.prg
+            DO Suite_SyncAfterIncidencia WITH tctipinc, tnidplan
+         CASE UPPER(ALLTRIM(tctipinc))=="CREAR"
+            DO Suite_SyncAfterIncidencia WITH tctipinc, tnidplan
       ENDCASE
    ENDIF
 CATCH
 ENDTRY
 ```
 
-El fuente editable está solo en `C:\Duna\Export\PROGS\funciones.prg` (no en este repo).
+Procedimientos en `suite_full_unlock` (embebido en duna.exe). NO usar `suite_reservas_sync.prg`.
+Fuente editable: `C:\Duna\Export\PROGS\funciones.prg` + copiar `vfp\suite_full_unlock.prg` antes de compilar.

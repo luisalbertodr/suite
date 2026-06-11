@@ -7,6 +7,7 @@
 
 param(
     [string]$VmHost = "192.168.99.119",
+    [string]$StyleDrive = "",
     [string]$SyncToken = "",
     [string]$SyncUrl = "https://supabase.lipoout.com/functions/v1/style-reservas-sync"
 )
@@ -40,11 +41,17 @@ if (-not $SyncToken) {
     throw "No se pudo resolver sync_token (pasa -SyncToken o configura SUPABASE_DB_URL en .env)"
 }
 
-$SuiteSyncRemote = "\\$VmHost\c$\SuiteSync"
-$StyleRemote = "\\$VmHost\c$\Style-Dunasoft"
+$StyleRemote = if ($StyleDrive -and (Test-Path $StyleDrive)) {
+    $StyleDrive.TrimEnd('\')
+} elseif (Test-Path "Z:\Style-Dunasoft") {
+    "Z:\Style-Dunasoft"
+} else {
+    "\\$VmHost\c$\Style-Dunasoft"
+}
+$SuiteSyncRemote = if (Test-Path "Z:\SuiteSync") { "Z:\SuiteSync" } else { "\\$VmHost\c$\SuiteSync" }
 
-if (-not (Test-Path $SuiteSyncRemote)) {
-    throw "Sin acceso SMB a $SuiteSyncRemote. Ejecuta: cd C:\Duna\DunaWeb\sync; .\copy-to-vm.ps1"
+if (-not (Test-Path $StyleRemote)) {
+    throw "Sin acceso a Style ($StyleRemote). Monta Z:\Style-Dunasoft o usa -StyleDrive."
 }
 
 Write-Host "Subiendo agente + VFP sync a $VmHost ..." -ForegroundColor Green
@@ -85,16 +92,25 @@ $out | Set-Content $envPath -Encoding UTF8
     ""
 ) | Set-Content (Join-Path $StyleRemote "SuiteSync.cfg") -Encoding ASCII
 
+$progsDest = Join-Path $StyleRemote "PROGS"
+New-Item -ItemType Directory -Force -Path $progsDest | Out-Null
+
+$exportUnlock = Join-Path $ExportProgs "suite_full_unlock.prg"
+Copy-Item (Join-Path $VfpLocal "suite_full_unlock.prg") $exportUnlock -Force
 Copy-Item (Join-Path $VfpLocal "suite_full_unlock.prg") (Join-Path $StyleRemote "suite_full_unlock.prg") -Force
+$exportFxp = Join-Path $ExportProgs "suite_full_unlock.fxp"
+if (Test-Path $exportFxp) {
+    Copy-Item $exportFxp (Join-Path $progsDest "suite_full_unlock.fxp") -Force
+    Write-Host "suite_full_unlock.fxp -> VM PROGS (fallback sin ReFox)" -ForegroundColor Cyan
+}
+Write-Host "suite_full_unlock.prg -> Export PROGS + VM (fallback sin ReFox)" -ForegroundColor Cyan
+Copy-Item (Join-Path $VfpLocal "DiagnosticarSuiteSync.ps1") (Join-Path $StyleRemote "DiagnosticarSuiteSync.ps1") -Force
 Copy-Item (Join-Path $VfpLocal "activar_suite_sync.prg") (Join-Path $StyleRemote "activar_suite_sync.prg") -Force
 Copy-Item (Join-Path $VfpLocal "TestStyleSync.ps1") (Join-Path $StyleRemote "TestStyleSync.ps1") -Force
 Copy-Item (Join-Path $VfpLocal "IniciarStyle.bat") (Join-Path $StyleRemote "IniciarStyle.bat") -Force
 # No copiar suite_reservas_sync.prg: puede pisar la version embebida en suite_full_unlock.prg
 $oldSync = Join-Path $StyleRemote "suite_reservas_sync.prg"
 if (Test-Path $oldSync) { Remove-Item $oldSync -Force; Write-Host "Eliminado suite_reservas_sync.prg obsoleto" }
-
-$progsDest = Join-Path $StyleRemote "PROGS"
-New-Item -ItemType Directory -Force -Path $progsDest | Out-Null
 Copy-Item (Join-Path $VfpLocal "patches\httpasp_validarlicencia.prg") (Join-Path $progsDest "httpasp_validarlicencia.patch.prg") -Force
 
 $resp = curl.exe -s -X POST $SyncUrl -H "Content-Type: application/x-www-form-urlencoded" -d "id=$SyncToken&tag=stylegetreservas"

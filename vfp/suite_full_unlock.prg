@@ -199,6 +199,7 @@ PROCEDURE Suite_SyncInit
  ENDIF
  IF FILE(lcfichero)
     lccontent = FILETOSTR(lcfichero)
+    DIMENSION laSuiteSyncCfg(1)
     lnlines = ALINES(laSuiteSyncCfg, lccontent)
     FOR i = 1 TO lnlines
        lcline = laSuiteSyncCfg(i)
@@ -295,6 +296,37 @@ FUNCTION Suite_HttpPostOk
  RETURN .F.
 ENDFUNC
 **
+FUNCTION Suite_UrlEncode
+ PARAMETER tcvalue
+ LOCAL lcraw, lcout, lchex, lch, lnasc, i, llsafe
+ lchex = "0123456789ABCDEF"
+ lcout = ""
+ lcraw = IIF(VARTYPE(tcvalue)="C", tcvalue, TRANSFORM(tcvalue))
+ lcraw = STRCONV(lcraw, 9)
+ FOR i = 1 TO LEN(lcraw)
+    lch = SUBSTR(lcraw, i, 1)
+    lnasc = ASC(lch)
+    llsafe = (lnasc >= 48 AND lnasc <= 57) OR ;
+             (lnasc >= 65 AND lnasc <= 90) OR ;
+             (lnasc >= 97 AND lnasc <= 122) OR ;
+             lnasc = 45 OR lnasc = 46 OR lnasc = 95 OR lnasc = 126
+    DO CASE
+       CASE lnasc = 32
+          lcout = lcout + "+"
+       CASE llsafe
+          lcout = lcout + lch
+       OTHERWISE
+          lcout = lcout + "%" + SUBSTR(lchex, INT(lnasc / 16) + 1, 1) + SUBSTR(lchex, MOD(lnasc, 16) + 1, 1)
+    ENDCASE
+ ENDFOR
+ RETURN lcout
+ENDFUNC
+**
+FUNCTION Suite_FormParam
+ PARAMETER tckey, tcvalue
+ RETURN ALLTRIM(tckey)+"="+Suite_UrlEncode(ALLTRIM(IIF(VARTYPE(tcvalue)="C", tcvalue, TRANSFORM(tcvalue))))
+ENDFUNC
+**
 PROCEDURE Suite_SyncCycle
  LOCAL lnSyncLock
  IF  .NOT. plSuiteSyncEnabled
@@ -344,9 +376,13 @@ ENDPROC
 **
 FUNCTION Suite_BuildServiciosPlan
  PARAMETER tnidplan
- LOCAL lccamposerv, lcalias
+ LOCAL lccamposerv, lcalias, llWasUsed
  lcalias = ALIAS()
  lccamposerv = ""
+ llWasUsed = USED("planart")
+ IF  .NOT. llWasUsed
+    USE SHARED dbf/planart AGAIN ALIAS planart IN 0
+ ENDIF
  IF USED("planart")
     SELECT planart
     SET ORDER TO idplan
@@ -356,6 +392,9 @@ FUNCTION Suite_BuildServiciosPlan
        ENDSCAN
     ENDIF
  ENDIF
+ IF  .NOT. llWasUsed AND USED("planart")
+    USE IN planart
+ ENDIF
  IF  .NOT. EMPTY(lcalias)
     SELECT (lcalias)
  ENDIF
@@ -364,16 +403,26 @@ ENDFUNC
 **
 FUNCTION Suite_TsToEpoch
  PARAMETER tdt
- IF EMPTY(tdt) OR TYPE("tdt")#"T"
+ LOCAL lt
+ IF ISNULL(tdt) OR EMPTY(tdt)
     RETURN 0
  ENDIF
- RETURN INT((tdt - DATETIME(1970, 1, 1, 0, 0, 0)) * 86400)
+ DO CASE
+    CASE TYPE("tdt")="T"
+       lt = tdt
+    CASE TYPE("tdt")="D"
+       lt = DTOT(tdt)
+    OTHERWISE
+       RETURN 0
+ ENDCASE
+ RETURN INT((lt - DATETIME(1970, 1, 1, 0, 0, 0)) * 86400)
 ENDFUNC
 **
 FUNCTION Suite_GetPlanLocalModifiedAt
  PARAMETER tnidplan
  LOCAL ldAt, lcalias, llWasUsed
- ldAt = {}
+ * fechorinc es T; no comparar con {} (D) — provoca "Operator/operand type mismatch"
+ ldAt = .NULL.
  lcalias = SELECT()
  llWasUsed = USED("planinc")
  IF  .NOT. llWasUsed
@@ -383,8 +432,10 @@ FUNCTION Suite_GetPlanLocalModifiedAt
  SET ORDER TO idplan
  IF SEEK(tnidplan)
     SCAN REST WHILE planinc.idplan = tnidplan
-       IF TYPE("planinc.fechorinc")="T" AND planinc.fechorinc > ldAt
-          ldAt = planinc.fechorinc
+       IF TYPE("planinc.fechorinc")="T"
+          IF ISNULL(ldAt) OR planinc.fechorinc > ldAt
+             ldAt = planinc.fechorinc
+          ENDIF
        ENDIF
     ENDSCAN
  ENDIF
@@ -416,6 +467,9 @@ FUNCTION Suite_ParseServiciosToPlanart
  LOCAL lcline, lccodart, lchora, lnbracket, lcalias
  lcalias = ALIAS()
  IF EMPTY(tcservicios)
+    IF  .NOT. EMPTY(lcalias)
+       SELECT (lcalias)
+    ENDIF
     RETURN .T.
  ENDIF
  IF  .NOT. USED("planart")
@@ -468,14 +522,19 @@ FUNCTION Suite_ParseServiciosToPlanart
 ENDFUNC
 **
 PROCEDURE Suite_SyncPull
- LOCAL lcparams, lcresp, llok, lohttp, lcalias
+ LOCAL lcparams, lcresp, llok, lohttp, lcalias, llPlanArtWasUsed
  LOCAL lnidplan, lnidand, lcfec, lcfact, lcelim
  IF  .NOT. plSuiteSyncEnabled
     RETURN
  ENDIF
- lcparams = "id="+ALLTRIM(pcSuiteSyncToken)+"&tag=stylegetreservas"
+ lcparams = Suite_FormParam("id", pcSuiteSyncToken)+"&"+Suite_FormParam("tag", "stylegetreservas")
  lcresp = Suite_HttpPost(pcSuiteSyncUrl, lcparams)
  IF EMPTY(lcresp)
+    DO Suite_SyncLog WITH "PULL vacio (sin respuesta HTTP)"
+    RETURN
+ ENDIF
+ IF AT("ERROR", UPPER(lcresp)) > 0
+    DO Suite_SyncLog WITH "PULL error servidor: "+LEFT(ALLTRIM(lcresp), 200)
     RETURN
  ENDIF
  llok = -1
@@ -503,6 +562,10 @@ PROCEDURE Suite_SyncPull
  ENDIF
  IF  .NOT. USED("plan2009")
     USE SHARED dbf/plan2009 AGAIN ALIAS plan2009 IN 0
+ ENDIF
+ llPlanArtWasUsed = USED("planart")
+ IF  .NOT. llPlanArtWasUsed
+    USE SHARED dbf/planart AGAIN ALIAS planart IN 0
  ENDIF
  lcalias = SELECT()
  SELECT cResPull
@@ -575,14 +638,17 @@ PROCEDURE Suite_SyncPull
        =Suite_ParseServiciosToPlanart(lnidplan, cResPull.servicios, cResPull.horini)
     ENDIF
     ENDIF
-    lcparams = "id="+ALLTRIM(pcSuiteSyncToken)+"&tag=stylereservaok"
-    lcparams = lcparams+"&macand="+ALLTRIM(cResPull.macand)
-    lcparams = lcparams+"&idand="+ALLTRIM(STR(lnidand))
-    lcparams = lcparams+"&idplan="+ALLTRIM(STR(lnidplan))
-    lcparams = lcparams+"&reservaok=SI"
+    lcparams = Suite_FormParam("id", pcSuiteSyncToken)+"&"+Suite_FormParam("tag", "stylereservaok")
+    lcparams = lcparams+"&"+Suite_FormParam("macand", cResPull.macand)
+    lcparams = lcparams+"&"+Suite_FormParam("idand", STR(lnidand))
+    lcparams = lcparams+"&"+Suite_FormParam("idplan", STR(lnidplan))
+    lcparams = lcparams+"&"+Suite_FormParam("reservaok", "SI")
     =Suite_HttpPostOk(pcSuiteSyncUrl, lcparams)
  ENDSCAN
  USE IN cResPull
+ IF  .NOT. llPlanArtWasUsed AND USED("planart")
+    USE IN planart
+ ENDIF
  IF  .NOT. EMPTY(lcalias)
     SELECT (lcalias)
  ENDIF
@@ -617,25 +683,25 @@ PROCEDURE Suite_SyncPushOne
  ELSE
     lcaccion = "MODIFICAR"
  ENDIF
- lcparams = "id="+ALLTRIM(pcSuiteSyncToken)+"&tag=stylereservas"
- lcparams = lcparams+"&accion="+lcaccion
- lcparams = lcparams+"&idplan="+ALLTRIM(STR(plan2009.idplan))
- lcparams = lcparams+"&codemp="+ALLTRIM(plan2009.codemp)
- lcparams = lcparams+"&codcli="+ALLTRIM(plan2009.codcli)
- lcparams = lcparams+"&fecha="+lcfec
- lcparams = lcparams+"&horini="+ALLTRIM(plan2009.horini)
- lcparams = lcparams+"&horfin="+ALLTRIM(plan2009.horfin)
- lcparams = lcparams+"&texto="+ALLTRIM(plan2009.texto)
- lcparams = lcparams+"&codrec="+ALLTRIM(plan2009.codrec)
- lcparams = lcparams+"&nomcli="+ALLTRIM(plan2009.nomcli)
- lcparams = lcparams+"&tel1cli="+ALLTRIM(plan2009.tel1cli)
- lcparams = lcparams+"&facturado="+lcfact
- lcparams = lcparams+"&servicios="+ALLTRIM(lccamposerv)
- lcparams = lcparams+"&collet="+ALLTRIM(STR(plan2009.collet))
- lcparams = lcparams+"&colfon="+ALLTRIM(STR(plan2009.colfon))
- lcparams = lcparams+"&idand="+ALLTRIM(STR(plan2009.idand))
- lcparams = lcparams+"&macand="+ALLTRIM(pcSuiteSyncMac)
- lcparams = lcparams+"&modificado="+ALLTRIM(STR(Suite_TsToEpoch(DATETIME())))
+ lcparams = Suite_FormParam("id", pcSuiteSyncToken)+"&"+Suite_FormParam("tag", "stylereservas")
+ lcparams = lcparams+"&"+Suite_FormParam("accion", lcaccion)
+ lcparams = lcparams+"&"+Suite_FormParam("idplan", STR(plan2009.idplan))
+ lcparams = lcparams+"&"+Suite_FormParam("codemp", plan2009.codemp)
+ lcparams = lcparams+"&"+Suite_FormParam("codcli", plan2009.codcli)
+ lcparams = lcparams+"&"+Suite_FormParam("fecha", lcfec)
+ lcparams = lcparams+"&"+Suite_FormParam("horini", plan2009.horini)
+ lcparams = lcparams+"&"+Suite_FormParam("horfin", plan2009.horfin)
+ lcparams = lcparams+"&"+Suite_FormParam("texto", plan2009.texto)
+ lcparams = lcparams+"&"+Suite_FormParam("codrec", plan2009.codrec)
+ lcparams = lcparams+"&"+Suite_FormParam("nomcli", plan2009.nomcli)
+ lcparams = lcparams+"&"+Suite_FormParam("tel1cli", plan2009.tel1cli)
+ lcparams = lcparams+"&"+Suite_FormParam("facturado", lcfact)
+ lcparams = lcparams+"&"+Suite_FormParam("servicios", lccamposerv)
+ lcparams = lcparams+"&"+Suite_FormParam("collet", STR(plan2009.collet))
+ lcparams = lcparams+"&"+Suite_FormParam("colfon", STR(plan2009.colfon))
+ lcparams = lcparams+"&"+Suite_FormParam("idand", STR(plan2009.idand))
+ lcparams = lcparams+"&"+Suite_FormParam("macand", pcSuiteSyncMac)
+ lcparams = lcparams+"&"+Suite_FormParam("modificado", STR(Suite_TsToEpoch(DATETIME())))
  llok = Suite_HttpPostOk(pcSuiteSyncUrl, lcparams)
  IF llok
     DO Suite_SyncLog WITH "PUSH ok idplan="+ALLTRIM(STR(tnidplan))
@@ -660,25 +726,25 @@ PROCEDURE Suite_SyncPushDelete
  ENDIF
  lcfec = ALLTRIM(STR(YEAR(tdfecha)))+"-"+PADL(ALLTRIM(STR(MONTH(tdfecha))), 2, "0")+"-"+PADL(ALLTRIM(STR(DAY(tdfecha))), 2, "0")
  lcfact = IIF(tlfacturado, "SI", "NO")
- lcparams = "id="+ALLTRIM(pcSuiteSyncToken)+"&tag=stylereservas"
- lcparams = lcparams+"&accion=BORRAR"
- lcparams = lcparams+"&idplan="+ALLTRIM(STR(tnidplan))
- lcparams = lcparams+"&codemp="+ALLTRIM(tccodemp)
- lcparams = lcparams+"&codcli="+ALLTRIM(tccodcli)
- lcparams = lcparams+"&fecha="+lcfec
- lcparams = lcparams+"&horini="+ALLTRIM(tchorini)
- lcparams = lcparams+"&horfin="+ALLTRIM(tchorfin)
- lcparams = lcparams+"&texto="+ALLTRIM(pctexto)
- lcparams = lcparams+"&codrec="+ALLTRIM(tccodrec)
- lcparams = lcparams+"&nomcli="+ALLTRIM(pcnomcli)
- lcparams = lcparams+"&tel1cli="+ALLTRIM(pctel1cli)
- lcparams = lcparams+"&facturado="+lcfact
- lcparams = lcparams+"&servicios="+ALLTRIM(pccamposerv)
- lcparams = lcparams+"&collet="+ALLTRIM(STR(tncollet))
- lcparams = lcparams+"&colfon="+ALLTRIM(STR(tncolfon))
- lcparams = lcparams+"&idand=0"
- lcparams = lcparams+"&macand="+ALLTRIM(pcSuiteSyncMac)
- lcparams = lcparams+"&modificado="+ALLTRIM(STR(Suite_TsToEpoch(DATETIME())))
+ lcparams = Suite_FormParam("id", pcSuiteSyncToken)+"&"+Suite_FormParam("tag", "stylereservas")
+ lcparams = lcparams+"&"+Suite_FormParam("accion", "BORRAR")
+ lcparams = lcparams+"&"+Suite_FormParam("idplan", STR(tnidplan))
+ lcparams = lcparams+"&"+Suite_FormParam("codemp", tccodemp)
+ lcparams = lcparams+"&"+Suite_FormParam("codcli", tccodcli)
+ lcparams = lcparams+"&"+Suite_FormParam("fecha", lcfec)
+ lcparams = lcparams+"&"+Suite_FormParam("horini", tchorini)
+ lcparams = lcparams+"&"+Suite_FormParam("horfin", tchorfin)
+ lcparams = lcparams+"&"+Suite_FormParam("texto", pctexto)
+ lcparams = lcparams+"&"+Suite_FormParam("codrec", tccodrec)
+ lcparams = lcparams+"&"+Suite_FormParam("nomcli", pcnomcli)
+ lcparams = lcparams+"&"+Suite_FormParam("tel1cli", pctel1cli)
+ lcparams = lcparams+"&"+Suite_FormParam("facturado", lcfact)
+ lcparams = lcparams+"&"+Suite_FormParam("servicios", pccamposerv)
+ lcparams = lcparams+"&"+Suite_FormParam("collet", STR(tncollet))
+ lcparams = lcparams+"&"+Suite_FormParam("colfon", STR(tncolfon))
+ lcparams = lcparams+"&"+Suite_FormParam("idand", "0")
+ lcparams = lcparams+"&"+Suite_FormParam("macand", pcSuiteSyncMac)
+ lcparams = lcparams+"&"+Suite_FormParam("modificado", STR(Suite_TsToEpoch(DATETIME())))
  llok = Suite_HttpPostOk(pcSuiteSyncUrl, lcparams)
  DO SuiteSyncReleaseLock WITH lnSyncLock
 ENDPROC

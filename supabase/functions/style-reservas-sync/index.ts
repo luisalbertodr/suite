@@ -78,10 +78,30 @@ type QueueRow = {
 
 function formatTsCompact(iso: string): string {
   const t = iso.trim();
+  if (!t) return '';
   if (/^\d+$/.test(t) && t.length >= 10) return t;
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
   return String(Math.floor(d.getTime() / 1000));
+}
+
+/** Style VFP compara modificado con VAL() → debe ser epoch Unix en segundos. */
+function resolveModificadoEpoch(
+  payload: Record<string, unknown>,
+  newBlock: Record<string, unknown>,
+  createdAt: string,
+): string {
+  const candidates = [
+    payloadField(newBlock, 'suite_updated_at'),
+    payloadField(payload, 'suite_updated_at'),
+    payloadField(newBlock, 'modificado'),
+    payloadField(payload, 'modificado'),
+  ];
+  for (const raw of candidates) {
+    const epoch = formatTsCompact(raw);
+    if (epoch) return epoch;
+  }
+  return formatTsCompact(createdAt);
 }
 
 function payloadField(payload: Record<string, unknown>, key: string): string {
@@ -126,10 +146,7 @@ function buildGetReservasXml(rows: QueueRow[], macand: string): string {
     parts.push(`<eliminar>${isDelete ? 'SI' : 'NO'}</eliminar>`);
     parts.push(`<collet>${xmlEscape(payloadField(newBlock, 'collet'))}</collet>`);
     parts.push(`<colfon>${xmlEscape(payloadField(newBlock, 'colfon'))}</colfon>`);
-    const modificado =
-      payloadField(newBlock, 'suite_updated_at') ||
-      payloadField(p, 'suite_updated_at') ||
-      formatTsCompact(row.created_at);
+    const modificado = resolveModificadoEpoch(p, newBlock, row.created_at);
     parts.push(`<modificado>${xmlEscape(modificado)}</modificado>`);
     parts.push('</reservas_web>');
   }
