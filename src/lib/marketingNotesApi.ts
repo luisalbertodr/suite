@@ -1,14 +1,16 @@
-import { runWhenAuthReady } from '@/lib/authSession';
+import { waitUntilAuthReady } from '@/lib/authSession';
 
+/** Ejecuta una mutación de marketing sin encolarla tras otras peticiones (evita falsos timeout). */
 export async function withSupabaseTimeout<T>(
   label: string,
   fn: () => Promise<T>,
-  ms = 20_000,
+  ms = 45_000,
 ): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
+    await waitUntilAuthReady();
     return await Promise.race([
-      runWhenAuthReady(fn),
+      fn(),
       new Promise<T>((_, reject) => {
         timer = setTimeout(
           () => reject(new Error(`${label}: la operación tardó demasiado. Comprueba la conexión e inténtalo de nuevo.`)),
