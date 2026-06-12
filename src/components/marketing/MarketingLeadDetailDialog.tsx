@@ -73,7 +73,7 @@ export const MarketingLeadDetailDialog: React.FC<MarketingLeadDetailDialogProps>
       setStageId(lead.stage_id ?? null);
       setNotes(lead.notes ?? '');
     }
-  }, [lead]);
+  }, [lead?.id, lead?.first_name, lead?.last_name, lead?.phone, lead?.email, lead?.value, lead?.stage_id, lead?.notes]);
 
   if (!lead) return null;
 
@@ -321,6 +321,7 @@ export const MarketingLeadDetailDialog: React.FC<MarketingLeadDetailDialogProps>
             Llamadas, rechazos, reagendados y anotaciones del equipo.
           </p>
           <MarketingLeadNotesPanel
+            key={lead.id}
             leadId={lead.id}
             companyId={lead.company_id ?? companyId}
             compact

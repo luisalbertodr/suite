@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   LayoutGrid,
   RefreshCw,
@@ -81,8 +82,9 @@ const matchesQuery = (lead: MarketingLead, q: string): boolean => {
 export const Marketing: React.FC = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { loading: companyLoading } = useCompanyFilter();
-  const { canWrite: canEditMarketing, marketingCompanyId } = useMarketingPermissions();
+  const { canWrite: canEditMarketing, loading: marketingPermsLoading, marketingCompanyId } = useMarketingPermissions();
   const marketingCompanyIdStable = marketingCompanyId;
 
   const { leads, isLoading: leadsLoading, refetch, moveLeadToStage } = useMarketingLeads(marketingCompanyIdStable);
@@ -155,6 +157,26 @@ export const Marketing: React.FC = () => {
 
   const leadsRef = useRef(leads);
   leadsRef.current = leads;
+
+  const activeLeadLive = useMemo(() => {
+    if (!activeLead) return null;
+    return leads.find((l) => l.id === activeLead.id) ?? activeLead;
+  }, [activeLead, leads]);
+
+  const notesLeadLive = useMemo(() => {
+    if (!notesLead) return null;
+    return leads.find((l) => l.id === notesLead.id) ?? notesLead;
+  }, [notesLead, leads]);
+
+  const prefetchLeadNotes = useCallback(
+    (lead: MarketingLead) => {
+      const notesCompanyId = lead.company_id ?? marketingCompanyIdStable;
+      void queryClient.invalidateQueries({
+        queryKey: ['marketing-lead-notes', notesCompanyId, lead.id],
+      });
+    },
+    [queryClient, marketingCompanyIdStable],
+  );
 
   const toggleStageColumnCollapsed = useCallback((stageId: string) => {
     setCollapsedStageIds((prev) => {
@@ -316,7 +338,7 @@ export const Marketing: React.FC = () => {
       setDraggedLeadId(null);
       setDragOverStageId(null);
       if (!lead || lead.stage_id === stageId) return;
-      if (!canEditMarketing) {
+      if (!marketingPermsLoading && !canEditMarketing) {
         toast({
           title: 'Sin permiso de edición',
           description: 'No puedes mover tarjetas sin el permiso «Editar Marketing» en Estética.',
@@ -337,7 +359,7 @@ export const Marketing: React.FC = () => {
         toast({ title: 'Error', description: message, variant: 'destructive' });
       }
     },
-    [leads, leadsByStage, moveLeadToStage, toast, canEditMarketing],
+    [leads, leadsByStage, moveLeadToStage, toast, canEditMarketing, marketingPermsLoading],
   );
 
   const handleEditStage = useCallback((_stage: MarketingLeadStage) => {
@@ -355,9 +377,10 @@ export const Marketing: React.FC = () => {
       if (lead.company_id && !viewedLeadIds.has(lead.id)) {
         markLeadViewed.mutate({ leadId: lead.id, companyId: lead.company_id });
       }
+      prefetchLeadNotes(lead);
       setActiveLead(lead);
     },
-    [viewedLeadIds, markLeadViewed],
+    [viewedLeadIds, markLeadViewed, prefetchLeadNotes],
   );
 
   const handleLeadOpenNotesById = useCallback(
@@ -367,9 +390,10 @@ export const Marketing: React.FC = () => {
       if (lead.company_id && !viewedLeadIds.has(lead.id)) {
         markLeadViewed.mutate({ leadId: lead.id, companyId: lead.company_id });
       }
+      prefetchLeadNotes(lead);
       setNotesLead(lead);
     },
-    [viewedLeadIds, markLeadViewed],
+    [viewedLeadIds, markLeadViewed, prefetchLeadNotes],
   );
 
   const handleLeadPromoteById = useCallback((leadId: string) => {
@@ -608,21 +632,21 @@ export const Marketing: React.FC = () => {
         )}
       </CardContent>
 
-      {activeLead ? (
+      {activeLeadLive ? (
         <MarketingLeadDetailDialog
-          lead={activeLead}
+          lead={activeLeadLive}
           companyId={marketingCompanyIdStable}
           stages={stages}
-          matchedCustomer={matchedCustomerByLead.get(activeLead.id) ?? null}
+          matchedCustomer={matchedCustomerByLead.get(activeLeadLive.id) ?? null}
           open
           onOpenChange={(open) => {
             if (!open) setActiveLead(null);
           }}
         />
       ) : null}
-      {notesLead ? (
+      {notesLeadLive ? (
         <MarketingLeadNotesDialog
-          lead={notesLead}
+          lead={notesLeadLive}
           open
           onOpenChange={(open) => {
             if (!open) setNotesLead(null);

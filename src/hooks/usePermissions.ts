@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/hooks/useAuth';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { runWhenAuthReady, isAuthLockError, sleep } from '@/lib/authSession';
 import {
   ESTETICA_COMPANY_ID,
   MEDICINA_COMPANY_ID,
@@ -54,34 +55,51 @@ export const usePermissions = () => {
 
   const fetchEffectiveRpc = useCallback(
     async (userId: string, scopeCompanyId: string): Promise<UserPermission[] | null> => {
-      try {
-        const { data, error } = await supabase.rpc('get_effective_user_permissions', {
-          p_user_id: userId,
-          p_company_id: scopeCompanyId,
-        });
-        if (error) {
-          debugError('get_effective_user_permissions error:', scopeCompanyId, error);
+      const maxAttempts = 3;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        if (attempt > 1) {
+          await sleep(250 * attempt);
+        }
+        try {
+          const { data, error } = await runWhenAuthReady(() =>
+            supabase.rpc('get_effective_user_permissions', {
+              p_user_id: userId,
+              p_company_id: scopeCompanyId,
+            }),
+          );
+          if (error) {
+            if (isAuthLockError(error) && attempt < maxAttempts) {
+              continue;
+            }
+            debugError('get_effective_user_permissions error:', scopeCompanyId, error);
+            return null;
+          }
+          if (!Array.isArray(data)) return null;
+          return data.map((row: Record<string, unknown>) => ({
+            permission_name:
+              (row.permission_name as string) || `${row.resource}:${row.action}`,
+            resource: String(row.resource ?? ''),
+            action: String(row.action ?? ''),
+          }));
+        } catch (e) {
+          if (isAuthLockError(e) && attempt < maxAttempts) {
+            continue;
+          }
+          debugError('get_effective_user_permissions threw:', scopeCompanyId, e);
           return null;
         }
-        if (!Array.isArray(data)) return null;
-        return data.map((row: Record<string, unknown>) => ({
-          permission_name:
-            (row.permission_name as string) || `${row.resource}:${row.action}`,
-          resource: String(row.resource ?? ''),
-          action: String(row.action ?? ''),
-        }));
-      } catch (e) {
-        debugError('get_effective_user_permissions threw:', scopeCompanyId, e);
-        return null;
       }
+      return null;
     },
     [],
   );
 
   const fetchLegacyRpc = async (userId: string): Promise<UserPermission[]> => {
-    const { data, error } = await supabase.rpc('get_user_permissions', {
-      p_user_id: userId,
-    });
+    const { data, error } = await runWhenAuthReady(() =>
+      supabase.rpc('get_user_permissions', {
+        p_user_id: userId,
+      }),
+    );
     if (error) throw error;
 
     const rawItems = Array.isArray(data) ? data : [];

@@ -13,6 +13,9 @@ export const WHATSAPP_MESSAGE_TEMPLATE_VARS = [
   { key: 'origen', description: 'Origen del lead (Facebook, Instagram, Meta…)' },
   { key: 'link_pago', description: 'Enlace único para pagar la señal con Stripe' },
   { key: 'importe_senal', description: 'Importe de la señal formateado (p. ej. 50,00 €)' },
+  { key: 'hora_cita', description: 'Hora de la cita (recordatorios agenda)' },
+  { key: 'titulo', description: 'Título de la cita en agenda' },
+  { key: 'profesional', description: 'Nombre del profesional de la cita' },
 ] as const;
 
 export function whatsappTemplateVariablesHelpText(): string {

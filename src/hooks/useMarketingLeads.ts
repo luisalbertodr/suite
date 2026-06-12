@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { withSupabaseTimeout } from '@/lib/marketingNotesApi';
+import { runWhenAuthReady } from '@/lib/authSession';
 import type { Database, Json } from '@/integrations/supabase/types';
 
 export type MarketingLead = Database['public']['Tables']['marketing_leads']['Row'];
@@ -361,14 +362,22 @@ export const useMarketingLeads = (scopeCompanyId?: string | null) => {
 
   const updateLead = useMutation({
     mutationFn: async (input: { id: string; values: MarketingLeadUpdate }) => {
-      const { data, error } = await supabase
-        .from('marketing_leads')
-        .update(input.values)
-        .eq('id', input.id)
-        .select('*')
-        .single();
-      if (error) throw error;
-      return data;
+      return withSupabaseTimeout('Actualizar lead', async () => {
+        let q = supabase
+          .from('marketing_leads')
+          .update(input.values)
+          .eq('id', input.id);
+        if (companyId) q = q.eq('company_id', companyId);
+        const { data, error } = await runWhenAuthReady(() => q.select('*').single());
+        if (error) {
+          const msg = error.message ?? 'Error al actualizar el lead';
+          if (/permission|policy|42501|403/i.test(msg)) {
+            throw new Error('No tienes permiso para editar este lead.');
+          }
+          throw new Error(msg);
+        }
+        return data;
+      });
     },
     onMutate: async ({ id, values }) => {
       await queryClient.cancelQueries({ queryKey: ['marketing-leads', companyId] });
@@ -404,8 +413,14 @@ export const useMarketingLeads = (scopeCompanyId?: string | null) => {
           })
           .eq('id', input.id);
         if (companyId) q = q.eq('company_id', companyId);
-        const { data, error } = await q.select('*').single();
-        if (error) throw error;
+        const { data, error } = await runWhenAuthReady(() => q.select('*').single());
+        if (error) {
+          const msg = error.message ?? 'Error al mover el lead';
+          if (/permission|policy|42501|403/i.test(msg)) {
+            throw new Error('No tienes permiso para mover tarjetas en Marketing.');
+          }
+          throw new Error(msg);
+        }
         return data;
       });
     },

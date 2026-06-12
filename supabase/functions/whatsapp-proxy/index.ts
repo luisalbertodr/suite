@@ -1145,6 +1145,31 @@ const WEBHOOK_EVENTS = [
   'group.v2.join',
 ];
 
+/** Body PUT sesión WAHA (documentación oficial: solo `config` en el cuerpo). */
+function buildWahaSessionPutBody(sessionConfig: Record<string, unknown>): string {
+  return JSON.stringify({ config: sessionConfig });
+}
+
+async function putWahaSessionConfig(
+  cfg: WhatsappConfig,
+  sessionName: string,
+  sessionConfig: Record<string, unknown>,
+): Promise<void> {
+  const putPath = `/api/sessions/${encodeURIComponent(sessionName)}`;
+  const putBody = buildWahaSessionPutBody(sessionConfig);
+  try {
+    await wahaJson(cfg, putPath, { method: 'PUT', body: putBody });
+    return;
+  } catch (e1) {
+    // Versiones antiguas aceptaban también `name` en el body.
+    if (!(e1 instanceof WahaError)) throw e1;
+    await wahaJson(cfg, putPath, {
+      method: 'PUT',
+      body: JSON.stringify({ name: sessionName, config: sessionConfig }),
+    });
+  }
+}
+
 function buildWebhookUrl(
   supabaseUrl: string,
   companyId: string,
@@ -1227,10 +1252,7 @@ async function ensureWahaSessionConfig(
 
   const sessionConfig = buildWahaSessionConfig(supabaseUrl, companyId, cfg);
   try {
-    await wahaJson(cfg, `/api/sessions/${encodeURIComponent(sessionName)}`, {
-      method: 'PUT',
-      body: JSON.stringify({ name: sessionName, config: sessionConfig }),
-    });
+    await putWahaSessionConfig(cfg, sessionName, sessionConfig);
   } catch (e) {
     console.warn('ensureWahaSessionConfig PUT failed:', e);
   }
@@ -1719,13 +1741,11 @@ serve(async (req) => {
         const webhookUrl = buildWebhookUrl(supabaseUrl, companyId, cfg.webhook_secret);
         const sessionConfig = buildWahaSessionConfig(supabaseUrl, companyId, cfg);
         const putPath = `/api/sessions/${encodeURIComponent(sessionName)}`;
-        const altPath = `/api/sessions`;
-        const putBody = JSON.stringify({ name: sessionName, config: sessionConfig });
 
         let configured = false;
         let lastError: WahaError | null = null;
         try {
-          await wahaJson(cfg, putPath, { method: 'PUT', body: putBody });
+          await putWahaSessionConfig(cfg, sessionName, sessionConfig);
           configured = true;
         } catch (e1) {
           if (e1 instanceof WahaError) lastError = e1;
@@ -1733,7 +1753,10 @@ serve(async (req) => {
         }
         if (!configured) {
           try {
-            await wahaJson(cfg, altPath, { method: 'POST', body: putBody });
+            await wahaJson(cfg, putPath, {
+              method: 'POST',
+              body: buildWahaSessionPutBody(sessionConfig),
+            });
             configured = true;
           } catch (e2) {
             if (e2 instanceof WahaError) lastError = e2;

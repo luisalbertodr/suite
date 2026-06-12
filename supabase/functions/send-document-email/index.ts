@@ -1,7 +1,8 @@
 
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { Resend } from "https://esm.sh/resend@2.0.0"
+import { loadEmailConfig, sendOutgoingEmail } from '../_shared/emailSender.ts'
+import { resolveUserCompanyId } from '../_shared/resolveCompanyId.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -128,50 +129,31 @@ serve(async (req) => {
       )
     }
 
-    // Get user's company
-    console.log('🏢 Fetching user profile for user:', user.id)
-    const { data: userProfile, error: profileError } = await supabaseClient
-      .from('user_profiles')
-      .select('company_id')
-      .eq('user_id', user.id)
-      .single()
+    console.log('🏢 Resolving company for user:', user.id)
+    const companyId = await resolveUserCompanyId(supabaseClient, user.id)
 
-    if (profileError) {
-      console.error('❌ Error fetching user profile:', profileError)
-      return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: 'Error fetching user profile: ' + profileError.message 
-        }),
-        { 
-          status: 400, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        }
-      )
-    }
-
-    if (!userProfile?.company_id) {
+    if (!companyId) {
       console.error('❌ User has no company associated')
       return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: 'User has no company associated' 
+        JSON.stringify({
+          success: false,
+          error: 'User has no company associated',
         }),
-        { 
-          status: 400, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        }
+        {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        },
       )
     }
 
-    console.log('🏢 Company ID found:', userProfile.company_id)
+    console.log('🏢 Company ID found:', companyId)
 
     // Get company information
     console.log('🏢 Fetching company data')
     const { data: company, error: companyError } = await supabaseClient
       .from('companies')
       .select('*')
-      .eq('id', userProfile.company_id)
+      .eq('id', companyId)
       .single()
 
     if (companyError) {
@@ -204,71 +186,40 @@ serve(async (req) => {
 
     console.log('🏢 Company found:', company.name)
 
-    // Get email configuration
+    // Get email configuration (SMTP Gmail o Resend)
     console.log('⚙️ Fetching email settings')
-    const { data: emailSettings, error: settingsError } = await supabaseClient
-      .from('system_settings')
-      .select('setting_key, setting_value')
-      .eq('company_id', userProfile.company_id)
-      .in('setting_key', ['resend_api_key', 'email_from'])
-
-    if (settingsError) {
+    let emailCfg
+    try {
+      emailCfg = await loadEmailConfig(supabaseClient, companyId)
+    } catch (settingsError) {
       console.error('❌ Error fetching email settings:', settingsError)
       return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: 'Error fetching email settings: ' + settingsError.message 
+        JSON.stringify({
+          success: false,
+          error: 'Error fetching email settings: ' + (settingsError as Error).message,
         }),
-        { 
-          status: 400, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        }
+        {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        },
       )
     }
 
-    console.log('⚙️ Email settings found:', emailSettings?.length || 0, 'settings')
-
-    const resendApiKey = emailSettings?.find(s => s.setting_key === 'resend_api_key')?.setting_value
-    const emailFrom = emailSettings?.find(s => s.setting_key === 'email_from')?.setting_value || 'noreply@moges.com'
-
-    console.log('🔑 Email configuration:', {
-      hasResendApiKey: !!resendApiKey,
-      emailFrom: emailFrom,
-      resendApiKeyLength: resendApiKey?.length || 0
-    })
-
-    if (!resendApiKey) {
-      console.error('❌ Resend API key not configured')
+    if (!emailCfg) {
+      console.error('❌ Email not configured')
       return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: 'Resend API key not configured for this company. Please configure it in the system settings.' 
+        JSON.stringify({
+          success: false,
+          error: 'Email no configurado (SMTP o Resend).',
         }),
-        { 
-          status: 400, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        }
+        {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        },
       )
     }
 
-    // Initialize Resend
-    let resend
-    try {
-      resend = new Resend(resendApiKey)
-      console.log('📧 Resend client created')
-    } catch (resendError) {
-      console.error('❌ Error creating Resend client:', resendError)
-      return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: 'Error creating email client: ' + resendError.message 
-        }),
-        { 
-          status: 500, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        }
-      )
-    }
+    console.log('🔑 Email configuration:', { provider: emailCfg.provider, from: emailCfg.from })
 
     // Convert base64 PDF to buffer
     let pdfBuffer
@@ -312,13 +263,9 @@ serve(async (req) => {
 
     // Send email
     console.log('🚀 Sending email to:', emailData.customerEmail)
-    let emailResponse
+    let messageId: string | undefined
     try {
-      emailResponse = await resend.emails.send({
-        from: emailFrom,
-        to: [emailData.customerEmail],
-        subject: emailData.subject,
-        html: `
+      const html = `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
             <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
               <h2 style="color: #333; margin-bottom: 10px;">${company.name}</h2>
@@ -348,23 +295,25 @@ serve(async (req) => {
               </p>
             </div>
           </div>
-        `,
+        `
+
+      const sent = await sendOutgoingEmail(emailCfg, {
+        to: emailData.customerEmail,
+        subject: emailData.subject,
+        html,
         attachments: [
           {
-            filename: filename,
+            filename,
             content: pdfBuffer,
-          }
-        ]
+            contentType: 'application/pdf',
+          },
+        ],
       })
 
-      console.log('✅ Email sent successfully:', {
-        id: emailResponse.data?.id,
-        error: emailResponse.error
-      })
+      if (!sent.ok) throw new Error(sent.error)
+      messageId = sent.messageId
 
-      if (emailResponse.error) {
-        throw new Error(emailResponse.error.message || 'Failed to send email')
-      }
+      console.log('✅ Email sent successfully:', { messageId })
 
     } catch (emailError) {
       console.error('❌ Error sending email:', emailError)
@@ -385,7 +334,7 @@ serve(async (req) => {
       await supabaseClient
         .from('system_settings')
         .upsert({
-          company_id: userProfile.company_id,
+          company_id: companyId,
           setting_key: `last_email_sent_${emailData.documentType}_${emailData.documentId}`,
           setting_value: new Date().toISOString(),
           setting_type: 'datetime',
@@ -403,7 +352,7 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({ 
         success: true, 
-        messageId: emailResponse.data?.id,
+        messageId: messageId,
         message: 'Email sent successfully' 
       }),
       {

@@ -239,6 +239,52 @@ export function inbodyBarScale(
   return { start, end, markerPct, normalStartPct, normalEndPct };
 }
 
+export type InbodyMarkerCurvePoint = { xPct: number; yPct: number };
+export type InbodyCurvePoint = { x: number; y: number };
+
+/** Posición vertical del centro de cada fila de barra (h=20, gap=8 → coincide con gap-2 + h-5). */
+export function inbodyBarRowCenterYpct(rowIndex: number, rowCount: number, barHeightPx = 20, gapPx = 8): number {
+  const total = rowCount * barHeightPx + Math.max(0, rowCount - 1) * gapPx;
+  const center = rowIndex * (barHeightPx + gapPx) + barHeightPx / 2;
+  return (center / total) * 100;
+}
+
+/** Curva suave que une los marcadores azules de composición corporal (perfil InBody). */
+export function inbodyMarkerCurvePathFromPoints(points: InbodyCurvePoint[]): string {
+  if (points.length < 2) return '';
+  if (points.length === 2) {
+    const [a, b] = points;
+    return `M ${a.x} ${a.y} L ${b.x} ${b.y}`;
+  }
+  const [a, b, c] = points;
+  const t = 0.38;
+  return [
+    `M ${a.x} ${a.y}`,
+    `C ${a.x} ${a.y - (b.y - a.y) * t}, ${b.x + (b.x - a.x) * t} ${b.y}, ${b.x} ${b.y}`,
+    `C ${b.x - (c.x - b.x) * t} ${b.y}, ${c.x} ${c.y + (c.y - b.y) * t}, ${c.x} ${c.y}`,
+  ].join(' ');
+}
+
+export function inbodyMarkerCurvePath(points: InbodyMarkerCurvePoint[]): string {
+  return inbodyMarkerCurvePathFromPoints(points.map((p) => ({ x: p.xPct, y: p.yPct })));
+}
+
+export function buildInbodyCompositionMarkerCurve(
+  scales: Array<{ markerPct: number } | null>,
+): string | null {
+  const rowCount = scales.length;
+  const points: InbodyMarkerCurvePoint[] = [];
+  scales.forEach((scale, index) => {
+    if (!scale) return;
+    points.push({
+      xPct: scale.markerPct,
+      yPct: inbodyBarRowCenterYpct(index, rowCount),
+    });
+  });
+  if (points.length < 2) return null;
+  return inbodyMarkerCurvePath(points);
+}
+
 const BCA_NUMERIC_FIELDS: (keyof InbodyMeasurement)[] = [
   'height_cm', 'age_years', 'weight_kg', 'weight_min_kg', 'weight_max_kg',
   'smm_kg', 'smm_min_kg', 'smm_max_kg', 'body_fat_kg', 'body_fat_min_kg', 'body_fat_max_kg',

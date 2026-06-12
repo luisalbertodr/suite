@@ -3,6 +3,7 @@ import { es } from 'date-fns/locale';
 import {
   completeSpanishDni,
   inbodyBarScale,
+  inbodyMarkerCurvePathFromPoints,
   inbodyRangeStatus,
   inbodyStatusLabel,
   normalizeInbodyMeasurement,
@@ -290,6 +291,39 @@ function drawCompositionMarker(
   ctx.restore();
 }
 
+function drawCompositionMarkerCurve(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  rows: Array<{
+    yRef: number;
+    value: number | null | undefined;
+    min: number | null | undefined;
+    max: number | null | undefined;
+  }>,
+) {
+  const points: Array<{ x: number; y: number }> = [];
+  for (const item of rows) {
+    if (item.value == null || item.min == null || item.max == null) continue;
+    const scale = inbodyBarScale(item.value, item.min, item.max);
+    const yGraph = compositionGraphY(item.yRef);
+    const barLeft = px(w, h, COMPOSITION_BAR.x1, yGraph);
+    const barRight = px(w, h, COMPOSITION_BAR.x2, yGraph);
+    const markerX = barLeft.x + (scale.markerPct / 100) * (barRight.x - barLeft.x);
+    points.push({ x: markerX, y: barLeft.y });
+  }
+  if (points.length < 2) return;
+  const pathD = inbodyMarkerCurvePathFromPoints(points);
+  if (!pathD) return;
+  ctx.save();
+  ctx.strokeStyle = '#1d4ed8';
+  ctx.lineWidth = Math.max(2, px(w, h, 0, 2.5).y);
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.stroke(new Path2D(pathD));
+  ctx.restore();
+}
+
 function drawTextInRowSlice(
   ctx: CanvasRenderingContext2D,
   w: number,
@@ -423,6 +457,8 @@ function drawComposition(ctx: CanvasRenderingContext2D, w: number, h: number, m:
       );
     }
   }
+
+  drawCompositionMarkerCurve(ctx, w, h, rows);
 }
 
 function drawActAndMlg(ctx: CanvasRenderingContext2D, w: number, h: number, m: InbodyMeasurement) {

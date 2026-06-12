@@ -315,7 +315,12 @@ export async function markDepositPaid(
 
   await admin
     .from('marketing_leads')
-    .update({ stripe_deposit_paid_at: now })
+    .update({
+      stripe_deposit_paid_at: now,
+      wa_automation_status: 'completed',
+      wa_automation_completed_at: now,
+      wa_automation_error: null,
+    })
     .eq('id', session.marketing_lead_id);
 
   const stripeCfg = await loadStripeConfig(admin, session.company_id);

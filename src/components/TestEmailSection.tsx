@@ -91,7 +91,8 @@ export const TestEmailSection: React.FC = () => {
           <div className="bg-gray-50 border border-gray-200 p-4 rounded-lg">
             <h4 className="font-medium text-gray-900 mb-2">¿Qué hace esta prueba?</h4>
             <ul className="text-sm text-gray-600 space-y-1">
-              <li>• Verifica que la configuración de Resend API está correcta</li>
+              <li>• Comprueba la bandeja de spam si no llega en unos minutos</li>
+              <li>• Remitente configurado: info@lipoout.com (Gmail SMTP)</li>
               <li>• Comprueba que el email remitente está configurado</li>
               <li>• Envía un email simple sin adjuntos</li>
               <li>• Confirma que el sistema de autenticación funciona</li>

@@ -4,7 +4,8 @@ import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { useAuth } from '@/hooks/useAuth';
 import type { Database } from '@/integrations/supabase/types';
 import { withSupabaseTimeout } from '@/lib/marketingNotesApi';
-import { waitUntilAuthReady } from '@/lib/authSession';
+import { waitForAuthBootstrap } from '@/lib/authSession';
+import { MARKETING_HOST_COMPANY_ID } from '@/lib/marketingScope';
 
 export type MarketingLeadNote = Database['public']['Tables']['marketing_lead_notes']['Row'];
 export type MarketingLeadNoteInsert = Database['public']['Tables']['marketing_lead_notes']['Insert'];
@@ -114,18 +115,19 @@ export const useMarketingLeadNotes = (
   leadCompanyId?: string | null,
 ) => {
   const queryClient = useQueryClient();
-  const { companyId: activeCompanyId, loading: companyLoading } = useCompanyFilter();
-  const companyId = leadCompanyId ?? activeCompanyId;
+  const companyId = leadCompanyId ?? MARKETING_HOST_COMPANY_ID;
   const { user } = useAuth();
   const queryKey = notesQueryKey(companyId, leadId);
 
   const query = useQuery({
     queryKey,
-    enabled: !!leadId && !!companyId && !companyLoading,
+    enabled: Boolean(leadId && companyId),
+    staleTime: 0,
     refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
     queryFn: async (): Promise<MarketingLeadNote[]> => {
       if (!leadId) return [];
-      await waitUntilAuthReady();
+      await waitForAuthBootstrap();
       const { data, error } = await supabase
         .from('marketing_lead_notes')
         .select('*')

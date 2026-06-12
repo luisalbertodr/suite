@@ -18,7 +18,9 @@ import {
   type InbodyMeasurement,
 } from '@/lib/inbodyMeasurements';
 import { InbodyMetricRow, InbodyRangeBar } from './inbody/InbodyRangeBar';
+import { InbodyCompositionRangeGroup } from './inbody/InbodyCompositionRangeGroup';
 import { InbodyHistoryChart } from './inbody/InbodyHistoryChart';
+import { InbodyCompositionEvolutionChart } from './inbody/InbodyCompositionEvolutionChart';
 import { InbodySegmentalSilhouette } from './inbody/InbodySegmentalSilhouette';
 import { InbodyReportExport } from './inbody/InbodyReportExport';
 import { InbodyNutritionPanel } from './inbody/InbodyNutritionPanel';
@@ -152,13 +154,11 @@ function MeasurementReport({ measurement, compact }: { measurement: InbodyMeasur
             <InbodySectionHelp metricId="weight_kg" title="Composición corporal" />
           </CardTitle>
           <p className="text-[10px] text-muted-foreground mt-1">
-            Banda verde = rango normal InBody. Pase el cursor sobre cada sigla para ver qué mide y cómo interpretarla.
+            Banda verde = rango normal InBody. Línea azul = valor medido; la curva une peso, MME y masa grasa.
           </p>
         </CardHeader>
         <CardContent className="space-y-2">
-          <InbodyRangeBar metricId="weight_kg" value={measurement.weight_kg} min={measurement.weight_min_kg} max={measurement.weight_max_kg} />
-          <InbodyRangeBar metricId="smm_kg" value={measurement.smm_kg} min={measurement.smm_min_kg} max={measurement.smm_max_kg} />
-          <InbodyRangeBar metricId="body_fat_kg" value={measurement.body_fat_kg} min={measurement.body_fat_min_kg} max={measurement.body_fat_max_kg} />
+          <InbodyCompositionRangeGroup measurement={measurement} />
           <div className="grid sm:grid-cols-2 gap-2 pt-2 border-t border-border/40">
             <InbodyRangeBar metricId="tbw_kg" value={measurement.tbw_kg} min={measurement.tbw_min_kg} max={measurement.tbw_max_kg} className="col-span-1" />
             <InbodyRangeBar metricId="ffm_kg" value={measurement.ffm_kg} min={measurement.ffm_min_kg} max={measurement.ffm_max_kg} className="col-span-1" />
@@ -305,6 +305,13 @@ export const ClienteInbodyTab: React.FC<Props> = ({ customerId, taxId, companyId
           compact={compact}
         />
       )}
+
+      <InbodyCompositionEvolutionChart
+        measurements={measurements}
+        selectedId={selected?.id}
+        compact={compact}
+        onSelectSession={setSelectedId}
+      />
 
       <InbodyHistoryChart
         measurements={measurements}

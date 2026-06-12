@@ -1,9 +1,14 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import {
+  loadAutomationSettings,
+  sendDirectWhatsapp,
+} from '../_shared/whatsappAutomationDispatch.ts';
+import { transcribeAudioWav } from '../_shared/transcribeAudio.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-automation-secret',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
@@ -11,7 +16,7 @@ type CallDirection = 'outbound' | 'inbound' | 'missed';
 type CallDisplayType = 'outbound' | 'inbound' | 'missed' | 'voicemail';
 
 type Body = {
-  action: 'calls.list' | 'calls.sync_missed' | 'calls.recording';
+  action: 'calls.list' | 'calls.sync_missed' | 'calls.sync_whatsapp' | 'calls.recording';
   company_id?: string;
   from?: string;
   to?: string;
@@ -843,14 +848,167 @@ async function syncMissedCallNotifications(
   return { created: inserts.length, missed: missed.length };
 }
 
+function formatMadridDateTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return new Intl.DateTimeFormat('es-ES', {
+    timeZone: 'Europe/Madrid',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(d);
+}
+
+type EnrichedMissedCall = Awaited<ReturnType<typeof enrichCallsWithCustomers>>[number];
+
+async function fetchVoicemailAudioBytes(
+  recordingPath: string | null,
+  callId: string,
+): Promise<ArrayBuffer | null> {
+  const path = recordingPath ?? `uniqueid:${callId}`;
+  const targetUrl = buildRecordingFetchUrl(path);
+  if (!targetUrl) return null;
+
+  const resp = await fetch(targetUrl, {
+    headers: issabelAuthHeaders(),
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (!resp.ok) return null;
+  const contentType = resp.headers.get('Content-Type') ?? '';
+  if (contentType.includes('application/json') || contentType.includes('text/')) return null;
+  return resp.arrayBuffer();
+}
+
+function buildPhoneAlertMessage(
+  call: EnrichedMissedCall,
+  transcript: string | null,
+  transcriptError: string | null,
+): string {
+  const isVoicemail = call.missed_reason === 'voicemail';
+  const phone = call.customer_phone || call.caller || 'desconocido';
+  const party = call.customer?.name
+    ? `${call.customer.name} (${phone})`
+    : phone;
+  const when = formatMadridDateTime(call.started_at);
+
+  if (isVoicemail) {
+    let body = `📬 Buzón de voz\n\nDe: ${party}\nHora: ${when}`;
+    if (transcript) {
+      body += `\n\nTranscripción:\n${transcript}`;
+    } else if (transcriptError) {
+      body += `\n\nTranscripción: no disponible (${transcriptError})`;
+    } else {
+      body += '\n\nTranscripción: no disponible (sin audio)';
+    }
+    return body;
+  }
+
+  return `📞 Llamada perdida\n\nDe: ${party}\nHora: ${when}`;
+}
+
+async function syncMissedCallWhatsappAlerts(
+  admin: ReturnType<typeof createClient>,
+  companyId: string,
+  calls: EnrichedMissedCall[],
+): Promise<{ sent: number; skipped: number; failed: number; pending: number }> {
+  const settings = await loadAutomationSettings(admin, companyId);
+  if (!settings.phone_missed_whatsapp_enabled) {
+    return { sent: 0, skipped: 0, failed: 0, pending: 0 };
+  }
+
+  const destPhone = (settings.phone_missed_whatsapp_phone ?? BUSINESS_PHONE).replace(/\D/g, '') ||
+    BUSINESS_PHONE;
+  const alertCalls = calls.filter((call) => {
+    const displayType = computeDisplayType(call);
+    return displayType === 'missed' || displayType === 'voicemail';
+  });
+  if (alertCalls.length === 0) {
+    return { sent: 0, skipped: 0, failed: 0, pending: 0 };
+  }
+
+  const candidateIds = alertCalls.slice(0, 100).map((call) => call.id);
+  const { data: existingRows, error: existingError } = await admin
+    .from('whatsapp_automation_send_log')
+    .select('reference_id, automation_type, success')
+    .eq('company_id', companyId)
+    .in('automation_type', ['phone_missed', 'phone_voicemail'])
+    .in('reference_id', candidateIds)
+    .eq('success', true);
+  if (existingError) throw existingError;
+
+  const sentIds = new Set((existingRows ?? []).map((r) => String(r.reference_id)));
+  const pending = alertCalls.filter((call) => !sentIds.has(call.id)).slice(0, 20);
+  if (pending.length === 0) {
+    return { sent: 0, skipped: alertCalls.length, failed: 0, pending: 0 };
+  }
+
+  let sent = 0;
+  let failed = 0;
+  let skipped = alertCalls.length - pending.length;
+  let transcriptionsLeft = 5;
+
+  for (const call of pending) {
+    const isVoicemail = call.missed_reason === 'voicemail';
+    const automationType = isVoicemail ? 'phone_voicemail' : 'phone_missed';
+
+    let transcript: string | null = null;
+    let transcriptError: string | null = null;
+    if (isVoicemail && transcriptionsLeft > 0) {
+      transcriptionsLeft -= 1;
+      try {
+        const audio = await fetchVoicemailAudioBytes(call.recording_path, call.id);
+        if (audio && audio.byteLength > 0) {
+          const tr = await transcribeAudioWav(audio, `${call.id}.wav`);
+          if (tr.ok) transcript = tr.text;
+          else transcriptError = tr.error;
+        } else {
+          transcriptError = 'sin audio del buzón';
+        }
+      } catch (e) {
+        transcriptError = e instanceof Error ? e.message : 'error al transcribir';
+      }
+    }
+
+    const text = buildPhoneAlertMessage(call, transcript, transcriptError);
+    const result = await sendDirectWhatsapp(admin, companyId, destPhone, text, {
+      automation_type: automationType,
+      reference_id: call.id,
+    });
+    if (result.ok) sent += 1;
+    else failed += 1;
+  }
+
+  return { sent, skipped, failed, pending: pending.length };
+}
+
+function authorizeCronOrServiceRole(req: Request): boolean {
+  const cronSecret = Deno.env.get('WHATSAPP_AUTOMATION_CRON_SECRET') ??
+    Deno.env.get('SERVICE_MONITOR_CRON_SECRET');
+  const headerSecret = req.headers.get('x-automation-secret');
+  if (cronSecret && headerSecret === cronSecret) return true;
+
+  const authHeader = req.headers.get('Authorization') ?? req.headers.get('authorization');
+  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  const token = authHeader?.replace(/^Bearer\s+/i, '');
+  return !!(serviceKey && token === serviceKey);
+}
+
+async function resolveCompanyIdForCron(
+  admin: ReturnType<typeof createClient>,
+  requestedCompanyId?: string,
+): Promise<string | null> {
+  if (requestedCompanyId) return requestedCompanyId;
+  const { data } = await admin.from('companies').select('id').limit(1).maybeSingle();
+  return data?.id ?? null;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
   if (req.method !== 'POST') return err('Método no permitido', 405);
-
-  const user = await requireUser(req);
-  if (!user) return err('No autorizado', 401);
 
   let body: Body;
   try {
@@ -858,6 +1016,42 @@ serve(async (req) => {
   } catch {
     return err('JSON inválido');
   }
+
+  const admin = createClient(
+    Deno.env.get('SUPABASE_URL') ?? '',
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+  );
+
+  const internalPattern = new RegExp(Deno.env.get('ISSABEL_INTERNAL_EXTENSIONS_REGEX') ?? '^\\d{2,6}$');
+
+  if (body.action === 'calls.sync_whatsapp') {
+    if (!authorizeCronOrServiceRole(req)) return err('No autorizado', 401);
+
+    const companyId = await resolveCompanyIdForCron(admin, body.company_id);
+    if (!companyId) return err('Sin empresa activa', 400);
+
+    const today = new Date().toISOString().slice(0, 10);
+    let calls: NormalizedCall[];
+    try {
+      calls = await fetchNormalizedCalls(
+        { from: yesterdayDateString(), to: today, limit: 500 },
+        internalPattern,
+      );
+    } catch (e) {
+      return err(e instanceof Error ? e.message : 'Error Issabel', 502);
+    }
+
+    const missedRaw = calls.filter(isCustomerFacingCall).filter((call) => {
+      const displayType = computeDisplayType(call);
+      return displayType === 'missed' || displayType === 'voicemail';
+    });
+    const enriched = await enrichCallsWithCustomers(admin, companyId, missedRaw, 'all');
+    const sync = await syncMissedCallWhatsappAlerts(admin, companyId, enriched);
+    return json({ ok: true, ...sync });
+  }
+
+  const user = await requireUser(req);
+  if (!user) return err('No autorizado', 401);
 
   if (
     body.action !== 'calls.list' &&
@@ -867,15 +1061,8 @@ serve(async (req) => {
     return err('Acción no soportada');
   }
 
-  const admin = createClient(
-    Deno.env.get('SUPABASE_URL') ?? '',
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
-  );
-
   const phoneAccess = await resolvePhoneAccess(admin, user);
   if (phoneAccess === 'none') return err('Sin permiso para teléfono', 403);
-
-  const internalPattern = new RegExp(Deno.env.get('ISSABEL_INTERNAL_EXTENSIONS_REGEX') ?? '^\\d{2,6}$');
 
   if (body.action === 'calls.recording') {
     const recording = asString(body.recording);

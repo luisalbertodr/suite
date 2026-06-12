@@ -2,7 +2,7 @@
 import React from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Mail, ExternalLink, Info } from 'lucide-react';
+import { Mail, Info } from 'lucide-react';
 import { TestEmailSection } from './TestEmailSection';
 
 export const EmailConfig: React.FC = () => {
@@ -15,7 +15,7 @@ export const EmailConfig: React.FC = () => {
             <span>Configuración de Email</span>
           </CardTitle>
           <CardDescription>
-            Configuración del sistema de envío de emails usando Resend
+            Envío vía Gmail SMTP (remitente info@lipoout.com)
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -24,65 +24,34 @@ export const EmailConfig: React.FC = () => {
             <AlertDescription>
               <div className="space-y-2">
                 <p className="font-medium">Estado de configuración:</p>
-                <p>El sistema de email está configurado y listo para usar con Resend.</p>
-                <div className="mt-3">
-                  <p className="text-sm">
-                    <strong>Proveedor:</strong> Resend
+                <p>
+                  Los correos se envían desde <strong>info@lipoout.com</strong> usando la cuenta
+                  Gmail configurada en el servidor (SMTP).
+                </p>
+                <div className="mt-3 text-sm space-y-1">
+                  <p>
+                    <strong>Proveedor:</strong> Gmail SMTP
                   </p>
-                  <p className="text-sm">
-                    <strong>Dominio remitente:</strong> onboarding@resend.dev
+                  <p>
+                    <strong>Remitente:</strong> info@lipoout.com
+                  </p>
+                  <p>
+                    <strong>Servidor:</strong> smtp.gmail.com:587
                   </p>
                 </div>
               </div>
             </AlertDescription>
           </Alert>
 
-          <div className="space-y-4">
-            <h3 className="text-lg font-medium">Información sobre Resend</h3>
-            <div className="bg-gray-50 border border-gray-200 p-4 rounded-lg space-y-3">
-              <p className="text-sm text-gray-700">
-                <strong>Resend</strong> es el servicio de email transaccional que utiliza esta aplicación 
-                para enviar correos electrónicos como facturas, presupuestos y notificaciones.
-              </p>
-              
-              <div className="space-y-2">
-                <p className="text-sm text-gray-700">
-                  <strong>Características principales:</strong>
-                </p>
-                <ul className="text-sm text-gray-600 list-disc list-inside space-y-1">
-                  <li>Alta deliverability y velocidad de entrega</li>
-                  <li>APIs simples y potentes</li>
-                  <li>Soporte para plantillas HTML personalizadas</li>
-                  <li>Métricas detalladas de entrega</li>
-                  <li>Integración nativa con React Email</li>
-                </ul>
-              </div>
-
-              <div className="pt-2">
-                <a
-                  href="https://resend.com"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center space-x-1 text-blue-600 hover:text-blue-800 text-sm"
-                >
-                  <span>Más información sobre Resend</span>
-                  <ExternalLink className="h-3 w-3" />
-                </a>
-              </div>
+          <div className="bg-green-50 border border-green-200 p-4 rounded-lg">
+            <div className="flex items-center space-x-2 mb-2">
+              <div className="w-2 h-2 bg-green-500 rounded-full" />
+              <span className="text-sm font-medium text-green-800">SMTP activo</span>
             </div>
-          </div>
-
-          <div className="space-y-4">
-            <h3 className="text-lg font-medium">Configuración actual</h3>
-            <div className="bg-green-50 border border-green-200 p-4 rounded-lg">
-              <div className="flex items-center space-x-2 mb-2">
-                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                <span className="text-sm font-medium text-green-800">Sistema activo</span>
-              </div>
-              <p className="text-sm text-green-700">
-                El sistema de email está configurado correctamente y listo para enviar correos.
-              </p>
-            </div>
+            <p className="text-sm text-green-700">
+              Facturas, presupuestos, alertas del monitor de servidores y emails de prueba usan
+              esta configuración.
+            </p>
           </div>
         </CardContent>
       </Card>

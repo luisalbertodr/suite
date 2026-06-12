@@ -189,7 +189,7 @@ export const Whatsapp: React.FC = () => {
           mensajes.
         </p>
         <Button asChild>
-          <Link to="/configuracion?tab=whatsapp">
+          <Link to="/configuracion?tab=marketing&subtab=whatsapp-conexion">
             <SettingsIcon className="mr-2 h-4 w-4" />
             Ir a configuración
           </Link>

@@ -1,4 +1,11 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import {
+  loadAutomationSettings,
+  logAutomationSend,
+  resolveRecipientPhone,
+  wrapMessageForTestMode,
+  type AutomationSendType,
+} from './whatsappAutomationDispatch.ts';
 
 export type WhatsappConfigRow = {
   company_id: string;
@@ -355,6 +362,54 @@ async function sendWhatsappText(
   return { chatId: resolvedChatId, wahaId };
 }
 
+async function sendAutomatedLeadMessage(
+  admin: SupabaseClient,
+  cfg: WhatsappConfigRow,
+  companyId: string,
+  intendedPhone: string,
+  text: string,
+  meta: {
+    automation_type: AutomationSendType;
+    reference_id: string;
+    contactName?: string | null;
+  },
+): Promise<{ chatId: string; wahaId: string | null }> {
+  const settings = await loadAutomationSettings(admin, companyId);
+  const { chatPhone, intendedLabel } = resolveRecipientPhone(intendedPhone, settings);
+  const body = wrapMessageForTestMode(
+    text,
+    settings,
+    meta.contactName ?? intendedLabel,
+  );
+  const chatId = normalizeChatId(chatPhone, cfg.default_country_code);
+  try {
+    const sent = await sendWhatsappText(admin, cfg, companyId, chatId, body);
+    await logAutomationSend(admin, {
+      company_id: companyId,
+      automation_type: meta.automation_type,
+      reference_id: meta.reference_id,
+      intended_phone: intendedPhone,
+      sent_to_phone: chatPhone,
+      message_preview: body,
+      success: true,
+    });
+    return sent;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Error al enviar';
+    await logAutomationSend(admin, {
+      company_id: companyId,
+      automation_type: meta.automation_type,
+      reference_id: meta.reference_id,
+      intended_phone: intendedPhone,
+      sent_to_phone: chatPhone,
+      message_preview: body,
+      success: false,
+      error: msg,
+    });
+    throw e;
+  }
+}
+
 async function linkChatToLead(
   admin: SupabaseClient,
   companyId: string,
@@ -451,7 +506,6 @@ export async function sendInitialAutomationForLead(
   }
 
   try {
-    const chatId = normalizeChatId(lead.phone!, cfg.default_country_code);
     const contactName = leadDisplayName(lead);
     const { renderWhatsappTemplateWithPaymentLinks } = await import('./stripeDeposit.ts');
     const initialText = await renderWhatsappTemplateWithPaymentLinks(
@@ -463,7 +517,18 @@ export async function sendInitialAutomationForLead(
       form,
       null,
     );
-    const sent = await sendWhatsappText(admin, cfg, companyId, chatId, initialText);
+    const sent = await sendAutomatedLeadMessage(
+      admin,
+      cfg,
+      companyId,
+      lead.phone!,
+      initialText,
+      {
+        automation_type: 'meta_initial',
+        reference_id: leadId,
+        contactName,
+      },
+    );
     await linkChatToLead(admin, companyId, sent.chatId, leadId, contactName);
     const now = new Date().toISOString();
     await admin
@@ -565,7 +630,18 @@ export async function processAutomationReply(
         form,
         null,
       );
-      await sendWhatsappText(admin, cfg, companyId, chatId, invalidText);
+      await sendAutomatedLeadMessage(
+        admin,
+        cfg,
+        companyId,
+        lead.phone ?? chatId.replace(/@.*/, ''),
+        invalidText,
+        {
+          automation_type: 'meta_invalid',
+          reference_id: `${lead.id}:invalid:${Date.now()}`,
+          contactName: leadDisplayName(lead),
+        },
+      );
       return { handled: true, action: 'invalid_reply' };
     } catch (e) {
       console.error('processAutomationReply invalid message failed:', e);
@@ -597,7 +673,8 @@ export async function processAutomationReply(
 
   try {
     await linkChatToLead(admin, companyId, chatId, lead.id, leadDisplayName(lead));
-    const { renderWhatsappTemplateWithPaymentLinks } = await import('./stripeDeposit.ts');
+    const { renderWhatsappTemplateWithPaymentLinks, loadStripeConfig, resolveDepositAmountCents } =
+      await import('./stripeDeposit.ts');
     const replyText = await renderWhatsappTemplateWithPaymentLinks(
       admin,
       companyId,
@@ -607,12 +684,28 @@ export async function processAutomationReply(
       form,
       null,
     );
-    await sendWhatsappText(admin, cfg, companyId, chatId, replyText);
+    await sendAutomatedLeadMessage(
+      admin,
+      cfg,
+      companyId,
+      lead.phone ?? chatId.replace(/@.*/, ''),
+      replyText,
+      {
+        automation_type: choice === '1' ? 'meta_reply_1' : 'meta_reply_2',
+        reference_id: `${lead.id}:reply_${choice}`,
+        contactName: leadDisplayName(lead),
+      },
+    );
+
+    const stripeCfg = await loadStripeConfig(admin, companyId);
+    const depositAmount = stripeCfg ? resolveDepositAmountCents(stripeCfg, form) : null;
+    const waitsPayment = choice === '1' && !!depositAmount && !!stripeCfg?.enabled;
+
     const { data: locked } = await admin
       .from('marketing_leads')
       .update({
-        wa_automation_status: 'completed',
-        wa_automation_completed_at: new Date().toISOString(),
+        wa_automation_status: waitsPayment ? 'awaiting_payment' : 'completed',
+        wa_automation_completed_at: waitsPayment ? null : new Date().toISOString(),
         wa_automation_error: null,
         last_contacted_at: new Date().toISOString(),
       })

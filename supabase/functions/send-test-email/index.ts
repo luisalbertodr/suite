@@ -1,7 +1,8 @@
 
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { Resend } from "https://esm.sh/resend@2.0.0"
+import { loadEmailConfig, sendOutgoingEmail } from '../_shared/emailSender.ts'
+import { resolveUserCompanyId } from '../_shared/resolveCompanyId.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -10,6 +11,7 @@ const corsHeaders = {
 
 interface TestEmailRequest {
   destinationEmail: string
+  company_id?: string
 }
 
 serve(async (req) => {
@@ -118,50 +120,36 @@ serve(async (req) => {
       )
     }
 
-    // Get user's company
-    console.log('🏢 Fetching user profile for user:', user.id)
-    const { data: userProfile, error: profileError } = await supabaseClient
-      .from('user_profiles')
-      .select('company_id')
-      .eq('user_id', user.id)
-      .single()
+    // Empresa del usuario (soporta varios perfiles)
+    console.log('🏢 Resolving company for user:', user.id)
+    const companyId = await resolveUserCompanyId(
+      supabaseClient,
+      user.id,
+      emailData.company_id,
+    )
 
-    if (profileError) {
-      console.error('❌ Error fetching user profile:', profileError)
-      return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: 'Error fetching user profile: ' + profileError.message 
-        }),
-        { 
-          status: 400, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        }
-      )
-    }
-
-    if (!userProfile?.company_id) {
+    if (!companyId) {
       console.error('❌ User has no company associated')
       return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: 'User has no company associated' 
+        JSON.stringify({
+          success: false,
+          error: 'User has no company associated',
         }),
-        { 
-          status: 400, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        }
+        {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        },
       )
     }
 
-    console.log('🏢 Company ID found:', userProfile.company_id)
+    console.log('🏢 Company ID found:', companyId)
 
     // Get company information
     console.log('🏢 Fetching company data')
     const { data: company, error: companyError } = await supabaseClient
       .from('companies')
       .select('*')
-      .eq('id', userProfile.company_id)
+      .eq('id', companyId)
       .single()
 
     if (companyError) {
@@ -194,81 +182,49 @@ serve(async (req) => {
 
     console.log('🏢 Company found:', company.name)
 
-    // Get email configuration
+    // Get email configuration (SMTP Gmail o Resend)
     console.log('⚙️ Fetching email settings')
-    const { data: emailSettings, error: settingsError } = await supabaseClient
-      .from('system_settings')
-      .select('setting_key, setting_value')
-      .eq('company_id', userProfile.company_id)
-      .in('setting_key', ['resend_api_key', 'email_from'])
-
-    if (settingsError) {
+    let emailCfg
+    try {
+      emailCfg = await loadEmailConfig(supabaseClient, companyId)
+    } catch (settingsError) {
       console.error('❌ Error fetching email settings:', settingsError)
       return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: 'Error fetching email settings: ' + settingsError.message 
+        JSON.stringify({
+          success: false,
+          error: 'Error fetching email settings: ' + (settingsError as Error).message,
         }),
-        { 
-          status: 400, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        }
+        {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        },
       )
     }
 
-    console.log('⚙️ Email settings found:', emailSettings?.length || 0, 'settings')
-
-    const resendApiKey = emailSettings?.find(s => s.setting_key === 'resend_api_key')?.setting_value
-    const emailFrom = emailSettings?.find(s => s.setting_key === 'email_from')?.setting_value || 'noreply@moges.com'
+    if (!emailCfg) {
+      console.error('❌ Email not configured')
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'Email no configurado (SMTP o Resend). Contacta con el administrador.',
+        }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        },
+      )
+    }
 
     console.log('🔑 Email configuration:', {
-      hasResendApiKey: !!resendApiKey,
-      emailFrom: emailFrom,
-      resendApiKeyLength: resendApiKey?.length || 0
+      provider: emailCfg.provider,
+      from: emailCfg.from,
     })
-
-    if (!resendApiKey) {
-      console.error('❌ Resend API key not configured')
-      return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: 'Resend API key not configured for this company. Please configure it in the system settings.' 
-        }),
-        { 
-          status: 400, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        }
-      )
-    }
-
-    // Initialize Resend
-    let resend
-    try {
-      resend = new Resend(resendApiKey)
-      console.log('📧 Resend client created')
-    } catch (resendError) {
-      console.error('❌ Error creating Resend client:', resendError)
-      return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: 'Error creating email client: ' + resendError.message 
-        }),
-        { 
-          status: 500, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        }
-      )
-    }
 
     // Send test email
     console.log('🚀 Sending test email to:', emailData.destinationEmail)
-    let emailResponse
+    let messageId: string | undefined
     try {
-      emailResponse = await resend.emails.send({
-        from: emailFrom,
-        to: [emailData.destinationEmail],
-        subject: 'Email de Prueba - MOGES',
-        html: `
+      const html = `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
             <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
               <h2 style="color: #333; margin-bottom: 10px;">${company.name}</h2>
@@ -283,10 +239,7 @@ serve(async (req) => {
               
               <div style="margin: 20px 0; padding: 15px; background-color: #d4edda; border: 1px solid #c3e6cb; border-radius: 4px;">
                 <p style="margin: 8px 0; color: #155724; font-weight: bold;">
-                  🎉 ¡Felicidades! El sistema de envío de emails está funcionando correctamente.
-                </p>
-                <p style="margin: 8px 0; color: #155724;">
-                  Este es un email de prueba enviado desde el sistema MOGES para verificar que la configuración de email está correctamente establecida.
+                  🎉 El sistema de envío de emails está funcionando correctamente.
                 </p>
               </div>
               
@@ -294,40 +247,31 @@ serve(async (req) => {
                 <h3 style="color: #333; margin-bottom: 10px;">Información del Test:</h3>
                 <ul style="color: #666; line-height: 1.6;">
                   <li><strong>Fecha y hora:</strong> ${new Date().toLocaleString('es-ES')}</li>
-                  <li><strong>Enviado desde:</strong> ${emailFrom}</li>
+                  <li><strong>Enviado desde:</strong> ${emailCfg.from}</li>
+                  <li><strong>Proveedor:</strong> ${emailCfg.provider.toUpperCase()}</li>
                   <li><strong>Usuario:</strong> ${user.email}</li>
                   <li><strong>Empresa:</strong> ${company.name}</li>
                 </ul>
               </div>
               
-              <p style="color: #333; margin-top: 20px;">
-                Si recibiste este email, significa que el sistema de envío de emails está funcionando correctamente.
-              </p>
-              
               <p style="color: #333;">
                 Saludos cordiales,<br>
-                <strong>Sistema MOGES</strong>
-              </p>
-            </div>
-            
-            <div style="border-top: 1px solid #e9ecef; padding-top: 20px; margin-top: 30px;">
-              <p style="color: #666; font-size: 12px; text-align: center;">
-                ${company.address_street ? `${company.address_street}, ` : ''}${company.address_city || ''} ${company.address_postal_code || ''}
-                ${company.tax_id ? `<br>CIF: ${company.tax_id}` : ''}
+                <strong>Sistema Lipoout</strong>
               </p>
             </div>
           </div>
-        `,
+        `
+
+      const sent = await sendOutgoingEmail(emailCfg, {
+        to: emailData.destinationEmail,
+        subject: 'Email de Prueba - Lipoout',
+        html,
       })
 
-      console.log('✅ Test email sent successfully:', {
-        id: emailResponse.data?.id,
-        error: emailResponse.error
-      })
+      if (!sent.ok) throw new Error(sent.error)
+      messageId = sent.messageId
 
-      if (emailResponse.error) {
-        throw new Error(emailResponse.error.message || 'Failed to send test email')
-      }
+      console.log('✅ Test email sent successfully:', { messageId })
 
     } catch (emailError) {
       console.error('❌ Error sending test email:', emailError)
@@ -348,10 +292,10 @@ serve(async (req) => {
       await supabaseClient
         .from('system_settings')
         .upsert({
-          company_id: userProfile.company_id,
+          company_id: companyId,
           setting_key: `last_test_email_sent`,
           setting_value: new Date().toISOString(),
-          setting_type: 'datetime',
+          setting_type: 'text',
           description: `Test email sent to ${emailData.destinationEmail} by ${user.email}`
         }, {
           onConflict: 'company_id,setting_key'
@@ -366,7 +310,7 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({ 
         success: true, 
-        messageId: emailResponse.data?.id,
+        messageId: messageId,
         message: 'Test email sent successfully' 
       }),
       {

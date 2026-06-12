@@ -256,3 +256,58 @@ export function formatChartValue(value: number, decimals: number, unit: string):
   const formatted = value.toFixed(decimals);
   return unit ? `${formatted} ${unit}` : formatted;
 }
+
+export type InbodyCompositionPoint = {
+  id: string;
+  measuredAt: string;
+  label: string;
+  tooltipLabel: string;
+  weight_kg: number | null;
+  smm_kg: number | null;
+  body_fat_kg: number | null;
+  isSelected: boolean;
+};
+
+const COMPOSITION_KEYS = ['weight_kg', 'smm_kg', 'body_fat_kg'] as const;
+
+/** Serie temporal de las 3 métricas principales de composición corporal (kg). */
+export function buildInbodyCompositionSeries(
+  measurements: InbodyMeasurement[],
+  selectedId?: string | null,
+): InbodyCompositionPoint[] {
+  return [...measurements]
+    .sort((a, b) => new Date(a.measured_at).getTime() - new Date(b.measured_at).getTime())
+    .map((m) => {
+      const weight = m.weight_kg;
+      const smm = m.smm_kg;
+      const fat = m.body_fat_kg;
+      if (
+        (weight == null || Number.isNaN(weight)) &&
+        (smm == null || Number.isNaN(smm)) &&
+        (fat == null || Number.isNaN(fat))
+      ) {
+        return null;
+      }
+
+      const date = new Date(m.measured_at);
+      return {
+        id: m.id,
+        measuredAt: m.measured_at,
+        label: date.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: '2-digit' }),
+        tooltipLabel: date.toLocaleString('es-ES', {
+          day: '2-digit',
+          month: 'short',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+        weight_kg: weight ?? null,
+        smm_kg: smm ?? null,
+        body_fat_kg: fat ?? null,
+        isSelected: selectedId ? m.id === selectedId : false,
+      };
+    })
+    .filter((row): row is InbodyCompositionPoint => row != null);
+}
+
+export const INBODY_COMPOSITION_SERIES = COMPOSITION_KEYS;

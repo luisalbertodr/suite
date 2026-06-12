@@ -435,10 +435,12 @@ export const WhatsappConfig: React.FC = () => {
             <div>
               <CardTitle>Webhook para recibir mensajes</CardTitle>
               <CardDescription>
-                Configura este endpoint dentro de Waha para que nos notifique
-                los mensajes entrantes y los cambios de estado en tiempo real.
-                Eventos recomendados: <code>message</code>, <code>message.any</code>,{' '}
-                <code>message.ack</code>, <code>state.change</code>.
+                Suite registra el webhook en WAHA vía{' '}
+                <code className="text-xs">PUT /api/sessions/&#123;sesión&#125;</code> (botón
+                «Aplicar webhook en Waha»). Eventos:{' '}
+                <code>message</code>, <code>message.any</code>, <code>message.ack</code>,{' '}
+                <code>session.status</code> y más. El header{' '}
+                <code>X-Webhook-Secret</code> valida el origen.
               </CardDescription>
             </div>
           </div>
@@ -485,8 +487,7 @@ export const WhatsappConfig: React.FC = () => {
           {webhookUrlWithSecret ? (
             <div className="grid gap-2 rounded-lg border bg-muted/40 px-3 py-2">
               <Label className="text-xs">
-                URL completa (con secret incluido como query) — pégala en Waha
-                si configuras el webhook manualmente
+                URL completa (con secret en query) — alternativa manual si no usas el botón
               </Label>
               <div className="flex items-center gap-2">
                 <Input

@@ -1,4 +1,4 @@
-import { waitUntilAuthReady } from '@/lib/authSession';
+import { waitForAuthBootstrap } from '@/lib/authSession';
 
 /** Ejecuta una mutación de marketing sin encolarla tras otras peticiones (evita falsos timeout). */
 export async function withSupabaseTimeout<T>(
@@ -8,7 +8,7 @@ export async function withSupabaseTimeout<T>(
 ): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await waitUntilAuthReady();
+    await waitForAuthBootstrap();
     return await Promise.race([
       fn(),
       new Promise<T>((_, reject) => {
