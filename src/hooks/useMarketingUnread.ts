@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
-import { useCompanyFilter } from '@/hooks/useCompanyFilter';
-import { useWorkCenter } from '@/hooks/useWorkCenter';
+import { MARKETING_HOST_COMPANY_ID } from '@/lib/marketingScope';
 
 function unreadCountQueryKey(companyIds: string[]) {
   return ['marketing-unread-count', companyIds.slice().sort().join(',')] as const;
@@ -12,28 +11,18 @@ function viewedSetQueryKey(companyId: string | null) {
   return ['marketing-lead-viewed', companyId] as const;
 }
 
-/** IDs de empresa para el contador del dock (centro de facturación completo si aplica). */
+/** Empresa del tablero de marketing (siempre Estética). */
 export function useMarketingUnreadScopeCompanyIds(): string[] {
-  const { companyId } = useCompanyFilter();
-  const { billingCompanies, isMultiEntity } = useWorkCenter();
-
-  return useMemo(() => {
-    if (isMultiEntity && billingCompanies.length > 0) {
-      return billingCompanies.map((c) => c.id);
-    }
-    return companyId ? [companyId] : [];
-  }, [companyId, isMultiEntity, billingCompanies]);
+  return [MARKETING_HOST_COMPANY_ID];
 }
 
 /** Total de leads no vistos por el usuario (badge en DockBar). */
 export function useMarketingUnread() {
   const queryClient = useQueryClient();
-  const { loading: companyLoading } = useCompanyFilter();
   const scopeIds = useMarketingUnreadScopeCompanyIds();
-
   const totalQuery = useQuery({
     queryKey: unreadCountQueryKey(scopeIds),
-    enabled: scopeIds.length > 0 && !companyLoading,
+    enabled: scopeIds.length > 0,
     staleTime: 30_000,
     queryFn: async (): Promise<number> => {
       const { data, error } = await supabase.rpc('count_marketing_unviewed_leads', {

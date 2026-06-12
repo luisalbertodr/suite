@@ -54,8 +54,21 @@ FUNCTION SuiteSyncEnsureLoaded
  IF TYPE("Suite_SyncInit")#"U"
     RETURN .T.
  ENDIF
- * Sync va en este mismo PRG / componente exe suite_full_unlock
+ IF TYPE("Suite_SyncLog")#"U"
+    DO Suite_SyncLog WITH "[BOOT-07] SuiteSyncEnsureLoaded: Suite_SyncInit no definido"
+ ENDIF
  RETURN .F.
+ENDFUNC
+**
+FUNCTION Suite_SyncDiag
+ * Resumen legible para ? en ventana VFP o log manual
+ LOCAL lc
+ lc = "Suite_SyncInit="+IIF(TYPE("Suite_SyncInit")="U", "NO", "SI")
+ lc = lc+" enabled="+IIF(TYPE("plSuiteSyncEnabled")="L" AND plSuiteSyncEnabled, "SI", "NO")
+ lc = lc+" timer="+ALLTRIM(STR(gnSuiteSyncTimerId))
+ lc = lc+" url="+IIF(EMPTY(pcSuiteSyncUrl), "(vacio)", LEFT(pcSuiteSyncUrl, 60))
+ lc = lc+" root="+SuiteStyleRoot()
+ RETURN lc
 ENDFUNC
 **
 FUNCTION SuiteWindowsUser
@@ -162,9 +175,11 @@ ENDPROC
 **
 PROCEDURE start_serviciocomunicaciones
  TRY
+    DO Suite_SyncLog WITH "[MANUAL] Ctrl+F5 start_serviciocomunicaciones"
     = SuiteSyncEnsureLoaded()
     DO Suite_SyncInit
- CATCH
+ CATCH TO oerr
+    DO Suite_SyncLog WITH "[MANUAL] start_serviciocomunicaciones error: "+IIF(TYPE("oerr")="O", oerr.message, "?")
  ENDTRY
 ENDPROC
 **
@@ -193,9 +208,15 @@ ENDPROC
 **
 PROCEDURE Suite_SyncInit
  LOCAL lcfichero, lcline, lckey, lcval, lccontent, lnlines, i
+ DO Suite_SyncLog WITH "[INIT-01] Suite_SyncInit entrada"
  lcfichero = SuiteStyleRoot()+"SuiteSync.cfg"
  IF  .NOT. FILE(lcfichero)
     lcfichero = ADDBS(SYS(5)+SYS(2003))+"SuiteSync.cfg"
+ ENDIF
+ IF  .NOT. FILE(lcfichero)
+    plSuiteSyncEnabled = .F.
+    DO Suite_SyncLog WITH "[INIT-02] FALLO: SuiteSync.cfg no encontrado root="+SuiteStyleRoot()+" cwd="+SYS(5)+SYS(2003)
+    RETURN
  ENDIF
  IF FILE(lcfichero)
     lccontent = FILETOSTR(lcfichero)
@@ -222,32 +243,39 @@ PROCEDURE Suite_SyncInit
  ENDIF
  IF EMPTY(pcSuiteSyncUrl) OR EMPTY(pcSuiteSyncToken)
     plSuiteSyncEnabled = .F.
-    DO Suite_SyncLog WITH "INIT fallo: falta SYNC_URL o SYNC_TOKEN en "+lcfichero
+    DO Suite_SyncLog WITH "[INIT-04] FALLO: SYNC_URL o SYNC_TOKEN vacios en "+lcfichero
     RETURN
  ENDIF
  plSuiteSyncEnabled = .T.
- DO Suite_SyncLog WITH "INIT ok url="+pcSuiteSyncUrl+" cfg="+lcfichero
+ DO Suite_SyncLog WITH "[INIT-03] cfg OK url="+pcSuiteSyncUrl+" mac="+pcSuiteSyncMac+" interval="+ALLTRIM(STR(gnSuiteSyncInterval))+" file="+lcfichero
  DO Suite_SyncStartTimer
+ DO Suite_SyncLog WITH "[INIT-05] primer ciclo sync"
  DO Suite_SyncCycle
 ENDPROC
 **
 PROCEDURE Suite_SyncStartTimer
+ LOCAL lnsec
  IF  .NOT. plSuiteSyncEnabled
+    DO Suite_SyncLog WITH "[INIT-06E] timer omitido: plSuiteSyncEnabled=.F."
     RETURN
  ENDIF
  IF gnSuiteSyncTimerId > 0
+    DO Suite_SyncLog WITH "[INIT-06] timer ya activo"
     RETURN
  ENDIF
+ lnsec = MAX(gnSuiteSyncInterval, 15)
  IF TYPE("_SCREEN.oSuiteSyncTimer") = "O"
-    _SCREEN.oSuiteSyncTimer.Interval = MAX(gnSuiteSyncInterval, 15) * 1000
+    _SCREEN.oSuiteSyncTimer.Interval = lnsec * 1000
     _SCREEN.oSuiteSyncTimer.Enabled = .T.
     gnSuiteSyncTimerId = 1
+    DO Suite_SyncLog WITH "[INIT-06] timer reutilizado interval="+ALLTRIM(STR(lnsec))+"s"
     RETURN
  ENDIF
  _SCREEN.AddObject("oSuiteSyncTimer", "SuiteSyncTimer")
- _SCREEN.oSuiteSyncTimer.Interval = MAX(gnSuiteSyncInterval, 15) * 1000
+ _SCREEN.oSuiteSyncTimer.Interval = lnsec * 1000
  _SCREEN.oSuiteSyncTimer.Enabled = .T.
  gnSuiteSyncTimerId = 1
+ DO Suite_SyncLog WITH "[INIT-06] timer creado interval="+ALLTRIM(STR(lnsec))+"s"
 ENDPROC
 **
 PROCEDURE Suite_SyncStopTimer

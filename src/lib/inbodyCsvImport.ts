@@ -1,5 +1,6 @@
 import { parseCSV } from '@/components/marketing/csvParser';
 import { supabase } from '@/lib/supabase';
+import { parseInbodyMeasuredAt } from '@/lib/inbodyMeasuredAt';
 import {
   completeSpanishDni,
   dniMatchKeys,
@@ -216,51 +217,7 @@ function describeRowSkipReason(raw: Record<string, string>): string {
 }
 
 function parseMeasuredAt(raw: string | undefined): string | null {
-  if (!raw?.trim()) return null;
-  const s = cleanCsvCell(raw);
-  const lookin = s.match(
-    /^(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})\s+(\d{1,2}):(\d{2}):(\d{2})\s*(AM|PM)?$/i,
-  );
-  if (lookin) {
-    let hour = Number(lookin[4]);
-    const minute = Number(lookin[5]);
-    const second = Number(lookin[6]);
-    const ampm = (lookin[7] || '').toUpperCase();
-    if (ampm === 'PM' && hour < 12) hour += 12;
-    if (ampm === 'AM' && hour === 12) hour = 0;
-    return new Date(
-      Number(lookin[1]),
-      Number(lookin[2]) - 1,
-      Number(lookin[3]),
-      hour,
-      minute,
-      second,
-    ).toISOString();
-  }
-  if (/^\d{14}$/.test(s)) {
-    const y = s.slice(0, 4);
-    const mo = s.slice(4, 6);
-    const d = s.slice(6, 8);
-    const h = s.slice(8, 10);
-    const mi = s.slice(10, 12);
-    const sec = s.slice(12, 14);
-    return new Date(`${y}-${mo}-${d}T${h}:${mi}:${sec}`).toISOString();
-  }
-  const eu = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
-  if (eu) {
-    const [, dd, mm, yyyy, hh = '0', min = '0', sec = '0'] = eu;
-    return new Date(
-      Number(yyyy),
-      Number(mm) - 1,
-      Number(dd),
-      Number(hh),
-      Number(min),
-      Number(sec),
-    ).toISOString();
-  }
-  const parsed = Date.parse(s);
-  if (!Number.isNaN(parsed)) return new Date(parsed).toISOString();
-  return null;
+  return parseInbodyMeasuredAt(raw);
 }
 
 function buildSegmentalLean(row: Record<string, string>): InbodySegmentalLean {

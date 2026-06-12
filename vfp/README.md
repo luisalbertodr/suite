@@ -46,12 +46,28 @@ SYNC_MAC=STYLE-VM
 SYNC_INTERVAL=30
 ```
 
-## 5. Verificación
+## 5. Verificación y trazas
 
-1. Arrancar Style con `IniciarStyle.bat`
-2. Log: `Usuarios\_suite_sync.log` → `INIT ok url=...`
-3. Ciclos cada ~30 s: `CYCLE inicio` / `CYCLE fin`
-4. Ctrl+F5 = reiniciar sync manualmente
+Log: `Usuarios\_suite_sync.log`
+
+| Código | Significado |
+|--------|-------------|
+| `[BOOT-04]` | OK: sync embebida en `duna.exe` |
+| `[BOOT-07]` | FALLO: falta `suite_full_unlock` en exe y `PROGS\` |
+| `[INIT-02]` | FALLO: no hay `SuiteSync.cfg` |
+| `[INIT-03]` | cfg OK, sync activa |
+| `[INIT-04]` | FALLO: `SYNC_URL` o `SYNC_TOKEN` vacíos |
+| `[INIT-06]` | timer activo |
+| `CYCLE inicio/fin` | ciclos pull/push |
+
+**Sin log** → `general.prg` del exe viejo o Style arrancó en otra carpeta.
+
+```powershell
+cd C:\Style-Dunasoft
+powershell -ExecutionPolicy Bypass -File DiagnosticarSuiteSync.ps1
+```
+
+En VFP: `? Suite_SyncDiag()` | Ctrl+F5 reinicia | Ctrl+F6 para timer
 
 ## Notas
 

@@ -69,6 +69,10 @@ def norm_tax_id(value: object) -> str | None:
     return s if s else None
 
 
+def norm_inbody_user_id(value: object) -> str:
+    return re.sub(r"[\s\-\.]", "", str(value or "")).strip().upper()
+
+
 def dni_numeric_key(value: object) -> str | None:
     s = norm_tax_id(value)
     if not s:
@@ -268,7 +272,7 @@ def build_rows(
     stats = {"total": 0, "skipped_no_user": 0, "skipped_no_date": 0, "linked": 0, "unlinked": 0}
 
     for idx in range(n):
-        user_id = str(bca.get("USERID", [""] * n)[idx] or "").strip()
+        user_id = norm_inbody_user_id(str(bca.get("USERID", [""] * n)[idx] or "").strip())
         if not user_id:
             stats["skipped_no_user"] += 1
             continue

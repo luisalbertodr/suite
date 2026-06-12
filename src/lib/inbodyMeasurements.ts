@@ -285,3 +285,57 @@ export function normalizeInbodyMeasurement(raw: InbodyMeasurement): InbodyMeasur
 
   return out;
 }
+
+const ONE_HOUR_MS = 3600_000;
+
+function inbodyMeasurementScore(row: InbodyMeasurement): number {
+  let score = 0;
+  if (row.customer_id) score += 4;
+  if (row.source?.includes('mdb')) score += 2;
+  if (row.bmr_kcal != null) score += 1;
+  if (row.segmental_lean && Object.keys(row.segmental_lean).length > 0) score += 1;
+  return score;
+}
+
+/**
+ * Colapsa importaciones duplicadas (mismo DNI + desfase 1h por timezone o misma sesión).
+ */
+export function dedupeInbodyMeasurements(rows: InbodyMeasurement[]): InbodyMeasurement[] {
+  const sorted = [...rows].sort(
+    (a, b) => new Date(b.measured_at).getTime() - new Date(a.measured_at).getTime(),
+  );
+  const kept: InbodyMeasurement[] = [];
+
+  for (const row of sorted) {
+    const userKey = normInbodyUserId(row.inbody_user_id);
+    const t = new Date(row.measured_at).getTime();
+
+    const dupIdx = kept.findIndex((existing) => {
+      const sameUser =
+        normInbodyUserId(existing.inbody_user_id) === userKey ||
+        dniNumericKey(existing.inbody_user_id) === dniNumericKey(row.inbody_user_id);
+      if (!sameUser) return false;
+
+      const dt = Math.abs(new Date(existing.measured_at).getTime() - t);
+      if (dt === 0) return true;
+      if (dt >= ONE_HOUR_MS - 1000 && dt <= ONE_HOUR_MS + 1000) return true;
+
+      if (dt < ONE_HOUR_MS && row.weight_kg != null && existing.weight_kg != null) {
+        return Math.abs(row.weight_kg - existing.weight_kg) < 0.05;
+      }
+      return false;
+    });
+
+    if (dupIdx >= 0) {
+      const current = kept[dupIdx];
+      kept[dupIdx] =
+        inbodyMeasurementScore(row) > inbodyMeasurementScore(current) ? row : current;
+    } else {
+      kept.push(row);
+    }
+  }
+
+  return kept.sort(
+    (a, b) => new Date(b.measured_at).getTime() - new Date(a.measured_at).getTime(),
+  );
+}

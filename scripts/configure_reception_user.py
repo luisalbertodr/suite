@@ -21,8 +21,8 @@ except Exception as exc:
     print(f"psycopg2 requerido: {exc}", file=sys.stderr)
     sys.exit(2)
 
-ESTETICA = "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4"
-MEDICINA = "816af484-92a0-4f65-a5a7-1c907aa4bb3d"
+ESTETICA = "816af484-92a0-4f65-a5a7-1c907aa4bb3d"  # Delgado Lamas Medicina Estética SL
+MEDICINA = "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4"  # María del Mar Lamas Pernas
 RECEPTION_ROLE = "recepcion"
 
 COMMON_ALLOW = [
@@ -35,9 +35,9 @@ COMMON_ALLOW = [
     ("whatsapp", "read"),
 ]
 
-ESTETICA_ALLOW = COMMON_ALLOW + [("marketing", "read")]
-MEDICINA_ALLOW = COMMON_ALLOW
-MEDICINA_DENY = [("marketing", "read")]
+ESTETICA_ALLOW = COMMON_ALLOW + [("marketing", "read"), ("marketing", "write")]
+MEDICINA_ALLOW = COMMON_ALLOW + [("marketing", "read"), ("marketing", "write")]
+MEDICINA_DENY: list[tuple[str, str]] = []
 
 
 def connect():

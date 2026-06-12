@@ -86,9 +86,10 @@ const DEFAULT_CONFIG: Omit<MetaConfigInsert, 'company_id' | 'access_token'> = {
   enabled: true,
 };
 
-export const useMetaConfig = () => {
+export const useMetaConfig = (scopeCompanyId?: string | null) => {
   const queryClient = useQueryClient();
-  const { companyId, loading: companyLoading } = useCompanyFilter();
+  const { companyId: activeCompanyId, loading: companyLoading } = useCompanyFilter();
+  const companyId = scopeCompanyId ?? activeCompanyId;
 
   const configQuery = useQuery({
     queryKey: ['meta-config', companyId],

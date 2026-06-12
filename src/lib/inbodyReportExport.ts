@@ -1,14 +1,19 @@
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import {
+  completeSpanishDni,
   inbodyBarScale,
   inbodyRangeStatus,
   inbodyStatusLabel,
-  completeSpanishDni,
   normalizeInbodyMeasurement,
   type InbodyMeasurement,
   type InbodySegmentEntry,
 } from '@/lib/inbodyMeasurements';
+import {
+  exerciseKcal,
+  flattenExerciseMets,
+  recommendedDailyKcalForMeasurement,
+} from '@/lib/inbodyNutrition';
 
 /** Versión de plantilla: cambiar al subir PNG nueva para invalidar caché del navegador. */
 export const INBODY_REPORT_TEMPLATE_VERSION = '20260624';
@@ -21,16 +26,6 @@ const FONT = 'Arial, Helvetica, sans-serif';
 /** Escala global de tipografía (respecto a la base 11 px). */
 const FONT_SCALE = 1.28;
 const fs = (base: number) => Math.round(base * FONT_SCALE);
-const EXERCISE_DURATION_MIN = 30;
-const EXERCISE_KCAL_COEFF = 0.0084;
-
-/** MET por icono del planificador (3 filas × 6 columnas). */
-const EXERCISE_COLS = 6;
-const EXERCISE_METS: number[][] = [
-  [4.8, 3.5, 3.0, 2.5, 4.5, 4.0],
-  [7.0, 6.5, 10.0, 9.0, 7.0, 6.8],
-  [7.0, 10.0, 9.0, 7.0, 10.0, 6.0],
-];
 
 type RefRect = { x1: number; y1: number; x2: number; y2: number };
 
@@ -352,16 +347,6 @@ function evalFromEntry(entry?: InbodySegmentEntry): number | null {
   return pct == null || Number.isNaN(pct) ? null : pct;
 }
 
-function exerciseKcal(weightKg: number, met: number, minutes = EXERCISE_DURATION_MIN): number {
-  if (met <= 0) return 0;
-  return Math.round(EXERCISE_KCAL_COEFF * met * weightKg * minutes);
-}
-
-function recommendedDailyKcal(bmr: number | null | undefined): number | null {
-  if (bmr == null || Number.isNaN(bmr)) return null;
-  return Math.round(bmr * 1.55);
-}
-
 function drawPatientInfo(
   ctx: CanvasRenderingContext2D,
   w: number,
@@ -569,20 +554,30 @@ function drawExercisePlanner(ctx: CanvasRenderingContext2D, w: number, h: number
     bold: true,
   });
 
-  EXERCISE_METS.forEach((row, rowIdx) => {
+  const exerciseMets = flattenExerciseMets();
+  const durationMin = 30;
+
+  exerciseMets.forEach((row, rowIdx) => {
     const yRef = EXERCISE_ROW_Y[rowIdx];
     if (yRef == null) return;
     row.forEach((met, colIdx) => {
-      if (colIdx >= EXERCISE_COLS || met <= 0) return;
+      if (colIdx >= EXERCISE_COL_X.length || met <= 0) return;
       const xRef = EXERCISE_COL_X[colIdx];
       if (xRef == null) return;
-      const kcal = exerciseKcal(weight, met);
+      const kcal = Math.round(exerciseKcal(met, weight, durationMin));
       const p = px(w, h, exercisePlannerX(xRef), exercisePlannerY(yRef));
       drawText(ctx, String(kcal), p.x, p.y, { size: fs(10), align: 'center', bold: true });
     });
   });
 
-  const recommended = recommendedDailyKcal(m.bmr_kcal);
+  const recommended = recommendedDailyKcalForMeasurement({
+    sex: m.sex,
+    weight_kg: m.weight_kg,
+    height_cm: m.height_cm,
+    age_years: m.age_years,
+    bmr_kcal: m.bmr_kcal,
+    activity: 'moderate',
+  });
   if (recommended != null) {
     drawTextInRect(ctx, w, h, REGIONS.dailyKcal, String(recommended), {
       size: fs(12),

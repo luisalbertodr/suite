@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import {
   dniMatchKeys,
+  dedupeInbodyMeasurements,
   normalizeInbodyMeasurement,
   type InbodyMeasurement,
 } from '@/lib/inbodyMeasurements';
@@ -38,14 +39,14 @@ export function useInbodyMeasurements(
       if (error) throw error;
 
       const seen = new Set<string>();
-      const deduped: InbodyMeasurement[] = [];
+      const raw: InbodyMeasurement[] = [];
       for (const row of (data || []) as InbodyMeasurement[]) {
         const key = `${row.inbody_user_id}|${row.measured_at}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        deduped.push(normalizeInbodyMeasurement(row));
+        raw.push(normalizeInbodyMeasurement(row));
       }
-      return deduped;
+      return dedupeInbodyMeasurements(raw);
     },
   });
 }

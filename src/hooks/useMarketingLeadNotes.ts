@@ -334,8 +334,9 @@ export const useMarketingLeadNoteCounts = () => {
   });
 };
 
-export const useMarketingLeadNotesIndex = () => {
-  const { companyId, loading: companyLoading } = useCompanyFilter();
+export const useMarketingLeadNotesIndex = (scopeCompanyId?: string | null) => {
+  const { companyId: activeCompanyId, loading: companyLoading } = useCompanyFilter();
+  const companyId = scopeCompanyId ?? activeCompanyId;
 
   return useQuery({
     queryKey: ['marketing-lead-notes-index', companyId],

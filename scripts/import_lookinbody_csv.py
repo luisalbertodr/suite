@@ -24,6 +24,9 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
+
+MADRID = ZoneInfo("Europe/Madrid")
 
 try:
     import psycopg2
@@ -105,6 +108,10 @@ def to_float(value: object) -> float | None:
         return None
 
 
+def norm_inbody_user_id(raw: str) -> str:
+    return re.sub(r"[\s\-.]", "", (raw or "").strip()).upper()
+
+
 def parse_measured_at(raw: str) -> datetime | None:
     s = clean_cell(raw)
     m = re.match(
@@ -121,9 +128,19 @@ def parse_measured_at(raw: str) -> datetime | None:
             hour += 12
         if ampm == "AM" and hour == 12:
             hour = 0
-        return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), hour, minute, second)
+        return datetime(
+            int(m.group(1)), int(m.group(2)), int(m.group(3)), hour, minute, second, tzinfo=MADRID
+        )
+    if len(s) == 14 and s.isdigit():
+        try:
+            return datetime.strptime(s, "%Y%m%d%H%M%S").replace(tzinfo=MADRID)
+        except ValueError:
+            return None
     try:
-        return datetime.fromisoformat(s.replace(" ", "T"))
+        dt = datetime.fromisoformat(s.replace(" ", "T"))
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=MADRID)
+        return dt.astimezone(MADRID)
     except ValueError:
         return None
 
@@ -174,7 +191,7 @@ def parse_dbbackup_row(cells: list[str]) -> dict[str, Any]:
         impedance["100khz"] = z100
 
     measured = parse_measured_at(c(1))
-    user_id = norm_tax_id(c(0))
+    user_id = norm_inbody_user_id(norm_tax_id(c(0)))
 
     return {
         "inbody_user_id": user_id,

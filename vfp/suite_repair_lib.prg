@@ -30,11 +30,14 @@ FUNCTION SuiteProjHasFile
 ENDFUNC
 
 FUNCTION SuiteShouldRemoveProjFile
- PARAMETER tcname, tcfull
- LOCAL lcname, lcfull, llremove
+ PARAMETER tcname, tcfull, lcroot
+ LOCAL lcname, lcfull, llremove, lccanonfunc, lccanongen, lccanonunlock
  lcname = LOWER(NVL(tcname, ""))
  lcfull = LOWER(NVL(tcfull, ""))
  llremove = .F.
+ lccanonfunc = LOWER(SuiteLowerPath(lcroot + "PROGS\funciones.prg"))
+ lccanongen = LOWER(SuiteLowerPath(lcroot + "PROGS\general.prg"))
+ lccanonunlock = LOWER(SuiteLowerPath(lcroot + "PROGS\suite_full_unlock.prg"))
  IF "suite_reservas_sync"$lcname
     llremove = .T.
  ENDIF
@@ -44,13 +47,19 @@ FUNCTION SuiteShouldRemoveProjFile
  IF LEFT(lcname, 2) = "z:" .OR. LEFT(lcfull, 2) = "z:"
     llremove = .T.
  ENDIF
- IF "suite_full_unlock"$lcname .AND. JUSTEXT(lcname) <> "prg"
+ IF "suite_full_unlock"$lcname
+    IF JUSTEXT(lcname) <> "prg"
+       llremove = .T.
+    ELSE
+       IF lcfull <> lccanonunlock
+          llremove = .T.
+       ENDIF
+    ENDIF
+ ENDIF
+ IF JUSTFNAME(lcname) = "funciones.prg" .AND. lcfull <> lccanonfunc
     llremove = .T.
  ENDIF
- IF JUSTFNAME(lcname) = "funciones.prg" .AND.  .NOT. ("progs\funciones.prg"$lcfull)
-    llremove = .T.
- ENDIF
- IF JUSTFNAME(lcname) = "general.prg" .AND.  .NOT. ("progs\general.prg"$lcfull)
+ IF JUSTFNAME(lcname) = "general.prg" .AND. lcfull <> lccanongen
     llremove = .T.
  ENDIF
  RETURN llremove
@@ -151,7 +160,7 @@ PROCEDURE SuiteRepairMscomctlProject
     ENDIF
     lcname = NVL(loFile.Name, "")
     lcfull = SuiteLowerPath(lcname)
-    IF SuiteShouldRemoveProjFile(lcname, lcfull)
+    IF SuiteShouldRemoveProjFile(lcname, lcfull, lcroot)
        DO SuiteRemoveProjFile WITH loProj, lcname, tclog
        lnremoved = lnremoved + 1
     ENDIF

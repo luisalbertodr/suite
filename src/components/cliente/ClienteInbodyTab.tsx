@@ -21,6 +21,7 @@ import { InbodyMetricRow, InbodyRangeBar } from './inbody/InbodyRangeBar';
 import { InbodyHistoryChart } from './inbody/InbodyHistoryChart';
 import { InbodySegmentalSilhouette } from './inbody/InbodySegmentalSilhouette';
 import { InbodyReportExport } from './inbody/InbodyReportExport';
+import { InbodyNutritionPanel } from './inbody/InbodyNutritionPanel';
 import { InbodyMetricHelp, InbodySectionHelp } from './inbody/InbodyMetricHelp';
 import { InbodyCsvImportPanel } from '@/components/InbodyCsvImportPanel';
 
@@ -219,11 +220,9 @@ function MeasurementReport({ measurement, compact }: { measurement: InbodyMeasur
         </Card>
       </div>
 
-      <Card className="border-sky-100/50 dark:border-sky-900/20">
-        <CardContent className="pt-4">
-          <ImpedanceTable measurement={measurement} />
-        </CardContent>
-      </Card>
+      <InbodyNutritionPanel measurement={measurement} compact={compact} />
+
+      <ImpedanceTable measurement={measurement} />
     </div>
   );
 }

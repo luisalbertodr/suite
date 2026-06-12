@@ -66,6 +66,7 @@ export const DockBar: React.FC = () => {
 
   const visibleItems = dockItems.filter((item) => {
     if (permissionsLoading) return true;
+    if (item.path === '/marketing') return canSeeMarketing;
     if (item.phoneAccess) return canAccessPhone(hasPermission);
     if (item.permission) {
       return hasPermission(item.permission.resource, item.permission.action);

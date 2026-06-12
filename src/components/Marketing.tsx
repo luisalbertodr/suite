@@ -47,6 +47,7 @@ import {
 } from './marketing/marketingFilterUtils';
 import { useMarketingInvoicedValueSync } from '@/hooks/useMarketingInvoicedValueSync';
 import { useRegisterTopBarContent } from '@/components/TopBarContentContext';
+import { useMarketingPermissions } from '@/hooks/useMarketingPermissions';
 import { MarketingSearchInput } from './marketing/MarketingSearchInput';
 
 const COLLAPSED_STAGES_STORAGE_KEY = 'marketing-kanban-collapsed-stage-ids';
@@ -80,15 +81,17 @@ const matchesQuery = (lead: MarketingLead, q: string): boolean => {
 export const Marketing: React.FC = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
-  const { companyId, loading: companyLoading } = useCompanyFilter();
+  const { loading: companyLoading } = useCompanyFilter();
+  const { canWrite: canEditMarketing, marketingCompanyId } = useMarketingPermissions();
+  const marketingCompanyIdStable = marketingCompanyId;
 
-  const { leads, isLoading: leadsLoading, refetch, moveLeadToStage } = useMarketingLeads(companyId);
-  const { stages, isLoading: stagesLoading } = useMarketingStages(companyId);
-  const { fields, isLoading: fieldsLoading } = useMarketingFieldConfig(companyId);
-  const { data: notesIndex } = useMarketingLeadNotesIndex();
+  const { leads, isLoading: leadsLoading, refetch, moveLeadToStage } = useMarketingLeads(marketingCompanyIdStable);
+  const { stages, isLoading: stagesLoading } = useMarketingStages(marketingCompanyIdStable);
+  const { fields, isLoading: fieldsLoading } = useMarketingFieldConfig(marketingCompanyIdStable);
+  const { config: metaConfig, forms: metaForms, syncNow } = useMetaConfig(marketingCompanyIdStable);
+  const { data: notesIndex } = useMarketingLeadNotesIndex(marketingCompanyIdStable);
   const { index: customerIndex } = useCustomerLookup();
-  const { config: metaConfig, forms: metaForms, syncNow } = useMetaConfig();
-  const { viewedLeadIds } = useMarketingLeadViewedSet(companyId ?? null);
+  const { viewedLeadIds } = useMarketingLeadViewedSet(marketingCompanyIdStable);
   const markLeadViewed = useMarkMarketingLeadViewed();
 
   const [filterQuery, setFilterQuery] = useState('');
@@ -229,7 +232,7 @@ export const Marketing: React.FC = () => {
   }, [leads, matchLeadToCustomer]);
 
   const { runSync: syncPresentadaInvoicedValues } = useMarketingInvoicedValueSync({
-    companyId,
+    companyId: marketingCompanyIdStable,
     stages,
     leads,
     matchCustomer: matchLeadToCustomer,
@@ -313,6 +316,14 @@ export const Marketing: React.FC = () => {
       setDraggedLeadId(null);
       setDragOverStageId(null);
       if (!lead || lead.stage_id === stageId) return;
+      if (!canEditMarketing) {
+        toast({
+          title: 'Sin permiso de edición',
+          description: 'No puedes mover tarjetas sin el permiso «Editar Marketing» en Estética.',
+          variant: 'destructive',
+        });
+        return;
+      }
       const targetLeads = leadsByStage.map.get(stageId) ?? [];
       const newPosition = targetLeads.length;
       try {
@@ -326,7 +337,7 @@ export const Marketing: React.FC = () => {
         toast({ title: 'Error', description: message, variant: 'destructive' });
       }
     },
-    [leads, leadsByStage, moveLeadToStage, toast],
+    [leads, leadsByStage, moveLeadToStage, toast, canEditMarketing],
   );
 
   const handleEditStage = useCallback((_stage: MarketingLeadStage) => {
@@ -511,7 +522,7 @@ export const Marketing: React.FC = () => {
     );
   }
 
-  if (!companyId) {
+  if (!marketingCompanyIdStable) {
     return (
       <div className="flex justify-center items-center h-64 text-center">
         <div>
@@ -600,7 +611,7 @@ export const Marketing: React.FC = () => {
       {activeLead ? (
         <MarketingLeadDetailDialog
           lead={activeLead}
-          companyId={companyId}
+          companyId={marketingCompanyIdStable}
           stages={stages}
           matchedCustomer={matchedCustomerByLead.get(activeLead.id) ?? null}
           open

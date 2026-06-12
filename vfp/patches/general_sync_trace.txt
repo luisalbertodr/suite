@@ -1,0 +1,18 @@
+Parches en C:\Duna\Export\PROGS\general.prg (copiar tras editar Export o recompilar general.fxp).
+
+Trazas en Usuarios\_suite_sync.log — buscar códigos [BOOT-xx] e [INIT-xx]:
+
+BOOT-00  general.prg primera carga unlock
+BOOT-01  SuiteStartSyncIfReady
+BOOT-04  OK embebido en exe (ReFox Replace)
+BOOT-05  exe sin sync; probando PROGS\
+BOOT-07  FALLO: falta suite_full_unlock
+BOOT-09  llamando Suite_SyncInit
+INIT-02  FALLO: falta SuiteSync.cfg
+INIT-03  cfg OK, sync activa
+INIT-04  FALLO: token/url vacíos
+INIT-06  timer activo
+
+Si NO hay log → exe sin parche general.prg o carpeta arranque incorrecta.
+Si BOOT-07 → ReFox Replace general+funciones+suite_full_unlock en Duna.exe.
+Si INIT-02/04 → revisar SuiteSync.cfg junto al exe.

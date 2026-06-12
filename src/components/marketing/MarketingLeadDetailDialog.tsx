@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Phone, Mail, MessageCircle, Trash2, Archive, UserCheck, CalendarClock } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useMarketingPermissions } from '@/hooks/useMarketingPermissions';
 import {
   Dialog,
   DialogContent,
@@ -51,6 +52,7 @@ export const MarketingLeadDetailDialog: React.FC<MarketingLeadDetailDialogProps>
   const { updateLead, deleteLead, archiveLead } = useMarketingLeads(companyId);
   const navigate = useNavigate();
   const { hasPermission } = usePermissions();
+  const { canWrite: canEditMarketing } = useMarketingPermissions();
   const canUseWhatsapp = hasPermission('whatsapp', 'read');
 
   const [firstName, setFirstName] = useState('');
@@ -110,6 +112,14 @@ export const MarketingLeadDetailDialog: React.FC<MarketingLeadDetailDialogProps>
   };
 
   const handleSave = async () => {
+    if (!canEditMarketing) {
+      toast({
+        title: 'Sin permiso de edición',
+        description: 'Tu usuario solo puede ver Marketing. Pide a un administrador el permiso «Editar Marketing» en Estética.',
+        variant: 'destructive',
+      });
+      return;
+    }
     try {
       await updateLead.mutateAsync({
         id: lead.id,
@@ -337,7 +347,7 @@ export const MarketingLeadDetailDialog: React.FC<MarketingLeadDetailDialogProps>
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               Cancelar
             </Button>
-            <Button onClick={handleSave} disabled={updateLead.isPending}>
+            <Button onClick={handleSave} disabled={updateLead.isPending || !canEditMarketing}>
               Guardar
             </Button>
           </div>

@@ -31,9 +31,15 @@ export const PermissionCheck: React.FC<PermissionCheckProps> = ({
     );
   }
 
+  const needsCheck = (anyOf?.length ?? 0) > 0 || !!(resource && action);
+
+  if (!needsCheck) {
+    return <>{children}</>;
+  }
+
   const allowed = anyOf?.length
     ? anyOf.some((p) => hasPermission(p.resource, p.action))
-    : !!(resource && action && hasPermission(resource, action));
+    : hasPermission(resource!, action!);
 
   if (!allowed) {
     if (fallback) {
