@@ -1,0 +1,6 @@
+Parche en C:\Duna\Export\PROGS\funciones.prg — FUNCTION Actualizar:
+
+- RETURN .T. si Suite_SyncInit cargado o existe SuiteSync.cfg
+- RETURN .T. si no hay exe valido (evita error 11 en AGETFILEVERSION)
+
+Parche en general.prg: omitir llamada a actualizar() si existe SuiteSync.cfg

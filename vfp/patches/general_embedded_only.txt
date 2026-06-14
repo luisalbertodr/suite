@@ -1,0 +1,7 @@
+Parche en C:\Duna\Export\PROGS\general.prg — SuiteLoadUnlockProgram:
+
+- Solo carga suite_full_unlock embebido (SET PROCEDURE TO suite_full_unlock).
+- Sin fallback PROGS\suite_full_unlock.fxp/.prg (evita BOOT-06 y fxp roto).
+- BOOT-07 indica ReFox Replace: general, funciones, suite_full_unlock.
+
+ReFox obligatorio antes de produccion. Ver scripts/prepare-refox-embed.ps1

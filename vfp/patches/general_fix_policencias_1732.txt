@@ -1,0 +1,22 @@
+# general.prg — error 1732 antes del login
+
+# Causas (combinadas):
+# 1. suite_full_unlock.prg en PROGS con SuiteCreatePolicencias() hace que el exe viejo
+#    llame NEWOBJECT("licencias_unlock") -> 1732.
+# 2. ON ERROR (sin comando) = dialogo nativo "Error del programa", no errorwe.
+# 3. VM sin carpeta vcx\ -> CREATEOBJECT("licencias"/"usuario") falla si el exe no embebe.
+
+# Fix general.prg:
+# - FUNCTION SuiteSafeCreateObject (ON ERROR llFail=.T.)
+# - pousuario = SuiteSafeCreateObject("usuario", lcStyleRoot+"vcx\seguridad.vcx")
+# - policencias = SuiteSafeCreateObject("licencias", lcStyleRoot+"vcx\licencias.vcx")
+
+# Fix suite_full_unlock.prg:
+# - ELIMINAR FUNCTION SuiteCreatePolicencias (exe antiguo usa ELSE CREATEOBJECT)
+
+# Fix IniciarStyle.bat:
+# - NO borrar PROGS\suite_full_unlock.fxp al arrancar
+
+# Despliegue VM minimo hasta rebuild Duna.exe:
+# - PROGS\suite_full_unlock.prg + .FXP
+# - vcx\licencias.*, seguridad.*, screen_nueva.*, tickets_nuevo.*

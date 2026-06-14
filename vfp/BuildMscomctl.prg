@@ -32,10 +32,14 @@ PROCEDURE BuildMscomctlCore
 
  STRTOFILE("Build iniciado: " + TTOC(DATETIME()) + CHR(13), lcLog, .T.)
 
- CLOSE PROJECT ALL
+ IF TYPE("_VFP.ActiveProject") = "O"
+    CLOSE PROJECT
+ ENDIF
  OPEN PROJECT (lcProj) EXCLUSIVE
  BUILD PROJECT (lcProj) REBUILD
- CLOSE PROJECT ALL
+ IF TYPE("_VFP.ActiveProject") = "O"
+    CLOSE PROJECT
+ ENDIF
 
  ON ERROR &lcSavErr
 

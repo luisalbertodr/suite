@@ -1,0 +1,17 @@
+Parche general.prg — arranque sin IniciarStyle.bat + idioma + aniversarios
+
+Incluye en el exe via BUILD PROJECT mscomctl (VFP9), no ReFox:
+
+1. SuiteResolveStyleRoot() — carpeta del exe via SYS(16), luego STYLE_HOME, cwd, C:\Style-Dunasoft
+2. SuiteApplyStyleEnvironment() — equivalente IniciarStyle.bat:
+   - SET DEFAULT + CD raiz Style
+   - OPEN DATABASE dbf\wedb
+   - borrar wedb.dbc duplicado en raiz
+   - crear Usuarios\
+3. RESTORE cfg desde EMPRESA + default cfgidioma=CA/cfgpais=ESP si vacio (España)
+4. funciones.prg BuscarAniversarios — USE clientes via DBC() o ruta dbf\clientes
+
+Recompilar: BUILD PROJECT mscomctl (VFP9) y deploy Duna.exe a la VM.
+desde cualquier sitio si el exe esta en C:\Style-Dunasoft\.
+
+Sigue haciendo falta en disco (no embebible): EMPRESA.DBF, dbf\, SuiteSync.cfg.

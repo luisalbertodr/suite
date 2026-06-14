@@ -15,12 +15,28 @@ plSuiteSyncEnabled = .F.
 pcSuiteStyleRoot = ""
 gnSuiteInstanceLockHandle = 0
 **
+PROCEDURE SuiteEnsureGlobals
+ IF TYPE("pcidioma")#"C"
+    PUBLIC pcidioma, pcpais, pcversionpais
+    pcidioma = "CA"
+    pcpais = "ESP"
+    pcversionpais = "ESP"
+ ENDIF
+ENDPROC
+**
 FUNCTION SuiteStyleRoot
  LOCAL lcb
- lcb = ADDBS(SYS(5)+SYS(2003))
  IF  .NOT. EMPTY(pcSuiteStyleRoot) AND DIRECTORY(pcSuiteStyleRoot)
     RETURN ADDBS(pcSuiteStyleRoot)
  ENDIF
+ IF  .NOT. EMPTY(SYS(16))
+    lcb = ADDBS(JUSTPATH(FULLPATH(SYS(16))))
+    IF FILE(lcb+"duna.exe") OR FILE(lcb+"Duna.exe") OR FILE(lcb+"EMPRESA.DBF") OR FILE(lcb+"SuiteSync.cfg")
+       pcSuiteStyleRoot = lcb
+       RETURN lcb
+    ENDIF
+ ENDIF
+ lcb = ADDBS(SYS(5)+SYS(2003))
  IF FILE(lcb+"EMPRESA.DBF") OR FILE(lcb+"duna.exe") OR FILE(lcb+"mscomctl.exe") OR FILE(lcb+"style.exe")
     pcSuiteStyleRoot = lcb
     RETURN lcb
@@ -71,16 +87,18 @@ FUNCTION Suite_SyncDiag
  RETURN lc
 ENDFUNC
 **
+FUNCTION SuiteIdUser
+ LOCAL lcid, lnAt
+ lcid = ID()
+ lnAt = AT("#", lcid)
+ IF lnAt > 1
+    RETURN ALLTRIM(SUBSTR(lcid, 1, lnAt-1))
+ ENDIF
+ RETURN ALLTRIM(lcid)
+ENDFUNC
+**
 FUNCTION SuiteWindowsUser
- LOCAL lc
- lc = ALLTRIM(SUBSTR(ID(), 1, AT("#", ID())-1))
- IF EMPTY(lc)
-    lc = ALLTRIM(GETENV("USERNAME"))
- ENDIF
- IF EMPTY(lc)
-    lc = "user"
- ENDIF
- RETURN lc
+ RETURN SuiteIdUser()
 ENDFUNC
 **
 FUNCTION SuiteSyncTryLock
@@ -129,6 +147,7 @@ PROCEDURE SuiteShutdown
 ENDPROC
 **
 PROCEDURE SuiteApplyFullUnlock
+ DO SuiteEnsureGlobals
  plSuiteFullUnlock = .T.
  plversiondemo = .F.
  plversiondemoespecial = .T.
@@ -375,6 +394,9 @@ PROCEDURE Suite_SyncCycle
     DO Suite_SyncPull
  CATCH TO oerr
     lcerr = IIF(TYPE("oerr")="O", oerr.message, "?")
+    IF TYPE("oerr")="O" AND  .NOT. EMPTY(oerr.lineNo)
+       lcerr = lcerr+" line="+ALLTRIM(STR(oerr.lineNo))
+    ENDIF
     DO Suite_SyncLog WITH "CYCLE error: "+lcerr
  ENDTRY
  plSuiteSyncBusy = .F.
@@ -432,25 +454,39 @@ ENDFUNC
 FUNCTION Suite_TsToEpoch
  PARAMETER tdt
  LOCAL lt
- IF ISNULL(tdt) OR EMPTY(tdt)
+ IF ISNULL(tdt)
     RETURN 0
  ENDIF
  DO CASE
     CASE TYPE("tdt")="T"
+       IF EMPTY(tdt)
+          RETURN 0
+       ENDIF
        lt = tdt
     CASE TYPE("tdt")="D"
+       IF EMPTY(tdt)
+          RETURN 0
+       ENDIF
        lt = DTOT(tdt)
+    CASE TYPE("tdt")="C"
+       IF EMPTY(ALLTRIM(tdt))
+          RETURN 0
+       ENDIF
+       lt = CTOT(ALLTRIM(tdt))
+       IF EMPTY(lt)
+          RETURN 0
+       ENDIF
     OTHERWISE
        RETURN 0
  ENDCASE
  RETURN INT((lt - DATETIME(1970, 1, 1, 0, 0, 0)) * 86400)
 ENDFUNC
 **
-FUNCTION Suite_GetPlanLocalModifiedAt
+FUNCTION Suite_GetPlanLocalModifiedEpoch
  PARAMETER tnidplan
- LOCAL ldAt, lcalias, llWasUsed
- * fechorinc es T; no comparar con {} (D) — provoca "Operator/operand type mismatch"
- ldAt = .NULL.
+ LOCAL lnMax, lnE, lcalias, llWasUsed
+ * Comparar epoch (N), no DateTime vs Date — evita "Operator/operand type mismatch"
+ lnMax = 0
  lcalias = SELECT()
  llWasUsed = USED("planinc")
  IF  .NOT. llWasUsed
@@ -460,10 +496,9 @@ FUNCTION Suite_GetPlanLocalModifiedAt
  SET ORDER TO idplan
  IF SEEK(tnidplan)
     SCAN REST WHILE planinc.idplan = tnidplan
-       IF TYPE("planinc.fechorinc")="T"
-          IF ISNULL(ldAt) OR planinc.fechorinc > ldAt
-             ldAt = planinc.fechorinc
-          ENDIF
+       lnE = Suite_TsToEpoch(planinc.fechorinc)
+       IF lnE > lnMax
+          lnMax = lnE
        ENDIF
     ENDSCAN
  ENDIF
@@ -473,7 +508,17 @@ FUNCTION Suite_GetPlanLocalModifiedAt
  IF  .NOT. EMPTY(lcalias)
     SELECT (lcalias)
  ENDIF
- RETURN ldAt
+ RETURN lnMax
+ENDFUNC
+**
+FUNCTION Suite_GetPlanLocalModifiedAt
+ PARAMETER tnidplan
+ LOCAL lnMax
+ lnMax = Suite_GetPlanLocalModifiedEpoch(tnidplan)
+ IF lnMax <= 0
+    RETURN .NULL.
+ ENDIF
+ RETURN DATETIME(1970, 1, 1, 0, 0, 0) + lnMax
 ENDFUNC
 **
 FUNCTION Suite_PullShouldApply
@@ -483,7 +528,7 @@ FUNCTION Suite_PullShouldApply
  IF lnSuiteEpoch <= 0
     RETURN .T.
  ENDIF
- lnLocalEpoch = Suite_TsToEpoch(Suite_GetPlanLocalModifiedAt(tnidplan))
+ lnLocalEpoch = Suite_GetPlanLocalModifiedEpoch(tnidplan)
  IF lnLocalEpoch <= 0
     RETURN .T.
  ENDIF
@@ -801,7 +846,7 @@ DEFINE CLASS licencias_unlock AS licencias
   IF .NOT. DIRECTORY(lcruta)
      MD (lcruta)
   ENDIF
-  lcnompc = ALLTRIM(SUBSTR(ID(), 1, AT("#", ID())-1))
+  lcnompc = SuiteIdUser()
   lcsess = ALLTRIM(STR(_SCREEN.HWnd))
   lcfichero = lcruta + lcnompc + "_" + lcsess + ".lic"
   STRTOFILE("", lcfichero)
@@ -853,5 +898,23 @@ DEFINE CLASS httpasp_local AS Custom
 ENDDEFINE
 **
 FUNCTION SuiteCreateHttp
- RETURN CREATEOBJECT("httpasp_local")
+ * httpasp_local vive en este PRG: SET PROCEDURE + CREATEOBJECT (evita ERR "VCX SUITE_FULL_UNLOCK").
+ LOCAL lcSavErr, lo, lcRoot, lcPrg, llFail
+ lo = .NULL.
+ llFail = .F.
+ lcSavErr = ON("ERROR")
+ ON ERROR llFail = .T.
+ SET PROCEDURE TO suite_full_unlock ADDITIVE
+ lo = CREATEOBJECT("httpasp_local")
+ IF llFail OR VARTYPE(lo)#"O"
+    llFail = .F.
+    lcRoot = SuiteStyleRoot()
+    lcPrg = lcRoot+"PROGS\suite_full_unlock.prg"
+    IF FILE(lcPrg)
+       SET PROCEDURE TO (lcPrg) ADDITIVE
+       lo = CREATEOBJECT("httpasp_local")
+    ENDIF
+ ENDIF
+ ON ERROR &lcSavErr
+ RETURN lo
 ENDFUNC

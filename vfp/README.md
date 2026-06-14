@@ -1,77 +1,108 @@
-# Sync embebida en Duna.exe (sin archivos externos)
+# Duna.exe — build completo VFP9 (sin ReFox)
 
-Objetivo: **solo `SuiteSync.cfg`** junto al exe. Nada de `PROGS\suite_full_unlock.*` en producción.
+El exe se genera con **`BUILD PROJECT mscomctl`** en `C:\Duna\Export\`. Todo el codigo Suite (unlock, sync, rutas de arranque) va **dentro** del exe via el proyecto `.pjx`, no con Replace externo.
 
-## 1. Compilar PRGs
+## Flujo
 
-Desde la raíz del repo Suite:
+```
+1. Parches en C:\Duna\Export\PROGS\  (general.prg, funciones.prg, suite_full_unlock.prg)
+2. BUILD PROJECT mscomctl  →  mscomctl.exe  →  Duna.exe
+3. deploy-duna-exe-vm.ps1  →  VM Style-Dunasoft
+```
+
+## 1. Sincronizar PRGs del repo
 
 ```powershell
 cd C:\Users\OportoW11\Suite\suite
-.\scripts\build-duna-suite.ps1
+.\scripts\sync-vfp-export.ps1
 ```
 
-Genera en `C:\Duna\Export\PROGS\`:
-- `general.fxp`
-- `funciones.fxp`
-- `suite_full_unlock.fxp`
+`general.prg` y `funciones.prg` viven en **Export** (export del exe original). Los parches de referencia estan en `vfp/patches/*.txt`.
 
-## 2. ReFox Replace (manual, una vez por versión)
+Parches recientes (arranque sin `.bat`, idioma, aniversarios):
 
-1. Abrir **`C:\Duna\Export\Duna.exe`** en ReFox XI+
-2. **Replace component** con los `.prg` de `C:\Duna\Export\PROGS\`:
-   - `general`
-   - `funciones`
-   - `suite_full_unlock`
-3. Guardar `Duna.exe`
+| Parche | Fichero Export |
+|--------|----------------|
+| `general_bootstrap_sin_bat.txt` | `PROGS\general.prg` |
+| `general_fix_default_dbf.txt` | `PROGS\general.prg` |
+| `general_fix_licencias_unlock.txt` | `PROGS\general.prg` |
+| `funciones_fix_aniversarios.txt` | `PROGS\funciones.prg` |
 
-## 3. Desplegar en la VM Style
+## 2. Build VFP9
 
-Copiar el exe parcheado a la VM (sustituye el anterior):
+En la maquina con Visual FoxPro 9:
+
+```cmd
+cd C:\Duna\Export
+BUILD-DUNA.bat
+```
+
+O dentro de VFP9:
+
+```foxpro
+SET DEFAULT TO C:\Duna\Export
+DO PROGS\VfpBuildProject.prg
+```
+
+Salida: `C:\Duna\Export\Duna.exe` (copia de `mscomctl.exe`).
+
+**Trampa habitual:** el Build genera `mscomctl.exe`. Style en la VM arranca **`Duna.exe`**. Tras cada build:
 
 ```powershell
-Copy-Item C:\Duna\Export\Duna.exe Z:\Style-Dunasoft\Duna.exe -Force
+.\scripts\copy-duna-exe.ps1
+.\scripts\deploy-duna-exe-vm.ps1
 ```
 
-En la VM la ruta real es `C:\Style-Dunasoft\Duna.exe`.
+Si `Duna.exe` es viejo verás errores ya corregidos (p. ej. «nombre de clase no válido»).
 
-## 4. Config (único fichero externo obligatorio)
+Revisa `build_mscomctl.log` y `mscomctl.ERR` si falla.
 
-`SuiteSync.cfg` junto al exe:
+### Proyecto mscomctl.pjx
 
-```ini
-SYNC_URL=https://supabase.lipoout.com/functions/v1/style-reservas-sync
-SYNC_TOKEN=<token de style_reservas_sync_config>
-SYNC_MAC=STYLE-VM
-SYNC_INTERVAL=30
-```
+Debe incluir (entre otros):
 
-## 5. Verificación y trazas
+- `PROGS\general.prg`
+- `PROGS\funciones.prg`
+- `PROGS\suite_full_unlock.prg` — sync + unlock embebidos
 
-Log: `Usuarios\_suite_sync.log`
+No marques esos PRGs como **Exclude** del exe. En produccion **no** hace falta copiar `PROGS\suite_full_unlock.*` a la VM (el deploy los elimina si existen como fallback).
 
-| Código | Significado |
-|--------|-------------|
-| `[BOOT-04]` | OK: sync embebida en `duna.exe` |
-| `[BOOT-07]` | FALLO: falta `suite_full_unlock` en exe y `PROGS\` |
-| `[INIT-02]` | FALLO: no hay `SuiteSync.cfg` |
-| `[INIT-03]` | cfg OK, sync activa |
-| `[INIT-04]` | FALLO: `SYNC_URL` o `SYNC_TOKEN` vacíos |
-| `[INIT-06]` | timer activo |
-| `CYCLE inicio/fin` | ciclos pull/push |
-
-**Sin log** → `general.prg` del exe viejo o Style arrancó en otra carpeta.
+## 3. Despliegue VM
 
 ```powershell
-cd C:\Style-Dunasoft
-powershell -ExecutionPolicy Bypass -File DiagnosticarSuiteSync.ps1
+.\scripts\deploy-duna-exe-vm.ps1
 ```
 
-En VFP: `? Suite_SyncDiag()` | Ctrl+F5 reinicia | Ctrl+F6 para timer
+En la VM debe existir:
 
-## Notas
+- `Duna.exe` (nuevo build)
+- `SuiteSync.cfg`
+- `EMPRESA.DBF` (raiz)
+- `dbf\wedb.dbc` + tablas
 
-- **`activar_suite_sync.prg`** es solo emergencia/desarrollo; no hace falta si el exe está parcheado.
-- Los `.prg`/`.fxp` en `PROGS\` son **fallback** si aún no has hecho ReFox.
-- Desde el PC con unidad `Z:` los `.fxp` en red **no cargan** en VFP; por eso la producción va embebida en el exe en la VM.
-- Borrar `suite_reservas_sync.prg` si existe (obsoleto).
+**No** hace falta `IniciarStyle.bat` tras el parche de bootstrap (doble clic en `Duna.exe` OK si el exe esta en `Style-Dunasoft`).
+
+## Verificacion
+
+Tras arrancar Style, en `Usuarios\_suite_sync.log`:
+
+- `[BOOT-00]` — ruta Style detectada (debe ser `C:\Style-Dunasoft\`, no `...\dbf\`)
+- `[BOOT-04]` o `[INIT-03]` — sync embebida activa
+
+## Scripts
+
+| Script | Uso |
+|--------|-----|
+| `sync-vfp-export.ps1` | Repo → Export antes del build |
+| `build-duna-suite.ps1` | Lanza `BUILD-DUNA.bat` |
+| `deploy-duna-exe-vm.ps1` | Export → VM |
+| `build-style-portable.ps1` | Empaquetado portable (runtime + datos) |
+
+## Errores frecuentes
+
+| Sintoma | Causa | Accion |
+|---------|-------|--------|
+| Idioma cada arranque | Exe viejo sin parche `SuiteResolveStyleRoot` | Rebuild + deploy |
+| Aniversarios vacios | `BuscarAniversarios` sin DBC | Rebuild `funciones.prg` |
+| Clase no valida | Exe sin `suite_full_unlock` en proyecto | Incluir PRG en `.pjx` y rebuild |
+| BOOT-07 en log | Sync no embebida | Verificar `suite_full_unlock.prg` en proyecto |

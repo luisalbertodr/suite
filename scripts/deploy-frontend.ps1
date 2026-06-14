@@ -22,6 +22,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$SshOpts = @("-o", "ConnectTimeout=15", "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=3")
 $SshTarget = if ($env:SUITE_WEB_SSH_HOST) { $env:SUITE_WEB_SSH_HOST } else { "suite-web" }
 $RemoteRoot = if ($env:SUITE_WEB_ROOT) {
   $env:SUITE_WEB_ROOT
@@ -34,7 +35,7 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
 
 function Test-SshKeyAuth {
-  $null = ssh -o BatchMode=yes -o ConnectTimeout=8 $SshTarget "echo ok" 2>&1
+  $null = ssh @SshOpts -o BatchMode=yes $SshTarget "echo ok" 2>&1
   return $LASTEXITCODE -eq 0
 }
 
@@ -100,21 +101,21 @@ if ($Backup) {
   $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
   $backupPath = "${RemoteRoot}_backup_${stamp}"
   Write-Host "Backup remoto -> $backupPath ..." -ForegroundColor Green
-  ssh $SshTarget "if [ -d '$remoteRootEscaped' ] && [ `"`$(ls -A '$remoteRootEscaped' 2>/dev/null)`" ]; then cp -a '$remoteRootEscaped' '$backupPath'; fi"
+  ssh @SshOpts $SshTarget "if [ -d '$remoteRootEscaped' ] && [ `"`$(ls -A '$remoteRootEscaped' 2>/dev/null)`" ]; then cp -a '$remoteRootEscaped' '$backupPath'; fi"
   if ($LASTEXITCODE -ne 0) { throw "Backup remoto falló" }
 }
 
 Write-Host "Limpiando $RemoteRoot ..." -ForegroundColor Green
-ssh $SshTarget "mkdir -p '$remoteRootEscaped' && rm -rf '${remoteRootEscaped}'/*"
+ssh @SshOpts $SshTarget "mkdir -p '$remoteRootEscaped' && find '$remoteRootEscaped' -mindepth 1 ! -name '.user.ini' -delete"
 if ($LASTEXITCODE -ne 0) { throw "No se pudo limpiar el directorio remoto" }
 
 Write-Host "Subiendo dist/ -> ${SshTarget}:${RemoteRoot}/ ..." -ForegroundColor Green
-& scp -r "$distDir/." "${SshTarget}:${RemoteRoot}/"
+& scp @SshOpts -r "$distDir/." "${SshTarget}:${RemoteRoot}/"
 if ($LASTEXITCODE -ne 0) { throw "scp falló" }
 
 Write-Host "Verificando permisos ..." -ForegroundColor Green
 # aaPanel crea .user.ini con chattr +i; chmod -R falla ahí aunque el resto esté bien.
-ssh $SshTarget "find '$remoteRootEscaped' ! -name '.user.ini' -exec chmod a+rX {} +"
+ssh @SshOpts $SshTarget "find '$remoteRootEscaped' ! -name '.user.ini' -exec chmod a+rX {} +"
 if ($LASTEXITCODE -ne 0) {
   Write-Host "Aviso: chmod parcial (normal si existe .user.ini de aaPanel)." -ForegroundColor Yellow
 }

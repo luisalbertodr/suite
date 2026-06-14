@@ -20,7 +20,10 @@ copy /Y "%REPO%RepararProyectoSilent.prg" "%ROOT%\PROGS\" >nul
 copy /Y "%REPO%RunBuildExport.prg" "%ROOT%\PROGS\" >nul
 copy /Y "%REPO%BuildMscomctl.prg" "%ROOT%\PROGS\" >nul
 copy /Y "%REPO%BuildMscomctlSilent.prg" "%ROOT%\PROGS\" >nul
-if exist "%REPO%suite_full_unlock.prg" copy /Y "%REPO%suite_full_unlock.prg" "%ROOT%\PROGS\" >nul
+copy /Y "%REPO%VfpBuildAll.prg" "%ROOT%\PROGS\" >nul
+copy /Y "%REPO%VfpCompilePrgs.prg" "%ROOT%\PROGS\" >nul
+copy /Y "%REPO%VfpBuildProject.prg" "%ROOT%\PROGS\" >nul
+REM suite_full_unlock.prg se edita en Export\PROGS (no sobrescribir desde repo)
 
 echo Copiando CONTA / tiendaonline a vcx\...
 if exist "%ROOT%\gestion-dunasoft\gestion\vcx\conta.vcx" (
@@ -46,9 +49,7 @@ copy /Y "%REPO%RepararProyecto.bat" "%ROOT%\" >nul 2>nul
 copy /Y "%REPO%CompilarMscomctl.bat" "%ROOT%\" >nul 2>nul
 copy /Y "%REPO%CompilarTodo.bat" "%ROOT%\" >nul 2>nul
 
-echo.
-echo Listo. Cierra el Project Manager de VFP y ejecuta:
-echo   %REPO%CompilarTodo.bat
-echo   (o %ROOT%\RepararProyecto.bat + CompilarMscomctl.bat)
+echo Listo. Ejecuta:
+echo   C:\Duna\Export\BUILD-DUNA.bat
 echo.
 exit /b 0

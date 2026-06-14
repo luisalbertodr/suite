@@ -22,7 +22,7 @@ SET PROCEDURE TO (lcRoot + "PROGS\suite_repair_lib.prg") ADDITIVE
 
 lcSavErr = ON("ERROR")
 ON ERROR MESSAGEBOX("Cierra el Project Manager (mscomctl) y vuelve a ejecutar." + CHR(13) + CHR(13) + MESSAGE(), 16, "Reparar proyecto")
-DO SuiteRepairMscomctlProject WITH lcRoot, lcLog, @lnRemoved
+DO SuiteRepairMscomctlProject WITH lcRoot, lcLog
 ON ERROR &lcSavErr
 
 MESSAGEBOX("Proyecto reparado." + CHR(13) + CHR(13) + ;

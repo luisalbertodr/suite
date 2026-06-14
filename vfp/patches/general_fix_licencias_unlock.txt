@@ -1,0 +1,19 @@
+Parche real error 1732 «El nombre de clase no es valido» (licencias_unlock)
+
+Causa (el parche TRY/CATCH anterior NO funcionaba):
+  1. general.prg linea 6: ON ERROR DO errorwe — captura antes que TRY/CATCH
+  2. CREATEOBJECT("licencias_unlock") falla: la clase esta en suite_full_unlock.prg
+     y requiere NEWOBJECT("licencias_unlock", "suite_full_unlock")
+
+Solucion:
+  - FUNCTION SuiteCreatePolicencias en suite_full_unlock.prg
+  - general.prg: policencias = SuiteCreatePolicencias()
+  - DetectActivity: ON ERROR temporal (mismo motivo)
+
+Recompilar:
+  COMPILE PROGS\suite_full_unlock.prg
+  COMPILE PROGS\general.prg
+  BUILD PROJECT mscomctl
+  copy-duna-exe.ps1 + deploy-duna-exe-vm.ps1
+
+Verificar: no debe aparecer dialogo 1732 al arrancar; log [BOOT-04] OK.

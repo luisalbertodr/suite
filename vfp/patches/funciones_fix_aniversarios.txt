@@ -1,0 +1,10 @@
+Parche C:\Duna\Export\PROGS\funciones.prg — recordatorio aniversarios vacio
+
+Problema:
+  BuscarAniversarios hace USE dbf/clientes relativo al DEFAULT.
+  Con DEFAULT en dbf\ resuelve dbf\dbf\clientes (inexistente) → lista vacia.
+
+Solucion:
+  FUNCTION BuscarAniversarios usa pcSuiteStyleRoot + "dbf\clientes" con ruta absoluta.
+
+Recompilar funciones.prg junto con general.prg (ver general_fix_default_dbf.txt).

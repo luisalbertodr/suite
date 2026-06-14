@@ -1,0 +1,8 @@
+Parche en C:\Duna\Export\PROGS\funciones.prg:
+
+- FUNCTION SuiteLoadUnlockFromFunciones: carga sync solo via .fxp (no .prg)
+- Actualizar: llama al loader antes del skip Dunasoft
+- Start_ServicioComunicaciones: llama al loader antes de Suite_SyncInit
+
+Desplegar funciones.fxp + PROGS\suite_full_unlock.fxp en la VM.
+No hace falta ReFox general si funciones.fxp esta actualizado en PROGS.

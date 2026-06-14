@@ -1,0 +1,19 @@
+Parche C:\Duna\Export\PROGS\general.prg — pantalla regional en bucle + rutas dbf\
+
+Problema:
+  SET DEFAULT TO dbf\ (arranque con wedb.dbc) hace que:
+  - FILE(SYS(2003)+"\EMPRESA.DBF") busque en dbf\ → no existe → DO FORM IDIOMA cada vez
+  - USE EMPRESA abre tabla equivocada o vacia
+  - cfgidioma no persiste → "Configuracion Regional" siempre
+
+Solucion aplicada:
+  - SET DEFAULT TO lcStyleRoot (raiz Style-Dunasoft)
+  - SET PATH TO dbf\ + OPEN DATABASE dbf\wedb
+  - FILE(lcStyleRoot+"EMPRESA.DBF") en lugar de SYS(2003)
+  - lcdirbase = lcStyleRoot
+  - USE (lcStyleRoot+"EMPRESA")
+
+Recompilar:
+  COMPILE PROGS\general.prg
+  Recompilar general.prg + BUILD PROJECT mscomctl en Duna.exe.
+  (o BUILD PROJECT mscomctl si flujo completo)

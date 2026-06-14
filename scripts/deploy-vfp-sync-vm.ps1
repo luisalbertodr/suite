@@ -4,12 +4,17 @@
 # Uso:
 #   cd C:\Users\OportoW11\Suite\suite
 #   .\scripts\deploy-vfp-sync-vm.ps1
+# Produccion embebida (build VFP9):
+#   .\scripts\sync-vfp-export.ps1
+#   .\scripts\build-duna-suite.ps1
+#   .\scripts\deploy-duna-exe-vm.ps1
 
 param(
     [string]$VmHost = "192.168.99.119",
     [string]$StyleDrive = "",
     [string]$SyncToken = "",
-    [string]$SyncUrl = "https://supabase.lipoout.com/functions/v1/style-reservas-sync"
+    [string]$SyncUrl = "https://supabase.lipoout.com/functions/v1/style-reservas-sync",
+    [switch]$EmbeddedOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -97,13 +102,38 @@ New-Item -ItemType Directory -Force -Path $progsDest | Out-Null
 
 $exportUnlock = Join-Path $ExportProgs "suite_full_unlock.prg"
 Copy-Item (Join-Path $VfpLocal "suite_full_unlock.prg") $exportUnlock -Force
-Copy-Item (Join-Path $VfpLocal "suite_full_unlock.prg") (Join-Path $StyleRemote "suite_full_unlock.prg") -Force
-$exportFxp = Join-Path $ExportProgs "suite_full_unlock.fxp"
-if (Test-Path $exportFxp) {
-    Copy-Item $exportFxp (Join-Path $progsDest "suite_full_unlock.fxp") -Force
-    Write-Host "suite_full_unlock.fxp -> VM PROGS (fallback sin ReFox)" -ForegroundColor Cyan
+
+if (-not $EmbeddedOnly) {
+    Copy-Item (Join-Path $VfpLocal "suite_full_unlock.prg") (Join-Path $progsDest "suite_full_unlock.prg") -Force
+    Copy-Item (Join-Path $VfpLocal "suite_full_unlock.prg") (Join-Path $StyleRemote "suite_full_unlock.prg") -Force
+    Write-Host "suite_full_unlock.prg -> VM (fallback sin ReFox)" -ForegroundColor Cyan
+
+    $exportGeneral = Join-Path $ExportProgs "general.prg"
+    if (Test-Path $exportGeneral) {
+        Copy-Item $exportGeneral (Join-Path $progsDest "general.prg") -Force
+    }
+    $exportGeneralFxp = Join-Path $ExportProgs "general.fxp"
+    if (Test-Path $exportGeneralFxp) {
+        Copy-Item $exportGeneralFxp (Join-Path $progsDest "general.fxp") -Force
+        Write-Host "general.fxp -> VM PROGS\" -ForegroundColor Cyan
+    }
+    foreach ($bf in @(
+        (Join-Path $StyleRemote "suite_full_unlock.fxp"),
+        (Join-Path $progsDest "suite_full_unlock.fxp")
+    )) {
+        if (Test-Path $bf) {
+            Remove-Item $bf -Force
+            Write-Host "Eliminado $bf" -ForegroundColor Yellow
+        }
+    }
+    $exportFuncionesFxp = Join-Path $ExportProgs "funciones.fxp"
+    if (Test-Path $exportFuncionesFxp) {
+        Copy-Item $exportFuncionesFxp (Join-Path $progsDest "funciones.fxp") -Force
+        Write-Host "funciones.fxp -> VM PROGS\" -ForegroundColor Cyan
+    }
+} else {
+    Write-Host "EmbeddedOnly: no se copian fallbacks PROGS (usa deploy-duna-exe-vm.ps1)" -ForegroundColor Yellow
 }
-Write-Host "suite_full_unlock.prg -> Export PROGS + VM (fallback sin ReFox)" -ForegroundColor Cyan
 Copy-Item (Join-Path $VfpLocal "DiagnosticarSuiteSync.ps1") (Join-Path $StyleRemote "DiagnosticarSuiteSync.ps1") -Force
 Copy-Item (Join-Path $VfpLocal "activar_suite_sync.prg") (Join-Path $StyleRemote "activar_suite_sync.prg") -Force
 Copy-Item (Join-Path $VfpLocal "TestStyleSync.ps1") (Join-Path $StyleRemote "TestStyleSync.ps1") -Force

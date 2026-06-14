@@ -21,7 +21,7 @@ IF  .NOT. FILE(lcRoot + "PROGS\export_build_stubs.prg")
 ENDIF
 
 SET PROCEDURE TO (lcRoot + "PROGS\suite_repair_lib.prg") ADDITIVE
-DO SuiteRepairMscomctlProject WITH lcRoot, lcLog, @lnRemoved
+DO SuiteRepairMscomctlProject WITH lcRoot, lcLog
 
 STRTOFILE("Reparar OK removed=" + ALLTRIM(STR(lnRemoved)) + CHR(13), lcLog, .T.)
 QUIT

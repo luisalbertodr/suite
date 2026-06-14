@@ -1,0 +1,18 @@
+# general.prg — datos sin enlaces .dbf en raiz (build Suite)
+
+# SuiteApplyStyleEnvironment:
+#   - NO borrar wedb.* en raiz
+#   - SET DEFAULT raiz Style, SET PATH dbf\
+#   - OPEN DATABASE dbf\wedb SHARED
+#   - SuiteEnsureLegacyWedbLink: mklink solo wedb.dbc/.dct/.dcx si faltan (forms DE legacy)
+
+# SuiteEnsureDatabaseOpen antes de formularios (IDIOMA, login)
+
+# IniciarStyle.bat: ya no llama ensure-style-dbc (salvo STYLE_LEGACY=1 + exe.bak)
+
+# Limpiar enlaces viejos en VM (una vez):
+#   .\scripts\ensure-style-dbc.ps1 -StyleRoot Z:\Style-Dunasoft -RemoveRootCopies
+
+# Rebuild:
+#   COMPILE PROGS\general.prg
+#   DO PROGS\VfpBuildProject.prg
