@@ -30,6 +30,7 @@ import { InbodyCsvImportPanel } from './InbodyCsvImportPanel';
 import { TpvSettingsConfig } from './TpvSettingsConfig';
 import { StripeConfigPanel } from './StripeConfig';
 import { ServidoresMonitorPanel } from './ServidoresMonitorPanel';
+import { ConsentimientoPlantillasConfig } from './consentimiento/ConsentimientoPlantillasConfig';
 import { useWorkCenter } from '@/hooks/useWorkCenter';
 
 const VALID_TABS = [
@@ -232,6 +233,7 @@ export const Configuracion: React.FC = () => {
 
         <TabsContent value="empresa" className="space-y-4">
           <Empresas />
+          <ConsentimientoPlantillasConfig />
         </TabsContent>
 
         <TabsContent value="agenda" className="space-y-4">
@@ -254,7 +256,7 @@ export const Configuracion: React.FC = () => {
               <TabsTrigger value="meta">Meta / Leads</TabsTrigger>
               <TabsTrigger value="email">Email</TabsTrigger>
               <TabsTrigger value="whatsapp-conexion">WhatsApp conexión</TabsTrigger>
-              <TabsTrigger value="whatsapp-automatizacion">WhatsApp automático</TabsTrigger>
+              <TabsTrigger value="whatsapp-automatizacion">WhatsApp (citas y alertas)</TabsTrigger>
             </TabsList>
             <TabsContent value="meta" className="mt-4 space-y-4">
               <MetaConfig />

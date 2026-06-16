@@ -3,10 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   LayoutGrid,
+  ListOrdered,
   RefreshCw,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import {
@@ -50,6 +52,7 @@ import { useMarketingInvoicedValueSync } from '@/hooks/useMarketingInvoicedValue
 import { useRegisterTopBarContent } from '@/components/TopBarContentContext';
 import { useMarketingPermissions } from '@/hooks/useMarketingPermissions';
 import { MarketingSearchInput } from './marketing/MarketingSearchInput';
+import { MarketingWhatsappQueueTab } from './marketing/MarketingWhatsappQueueTab';
 
 const COLLAPSED_STAGES_STORAGE_KEY = 'marketing-kanban-collapsed-stage-ids';
 const COMPACT_CARDS_STORAGE_KEY = 'marketing-kanban-compact-cards';
@@ -114,6 +117,7 @@ export const Marketing: React.FC = () => {
   const [notesLead, setNotesLead] = useState<MarketingLead | null>(null);
   const [promoteLead, setPromoteLead] = useState<MarketingLead | null>(null);
   const [customerDetailId, setCustomerDetailId] = useState<string | null>(null);
+  const [marketingView, setMarketingView] = useState<'board' | 'queue'>('board');
   const autoSyncTriggered = useRef(false);
 
   const toastMetaSyncResult = useCallback(
@@ -533,9 +537,9 @@ export const Marketing: React.FC = () => {
           Marketing
         </span>
       ),
-      actions: topBarActions,
+      actions: marketingView === 'board' ? topBarActions : null,
     },
-    [topBarActions],
+    [topBarActions, marketingView],
   );
 
   if (companyLoading || stagesLoading || leadsLoading || fieldsLoading) {
@@ -560,6 +564,30 @@ export const Marketing: React.FC = () => {
   return (
     <Card className="border-none shadow-none bg-transparent">
       <CardContent className="px-0 pb-0">
+        <Tabs
+          value={marketingView}
+          onValueChange={(v) => setMarketingView(v === 'queue' ? 'queue' : 'board')}
+          className="w-full"
+        >
+          <TabsList className="mb-3 h-9 w-full max-w-md grid grid-cols-2">
+            <TabsTrigger value="board" className="gap-1.5 text-xs sm:text-sm">
+              <LayoutGrid className="h-3.5 w-3.5 shrink-0" />
+              Tablero
+            </TabsTrigger>
+            <TabsTrigger value="queue" className="gap-1.5 text-xs sm:text-sm">
+              <ListOrdered className="h-3.5 w-3.5 shrink-0" />
+              Cola WhatsApp
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="queue" className="mt-0">
+            <MarketingWhatsappQueueTab
+              companyId={marketingCompanyIdStable}
+              canWrite={canEditMarketing}
+            />
+          </TabsContent>
+
+          <TabsContent value="board" className="mt-0">
         {stages.length === 0 ? (
           <div className="rounded-xl border border-dashed p-10 text-center">
             <p className="text-sm text-muted-foreground">
@@ -630,6 +658,8 @@ export const Marketing: React.FC = () => {
             </div>
           </div>
         )}
+          </TabsContent>
+        </Tabs>
       </CardContent>
 
       {activeLeadLive ? (

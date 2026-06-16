@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell, Check, CheckCheck, Info, AlertTriangle, CheckCircle } from 'lucide-react';
+import { Bell, Check, CheckCheck, Info, AlertTriangle, CheckCircle, CreditCard, ClipboardList } from 'lucide-react';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useNotificationSoundOnIncrease } from '@/hooks/useNotificationSoundOnIncrease';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -13,6 +13,8 @@ const typeIcons: Record<string, React.ReactNode> = {
   info: <Info className="h-4 w-4 text-blue-500" />,
   warning: <AlertTriangle className="h-4 w-4 text-amber-500" />,
   phone_missed_call: <AlertTriangle className="h-4 w-4 text-rose-500" />,
+  stripe_deposit_paid: <CreditCard className="h-4 w-4 text-emerald-500" />,
+  questionnaire_pending: <ClipboardList className="h-4 w-4 text-sky-500" />,
   success: <CheckCircle className="h-4 w-4 text-emerald-500" />,
 };
 

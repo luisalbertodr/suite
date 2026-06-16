@@ -38,6 +38,23 @@ interface Customer {
 
 type View = 'list' | 'form' | 'detail';
 
+const CLIENTE_DETAIL_TABS: ClienteDetailTab[] = [
+  'timeline',
+  'ficha',
+  'vouchers',
+  'inbody',
+  'historial',
+  'adjuntos',
+  'cuestionario',
+];
+
+function parseClienteDetailTab(tab: string | null): ClienteDetailTab {
+  if (tab && CLIENTE_DETAIL_TABS.includes(tab as ClienteDetailTab)) {
+    return tab as ClienteDetailTab;
+  }
+  return 'timeline';
+}
+
 export const Clientes: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchTerm, setSearchTerm] = useState('');
@@ -45,6 +62,7 @@ export const Clientes: React.FC = () => {
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<ClienteDetailTab>('timeline');
+  const [initialQuestionnaireId, setInitialQuestionnaireId] = useState<string | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { companyId, loading: companyLoading } = useCompanyFilter();
@@ -57,10 +75,10 @@ export const Clientes: React.FC = () => {
     const customerId = searchParams.get('customer');
     if (!customerId) return;
     const tab = searchParams.get('tab');
+    const questionnaireId = searchParams.get('questionnaire');
     setSelectedCustomerId(customerId);
-    setDetailTab(
-      tab === 'ficha' || tab === 'vouchers' || tab === 'inbody' || tab === 'adjuntos' ? tab : 'timeline',
-    );
+    setDetailTab(parseClienteDetailTab(tab));
+    setInitialQuestionnaireId(questionnaireId);
     setView('detail');
   }, [searchParams]);
 
@@ -68,7 +86,9 @@ export const Clientes: React.FC = () => {
     const next = new URLSearchParams(searchParams);
     next.delete('customer');
     next.delete('tab');
+    next.delete('questionnaire');
     setSearchParams(next, { replace: true });
+    setInitialQuestionnaireId(null);
   };
 
   const openCustomerDetail = (customerId: string, tab: ClienteDetailTab = 'timeline') => {
@@ -141,9 +161,10 @@ export const Clientes: React.FC = () => {
   if (view === 'detail' && selectedCustomerId) {
     return (
       <ClienteDetailView
-        key={`${selectedCustomerId}-${detailTab}`}
+        key={`${selectedCustomerId}-${detailTab}-${initialQuestionnaireId ?? ''}`}
         customerId={selectedCustomerId}
         initialTab={detailTab}
+        initialQuestionnaireId={initialQuestionnaireId}
         onBack={() => {
           setView('list');
           setSelectedCustomerId(null);

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { RefreshCw, MoreVertical, UserCheck, UserPlus, Link as LinkIcon, Megaphone } from 'lucide-react';
 import { WhatsappAvatar } from './WhatsappAvatar';
@@ -6,6 +7,8 @@ import { WhatsappMessageBubble } from './WhatsappMessageBubble';
 import { WhatsappMessageInput } from './WhatsappMessageInput';
 import { WhatsappForwardDialog } from './WhatsappForwardDialog';
 import { WhatsappLinkPopover } from './WhatsappLinkPopover';
+import { WhatsappSendDepositLinkButton } from './WhatsappSendDepositLinkButton';
+import { WhatsappConfirmDepositPaidButton } from './WhatsappConfirmDepositPaidButton';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,6 +26,7 @@ import {
 } from '@/hooks/useWhatsappMessages';
 import { useToast } from '@/hooks/use-toast';
 import { useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
+import { useWhatsappAutomationSettings } from '@/hooks/useWhatsappAutomationSettings';
 import {
   firstUnreadMessageId,
   groupMessagesByDay,
@@ -39,8 +43,10 @@ import {
   jidToDisplay,
   jidsSameContact,
   isPhoneJid,
+  isWhatsappTestChatId,
   resolveGroupSenderJidFromRaw,
   resolvePhoneLabelForChat,
+  customerProfilePath,
   WA_CHAT_WALLPAPER,
   waTheme,
   type MetaLeadInfo,
@@ -51,6 +57,7 @@ interface Props {
   chats: WhatsappChatRow[];
   chat: WhatsappChatRow;
   customerName?: string;
+  resolvedCustomerId?: string | null;
   isLinkedCustomer?: boolean;
   leadName?: string;
   leadMeta?: MetaLeadInfo;
@@ -64,6 +71,7 @@ export const WhatsappChatView: React.FC<Props> = ({
   chats,
   chat,
   customerName,
+  resolvedCustomerId,
   isLinkedCustomer,
   leadName,
   leadMeta,
@@ -74,6 +82,7 @@ export const WhatsappChatView: React.FC<Props> = ({
 }) => {
   const { toast } = useToast();
   const { companyId, loading: companyLoading } = useWhatsappCompanyId();
+  const { data: waAutomationSettings } = useWhatsappAutomationSettings();
   const relatedChatIds = useMemo(() => {
     const ids = new Set<string>();
     for (const c of chats) {
@@ -208,6 +217,17 @@ export const WhatsappChatView: React.FC<Props> = ({
     chat.raw,
   );
   const isGroup = chat.is_group || isGroupJid(chat.chat_id);
+  const isTestWaChat = isWhatsappTestChatId(chat.chat_id, waAutomationSettings);
+  const effectiveCustomerId =
+    isTestWaChat ? (chat.customer_id ?? null) : (chat.customer_id ?? resolvedCustomerId ?? null);
+  /** Nombre CRM; en chat de prueba no usar el cliente detectado por teléfono (Luis A.). */
+  const crmContactName = isTestWaChat
+    ? (leadName ?? null)
+    : (customerName ?? leadName ?? null);
+  const showDepositActions =
+    !isGroup &&
+    !isSystemChatJid(chat.chat_id) &&
+    (!isTestWaChat || chat.marketing_lead_id);
 
   const relatedPhoneChatIds = useMemo(() => {
     const ids: string[] = [];
@@ -255,7 +275,7 @@ export const WhatsappChatView: React.FC<Props> = ({
     [isGroup, messages],
   );
 
-  const isCustomer = isLinkedCustomer ?? !!chat.customer_id;
+  const isCustomer = isLinkedCustomer ?? !!effectiveCustomerId;
 
   return (
     <div
@@ -278,7 +298,17 @@ export const WhatsappChatView: React.FC<Props> = ({
           />
           <div className="min-w-0">
             <p className="truncate text-sm font-medium text-[#111b21] dark:text-zinc-100">
-              {displayName}
+              {effectiveCustomerId ? (
+                <Link
+                  to={customerProfilePath(effectiveCustomerId)}
+                  className="hover:underline"
+                  title="Abrir ficha del cliente"
+                >
+                  {displayName}
+                </Link>
+              ) : (
+                displayName
+              )}
               {showPhoneInline ? (
                 <span className={`font-normal ${waTheme.textMuted}`}> · {phoneLabel}</span>
               ) : null}
@@ -303,10 +333,13 @@ export const WhatsappChatView: React.FC<Props> = ({
                   <Megaphone className="h-3 w-3 shrink-0" />
                   {formatMetaLeadLabel(leadMeta)}
                 </span>
-              ) : customerName ? (
-                <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+              ) : customerName && effectiveCustomerId ? (
+                <Link
+                  to={customerProfilePath(effectiveCustomerId)}
+                  className="inline-flex items-center gap-0.5 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:hover:bg-emerald-900"
+                >
                   <UserCheck className="h-3 w-3" /> {customerName}
-                </span>
+                </Link>
               ) : leadName ? (
                 <span className="inline-flex items-center gap-0.5 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-medium text-sky-700 dark:bg-sky-950 dark:text-sky-300">
                   <UserPlus className="h-3 w-3" /> {leadName}
@@ -327,6 +360,27 @@ export const WhatsappChatView: React.FC<Props> = ({
           </div>
         </div>
         <div className="flex items-center gap-1">
+          {!isGroup && !isSystemChatJid(chat.chat_id) && showDepositActions ? (
+            <>
+              <WhatsappSendDepositLinkButton
+                chatId={chat.chat_id}
+                chatDisplayName={crmContactName ?? displayName}
+                marketingLeadId={chat.marketing_lead_id}
+                customerId={effectiveCustomerId}
+                depositPaid={!!leadMeta?.stripeDepositPaidAt}
+                onSendText={async (text) => {
+                  await onSend({ text });
+                }}
+              />
+              <WhatsappConfirmDepositPaidButton
+                chatId={chat.chat_id}
+                chatDisplayName={crmContactName ?? displayName}
+                marketingLeadId={chat.marketing_lead_id}
+                customerId={effectiveCustomerId}
+                depositPaid={!!leadMeta?.stripeDepositPaidAt}
+              />
+            </>
+          ) : null}
           <WhatsappLinkPopover
             chat={chat}
             customerName={customerName}

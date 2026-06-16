@@ -5,6 +5,7 @@ import {
   type DunasoftEmployeeHoursRow,
 } from '@/lib/dunasoftAgendaHours';
 import {
+  attachCustomerIdsToAppointments,
   chunkArray,
   mapDunasoftEmployees,
   mapPlan2009ToAppointments,
@@ -12,6 +13,7 @@ import {
   type DunasoftPlan2009Row,
   type DunasoftPlanArtRow,
 } from '@/lib/dunasoftAgendaMap';
+import { resolveCustomerIdsByLegacyCodcli } from '@/lib/appointmentCustomerResolve';
 import type { Appointment, Employee } from '@/types/agenda';
 import type { AgendaDayHoursMap, AgendaUnavailabilityEntry } from '@/lib/agendaHours';
 
@@ -25,7 +27,10 @@ export type DunasoftAgendaDayData = {
   rawEmployees: DunasoftEmpleadoRow[];
 };
 
-async function fetchDunasoftAgendaDay(dateYmd: string): Promise<DunasoftAgendaDayData> {
+async function fetchDunasoftAgendaDay(
+  dateYmd: string,
+  companyId: string | null,
+): Promise<DunasoftAgendaDayData> {
   const empRes = await dunasoftSupabase
     .from('empleados')
     .select(
@@ -89,7 +94,17 @@ async function fetchDunasoftAgendaDay(dateYmd: string): Promise<DunasoftAgendaDa
     planArtByPlan.set(key, list);
   }
 
-  const appointments = mapPlan2009ToAppointments(plans, employees, planArtByPlan, articles);
+  let appointments = mapPlan2009ToAppointments(plans, employees, planArtByPlan, articles);
+
+  if (companyId) {
+    const legacyCodes = appointments
+      .map((a) => a.legacyClientCode)
+      .filter((c): c is string => Boolean(c?.trim()));
+    if (legacyCodes.length) {
+      const legacyMap = await resolveCustomerIdsByLegacyCodcli(companyId, legacyCodes);
+      appointments = attachCustomerIdsToAppointments(appointments, legacyMap);
+    }
+  }
 
   const employeeAgendaById: DunasoftAgendaDayData['employeeAgendaById'] = {};
   for (const row of rawEmployees) {
@@ -103,10 +118,11 @@ async function fetchDunasoftAgendaDay(dateYmd: string): Promise<DunasoftAgendaDa
   return { employees, appointments, employeeAgendaById, rawEmployees };
 }
 
-export function useDunasoftAgendaDay(dateYmd: string) {
+export function useDunasoftAgendaDay(dateYmd: string, companyId: string | null) {
   return useQuery({
-    queryKey: ['dunasoft-agenda-day', dateYmd],
-    queryFn: () => fetchDunasoftAgendaDay(dateYmd),
+    queryKey: ['dunasoft-agenda-day', dateYmd, companyId],
+    queryFn: () => fetchDunasoftAgendaDay(dateYmd, companyId),
+    enabled: !!dateYmd,
     staleTime: 30_000,
   });
 }

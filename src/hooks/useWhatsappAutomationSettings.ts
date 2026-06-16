@@ -12,6 +12,8 @@ export type WhatsappAutomationSettings = {
   appointment_reminder_hour_before_enabled: boolean;
   appointment_reminder_hour_before_message: string | null;
   appointment_reminder_send_hour_start: number;
+  marketing_queue_hour_start: number;
+  marketing_queue_hour_end: number;
   phone_missed_whatsapp_enabled: boolean;
   phone_missed_whatsapp_phone: string;
 };

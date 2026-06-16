@@ -19,6 +19,7 @@ import MarketingPage from '@/pages/MarketingPage';
 import WhatsappPage from '@/pages/WhatsappPage';
 import TelefonoPage from '@/pages/TelefonoPage';
 import DepositPaymentPage from '@/pages/DepositPaymentPage';
+import QuestionnaireKioskPage from '@/pages/QuestionnaireKioskPage';
 import SuperuserPage from '@/pages/SuperuserPage';
 import SuperuserManagementPage from '@/pages/SuperuserManagementPage';
 import ReportesPage from '@/pages/ReportesPage';
@@ -93,6 +94,7 @@ function App() {
         } />
         <Route path="/pago/:token/exito" element={<DepositPaymentPage />} />
         <Route path="/pago/:token" element={<DepositPaymentPage />} />
+        <Route path="/cuestionario/:questionnaireId/paciente" element={<QuestionnaireKioskPage />} />
         <Route path="/superuser" element={<SuperuserPage />} />
         <Route path="/superuser-management" element={
           <SuperuserProtectedRoute>

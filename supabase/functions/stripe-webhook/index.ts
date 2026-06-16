@@ -10,6 +10,8 @@ import {
   renderWhatsappTemplate,
   type WhatsappTemplateContext,
 } from '../_shared/marketingWhatsappAutomation.ts';
+import { loadAutomationSettings } from '../_shared/whatsappAutomationDispatch.ts';
+import { isWithinAutomationHours } from '../_shared/whatsappAutomationHours.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -23,7 +25,15 @@ async function sendWhatsappAfterPayment(
   companyId: string,
   leadId: string,
   messageTemplate: string,
+  amountCents?: number | null,
+  currency?: string | null,
 ): Promise<void> {
+  const automationSettings = await loadAutomationSettings(admin, companyId);
+  if (!isWithinAutomationHours(automationSettings)) {
+    console.log('post-payment WhatsApp skipped: outside automation hours');
+    return;
+  }
+
   const { data: lead } = await admin
     .from('marketing_leads')
     .select(
@@ -39,7 +49,12 @@ async function sendWhatsappAfterPayment(
   }
 
   const ctx = lead as WhatsappTemplateContext;
-  const text = renderWhatsappTemplate(messageTemplate, ctx, undefined);
+  let text = renderWhatsappTemplate(messageTemplate, ctx, undefined);
+  if (amountCents && amountCents > 0) {
+    const { formatEurosFromCents } = await import('../_shared/stripeDeposit.ts');
+    const importe = formatEurosFromCents(amountCents, currency ?? 'eur');
+    text = text.replace(/\{importe_senal\}/gi, importe);
+  }
   const { normalizeChatId } = await import('../_shared/marketingWhatsappAutomation.ts');
   const chatId = normalizeChatId(lead.phone, cfg.default_country_code);
   const sessionName = cfg.session_name || 'default';
@@ -136,6 +151,19 @@ serve(async (req) => {
 
       const stripeCfg = await loadStripeConfig(admin, compId);
       const leadId = meta.marketing_lead_id;
+      let paidAmountCents: number | null = null;
+      let paidCurrency: string | null = null;
+      if (depId) {
+        const { data: paidSession } = await admin
+          .from('stripe_deposit_sessions')
+          .select('amount_cents, currency')
+          .eq('id', depId)
+          .maybeSingle();
+        if (paidSession) {
+          paidAmountCents = Number(paidSession.amount_cents ?? 0) || null;
+          paidCurrency = paidSession.currency ?? null;
+        }
+      }
       if (stripeCfg?.payment_success_whatsapp_message?.trim() && leadId) {
         try {
           await sendWhatsappAfterPayment(
@@ -143,6 +171,8 @@ serve(async (req) => {
             compId,
             leadId,
             stripeCfg.payment_success_whatsapp_message.trim(),
+            paidAmountCents,
+            paidCurrency,
           );
         } catch (e) {
           console.error('post-payment WhatsApp failed:', e);

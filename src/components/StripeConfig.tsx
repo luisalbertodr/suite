@@ -27,6 +27,7 @@ import {
 } from '@/hooks/useStripeConfig';
 import { useMarketingStages } from '@/hooks/useMarketingStages';
 import { WHATSAPP_MESSAGE_TEMPLATE_VARS } from '@/lib/whatsappMessageTemplates';
+import { DEFAULT_DEPOSIT_REQUEST_WHATSAPP_MESSAGE } from '@/lib/stripeDepositMessages';
 
 const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined) ?? '';
 const NONE_STAGE = '__none__';
@@ -48,6 +49,7 @@ export const StripeConfigPanel: React.FC = () => {
   const [publicAppUrl, setPublicAppUrl] = useState('');
   const [confirmedStageId, setConfirmedStageId] = useState<string>(NONE_STAGE);
   const [successWhatsapp, setSuccessWhatsapp] = useState('');
+  const [depositRequestWhatsapp, setDepositRequestWhatsapp] = useState('');
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -60,6 +62,9 @@ export const StripeConfigPanel: React.FC = () => {
     setPublicAppUrl(config.public_app_url ?? window.location.origin);
     setConfirmedStageId(config.confirmed_stage_id ?? NONE_STAGE);
     setSuccessWhatsapp(config.payment_success_whatsapp_message ?? '');
+    setDepositRequestWhatsapp(
+      config.deposit_request_whatsapp_message ?? DEFAULT_DEPOSIT_REQUEST_WHATSAPP_MESSAGE,
+    );
   }, [config]);
 
   const webhookUrl = useMemo(() => {
@@ -77,6 +82,7 @@ export const StripeConfigPanel: React.FC = () => {
         confirmed_stage_id:
           confirmedStageId === NONE_STAGE ? null : confirmedStageId,
         payment_success_whatsapp_message: successWhatsapp.trim() || null,
+        deposit_request_whatsapp_message: depositRequestWhatsapp.trim() || null,
         ...(secretKey.trim() ? { secret_key: secretKey.trim() } : {}),
         ...(webhookSecret.trim() ? { webhook_secret: webhookSecret.trim() } : {}),
       });
@@ -264,6 +270,32 @@ export const StripeConfigPanel: React.FC = () => {
                   .map((v) => `{${v.key}}`)
                   .join(', ')}
                 …
+              </p>
+            </div>
+            <div className="space-y-2 md:col-span-2 rounded-lg border border-emerald-200/80 bg-emerald-50/30 p-3 dark:border-emerald-900 dark:bg-emerald-950/20">
+              <Label className="text-sm font-medium">Mensaje de cobro de señal (WhatsApp)</Label>
+              <p className="text-[11px] text-muted-foreground">
+                Lo envía el botón <strong>Cobro señal</strong> en cualquier chat individual. Incluye
+                Bizum, transferencia, datos de tu banco y, si quieres, el enlace Stripe con{' '}
+                <code>{'{link_pago}'}</code>. Si no usas Stripe, omite esa variable.
+              </p>
+              <Textarea
+                value={depositRequestWhatsapp}
+                onChange={(e) => setDepositRequestWhatsapp(e.target.value)}
+                rows={8}
+                className="text-xs font-mono"
+                placeholder={DEFAULT_DEPOSIT_REQUEST_WHATSAPP_MESSAGE}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Variables:{' '}
+                {WHATSAPP_MESSAGE_TEMPLATE_VARS
+                  .filter((v) =>
+                    ['nombre', 'importe_senal', 'link_pago', 'telefono', 'oferta', 'formulario'].includes(
+                      v.key,
+                    ),
+                  )
+                  .map((v) => `{${v.key}}`)
+                  .join(', ')}
               </p>
             </div>
           </div>

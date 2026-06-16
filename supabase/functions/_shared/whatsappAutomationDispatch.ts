@@ -1,4 +1,5 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { isWithinAutomationHours } from './whatsappAutomationHours.ts';
 import {
   loadWhatsappConfig,
   normalizeChatId,
@@ -15,6 +16,8 @@ export type WhatsappAutomationSettings = {
   appointment_reminder_hour_before_enabled: boolean;
   appointment_reminder_hour_before_message: string | null;
   appointment_reminder_send_hour_start: number;
+  marketing_queue_hour_start?: number | null;
+  marketing_queue_hour_end?: number | null;
   phone_missed_whatsapp_enabled: boolean;
   phone_missed_whatsapp_phone: string;
 };
@@ -23,9 +26,11 @@ export type AutomationSendType =
   | 'appointment_day_before'
   | 'appointment_hour_before'
   | 'meta_initial'
+  | 'meta_queue_initial'
   | 'meta_reply_1'
   | 'meta_reply_2'
   | 'meta_invalid'
+  | 'meta_reminder'
   | 'meta_payment_success'
   | 'test_manual'
   | 'phone_missed'
@@ -42,6 +47,39 @@ export function defaultDayBeforeMessage(): string {
 
 export function defaultHourBeforeMessage(): string {
   return DEFAULT_HOUR_BEFORE;
+}
+
+/** Últimos 9 dígitos de un teléfono (España). */
+export function phoneDigitsLast9(phone: string): string | null {
+  const d = phone.replace(/\D/g, '');
+  if (d.length < 9) return null;
+  return d.slice(-9);
+}
+
+export function testPhoneSuffix(settings: WhatsappAutomationSettings): string | null {
+  const raw = settings.test_phone?.trim() || '667435503';
+  return phoneDigitsLast9(raw);
+}
+
+/** True si los dígitos (o sufijo 9) coinciden con el teléfono de prueba WA. */
+export function isWhatsappTestPhoneDigits(
+  digits: string,
+  settings: WhatsappAutomationSettings,
+): boolean {
+  if (!settings.test_mode_enabled) return false;
+  const testSuffix = testPhoneSuffix(settings);
+  const n9 = phoneDigitsLast9(digits);
+  return !!(testSuffix && n9 && testSuffix === n9);
+}
+
+/** True si el JID del chat es el número de prueba (modo prueba activo). */
+export function isWhatsappTestChatId(
+  chatId: string,
+  settings: WhatsappAutomationSettings,
+): boolean {
+  if (!settings.test_mode_enabled) return false;
+  const local = chatId.split('@')[0] ?? '';
+  return isWhatsappTestPhoneDigits(local, settings);
 }
 
 export async function loadAutomationSettings(
@@ -317,11 +355,14 @@ export async function runAppointmentRemindersForCompany(
   }
 
   const now = new Date();
-  const nowM = madridParts(now);
   const tomorrowKey = madridDayKey(addMadridDays(now, 1));
   const errors: string[] = [];
   let dayBefore = 0;
   let hourBefore = 0;
+
+  if (!isWithinAutomationHours(settings)) {
+    return { day_before: 0, hour_before: 0, errors: [] };
+  }
 
   const windowStart = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
   const windowEnd = new Date(now.getTime() + 48 * 60 * 60 * 1000);
@@ -370,8 +411,7 @@ export async function runAppointmentRemindersForCompany(
 
     if (
       settings.appointment_reminder_day_before_enabled &&
-      aptDayKey === tomorrowKey &&
-      nowM.hour >= settings.appointment_reminder_send_hour_start
+      aptDayKey === tomorrowKey
     ) {
       const ref = `${apt.id}:day_before`;
       const { data: sent } = await admin

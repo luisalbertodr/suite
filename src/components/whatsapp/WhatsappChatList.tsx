@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Search, RefreshCw, MessageSquarePlus, Users, Megaphone, UserPlus } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -11,6 +12,7 @@ import {
   jidToDisplay,
   displayNameForChat,
   resolvePhoneLabelForChat,
+  customerProfilePath,
   waTheme,
   type MetaLeadInfo,
 } from './whatsappUtils';
@@ -177,6 +179,7 @@ export const WhatsappChatList: React.FC<Props> = ({
                 phoneLabel !== displayName &&
                 !displayName.includes(phoneLabel);
               const isCustomer = !!linkedCustomerId;
+              const hasUnread = (c.unread_count ?? 0) > 0 && !isActive;
               return (
                 <li key={c.id}>
                   <button
@@ -196,14 +199,31 @@ export const WhatsappChatList: React.FC<Props> = ({
                     />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-baseline justify-between gap-2">
-                        <p className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-sm font-medium text-[#111b21] dark:text-zinc-100">
+                        <p
+                          className={`flex min-w-0 flex-1 items-center gap-1.5 truncate text-sm ${
+                            hasUnread
+                              ? 'font-semibold text-[#111b21] dark:text-zinc-50'
+                              : 'font-medium text-[#111b21] dark:text-zinc-100'
+                          }`}
+                        >
                           {isGroup ? (
                             <Users
                               className="h-3.5 w-3.5 shrink-0 text-sky-600 dark:text-sky-400"
                               aria-hidden
                             />
                           ) : null}
-                          <span className="truncate">{displayName}</span>
+                          {isCustomer && linkedCustomerId ? (
+                            <Link
+                              to={customerProfilePath(linkedCustomerId)}
+                              onClick={(e) => e.stopPropagation()}
+                              className="truncate hover:underline"
+                              title="Abrir ficha del cliente"
+                            >
+                              {displayName}
+                            </Link>
+                          ) : (
+                            <span className="truncate">{displayName}</span>
+                          )}
                           {showPhoneInline ? (
                             <span className={`truncate font-normal ${waTheme.textMuted}`}>
                               · {phoneLabel}
@@ -264,12 +284,28 @@ export const WhatsappChatList: React.FC<Props> = ({
                       ) : null}
                       <div className="mt-0.5 flex items-center gap-1.5">
                         {c.last_message_from_me ? (
-                          <CheckCheck className={`h-3 w-3 shrink-0 ${waTheme.textMuted}`} />
+                          <CheckCheck
+                            className={`h-3 w-3 shrink-0 ${
+                              hasUnread ? waTheme.textMuted : 'text-sky-500 dark:text-sky-400'
+                            }`}
+                            aria-hidden
+                          />
+                        ) : hasUnread ? (
+                          <span
+                            className="h-2 w-2 shrink-0 rounded-full bg-[#25d366]"
+                            aria-label="No leído"
+                          />
                         ) : null}
-                        <p className={`flex-1 truncate text-xs ${waTheme.textMuted}`}>
+                        <p
+                          className={`flex-1 truncate text-xs ${
+                            hasUnread
+                              ? 'font-medium text-[#111b21] dark:text-zinc-200'
+                              : waTheme.textMuted
+                          }`}
+                        >
                           {c.last_message_preview ?? ' '}
                         </p>
-                        {c.unread_count > 0 && !isActive ? (
+                        {hasUnread ? (
                           <span className="ml-1 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[#25d366] px-1.5 text-[10px] font-semibold text-white">
                             {c.unread_count > 99 ? '99+' : c.unread_count}
                           </span>
@@ -286,6 +322,3 @@ export const WhatsappChatList: React.FC<Props> = ({
     </div>
   );
 };
-
-// Re-export para que el componente principal pueda mostrar ticks en preview.
-export { Check, CheckCheck };

@@ -1,0 +1,84 @@
+{
+  "name": "Suite Meta CAPI",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "suite-meta-conversion",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "a1b2c3d4-webhook-suite",
+      "name": "Webhook Suite",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [380, 300],
+      "webhookId": "suite-meta-conversion-v3"
+    },
+    {
+      "parameters": {
+        "jsCode": "const EXPECTED = 'suite-meta-lipoout-2026';\nconst item = $input.first().json;\nconst headers = item.headers || {};\nconst secret = headers['x-suite-secret'] || headers['X-Suite-Secret'] || '';\nif (EXPECTED && secret !== EXPECTED) {\n  throw new Error('Webhook secret invalido');\n}\nconst body = item.body ?? item;\nif (body.capi_payload) {\n  return [{ json: body.capi_payload }];\n}\nthrow new Error('Falta capi_payload (Suite envia payload CAPI hasheado)');"
+      },
+      "id": "b2c3d4e5-forward-capi",
+      "name": "Validar y reenviar CAPI",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v23.0/291687001692956/events",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer PEGAR_TOKEN_EAA_AQUI"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "c3d4e5f6-meta-http",
+      "name": "Meta CAPI events",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [900, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Suite": {
+      "main": [
+        [
+          {
+            "node": "Validar y reenviar CAPI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar y reenviar CAPI": {
+      "main": [
+        [
+          {
+            "node": "Meta CAPI events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

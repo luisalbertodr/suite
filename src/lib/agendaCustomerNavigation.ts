@@ -9,8 +9,13 @@ export function buildAgendaAppointmentUrl(
   return `/agenda?${params.toString()}`;
 }
 
+/** URL de ficha cliente (pestaña timeline por defecto). */
+export function buildCustomerProfileUrl(customerId: string, tab = 'ficha'): string {
+  const params = new URLSearchParams({ customer: customerId, tab });
+  return `/clientes?${params.toString()}`;
+}
+
 /** URL de ficha cliente con pestaña de historial. */
 export function buildCustomerHistoryUrl(customerId: string): string {
-  const params = new URLSearchParams({ customer: customerId, tab: 'timeline' });
-  return `/clientes?${params.toString()}`;
+  return buildCustomerProfileUrl(customerId, 'timeline');
 }

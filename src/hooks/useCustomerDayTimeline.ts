@@ -359,7 +359,7 @@ function mergeByDay(
       timeLabel: timeFromFecha(c.fecha_firma || c.created_at),
       refTable: 'consentimientos',
       refId: c.id,
-      signedConsent: c.firmado === true || !!c.firma_url,
+      signedConsent: c.firmado === true || !!c.firma_url || !!c.documento_pdf_url,
       sortKey: 2_000_000 + sortN++,
     });
   }

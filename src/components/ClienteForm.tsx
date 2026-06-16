@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
-import { ArrowLeft, Save, User, Heart, Calendar, FileText, Receipt, Gift, StickyNote, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Save, User, Heart, Calendar, FileText, Receipt, Gift, StickyNote, ChevronRight, ClipboardList } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useForm } from 'react-hook-form';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
@@ -12,6 +12,7 @@ import { ClienteDatosTab } from './cliente/ClienteDatosTab';
 import { ClienteHistorialTab } from './cliente/ClienteHistorialTab';
 import { ClienteCitasTab } from './cliente/ClienteCitasTab';
 import { ClienteDocumentacionTab } from './cliente/ClienteDocumentacionTab';
+import { ClienteCuestionariosTab } from './cliente/ClienteCuestionariosTab';
 import { ClienteFacturacionTab } from './cliente/ClienteFacturacionTab';
 import { ClienteBonosTab } from './cliente/ClienteBonosTab';
 import { ClienteNotasTab } from './cliente/ClienteNotasTab';
@@ -111,6 +112,7 @@ export const ClienteForm: React.FC<ClienteFormProps> = ({ customer, onClose }) =
   const [openHistorial, setOpenHistorial] = useState(false);
   const [openCitas, setOpenCitas] = useState(false);
   const [openDoc, setOpenDoc] = useState(false);
+  const [openCuest, setOpenCuest] = useState(false);
   const [openFact, setOpenFact] = useState(false);
   const [openBonos, setOpenBonos] = useState(false);
   const [openActividad, setOpenActividad] = useState(false);
@@ -264,12 +266,32 @@ export const ClienteForm: React.FC<ClienteFormProps> = ({ customer, onClose }) =
               )}
             </Section>
             <Section
+              title="Cuestionario"
+              icon={ClipboardList}
+              open={openCuest}
+              onOpenChange={setOpenCuest}
+            >
+              <ClienteCuestionariosTab customerId={customer.id} />
+            </Section>
+            <Section
               title="Documentación"
               icon={FileText}
               open={openDoc}
               onOpenChange={setOpenDoc}
             >
-              <ClienteDocumentacionTab customerId={customer.id} />
+              <ClienteDocumentacionTab
+                customerId={customer.id}
+                customer={{
+                  id: customer.id,
+                  name: customer.name,
+                  tax_id: customer.tax_id,
+                  email: customer.email,
+                  phone: customer.phone,
+                  address_street: customer.address_street,
+                  address_city: customer.address_city,
+                  address_postal_code: customer.address_postal_code,
+                }}
+              />
             </Section>
             <Section
               title="Facturación"

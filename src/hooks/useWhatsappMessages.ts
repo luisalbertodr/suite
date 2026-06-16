@@ -270,7 +270,7 @@ export const useWhatsappMessages = (
     invalidateTimerRef.current = setTimeout(() => {
       invalidateTimerRef.current = null;
       void queryClient.invalidateQueries({ queryKey: key });
-    }, 400);
+    }, 250);
   };
 
   const channelIdRef = useRef<string>('');
@@ -305,6 +305,7 @@ export const useWhatsappMessages = (
               return;
             }
           }
+          if (payload.eventType === 'DELETE') return;
           invalidate();
         },
       )
@@ -344,31 +345,49 @@ export const useWhatsappMessages = (
     if (openSyncKeyRef.current === syncKey) return;
     openSyncKeyRef.current = syncKey;
     forceRetryRef.current = false;
-    refreshFromWaha.mutate('auto', {
+
+    // Primero mensajes recientes (rápido); historial completo solo si la BD está vacía.
+    refreshFromWaha.mutate('recent', {
       onSuccess: (res) => {
         if ((res.count ?? 0) > 0) return;
+        const cached = queryClient.getQueryData<WhatsappMessageRow[]>(key);
+        if (cached && cached.length > 0) return;
         if (historySyncedAt) return;
         if (forceRetryRef.current) return;
         forceRetryRef.current = true;
-        refreshFromWaha.mutate('full', { onError: () => undefined });
+        refreshFromWaha.mutate('auto', { onError: () => undefined });
       },
       onError: () => {
-        if (historySyncedAt) return;
-        if (forceRetryRef.current) return;
+        const cached = queryClient.getQueryData<WhatsappMessageRow[]>(key);
+        if (cached && cached.length > 0) return;
+        if (historySyncedAt || forceRetryRef.current) return;
         forceRetryRef.current = true;
-        refreshFromWaha.mutate('full', { onError: () => undefined });
+        refreshFromWaha.mutate('auto', { onError: () => undefined });
       },
     });
   }, [enabled, chatIds.join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Respaldo si Realtime o el webhook fallan: solo mensajes recientes (pestaña visible).
+  // Polling ligero de mensajes nuevos (pestaña visible).
+  useEffect(() => {
+    if (!enabled) return;
+    const tick = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (refreshFromWaha.isPending) return;
+      refreshFromWaha.mutate('recent', { onError: () => undefined });
+    };
+    const timer = window.setInterval(tick, 12_000);
+    return () => window.clearInterval(timer);
+  }, [enabled, chatIds.join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Respaldo si Realtime falla (chats ya sincronizados).
   useEffect(() => {
     if (!enabled || !historySyncedAt) return;
     const tick = () => {
       if (document.visibilityState !== 'visible') return;
+      if (refreshFromWaha.isPending) return;
       refreshFromWaha.mutate('recent', { onError: () => undefined });
     };
-    const timer = window.setInterval(tick, 30_000);
+    const timer = window.setInterval(tick, 20_000);
     return () => window.clearInterval(timer);
   }, [enabled, chatIds.join('|'), historySyncedAt]); // eslint-disable-line react-hooks/exhaustive-deps
 

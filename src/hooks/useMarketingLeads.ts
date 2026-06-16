@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { withSupabaseTimeout } from '@/lib/marketingNotesApi';
 import { runWhenAuthReady } from '@/lib/authSession';
+import { notifyMetaConversionStageChange } from '@/lib/metaConversionStageNotify';
 import type { Database, Json } from '@/integrations/supabase/types';
 
 export type MarketingLead = Database['public']['Tables']['marketing_leads']['Row'];
@@ -390,10 +391,13 @@ export const useMarketingLeads = (scopeCompanyId?: string | null) => {
       }
       return { prev };
     },
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
       queryClient.setQueryData<MarketingLead[]>(['marketing-leads', companyId], (prev) =>
         prev ? prev.map((l) => (l.id === data.id ? data : l)) : prev,
       );
+      if (variables.values.stage_id !== undefined) {
+        void notifyMetaConversionStageChange(data.id);
+      }
     },
     onError: (_err, _vars, ctx) => {
       if (ctx?.prev) {
@@ -441,6 +445,7 @@ export const useMarketingLeads = (scopeCompanyId?: string | null) => {
       queryClient.setQueryData<MarketingLead[]>(['marketing-leads', companyId], (prev) =>
         prev ? prev.map((l) => (l.id === data.id ? data : l)) : prev,
       );
+      void notifyMetaConversionStageChange(data.id);
     },
     onError: (_err, _vars, ctx) => {
       if (ctx?.prev) {

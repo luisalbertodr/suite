@@ -84,6 +84,11 @@ const DEFAULT_CONFIG: Omit<MetaConfigInsert, 'company_id' | 'access_token'> = {
   graph_api_version: 'v23.0',
   sync_interval_minutes: 60,
   enabled: true,
+  pixel_id: null,
+  conversions_enabled: false,
+  n8n_webhook_url: null,
+  n8n_webhook_secret: null,
+  conversions_test_event_code: null,
 };
 
 export const useMetaConfig = (scopeCompanyId?: string | null) => {

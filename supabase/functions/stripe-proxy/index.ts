@@ -34,16 +34,73 @@ type Body =
       public_app_url?: string | null;
       confirmed_stage_id?: string | null;
       payment_success_whatsapp_message?: string | null;
+      deposit_request_whatsapp_message?: string | null;
       secret_key?: string | null;
       webhook_secret?: string | null;
     }
-  | { action: 'deposit.create_for_lead'; company_id?: string; lead_id: string };
+  | { action: 'deposit.create_for_lead'; company_id?: string; lead_id: string }
+  | { action: 'deposit.render_message_for_lead'; company_id?: string; lead_id: string }
+  | {
+      action: 'deposit.render_message_for_chat';
+      company_id?: string;
+      chat_id: string;
+      chat_display_name?: string | null;
+      customer_id?: string | null;
+      marketing_lead_id?: string | null;
+    }
+  | {
+      action: 'deposit.confirm_manual_for_chat';
+      company_id?: string;
+      chat_id: string;
+      chat_display_name?: string | null;
+      customer_id?: string | null;
+      marketing_lead_id?: string | null;
+      payment_method?: 'bizum' | 'transfer' | 'cash' | 'other';
+    };
 
-async function resolveAuthCompanyId(
+async function resolveCompanyIdForUser(
+  admin: ReturnType<typeof createClient>,
+  userId: string,
+  requestedCompanyId?: string,
+): Promise<string | null> {
+  const allowed = new Set<string>();
+
+  const { data: active } = await admin
+    .from('user_active_company')
+    .select('company_id')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (active?.company_id) allowed.add(String(active.company_id));
+
+  const { data: profiles } = await admin
+    .from('user_profiles')
+    .select('company_id')
+    .eq('user_id', userId);
+  for (const row of profiles ?? []) {
+    if (row.company_id) allowed.add(String(row.company_id));
+  }
+
+  const { data: roles } = await admin
+    .from('user_company_roles')
+    .select('company_id')
+    .eq('user_id', userId);
+  for (const row of roles ?? []) {
+    if (row.company_id) allowed.add(String(row.company_id));
+  }
+
+  if (requestedCompanyId && allowed.has(requestedCompanyId)) return requestedCompanyId;
+  if (active?.company_id) return String(active.company_id);
+  const first = profiles?.find((p) => p.company_id)?.company_id;
+  if (first) return String(first);
+  const roleCompany = roles?.find((r) => r.company_id)?.company_id;
+  return roleCompany ? String(roleCompany) : null;
+}
+
+async function resolveAuthContext(
   req: Request,
   admin: ReturnType<typeof createClient>,
   bodyCompanyId?: string,
-): Promise<{ companyId: string } | Response> {
+): Promise<{ companyId: string; userId: string } | Response> {
   const authHeader = req.headers.get('Authorization');
   if (!authHeader?.startsWith('Bearer ')) {
     return err('No autorizado', 401);
@@ -56,14 +113,23 @@ async function resolveAuthCompanyId(
   const { data: userData, error: userErr } = await userClient.auth.getUser();
   if (userErr || !userData.user) return err('Sesión inválida', 401);
 
-  const { data: profile } = await admin
-    .from('user_profiles')
-    .select('company_id')
-    .eq('id', userData.user.id)
-    .maybeSingle();
-  const companyId = bodyCompanyId ?? profile?.company_id;
+  const companyId = await resolveCompanyIdForUser(
+    admin,
+    userData.user.id,
+    bodyCompanyId,
+  );
   if (!companyId) return err('Sin empresa activa');
-  return { companyId };
+  return { companyId, userId: userData.user.id };
+}
+
+async function resolveAuthCompanyId(
+  req: Request,
+  admin: ReturnType<typeof createClient>,
+  bodyCompanyId?: string,
+): Promise<{ companyId: string } | Response> {
+  const ctx = await resolveAuthContext(req, admin, bodyCompanyId);
+  if (ctx instanceof Response) return ctx;
+  return { companyId: ctx.companyId };
 }
 
 serve(async (req) => {
@@ -173,6 +239,10 @@ serve(async (req) => {
         body.payment_success_whatsapp_message !== undefined
           ? body.payment_success_whatsapp_message?.trim() || null
           : existing?.payment_success_whatsapp_message ?? null,
+      deposit_request_whatsapp_message:
+        body.deposit_request_whatsapp_message !== undefined
+          ? body.deposit_request_whatsapp_message?.trim() || null
+          : existing?.deposit_request_whatsapp_message ?? null,
       secret_key: incomingSecret || existing?.secret_key || null,
       webhook_secret: incomingWebhook || existing?.webhook_secret || null,
     };
@@ -181,7 +251,7 @@ serve(async (req) => {
       .from('stripe_config')
       .upsert(row, { onConflict: 'company_id' })
       .select(
-        'company_id, publishable_key, enabled, currency, default_deposit_amount_cents, public_app_url, confirmed_stage_id, payment_success_whatsapp_message, last_webhook_at, created_at, updated_at',
+        'company_id, publishable_key, enabled, currency, default_deposit_amount_cents, public_app_url, confirmed_stage_id, payment_success_whatsapp_message, deposit_request_whatsapp_message, last_webhook_at, created_at, updated_at',
       )
       .single();
     if (error) return err(error.message, 500);
@@ -252,6 +322,88 @@ serve(async (req) => {
       payment_url: buildPublicPaymentUrl(cfg, session.public_token, cfg.public_app_url),
       amount_cents: session.amount_cents,
     });
+  }
+
+  if (body.action === 'deposit.render_message_for_lead') {
+    if (!body.lead_id) return err('Falta lead_id');
+    try {
+      const { buildDepositRequestWhatsappMessage } = await import('../_shared/stripeDeposit.ts');
+      const result = await buildDepositRequestWhatsappMessage(admin, companyId, body.lead_id);
+      return json({ ok: true, ...result });
+    } catch (e) {
+      return err(e instanceof Error ? e.message : 'No se pudo generar el mensaje', 400);
+    }
+  }
+
+  if (body.action === 'deposit.render_message_for_chat') {
+    if (!body.chat_id?.trim()) return err('Falta chat_id');
+    try {
+      const {
+        resolveMarketingLeadForWhatsappChat,
+        buildDepositRequestWhatsappMessage,
+      } = await import('../_shared/stripeDeposit.ts');
+      const { lead, created } = await resolveMarketingLeadForWhatsappChat(
+        admin,
+        companyId,
+        body.chat_id.trim(),
+        body.marketing_lead_id ?? null,
+        body.chat_display_name ?? null,
+        body.customer_id ?? null,
+      );
+      const result = await buildDepositRequestWhatsappMessage(
+        admin,
+        companyId,
+        lead.id,
+        created,
+      );
+      return json({ ok: true, ...result });
+    } catch (e) {
+      return err(e instanceof Error ? e.message : 'No se pudo generar el mensaje', 400);
+    }
+  }
+
+  if (body.action === 'deposit.confirm_manual_for_chat') {
+    if (!body.chat_id?.trim()) return err('Falta chat_id');
+    const authCtx = await resolveAuthContext(req, admin, body.company_id);
+    if (authCtx instanceof Response) return authCtx;
+    const { companyId, userId } = authCtx;
+
+    const { data: canWrite } = await admin.rpc('user_has_effective_permission', {
+      p_user_id: userId,
+      p_resource: 'marketing',
+      p_action: 'write',
+    });
+    if (!canWrite) return err('Sin permiso marketing:write', 403);
+
+    const method = body.payment_method ?? 'bizum';
+    if (!['bizum', 'transfer', 'cash', 'other'].includes(method)) {
+      return err('Método de pago no válido');
+    }
+
+    try {
+      const {
+        resolveMarketingLeadForWhatsappChat,
+        confirmManualDepositForLead,
+      } = await import('../_shared/stripeDeposit.ts');
+      const { lead } = await resolveMarketingLeadForWhatsappChat(
+        admin,
+        companyId,
+        body.chat_id.trim(),
+        body.marketing_lead_id ?? null,
+        body.chat_display_name ?? null,
+        body.customer_id ?? null,
+      );
+      const result = await confirmManualDepositForLead(
+        admin,
+        companyId,
+        lead.id,
+        method,
+        userId,
+      );
+      return json({ ok: true, lead_id: lead.id, ...result });
+    } catch (e) {
+      return err(e instanceof Error ? e.message : 'No se pudo confirmar la señal', 400);
+    }
   }
 
   if (!publicAction) return err(`Acción desconocida: ${(body as { action?: string }).action}`);

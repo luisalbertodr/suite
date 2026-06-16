@@ -24,6 +24,7 @@ import { useDunasoftAgendaDay } from '@/hooks/useDunasoftAgendaDay';
 import { useDunasoftAppointmentMutations } from '@/hooks/useDunasoftAppointmentMutations';
 import { useDunasoftSyncStatus } from '@/hooks/useDunasoftSyncStatus';
 import { useAuth } from '@/hooks/useAuth';
+import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { usePermissionGuard } from '@/hooks/usePermissionGuard';
 import { useRegisterTopBarContent } from '@/components/TopBarContentContext';
 import {
@@ -45,6 +46,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { ConsentimientoSignDialog } from '@/components/consentimiento/ConsentimientoSignDialog';
+import type { ConsentimientoSignContext } from '@/lib/consentimientoTypes';
+import { TreatmentSessionDialog } from '@/components/clinical/TreatmentSessionDialog';
+import type { TrackingFamily } from '@/lib/treatmentTracking';
+import { createQuestionnaire, openQuestionnaireKiosk } from '@/lib/questionnaireApi';
+import { useToast } from '@/hooks/use-toast';
 
 function appointmentToFormValues(apt: Appointment): Partial<DunasoftAppointmentFormValues> {
   const endTime =
@@ -70,6 +77,8 @@ function appointmentToFormValues(apt: Appointment): Partial<DunasoftAppointmentF
 
 export const DunasoftAgenda: React.FC = () => {
   const { user } = useAuth();
+  const { companyId } = useCompanyFilter();
+  const { toast } = useToast();
   const { requireOrToast: requirePermissionOrToast, can: canPermission } = usePermissionGuard();
   const navigate = useNavigate();
   const location = useLocation();
@@ -97,6 +106,12 @@ export const DunasoftAgenda: React.FC = () => {
   const [formSlot, setFormSlot] = useState<{ employeeId: string; time: string } | null>(null);
   const [editTarget, setEditTarget] = useState<Appointment | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Appointment | null>(null);
+  const [consentSignContext, setConsentSignContext] = useState<ConsentimientoSignContext | null>(null);
+  const [sessionContext, setSessionContext] = useState<{
+    appointment: Appointment;
+    trackingFamily: TrackingFamily;
+    plantillaCodigo?: string | null;
+  } | null>(null);
 
   const selectedDateYmd = useMemo(() => format(selectedDate, 'yyyy-MM-dd'), [selectedDate]);
 
@@ -121,7 +136,10 @@ export const DunasoftAgenda: React.FC = () => {
     saveAgendaViewPersisted(user.id, mergePersistedLastDate(prev, selectedDateYmd));
   }, [user?.id, selectedDateYmd]);
 
-  const { data, isLoading, isError, error, refetch, isFetching } = useDunasoftAgendaDay(selectedDateYmd);
+  const { data, isLoading, isError, error, refetch, isFetching } = useDunasoftAgendaDay(
+    selectedDateYmd,
+    companyId,
+  );
   const { createMutation, updateMutation, deleteMutation } = useDunasoftAppointmentMutations(selectedDateYmd);
   const { data: syncStatus } = useDunasoftSyncStatus(20_000);
 
@@ -363,7 +381,82 @@ export const DunasoftAgenda: React.FC = () => {
           if (!requirePermissionOrToast('agenda', 'delete')) return;
           setDeleteTarget(apt);
         }}
+        companyId={companyId}
+        onSelectConsent={(apt, plantillaId) => {
+          if (!companyId || !apt.customerId) return;
+          const employee = employees.find((e) => e.id === apt.employeeId);
+          setDetailOpen(false);
+          setConsentSignContext({
+            customerId: apt.customerId,
+            companyId,
+            appointmentId: apt.id,
+            tratamiento: apt.serviceName ?? undefined,
+            profesional: employee?.name ?? apt.legacyEmployeeCode ?? undefined,
+            profesionalEmpleadoId: apt.employeeId,
+            initialPlantillaId: plantillaId,
+          });
+        }}
+        onOpenFreeConsent={(apt) => {
+          if (!companyId || !apt.customerId) return;
+          const employee = employees.find((e) => e.id === apt.employeeId);
+          setDetailOpen(false);
+          setConsentSignContext({
+            customerId: apt.customerId,
+            companyId,
+            appointmentId: apt.id,
+            tratamiento: apt.serviceName ?? undefined,
+            profesional: employee?.name ?? apt.legacyEmployeeCode ?? undefined,
+            profesionalEmpleadoId: apt.employeeId,
+          });
+        }}
+        onRegisterSession={(apt, trackingFamily, plantillaCodigo) => {
+          if (!companyId || !apt.customerId) return;
+          setDetailOpen(false);
+          setSessionContext({ appointment: apt, trackingFamily, plantillaCodigo });
+        }}
+        onOpenQuestionnaire={async (apt) => {
+          if (!companyId || !apt.customerId) return;
+          try {
+            const q = await createQuestionnaire({
+              customerId: apt.customerId,
+              companyId,
+              appointmentId: apt.id,
+            });
+            setDetailOpen(false);
+            openQuestionnaireKiosk(q.id);
+            toast({ title: 'Cuestionario abierto en tablet (modo clienta)' });
+          } catch (e) {
+            toast({
+              title: e instanceof Error ? e.message : 'Error',
+              variant: 'destructive',
+            });
+          }
+        }}
       />
+
+      {consentSignContext ? (
+        <ConsentimientoSignDialog
+          open={!!consentSignContext}
+          onOpenChange={(o) => !o && setConsentSignContext(null)}
+          context={consentSignContext}
+        />
+      ) : null}
+
+      {sessionContext && companyId && sessionContext.appointment.customerId ? (
+        <TreatmentSessionDialog
+          open={!!sessionContext}
+          onOpenChange={(o) => !o && setSessionContext(null)}
+          customerId={sessionContext.appointment.customerId}
+          companyId={companyId}
+          customerName={sessionContext.appointment.clientName}
+          trackingFamily={sessionContext.trackingFamily}
+          tratamiento={sessionContext.appointment.serviceName ?? 'Tratamiento'}
+          plantillaCodigo={sessionContext.plantillaCodigo}
+          appointmentId={sessionContext.appointment.id}
+          appointmentDate={sessionContext.appointment.date}
+          employeeId={sessionContext.appointment.employeeId}
+        />
+      ) : null}
 
       {formMode === 'create' && formSlot ? (
         <DunasoftAppointmentForm

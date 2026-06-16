@@ -252,6 +252,7 @@ export const Whatsapp: React.FC = () => {
                 chats={chats}
                 chat={selectedChat}
                 customerName={resolveCustomerName(selectedChat)}
+                resolvedCustomerId={resolveCustomerId(selectedChat)}
                 isLinkedCustomer={!!resolveCustomerId(selectedChat)}
                 leadName={
                   selectedChat.marketing_lead_id

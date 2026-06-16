@@ -1,5 +1,5 @@
 import React from 'react';
-import { Phone, MessageCircle, CalendarPlus, User } from 'lucide-react';
+import { Phone, MessageCircle, CalendarPlus, User, ClipboardList } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -9,9 +9,10 @@ import { usePermissions } from '@/hooks/usePermissions';
 interface Props {
   customer: any;
   isLoading: boolean;
+  onOpenCuestionario?: () => void;
 }
 
-export const ClienteProfileHeader: React.FC<Props> = ({ customer, isLoading }) => {
+export const ClienteProfileHeader: React.FC<Props> = ({ customer, isLoading, onOpenCuestionario }) => {
   const navigate = useNavigate();
   const { hasPermission } = usePermissions();
   const canUseWhatsapp = hasPermission('whatsapp', 'read');
@@ -115,6 +116,17 @@ export const ClienteProfileHeader: React.FC<Props> = ({ customer, isLoading }) =
         >
           <MessageCircle className="w-3.5 h-3.5" />
           <span className="hidden sm:inline">WhatsApp</span>
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-1.5 border-violet-200 text-violet-700 hover:bg-violet-50 dark:border-violet-800 dark:text-violet-300"
+          onClick={onOpenCuestionario}
+          disabled={!onOpenCuestionario}
+          title="Cuestionario facial-corporal en tablet"
+        >
+          <ClipboardList className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline">Cuestionario</span>
         </Button>
         <Button
           size="sm"

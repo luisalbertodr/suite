@@ -26,6 +26,7 @@ export interface MetaLeadInfo {
   formName: string | null;
   source: string | null;
   externalCreatedAt: string | null;
+  stripeDepositPaidAt: string | null;
 }
 
 export function formatMetaLeadLabel(meta: MetaLeadInfo): string {
@@ -300,6 +301,29 @@ export function extractPhoneDigitsFromJid(jid: string | null | undefined): strin
   const local = jid.split('@')[0] ?? '';
   const digits = local.replace(/[^0-9]/g, '');
   return digits.length >= 6 ? digits : null;
+}
+
+function phoneDigitsLast9(digits: string): string | null {
+  const d = digits.replace(/\D/g, '');
+  if (d.length < 9) return null;
+  return d.slice(-9);
+}
+
+/** Chat del teléfono de prueba WA (modo prueba activo). */
+export function isWhatsappTestChatId(
+  chatId: string,
+  settings: { test_mode_enabled: boolean; test_phone: string } | null | undefined,
+): boolean {
+  if (!settings?.test_mode_enabled) return false;
+  const testN9 = phoneDigitsLast9(settings.test_phone || '667435503');
+  const chatN9 = phoneDigitsLast9(extractPhoneDigitsFromJid(chatId) ?? '');
+  return !!(testN9 && chatN9 && testN9 === chatN9);
+}
+
+/** Ruta interna a la ficha de un cliente en Suite. */
+export function customerProfilePath(customerId: string, tab = 'ficha'): string {
+  const params = new URLSearchParams({ customer: customerId, tab });
+  return `/clientes?${params.toString()}`;
 }
 
 /** True si dos JIDs apuntan al mismo contacto (mismo número de teléfono). */

@@ -51,7 +51,9 @@ export const useWhatsappLinkLookup = (
       if (leadIds.length === 0) return [];
       const { data, error } = await supabase
         .from('marketing_leads')
-        .select('id, first_name, last_name, campaign, form_name, source, external_created_at')
+        .select(
+          'id, first_name, last_name, campaign, form_name, source, external_created_at, stripe_deposit_paid_at',
+        )
         .in('id', leadIds);
       if (error) throw error;
       return data ?? [];
@@ -75,6 +77,7 @@ export const useWhatsappLinkLookup = (
         formName: l.form_name ?? null,
         source: l.source ?? null,
         externalCreatedAt: l.external_created_at ?? null,
+        stripeDepositPaidAt: l.stripe_deposit_paid_at ?? null,
       };
     }
     return { customerNameById, leadNameById, leadMetaById };

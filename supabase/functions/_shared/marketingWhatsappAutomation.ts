@@ -1,9 +1,11 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { buildMarketingFieldTemplateVars } from './marketingWhatsappFieldVars.ts';
 import {
   loadAutomationSettings,
   logAutomationSend,
   resolveRecipientPhone,
   wrapMessageForTestMode,
+  isWhatsappTestChatId,
   type AutomationSendType,
 } from './whatsappAutomationDispatch.ts';
 
@@ -27,6 +29,8 @@ export type MetaFormAutomation = {
   whatsapp_reply_1_message: string | null;
   whatsapp_reply_2_message: string | null;
   whatsapp_reply_invalid_message: string | null;
+  whatsapp_reminder_message: string | null;
+  whatsapp_reminder_delay_hours?: number | null;
   stripe_deposit_enabled?: boolean;
   stripe_deposit_amount_cents?: number | null;
 };
@@ -44,7 +48,10 @@ export type MarketingLeadAutomationRow = {
   appointment_label?: string | null;
   source?: string | null;
   meta_form_id: string | null;
+  field_data?: unknown;
   wa_automation_status: string;
+  wa_automation_initial_sent_at?: string | null;
+  wa_automation_reminder_sent_at?: string | null;
 };
 
 export type WhatsappTemplateContext = Pick<
@@ -58,6 +65,7 @@ export type WhatsappTemplateContext = Pick<
   | 'appointment_at'
   | 'appointment_label'
   | 'source'
+  | 'field_data'
 >;
 
 /** Variables documentadas en Configuración → Meta. */
@@ -143,8 +151,12 @@ export function renderWhatsappTemplate(
   template: string,
   ctx: WhatsappTemplateContext,
   form?: Pick<MetaFormAutomation, 'form_name' | 'form_id'>,
+  fieldData?: unknown,
 ): string {
-  const vars = buildWhatsappTemplateVars(ctx, form);
+  const vars = {
+    ...buildWhatsappTemplateVars(ctx, form),
+    ...buildMarketingFieldTemplateVars(fieldData ?? (ctx as { field_data?: unknown }).field_data),
+  };
   return template.replace(/\{([a-zA-ZáéíóúÁÉÍÓÚñÑ0-9_]+)\}/g, (match, rawKey: string) => {
     const key = normalizeTemplateKey(rawKey);
     if (key in vars) return vars[key];
@@ -266,7 +278,7 @@ export async function loadMetaFormAutomation(
   const { data, error } = await admin
     .from('meta_forms')
     .select(
-      'id, form_id, form_name, whatsapp_automation_enabled, whatsapp_initial_message, whatsapp_reply_1_message, whatsapp_reply_2_message, whatsapp_reply_invalid_message, stripe_deposit_enabled, stripe_deposit_amount_cents',
+      'id, form_id, form_name, whatsapp_automation_enabled, whatsapp_initial_message, whatsapp_reply_1_message, whatsapp_reply_2_message, whatsapp_reply_invalid_message, whatsapp_reminder_message, whatsapp_reminder_delay_hours, stripe_deposit_enabled, stripe_deposit_amount_cents',
     )
     .eq('id', metaFormId)
     .maybeSingle();
@@ -417,6 +429,12 @@ async function linkChatToLead(
   leadId: string,
   contactName: string | null,
 ): Promise<void> {
+  const settings = await loadAutomationSettings(admin, companyId);
+  if (isWhatsappTestChatId(chatId, settings)) {
+    // Modo prueba: todos los envíos van al mismo número; no mezclar leads en ese chat.
+    return;
+  }
+
   const { data: existing } = await admin
     .from('whatsapp_chats')
     .select('id, marketing_lead_id, customer_id, name')
@@ -560,16 +578,32 @@ async function findAwaitingLeadForChat(
   chatId: string,
   marketingLeadId: string | null,
 ): Promise<MarketingLeadAutomationRow | null> {
-  if (marketingLeadId) {
+  const settings = await loadAutomationSettings(admin, companyId);
+  const isTestChat = isWhatsappTestChatId(chatId, settings);
+
+  if (marketingLeadId && !isTestChat) {
     const { data } = await admin
       .from('marketing_leads')
       .select(
-        'id, company_id, phone, first_name, last_name, email, campaign, form_name, appointment_at, appointment_label, source, meta_form_id, wa_automation_status',
+        'id, company_id, phone, first_name, last_name, email, campaign, form_name, appointment_at, appointment_label, source, meta_form_id, field_data, wa_automation_status, wa_automation_initial_sent_at, wa_automation_reminder_sent_at',
       )
       .eq('id', marketingLeadId)
       .eq('company_id', companyId)
       .maybeSingle();
     if (data) return data as MarketingLeadAutomationRow;
+  }
+
+  if (isTestChat) {
+    const { data: leads } = await admin
+      .from('marketing_leads')
+      .select(
+        'id, company_id, phone, first_name, last_name, email, campaign, form_name, appointment_at, appointment_label, source, meta_form_id, field_data, wa_automation_status, wa_automation_initial_sent_at, wa_automation_reminder_sent_at',
+      )
+      .eq('company_id', companyId)
+      .eq('wa_automation_status', 'awaiting_reply')
+      .order('wa_automation_initial_sent_at', { ascending: false })
+      .limit(1);
+    return (leads?.[0] as MarketingLeadAutomationRow | undefined) ?? null;
   }
 
   const { data: suffix } = await admin.rpc('whatsapp_resolve_chat_phone_last9', {
@@ -582,7 +616,7 @@ async function findAwaitingLeadForChat(
   const { data: leads } = await admin
     .from('marketing_leads')
     .select(
-      'id, company_id, phone, first_name, last_name, email, campaign, form_name, appointment_at, appointment_label, source, meta_form_id, wa_automation_status',
+      'id, company_id, phone, first_name, last_name, email, campaign, form_name, appointment_at, appointment_label, source, meta_form_id, field_data, wa_automation_status, wa_automation_initial_sent_at, wa_automation_reminder_sent_at',
     )
     .eq('company_id', companyId)
     .eq('wa_automation_status', 'awaiting_reply')
@@ -612,6 +646,23 @@ export async function processAutomationReply(
 
   const choice = parseReplyChoice(messageBody);
   if (!choice) {
+    const trimmed = (messageBody ?? '').trim();
+    const usesNumericMenu =
+      !!form.whatsapp_reply_1_message?.trim() || !!form.whatsapp_reply_2_message?.trim();
+    if (!usesNumericMenu && trimmed.length >= 2) {
+      await admin
+        .from('marketing_leads')
+        .update({
+          wa_automation_status: 'completed',
+          wa_automation_completed_at: new Date().toISOString(),
+          wa_automation_error: null,
+          last_contacted_at: new Date().toISOString(),
+        })
+        .eq('id', lead.id)
+        .eq('wa_automation_status', 'awaiting_reply');
+      return { handled: true, action: 'human_takeover' };
+    }
+
     const invalidRaw = form.whatsapp_reply_invalid_message?.trim();
     if (!invalidRaw) return { handled: false };
 
@@ -728,4 +779,118 @@ export async function processAutomationReply(
     console.error('processAutomationReply send failed:', e);
     return { handled: true, action: 'send_failed' };
   }
+}
+
+export async function runMarketingLeadRemindersForCompany(
+  admin: SupabaseClient,
+  companyId: string,
+): Promise<{ sent: number; skipped: number; errors: number }> {
+  const cfg = await loadWhatsappConfig(admin, companyId);
+  if (!cfg?.enabled || !cfg.base_url || (cfg.last_status ?? '').toUpperCase() !== 'WORKING') {
+    return { sent: 0, skipped: 0, errors: 0 };
+  }
+
+  const { loadAutomationSettings } = await import('./whatsappAutomationDispatch.ts');
+  const { isWithinAutomationHours } = await import('./whatsappAutomationHours.ts');
+  const automationSettings = await loadAutomationSettings(admin, companyId);
+  if (!isWithinAutomationHours(automationSettings)) {
+    return { sent: 0, skipped: 0, errors: 0 };
+  }
+
+  const { data: leads, error } = await admin
+    .from('marketing_leads')
+    .select(
+      'id, company_id, phone, first_name, last_name, email, campaign, form_name, appointment_at, appointment_label, source, meta_form_id, field_data, wa_automation_status, wa_automation_initial_sent_at, wa_automation_reminder_sent_at',
+    )
+    .eq('company_id', companyId)
+    .eq('wa_automation_status', 'awaiting_reply')
+    .is('wa_automation_reminder_sent_at', null)
+    .not('wa_automation_initial_sent_at', 'is', null)
+    .order('wa_automation_initial_sent_at', { ascending: true })
+    .limit(40);
+
+  if (error) throw error;
+
+  let sent = 0;
+  let skipped = 0;
+  let errors = 0;
+
+  for (const row of leads ?? []) {
+    const lead = row as MarketingLeadAutomationRow;
+    if (!lead.meta_form_id || !lead.phone?.trim()) {
+      skipped++;
+      continue;
+    }
+
+    const form = await loadMetaFormAutomation(admin, lead.meta_form_id);
+    if (!form?.whatsapp_automation_enabled) {
+      skipped++;
+      continue;
+    }
+
+    const reminderRaw = form.whatsapp_reminder_message?.trim();
+    if (!reminderRaw) {
+      skipped++;
+      continue;
+    }
+
+    const delayHours = Math.max(1, Number(form.whatsapp_reminder_delay_hours ?? 3));
+    const initialAt = lead.wa_automation_initial_sent_at
+      ? new Date(lead.wa_automation_initial_sent_at)
+      : null;
+    if (!initialAt || Number.isNaN(initialAt.getTime())) {
+      skipped++;
+      continue;
+    }
+    if (Date.now() - initialAt.getTime() < delayHours * 60 * 60 * 1000) {
+      skipped++;
+      continue;
+    }
+
+    try {
+      const contactName = leadDisplayName(lead);
+      const { renderWhatsappTemplateWithPaymentLinks } = await import('./stripeDeposit.ts');
+      const reminderText = await renderWhatsappTemplateWithPaymentLinks(
+        admin,
+        companyId,
+        lead.id,
+        reminderRaw,
+        lead,
+        form,
+        null,
+      );
+      await sendAutomatedLeadMessage(
+        admin,
+        cfg,
+        companyId,
+        lead.phone!,
+        reminderText,
+        {
+          automation_type: 'meta_reminder',
+          reference_id: `${lead.id}:reminder`,
+          contactName,
+        },
+      );
+      const now = new Date().toISOString();
+      const { data: locked } = await admin
+        .from('marketing_leads')
+        .update({
+          wa_automation_reminder_sent_at: now,
+          last_contacted_at: now,
+          wa_automation_error: null,
+        })
+        .eq('id', lead.id)
+        .eq('wa_automation_status', 'awaiting_reply')
+        .is('wa_automation_reminder_sent_at', null)
+        .select('id')
+        .maybeSingle();
+      if (locked) sent++;
+      else skipped++;
+    } catch (e) {
+      errors++;
+      console.error('marketing lead reminder failed:', lead.id, e);
+    }
+  }
+
+  return { sent, skipped, errors };
 }

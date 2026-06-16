@@ -876,44 +876,122 @@ export type Database = {
         }
         Relationships: []
       }
+      consentimiento_plantillas: {
+        Row: {
+          activo: boolean
+          codigo: string | null
+          company_id: string
+          contenido: string
+          created_at: string
+          id: string
+          keywords: string | null
+          orden: number
+          tipo: string
+          titulo: string
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          activo?: boolean
+          codigo?: string | null
+          company_id: string
+          contenido?: string
+          created_at?: string
+          id?: string
+          keywords?: string | null
+          orden?: number
+          tipo: string
+          titulo: string
+          updated_at?: string
+          version?: number
+        }
+        Update: {
+          activo?: boolean
+          codigo?: string | null
+          company_id?: string
+          contenido?: string
+          created_at?: string
+          id?: string
+          keywords?: string | null
+          orden?: number
+          tipo?: string
+          titulo?: string
+          updated_at?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "consentimiento_plantillas_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       consentimientos: {
         Row: {
+          appointment_id: string | null
           company_id: string
           contenido: string | null
           created_at: string
           customer_id: string
+          datos_snapshot: Json | null
+          documento_pdf_url: string | null
           fecha_firma: string | null
           firma_url: string | null
           firmado: boolean | null
+          firmado_por_empleado_id: string | null
           id: string
+          plantilla_id: string | null
+          plantilla_version: number | null
           tipo: string
           titulo: string
         }
         Insert: {
+          appointment_id?: string | null
           company_id: string
           contenido?: string | null
           created_at?: string
           customer_id: string
+          datos_snapshot?: Json | null
+          documento_pdf_url?: string | null
           fecha_firma?: string | null
           firma_url?: string | null
           firmado?: boolean | null
+          firmado_por_empleado_id?: string | null
           id?: string
+          plantilla_id?: string | null
+          plantilla_version?: number | null
           tipo: string
           titulo: string
         }
         Update: {
+          appointment_id?: string | null
           company_id?: string
           contenido?: string | null
           created_at?: string
           customer_id?: string
+          datos_snapshot?: Json | null
+          documento_pdf_url?: string | null
           fecha_firma?: string | null
           firma_url?: string | null
           firmado?: boolean | null
+          firmado_por_empleado_id?: string | null
           id?: string
+          plantilla_id?: string | null
+          plantilla_version?: number | null
           tipo?: string
           titulo?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "consentimientos_appointment_id_fkey"
+            columns: ["appointment_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_appointments"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "consentimientos_company_id_fkey"
             columns: ["company_id"]
@@ -926,6 +1004,125 @@ export type Database = {
             columns: ["customer_id"]
             isOneToOne: false
             referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "consentimientos_firmado_por_empleado_id_fkey"
+            columns: ["firmado_por_empleado_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_employees"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "consentimientos_plantilla_id_fkey"
+            columns: ["plantilla_id"]
+            isOneToOne: false
+            referencedRelation: "consentimiento_plantillas"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      customer_questionnaires: {
+        Row: {
+          answers: Json
+          appointment_id: string | null
+          company_id: string
+          completed_at: string | null
+          completed_by: string | null
+          created_at: string
+          customer_id: string
+          documento_pdf_url: string | null
+          firma_url: string | null
+          form_key: string
+          form_version: number
+          id: string
+          patient_submitted_at: string | null
+          profile_snapshot: Json | null
+          return_note: string | null
+          status: string
+          technical_data: Json
+          technical_started_at: string | null
+          technical_started_by: string | null
+          updated_at: string
+        }
+        Insert: {
+          answers?: Json
+          appointment_id?: string | null
+          company_id: string
+          completed_at?: string | null
+          completed_by?: string | null
+          created_at?: string
+          customer_id: string
+          documento_pdf_url?: string | null
+          firma_url?: string | null
+          form_key?: string
+          form_version?: number
+          id?: string
+          patient_submitted_at?: string | null
+          profile_snapshot?: Json | null
+          return_note?: string | null
+          status?: string
+          technical_data?: Json
+          technical_started_at?: string | null
+          technical_started_by?: string | null
+          updated_at?: string
+        }
+        Update: {
+          answers?: Json
+          appointment_id?: string | null
+          company_id?: string
+          completed_at?: string | null
+          completed_by?: string | null
+          created_at?: string
+          customer_id?: string
+          documento_pdf_url?: string | null
+          firma_url?: string | null
+          form_key?: string
+          form_version?: number
+          id?: string
+          patient_submitted_at?: string | null
+          profile_snapshot?: Json | null
+          return_note?: string | null
+          status?: string
+          technical_data?: Json
+          technical_started_at?: string | null
+          technical_started_by?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_questionnaires_appointment_id_fkey"
+            columns: ["appointment_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_appointments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_questionnaires_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_questionnaires_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_questionnaires_completed_by_fkey"
+            columns: ["completed_by"]
+            isOneToOne: false
+            referencedRelation: "agenda_employees"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_questionnaires_technical_started_by_fkey"
+            columns: ["technical_started_by"]
+            isOneToOne: false
+            referencedRelation: "agenda_employees"
             referencedColumns: ["id"]
           },
         ]
@@ -1171,17 +1368,22 @@ export type Database = {
           address_postal_code: string | null
           address_state: string | null
           address_street: string | null
+          birth_date: string | null
+          clinical_profile: Json
           company_id: string
           contact_person: string | null
           created_at: string
           credit_limit: number | null
           email: string | null
+          first_session_date: string | null
+          height_cm: number | null
           iban_account: string | null
           id: string
           intracomunitario: string | null
           irpf_percentage: number | null
           name: string
           notes: string | null
+          occupation: string | null
           legacy_codcli: string | null
           payment_terms: number | null
           phone: string | null
@@ -1199,17 +1401,22 @@ export type Database = {
           address_postal_code?: string | null
           address_state?: string | null
           address_street?: string | null
+          birth_date?: string | null
+          clinical_profile?: Json
           company_id: string
           contact_person?: string | null
           created_at?: string
           credit_limit?: number | null
           email?: string | null
+          first_session_date?: string | null
+          height_cm?: number | null
           iban_account?: string | null
           id?: string
           intracomunitario?: string | null
           irpf_percentage?: number | null
           name: string
           notes?: string | null
+          occupation?: string | null
           legacy_codcli?: string | null
           payment_terms?: number | null
           phone?: string | null
@@ -1226,17 +1433,22 @@ export type Database = {
           address_postal_code?: string | null
           address_state?: string | null
           address_street?: string | null
+          birth_date?: string | null
+          clinical_profile?: Json
           company_id?: string
           contact_person?: string | null
           created_at?: string
           credit_limit?: number | null
           email?: string | null
+          first_session_date?: string | null
+          height_cm?: number | null
           iban_account?: string | null
           id?: string
           intracomunitario?: string | null
           irpf_percentage?: number | null
           name?: string
           notes?: string | null
+          occupation?: string | null
           legacy_codcli?: string | null
           payment_terms?: number | null
           phone?: string | null
@@ -2335,6 +2547,60 @@ export type Database = {
           },
         ]
       }
+      marketing_whatsapp_queue: {
+        Row: {
+          company_id: string
+          created_at: string
+          error: string | null
+          id: string
+          marketing_lead_id: string
+          queued_at: string
+          queued_by: string | null
+          sent_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          error?: string | null
+          id?: string
+          marketing_lead_id: string
+          queued_at?: string
+          queued_by?: string | null
+          sent_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          error?: string | null
+          id?: string
+          marketing_lead_id?: string
+          queued_at?: string
+          queued_by?: string | null
+          sent_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "marketing_whatsapp_queue_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketing_whatsapp_queue_marketing_lead_id_fkey"
+            columns: ["marketing_lead_id"]
+            isOneToOne: false
+            referencedRelation: "marketing_leads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       marketing_leads: {
         Row: {
           appointment_at: string | null
@@ -2368,6 +2634,7 @@ export type Database = {
           wa_automation_completed_at: string | null
           wa_automation_error: string | null
           wa_automation_initial_sent_at: string | null
+          wa_automation_reminder_sent_at: string | null
           wa_automation_status: string
           win_status: string | null
         }
@@ -2402,6 +2669,7 @@ export type Database = {
           wa_automation_completed_at?: string | null
           wa_automation_error?: string | null
           wa_automation_initial_sent_at?: string | null
+          wa_automation_reminder_sent_at?: string | null
           wa_automation_status?: string
           win_status?: string | null
         }
@@ -2436,6 +2704,7 @@ export type Database = {
           wa_automation_completed_at?: string | null
           wa_automation_error?: string | null
           wa_automation_initial_sent_at?: string | null
+          wa_automation_reminder_sent_at?: string | null
           wa_automation_status?: string
           win_status?: string | null
         }
@@ -2468,6 +2737,8 @@ export type Database = {
           access_token: string | null
           business_id: string | null
           company_id: string
+          conversions_enabled: boolean
+          conversions_test_event_code: string | null
           created_at: string
           enabled: boolean
           graph_api_version: string
@@ -2476,6 +2747,9 @@ export type Database = {
           last_sync_message: string | null
           last_sync_skipped: number
           last_sync_status: string | null
+          n8n_webhook_secret: string | null
+          n8n_webhook_url: string | null
+          pixel_id: string | null
           sync_interval_minutes: number
           updated_at: string
         }
@@ -2483,6 +2757,8 @@ export type Database = {
           access_token?: string | null
           business_id?: string | null
           company_id: string
+          conversions_enabled?: boolean
+          conversions_test_event_code?: string | null
           created_at?: string
           enabled?: boolean
           graph_api_version?: string
@@ -2491,6 +2767,9 @@ export type Database = {
           last_sync_message?: string | null
           last_sync_skipped?: number
           last_sync_status?: string | null
+          n8n_webhook_secret?: string | null
+          n8n_webhook_url?: string | null
+          pixel_id?: string | null
           sync_interval_minutes?: number
           updated_at?: string
         }
@@ -2498,6 +2777,8 @@ export type Database = {
           access_token?: string | null
           business_id?: string | null
           company_id?: string
+          conversions_enabled?: boolean
+          conversions_test_event_code?: string | null
           created_at?: string
           enabled?: boolean
           graph_api_version?: string
@@ -2506,6 +2787,9 @@ export type Database = {
           last_sync_message?: string | null
           last_sync_skipped?: number
           last_sync_status?: string | null
+          n8n_webhook_secret?: string | null
+          n8n_webhook_url?: string | null
+          pixel_id?: string | null
           sync_interval_minutes?: number
           updated_at?: string
         }
@@ -2541,6 +2825,8 @@ export type Database = {
           whatsapp_reply_1_message: string | null
           whatsapp_reply_2_message: string | null
           whatsapp_reply_invalid_message: string | null
+          whatsapp_reminder_message: string | null
+          whatsapp_reminder_delay_hours: number
           stripe_deposit_enabled: boolean
           stripe_deposit_amount_cents: number | null
         }
@@ -2565,6 +2851,8 @@ export type Database = {
           whatsapp_reply_1_message?: string | null
           whatsapp_reply_2_message?: string | null
           whatsapp_reply_invalid_message?: string | null
+          whatsapp_reminder_message?: string | null
+          whatsapp_reminder_delay_hours?: number
           stripe_deposit_enabled?: boolean
           stripe_deposit_amount_cents?: number | null
         }
@@ -2589,6 +2877,8 @@ export type Database = {
           whatsapp_reply_1_message?: string | null
           whatsapp_reply_2_message?: string | null
           whatsapp_reply_invalid_message?: string | null
+          whatsapp_reminder_message?: string | null
+          whatsapp_reminder_delay_hours?: number
           stripe_deposit_enabled?: boolean
           stripe_deposit_amount_cents?: number | null
         }

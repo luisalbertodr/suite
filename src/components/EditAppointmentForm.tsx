@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
-import { X, Save, Trash2, ArrowLeft, Stethoscope } from 'lucide-react';
+import { X, Save, Trash2, ArrowLeft, Stethoscope, FolderOpen, ClipboardList } from 'lucide-react';
 import { AppointmentItemsEditor } from '@/components/AppointmentItemsEditor';
 import { AppointmentAttachmentsPanel } from '@/components/AppointmentAttachmentsPanel';
 import { AppointmentCustomerSummaryBar } from '@/components/AppointmentCustomerSummaryBar';
@@ -42,6 +42,13 @@ import { normalizeLegacyAppointmentDescription } from '@/lib/legacyAppointmentIt
 import { isAppointmentFinanciallyClosed } from '@/lib/appointmentLifecycle';
 import { AppointmentResourceConflictDialog } from '@/components/AppointmentResourceConflictDialog';
 import { AppointmentClinicalHistoryPanel } from '@/components/AppointmentClinicalHistoryPanel';
+import { AppointmentDocumentationDialog } from '@/components/clinical/AppointmentDocumentationDialog';
+import { ConsentimientoSignDialog } from '@/components/consentimiento/ConsentimientoSignDialog';
+import { TreatmentSessionDialog } from '@/components/clinical/TreatmentSessionDialog';
+import type { ConsentimientoSignContext } from '@/lib/consentimientoTypes';
+import type { TrackingFamily } from '@/lib/treatmentTracking';
+import { createQuestionnaire, openQuestionnaireKiosk } from '@/lib/questionnaireApi';
+import { useToast } from '@/hooks/use-toast';
 import type { ClienteDetailTab } from '@/types/clienteDetail';
 
 interface Employee { id: string; name: string; color: string; billing_company_id?: string | null; }
@@ -156,9 +163,16 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
   );
 
   const { requireOrToast: requirePermissionOrToast } = usePermissionGuard();
+  const { toast } = useToast();
   const [showCustomerHistory, setShowCustomerHistory] = useState(false);
   const [customerHistoryTab, setCustomerHistoryTab] = useState<ClienteDetailTab>('ficha');
   const [showClinicalHistory, setShowClinicalHistory] = useState(false);
+  const [docPickerOpen, setDocPickerOpen] = useState(false);
+  const [consentSignContext, setConsentSignContext] = useState<ConsentimientoSignContext | null>(null);
+  const [sessionContext, setSessionContext] = useState<{
+    trackingFamily: TrackingFamily;
+    plantillaCodigo?: string | null;
+  } | null>(null);
   const [resourceConflictMessages, setResourceConflictMessages] = useState<string[]>([]);
   const [showResourceConflictDialog, setShowResourceConflictDialog] = useState(false);
 
@@ -325,6 +339,34 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
   const summaryCustomer = selectedCustomer ?? customerByLegacy ?? null;
   const effectiveCustomerId = selectedCustomerId ?? summaryCustomer?.id ?? null;
 
+  const serviceLabel = useMemo(
+    () =>
+      items
+        .filter((i) => i.kind === 'service')
+        .map((i) => i.label.trim())
+        .filter(Boolean)
+        .join(' · ') || undefined,
+    [items],
+  );
+
+  const handleOpenQuestionnaire = async () => {
+    if (!companyId || !effectiveCustomerId) return;
+    try {
+      const q = await createQuestionnaire({
+        customerId: effectiveCustomerId,
+        companyId,
+        appointmentId: appointment.id,
+      });
+      openQuestionnaireKiosk(q.id);
+      toast({ title: 'Cuestionario abierto en tablet (modo clienta)' });
+    } catch (e) {
+      toast({
+        title: e instanceof Error ? e.message : 'Error al abrir cuestionario',
+        variant: 'destructive',
+      });
+    }
+  };
+
   const { data: activeBonos = [] } = useCustomerActiveBonos(effectiveCustomerId);
   const activeVouchersCount = activeBonos.length;
 
@@ -487,10 +529,30 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
 
             {effectiveCustomerId && companyId && (
               <>
-                <div className="flex justify-end">
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="default"
+                    size="sm"
+                    className="h-8 text-xs gap-1.5"
+                    onClick={() => void handleOpenQuestionnaire()}
+                  >
+                    <ClipboardList className="w-3.5 h-3.5" />
+                    Cuestionario tablet
+                  </Button>
                   <Button
                     type="button"
                     variant="secondary"
+                    size="sm"
+                    className="h-8 text-xs gap-1.5"
+                    onClick={() => setDocPickerOpen(true)}
+                  >
+                    <FolderOpen className="w-3.5 h-3.5" />
+                    Documentación
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
                     size="sm"
                     className="h-8 text-xs gap-1.5"
                     onClick={() => setShowClinicalHistory(true)}
@@ -661,6 +723,68 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
           }
         />
       )}
+      {effectiveCustomerId && companyId && (
+        <AppointmentDocumentationDialog
+          open={docPickerOpen}
+          onOpenChange={setDocPickerOpen}
+          companyId={companyId}
+          clientName={summaryCustomer?.name?.trim() || appointment.clientName || 'Cliente'}
+          serviceLabel={serviceLabel}
+          onSelectConsent={(plantillaId) => {
+            setDocPickerOpen(false);
+            setConsentSignContext({
+              customerId: effectiveCustomerId,
+              companyId,
+              appointmentId: appointment.id,
+              tratamiento: serviceLabel,
+              profesional: employee?.name,
+              profesionalEmpleadoId: formData.employeeId,
+              initialPlantillaId: plantillaId,
+            });
+          }}
+          onSelectQuestionnaire={() => {
+            setDocPickerOpen(false);
+            void handleOpenQuestionnaire();
+          }}
+          onRegisterSession={(trackingFamily, plantillaCodigo) => {
+            setDocPickerOpen(false);
+            setSessionContext({ trackingFamily, plantillaCodigo });
+          }}
+          onSelectFreeConsent={() => {
+            setDocPickerOpen(false);
+            setConsentSignContext({
+              customerId: effectiveCustomerId,
+              companyId,
+              appointmentId: appointment.id,
+              tratamiento: serviceLabel,
+              profesional: employee?.name,
+              profesionalEmpleadoId: formData.employeeId,
+            });
+          }}
+        />
+      )}
+      {consentSignContext ? (
+        <ConsentimientoSignDialog
+          open={!!consentSignContext}
+          onOpenChange={(o) => !o && setConsentSignContext(null)}
+          context={consentSignContext}
+        />
+      ) : null}
+      {sessionContext && effectiveCustomerId && companyId ? (
+        <TreatmentSessionDialog
+          open={!!sessionContext}
+          onOpenChange={(o) => !o && setSessionContext(null)}
+          customerId={effectiveCustomerId}
+          companyId={companyId}
+          appointmentId={appointment.id}
+          appointmentDate={formData.date}
+          trackingFamily={sessionContext.trackingFamily}
+          tratamiento={serviceLabel ?? 'Tratamiento'}
+          plantillaCodigo={sessionContext.plantillaCodigo}
+          customerName={summaryCustomer?.name?.trim() || appointment.clientName || 'Cliente'}
+          employeeId={formData.employeeId}
+        />
+      ) : null}
     </div>
   );
 };

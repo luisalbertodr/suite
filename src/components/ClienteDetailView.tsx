@@ -12,6 +12,7 @@ import { ClienteFichaTecnicaTab } from './cliente/ClienteFichaTecnicaTab';
 import { ClienteInbodyTab } from './cliente/ClienteInbodyTab';
 import { ClienteAdjuntosTab } from './cliente/ClienteAdjuntosTab';
 import { ClienteHistorialClinicoTab } from './cliente/ClienteHistorialClinicoTab';
+import { ClienteCuestionariosTab } from './cliente/ClienteCuestionariosTab';
 import type { ClienteDetailTab } from '@/types/clienteDetail';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
@@ -24,6 +25,7 @@ interface Props {
   customerId: string;
   onBack: () => void;
   initialTab?: ClienteDetailTab;
+  initialQuestionnaireId?: string | null;
   backLabel?: string;
   variant?: 'full' | 'compact';
   onNewAppointment?: () => void;
@@ -35,6 +37,7 @@ export const ClienteDetailView: React.FC<Props> = ({
   customerId,
   onBack,
   initialTab,
+  initialQuestionnaireId,
   backLabel = 'Clientes',
   variant = 'full',
   onNewAppointment,
@@ -105,6 +108,7 @@ export const ClienteDetailView: React.FC<Props> = ({
           onBack={onBack}
           backLabel={backLabel}
           onNewAppointment={onNewAppointment}
+          onOpenCuestionario={() => setTab('cuestionario')}
           hasChanges={hasChanges}
           onSave={() => saveMutation.mutate()}
           saving={saveMutation.isPending}
@@ -133,14 +137,18 @@ export const ClienteDetailView: React.FC<Props> = ({
               </Button>
             )}
           </div>
-          <ClienteProfileHeader customer={mergedCustomer} isLoading={customer.isLoading} />
+          <ClienteProfileHeader
+            customer={mergedCustomer}
+            isLoading={customer.isLoading}
+            onOpenCuestionario={() => setTab('cuestionario')}
+          />
         </>
       )}
 
       <Tabs value={tab} onValueChange={setTab} className="w-full">
         <TabsList
           className={cn(
-            'w-full grid grid-cols-3 sm:grid-cols-6 bg-sky-50/50 dark:bg-sky-950/20 border border-sky-100/50 dark:border-sky-900/20 rounded-lg p-0.5',
+            'w-full grid grid-cols-4 sm:grid-cols-7 bg-sky-50/50 dark:bg-sky-950/20 border border-sky-100/50 dark:border-sky-900/20 rounded-lg p-0.5',
             compact && 'h-8',
           )}
         >
@@ -198,6 +206,15 @@ export const ClienteDetailView: React.FC<Props> = ({
           >
             Adjuntos
           </TabsTrigger>
+          <TabsTrigger
+            value="cuestionario"
+            className={cn(
+              'rounded-md data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-sky-700 dark:data-[state=active]:bg-gray-800 dark:data-[state=active]:text-sky-300',
+              compact ? 'text-[10px] px-1 py-1 h-7' : 'text-sm rounded-lg',
+            )}
+          >
+            {compact ? 'Cuest.' : 'Cuestionario'}
+          </TabsTrigger>
         </TabsList>
 
         <div className={compact ? 'mt-2' : 'mt-5'}>
@@ -254,6 +271,15 @@ export const ClienteDetailView: React.FC<Props> = ({
           <TabsContent value="adjuntos" className="mt-0">
             {tab === 'adjuntos' ? (
               <ClienteAdjuntosTab customerId={customerId} compact={compact} />
+            ) : null}
+          </TabsContent>
+
+          <TabsContent value="cuestionario" className="mt-0">
+            {tab === 'cuestionario' ? (
+              <ClienteCuestionariosTab
+                customerId={customerId}
+                initialManageQuestionnaireId={initialQuestionnaireId}
+              />
             ) : null}
           </TabsContent>
         </div>

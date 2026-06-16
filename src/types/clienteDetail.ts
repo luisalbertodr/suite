@@ -1,1 +1,1 @@
-export type ClienteDetailTab = 'timeline' | 'vouchers' | 'ficha' | 'inbody' | 'adjuntos' | 'historial';
+export type ClienteDetailTab = 'timeline' | 'vouchers' | 'ficha' | 'inbody' | 'adjuntos' | 'historial' | 'cuestionario';

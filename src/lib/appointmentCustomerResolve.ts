@@ -1,13 +1,14 @@
 import type { CustomerSearchRow } from '@/lib/customerSearch';
 import type { AppointmentClientPick } from '@/components/forms/AppointmentClientePicker';
+import { supabase } from '@/lib/supabase';
 
-function normLegacyCodcli(value: string): string {
+export function normLegacyCodcli(value: string): string {
   const s = value.trim();
   if (!s) return '';
   return s.replace(/^0+/, '') || '0';
 }
 
-function legacyCodcliMatches(a: string, b: string): boolean {
+export function legacyCodcliMatches(a: string, b: string): boolean {
   const x = a.trim();
   const y = b.trim();
   if (!x || !y) return false;
@@ -45,4 +46,39 @@ export function resolveAppointmentClientPick(
   }
 
   return null;
+}
+
+/** Resuelve UUID de cliente Suite a partir de códigos legacy Style (codcli). */
+export async function resolveCustomerIdsByLegacyCodcli(
+  companyId: string,
+  legacyCodes: string[],
+): Promise<Map<string, string>> {
+  const unique = [...new Set(legacyCodes.map((c) => c.trim()).filter(Boolean))];
+  if (!unique.length) return new Map();
+
+  const { data, error } = await supabase
+    .from('customers')
+    .select('id, legacy_codcli')
+    .eq('company_id', companyId)
+    .not('legacy_codcli', 'is', null);
+  if (error) throw error;
+
+  const out = new Map<string, string>();
+  for (const code of unique) {
+    const match = (data ?? []).find((row) =>
+      legacyCodcliMatches(code, String(row.legacy_codcli ?? '')),
+    );
+    if (match?.id) out.set(normLegacyCodcli(code), match.id as string);
+  }
+  return out;
+}
+
+export async function resolveCustomerIdByLegacyCodcli(
+  companyId: string,
+  legacyCodcli: string | null | undefined,
+): Promise<string | null> {
+  const code = String(legacyCodcli ?? '').trim();
+  if (!code) return null;
+  const map = await resolveCustomerIdsByLegacyCodcli(companyId, [code]);
+  return map.get(normLegacyCodcli(code)) ?? null;
 }

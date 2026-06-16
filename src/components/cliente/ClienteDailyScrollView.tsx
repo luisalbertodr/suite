@@ -4,6 +4,9 @@ import { es } from 'date-fns/locale';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { AppointmentAttachmentIcons } from '@/components/AppointmentAttachmentIcons';
+import { ConsentimientoViewerDialog } from '@/components/consentimiento/ConsentimientoViewerDialog';
+import { supabase } from '@/lib/supabase';
+import type { Consentimiento } from '@/lib/consentimientoTypes';
 import {
   Table,
   TableBody,
@@ -33,6 +36,7 @@ type HistoryTableRow = {
   appointmentId?: string;
   appointmentDate?: string;
   attachments?: AppointmentAttachmentHints;
+  consentId?: string;
 };
 
 function formatDateLabel(ymd: string): string {
@@ -105,6 +109,8 @@ function itemToRow(dayDate: string, it: DayTimelineItem): HistoryTableRow {
     employee: '',
     details,
     price: it.amountLabel || '',
+    consentId:
+      it.kind === 'consent' && it.refTable === 'consentimientos' && it.refId ? it.refId : undefined,
   };
 }
 
@@ -161,11 +167,30 @@ interface Props {
 
 export const ClienteDailyScrollView: React.FC<Props> = ({ customerId, className, onAppointmentClick }) => {
   const [appointmentLimit, setAppointmentLimit] = useState(CUSTOMER_APPOINTMENTS_TIMELINE_LIMIT);
+  const [viewConsent, setViewConsent] = useState<Consentimiento | null>(null);
+  const [loadingConsent, setLoadingConsent] = useState(false);
   const { data, isLoading, isFetching, isError, error } = useCustomerDayTimeline(customerId, {
     appointmentLimit,
   });
   const rows = useMemo(() => buildTableRows(data?.days || []), [data?.days]);
   const hasMoreAppointments = data?.hasMoreAppointments ?? false;
+
+  const openConsent = async (consentId: string) => {
+    setLoadingConsent(true);
+    try {
+      const { data: row, error } = await supabase
+        .from('consentimientos')
+        .select('*')
+        .eq('id', consentId)
+        .single();
+      if (error) throw error;
+      setViewConsent(row as Consentimiento);
+    } catch {
+      /* ignore */
+    } finally {
+      setLoadingConsent(false);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -225,6 +250,7 @@ export const ClienteDailyScrollView: React.FC<Props> = ({ customerId, className,
         <TableBody>
           {rows.map((row) => {
             const isAppointment = Boolean(row.appointmentId && row.appointmentDate && onAppointmentClick);
+            const isConsent = Boolean(row.consentId);
             return (
             <TableRow
               key={row.id}
@@ -232,13 +258,15 @@ export const ClienteDailyScrollView: React.FC<Props> = ({ customerId, className,
                 'hover:bg-muted/30',
                 row.muted && 'bg-muted/20',
                 isAppointment && 'cursor-pointer hover:bg-sky-50/80 dark:hover:bg-sky-950/30',
+                isConsent && 'cursor-pointer hover:bg-sky-50/80 dark:hover:bg-sky-950/30',
               )}
-              onClick={
-                isAppointment
-                  ? () => onAppointmentClick!(row.appointmentId!, row.appointmentDate!)
-                  : undefined
+              onClick={() => {
+                if (isAppointment) onAppointmentClick!(row.appointmentId!, row.appointmentDate!);
+                else if (isConsent && row.consentId) void openConsent(row.consentId);
+              }}
+              title={
+                isAppointment ? 'Abrir cita en la agenda' : isConsent ? 'Ver consentimiento' : undefined
               }
-              title={isAppointment ? 'Abrir cita en la agenda' : undefined}
             >
               <TableCell className="px-2 py-1.5 align-middle whitespace-nowrap text-muted-foreground tabular-nums">
                 {row.dateLabel}
@@ -294,6 +322,16 @@ export const ClienteDailyScrollView: React.FC<Props> = ({ customerId, className,
           </Button>
         </div>
       )}
+      <ConsentimientoViewerDialog
+        consent={viewConsent}
+        open={!!viewConsent}
+        onOpenChange={(o) => !o && setViewConsent(null)}
+      />
+      {loadingConsent ? (
+        <p className="sr-only" aria-live="polite">
+          Cargando consentimiento…
+        </p>
+      ) : null}
     </div>
   );
 };

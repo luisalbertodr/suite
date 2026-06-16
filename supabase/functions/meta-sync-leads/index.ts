@@ -12,6 +12,10 @@ import {
   sendInitialAutomationForLead,
   type MetaFormAutomation,
 } from '../_shared/marketingWhatsappAutomation.ts';
+import { enqueueMarketingLeadForInitialWhatsapp } from '../_shared/marketingWhatsappQueue.ts';
+import { loadAutomationSettings } from '../_shared/whatsappAutomationDispatch.ts';
+import { isWithinAutomationHours } from '../_shared/whatsappAutomationHours.ts';
+import { emitLeadConversionFromRow } from '../_shared/metaConversionEmit.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -914,6 +918,9 @@ serve(async (req) => {
     let totalSkipped = 0;
     let totalErrors = 0;
 
+    const automationSettings = await loadAutomationSettings(admin, companyId);
+    const sendWelcomeNow = isWithinAutomationHours(automationSettings);
+
     for (const form of forms) {
       // Forzamos la etapa de entrada para leads nuevos (intake) a `intakeStageId`.
       // Si no existe, el valor será null y la BD lo tratará como "sin etapa".
@@ -1153,7 +1160,9 @@ serve(async (req) => {
         const { data: ins, error: insErr } = await admin
           .from('marketing_leads')
           .insert(slice)
-          .select('id');
+          .select(
+            'id, external_id, email, phone, first_name, last_name, campaign',
+          );
         if (insErr) {
           console.error('meta-sync insert error', insErr);
           formErrors += slice.length;
@@ -1165,30 +1174,45 @@ serve(async (req) => {
           }
         } else {
           inserted += ins?.length ?? 0;
+          if (ins?.length) {
+            for (const row of ins) {
+              if (!row?.id) continue;
+              try {
+                await emitLeadConversionFromRow(admin, companyId, row, 'Lead');
+              } catch (convErr) {
+                console.error('meta conversion Lead emit failed:', convErr);
+              }
+            }
+          }
           if (form.whatsapp_automation_enabled && ins?.length) {
             for (let j = 0; j < ins.length; j++) {
               const leadId = ins[j]?.id as string | undefined;
               if (!leadId) continue;
               const srcRow = rows[i + j];
               try {
-                await sendInitialAutomationForLead(
-                  admin,
-                  companyId,
-                  leadId,
-                  {
-                    phone: srcRow.phone as string | null,
-                    first_name: srcRow.first_name as string | null,
-                    last_name: srcRow.last_name as string | null,
-                    email: srcRow.email as string | null,
-                    campaign: srcRow.campaign as string | null,
-                    form_name: srcRow.form_name as string | null,
-                    appointment_at: srcRow.appointment_at as string | null,
-                    appointment_label: srcRow.appointment_label as string | null,
-                    source: srcRow.source as string | null,
-                    meta_form_id: form.id,
-                  },
-                  form as MetaFormAutomation,
-                );
+                if (sendWelcomeNow) {
+                  await sendInitialAutomationForLead(
+                    admin,
+                    companyId,
+                    leadId,
+                    {
+                      phone: srcRow.phone as string | null,
+                      first_name: srcRow.first_name as string | null,
+                      last_name: srcRow.last_name as string | null,
+                      email: srcRow.email as string | null,
+                      campaign: srcRow.campaign as string | null,
+                      form_name: srcRow.form_name as string | null,
+                      appointment_at: srcRow.appointment_at as string | null,
+                      appointment_label: srcRow.appointment_label as string | null,
+                      source: srcRow.source as string | null,
+                      meta_form_id: form.id,
+                      field_data: srcRow.field_data,
+                    },
+                    form as MetaFormAutomation,
+                  );
+                } else {
+                  await enqueueMarketingLeadForInitialWhatsapp(admin, companyId, leadId);
+                }
               } catch (autoErr) {
                 console.error('meta-sync WhatsApp automation failed:', autoErr);
               }

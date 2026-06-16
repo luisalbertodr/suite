@@ -7,6 +7,11 @@ import {
   runAppointmentRemindersForCompany,
   sendAutomatedWhatsapp,
 } from '../_shared/whatsappAutomationDispatch.ts';
+import { runMarketingLeadRemindersForCompany } from '../_shared/marketingWhatsappAutomation.ts';
+import {
+  runMarketingWhatsappQueueForCompany,
+  type MarketingWhatsappQueueSettings,
+} from '../_shared/marketingWhatsappQueue.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -98,7 +103,13 @@ serve(async (req) => {
   if (action === 'run_reminders') {
     const { data: companies } = await admin.from('companies').select('id');
     const summary: Record<string, unknown> = {};
+    const marketingSummary: Record<string, unknown> = {};
+    const queueSummary: Record<string, unknown> = {};
     for (const c of companies ?? []) {
+      const settings = await loadAutomationSettings(
+        admin,
+        c.id,
+      ) as MarketingWhatsappQueueSettings;
       try {
         summary[c.id] = await runAppointmentRemindersForCompany(admin, c.id);
       } catch (e) {
@@ -106,8 +117,32 @@ serve(async (req) => {
           error: e instanceof Error ? e.message : 'Error',
         };
       }
+      try {
+        marketingSummary[c.id] = await runMarketingLeadRemindersForCompany(admin, c.id);
+      } catch (e) {
+        marketingSummary[c.id] = {
+          error: e instanceof Error ? e.message : 'Error',
+        };
+      }
+      try {
+        queueSummary[c.id] = await runMarketingWhatsappQueueForCompany(
+          admin,
+          c.id,
+          settings,
+        );
+      } catch (e) {
+        queueSummary[c.id] = {
+          error: e instanceof Error ? e.message : 'Error',
+        };
+      }
     }
-    return json({ ok: true, action, summary });
+    return json({
+      ok: true,
+      action,
+      summary,
+      marketing_lead_reminders: marketingSummary,
+      marketing_whatsapp_queue: queueSummary,
+    });
   }
 
   if (action === 'test_send') {

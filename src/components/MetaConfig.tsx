@@ -107,13 +107,28 @@ function saveFormWhatsappField(
     | 'whatsapp_initial_message'
     | 'whatsapp_reply_1_message'
     | 'whatsapp_reply_2_message'
-    | 'whatsapp_reply_invalid_message',
+    | 'whatsapp_reply_invalid_message'
+    | 'whatsapp_reminder_message',
   value: string,
   updateForm: ReturnType<typeof useMetaConfig>['updateForm'],
 ) {
   const next = value.trim() || null;
   if (next === (form[field] ?? null)) return;
   updateForm.mutate({ id: form.id, values: { [field]: next } });
+}
+
+function saveFormWhatsappDelay(
+  form: MetaFormRow,
+  value: string,
+  updateForm: ReturnType<typeof useMetaConfig>['updateForm'],
+) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 1 || parsed > 72) return;
+  if (parsed === (form.whatsapp_reminder_delay_hours ?? 3)) return;
+  updateForm.mutate({
+    id: form.id,
+    values: { whatsapp_reminder_delay_hours: parsed },
+  });
 }
 
 export const MetaConfig: React.FC = () => {
@@ -137,6 +152,12 @@ export const MetaConfig: React.FC = () => {
   const [syncInterval, setSyncInterval] = useState<number>(60);
   const [enabled, setEnabled] = useState(true);
   const [apiVersion, setApiVersion] = useState('v23.0');
+  const [pixelId, setPixelId] = useState('');
+  const [conversionsEnabled, setConversionsEnabled] = useState(false);
+  const [n8nWebhookUrl, setN8nWebhookUrl] = useState('');
+  const [n8nWebhookSecret, setN8nWebhookSecret] = useState('');
+  const [hasStoredN8nSecret, setHasStoredN8nSecret] = useState(false);
+  const [conversionsTestCode, setConversionsTestCode] = useState('');
 
   const [openImport, setOpenImport] = useState(false);
   const [openFieldsConfig, setOpenFieldsConfig] = useState(false);
@@ -166,6 +187,12 @@ export const MetaConfig: React.FC = () => {
     setSyncInterval(config.sync_interval_minutes ?? 60);
     setEnabled(config.enabled ?? true);
     setApiVersion(config.graph_api_version ?? 'v23.0');
+    setPixelId(config.pixel_id ?? '');
+    setConversionsEnabled(config.conversions_enabled ?? false);
+    setN8nWebhookUrl(config.n8n_webhook_url ?? '');
+    setHasStoredN8nSecret(!!config.n8n_webhook_secret);
+    setN8nWebhookSecret('');
+    setConversionsTestCode(config.conversions_test_event_code ?? '');
   }, [config]);
 
   const intakeStage = useMemo(() => findMarketingIntakeStage(stages), [stages]);
@@ -218,13 +245,22 @@ export const MetaConfig: React.FC = () => {
         graph_api_version: apiVersion.trim() || 'v23.0',
         sync_interval_minutes: Math.max(5, Number(syncInterval) || 60),
         enabled,
+        pixel_id: pixelId.trim() || null,
+        conversions_enabled: conversionsEnabled,
+        n8n_webhook_url: n8nWebhookUrl.trim() || null,
+        conversions_test_event_code: conversionsTestCode.trim() || null,
+        ...(n8nWebhookSecret.trim()
+          ? { n8n_webhook_secret: n8nWebhookSecret.trim() }
+          : {}),
         ...(accessToken.trim()
           ? { access_token: accessToken.trim() }
           : {}),
       });
       setAccessToken('');
+      setN8nWebhookSecret('');
       setShowToken(false);
       setHasStoredToken(true);
+      setHasStoredN8nSecret(true);
       toast({ title: 'Configuración Meta guardada' });
     } catch (e) {
       const message = e instanceof Error ? e.message : 'No se pudo guardar';
@@ -522,9 +558,11 @@ export const MetaConfig: React.FC = () => {
               <div>
                 <p className="text-sm font-medium">WhatsApp automático</p>
                 <p className="text-[11px] text-muted-foreground">
-                  Al importar un lead nuevo se envía el mensaje inicial. Cuando responda{' '}
-                  <strong>1</strong> o <strong>2</strong>, se envía la respuesta configurada.
-                  Requiere WhatsApp conectado.
+                  Al sincronizar un lead nuevo se envía el mensaje 1 (bienvenida). Si no responde,
+                  el mensaje 2 (recordatorio) sale tras las horas configuradas. Para el histórico sin
+                  WhatsApp, usa <strong>Marketing → Cola</strong> (envío gradual). Incluye{' '}
+                  <code>{'{link_pago}'}</code> si activas señal Stripe. Respuestas 1/2 opcionales;
+                  si no las configuras, cualquier respuesta del lead pasa a gestión humana.
                 </p>
               </div>
             </div>
@@ -559,13 +597,15 @@ export const MetaConfig: React.FC = () => {
                 </div>
               </div>
               <div className="space-y-1 md:col-span-2">
-                <Label className="text-[11px]">Mensaje inicial (presentación + pide 1 o 2)</Label>
+                <Label className="text-[11px]">
+                  Mensaje 1 · Bienvenida (al recibir el lead)
+                </Label>
                 <Textarea
                   key={`${form.id}-initial-${form.whatsapp_initial_message ?? ''}`}
                   defaultValue={form.whatsapp_initial_message ?? ''}
-                  rows={4}
+                  rows={6}
                   className="text-xs"
-                  placeholder="Hola {nombre}, gracias por tu interés en {oferta}. Responde 1 para… o 2 para…"
+                  placeholder="Hola {nombre}… Usa {respuesta_zona} para personalizar según el formulario."
                   onBlur={(e) =>
                     saveFormWhatsappField(
                       form,
@@ -576,8 +616,49 @@ export const MetaConfig: React.FC = () => {
                   }
                 />
               </div>
+              <div className="space-y-1 md:col-span-2">
+                <Label className="text-[11px]">
+                  Mensaje 2 · Recordatorio si no responde
+                </Label>
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <Label className="text-[10px] text-muted-foreground shrink-0">
+                    Enviar tras
+                  </Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={72}
+                    className="h-7 w-16 text-xs"
+                    defaultValue={form.whatsapp_reminder_delay_hours ?? 3}
+                    onBlur={(e) => saveFormWhatsappDelay(form, e.target.value, updateForm)}
+                  />
+                  <span className="text-[10px] text-muted-foreground">horas sin respuesta</span>
+                </div>
+                <Textarea
+                  key={`${form.id}-reminder-${form.whatsapp_reminder_message ?? ''}`}
+                  defaultValue={form.whatsapp_reminder_message ?? ''}
+                  rows={5}
+                  className="text-xs"
+                  placeholder="¡Hola de nuevo, {nombre}!… {propuesta_dia_1} / {propuesta_dia_2}"
+                  onBlur={(e) =>
+                    saveFormWhatsappField(
+                      form,
+                      'whatsapp_reminder_message',
+                      e.target.value,
+                      updateForm,
+                    )
+                  }
+                />
+              </div>
+              <div className="space-y-1 md:col-span-2 rounded-md border border-dashed p-2">
+                <p className="text-[10px] text-muted-foreground">
+                  Opcional: flujo con respuesta automática 1/2 (si el lead escribe «1» o «2»).
+                  Si no configuras estas respuestas, cualquier mensaje del lead cierra la
+                  automatización y la conversación pasa a gestión humana.
+                </p>
+              </div>
               <div className="space-y-1">
-                <Label className="text-[11px]">Respuesta si eligen 1</Label>
+                <Label className="text-[11px]">Respuesta automática si eligen 1 (opcional)</Label>
                 <Textarea
                   key={`${form.id}-r1-${form.whatsapp_reply_1_message ?? ''}`}
                   defaultValue={form.whatsapp_reply_1_message ?? ''}
@@ -595,7 +676,7 @@ export const MetaConfig: React.FC = () => {
                 />
               </div>
               <div className="space-y-1">
-                <Label className="text-[11px]">Respuesta si eligen 2</Label>
+                <Label className="text-[11px]">Respuesta automática si eligen 2 (opcional)</Label>
                 <Textarea
                   key={`${form.id}-r2-${form.whatsapp_reply_2_message ?? ''}`}
                   defaultValue={form.whatsapp_reply_2_message ?? ''}
@@ -859,6 +940,71 @@ export const MetaConfig: React.FC = () => {
               <p className="text-[11px] text-muted-foreground">
                 Cambiar sólo si necesitas fijar otra versión (por defecto v23.0).
               </p>
+            </div>
+          </div>
+
+          <div className="space-y-4 rounded-lg border border-dashed p-4">
+            <div>
+              <p className="text-sm font-medium">API de conversiones (CAPI → n8n → Meta)</p>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Suite envía eventos al webhook n8n; n8n hashea los datos y los reenvía a Meta.
+                El token de Meta CAPI debe configurarse solo en n8n (System User EAA…).
+              </p>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="meta-pixel-id">Pixel / Dataset ID</Label>
+                <Input
+                  id="meta-pixel-id"
+                  value={pixelId}
+                  onChange={(e) => setPixelId(e.target.value)}
+                  placeholder="291687001692956"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="meta-n8n-url">URL webhook n8n</Label>
+                <Input
+                  id="meta-n8n-url"
+                  value={n8nWebhookUrl}
+                  onChange={(e) => setN8nWebhookUrl(e.target.value)}
+                  placeholder="http://192.168.99.110:5678/webhook/suite-meta-capi-lipoout"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="meta-n8n-secret">Secreto webhook (X-Suite-Secret)</Label>
+                <Input
+                  id="meta-n8n-secret"
+                  type="password"
+                  value={n8nWebhookSecret}
+                  onChange={(e) => setN8nWebhookSecret(e.target.value)}
+                  placeholder={
+                    hasStoredN8nSecret
+                      ? 'Guardado. Deja en blanco para no cambiar.'
+                      : 'suite-meta-lipoout-2026'
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="meta-test-code">Código de prueba (TESTXXXX)</Label>
+                <Input
+                  id="meta-test-code"
+                  value={conversionsTestCode}
+                  onChange={(e) => setConversionsTestCode(e.target.value)}
+                  placeholder="Opcional; solo para Events Manager → Probar eventos"
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-3 rounded-lg border bg-muted/40 px-3 py-2">
+              <Switch
+                checked={conversionsEnabled}
+                onCheckedChange={setConversionsEnabled}
+              />
+              <div>
+                <p className="text-sm font-medium">Emitir conversiones a n8n</p>
+                <p className="text-[11px] text-muted-foreground">
+                  Desactivado por defecto. Activa solo tras validar el flujo con TESTXXXX.
+                </p>
+              </div>
             </div>
           </div>
 

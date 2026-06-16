@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import { getSupabaseAccessToken } from '@/lib/supabaseSession';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import type { Database } from '@/integrations/supabase/types';
 
@@ -12,6 +13,7 @@ export type StripeConfigSavePayload = {
   public_app_url?: string | null;
   confirmed_stage_id?: string | null;
   payment_success_whatsapp_message?: string | null;
+  deposit_request_whatsapp_message?: string | null;
   secret_key?: string | null;
   webhook_secret?: string | null;
 };
@@ -20,6 +22,24 @@ export type StripeProxyAction =
   | { action: 'config.test'; company_id?: string }
   | ({ action: 'config.save'; company_id?: string } & StripeConfigSavePayload)
   | { action: 'deposit.create_for_lead'; lead_id: string; company_id?: string }
+  | { action: 'deposit.render_message_for_lead'; lead_id: string; company_id?: string }
+  | {
+      action: 'deposit.render_message_for_chat';
+      chat_id: string;
+      company_id?: string;
+      chat_display_name?: string | null;
+      customer_id?: string | null;
+      marketing_lead_id?: string | null;
+    }
+  | {
+      action: 'deposit.confirm_manual_for_chat';
+      chat_id: string;
+      company_id?: string;
+      chat_display_name?: string | null;
+      customer_id?: string | null;
+      marketing_lead_id?: string | null;
+      payment_method?: 'bizum' | 'transfer' | 'cash' | 'other';
+    }
   | { action: 'deposit.public_info'; token: string }
   | { action: 'deposit.public_checkout'; token: string; origin?: string };
 
@@ -27,9 +47,7 @@ export async function invokeStripeProxy<T = unknown>(payload: StripeProxyAction)
   const publicActions = new Set(['deposit.public_info', 'deposit.public_checkout']);
   const headers: Record<string, string> = {};
   if (!publicActions.has(payload.action)) {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) throw new Error('No hay sesión activa');
-    headers.Authorization = `Bearer ${session.access_token}`;
+    headers.Authorization = `Bearer ${await getSupabaseAccessToken()}`;
   }
   const response = await supabase.functions.invoke('stripe-proxy', {
     headers,

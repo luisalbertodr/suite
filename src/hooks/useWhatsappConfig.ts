@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import { getSupabaseAccessToken } from '@/lib/supabaseSession';
 import { getStoredWhatsappCompanyId, useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
 import type { Database } from '@/integrations/supabase/types';
 
@@ -72,8 +73,7 @@ export type WhatsappProxyAction = {
 export async function invokeWhatsappProxy<T = unknown>(
   payload: WhatsappProxyAction,
 ): Promise<T> {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error('No hay sesión activa');
+  const accessToken = await getSupabaseAccessToken();
 
   const whatsappCompanyId = getStoredWhatsappCompanyId();
   const requestBody: WhatsappProxyAction =
@@ -94,7 +94,7 @@ export async function invokeWhatsappProxy<T = unknown>(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${session.access_token}`,
+        Authorization: `Bearer ${accessToken}`,
         apikey:
           (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ?? '',
       },
@@ -138,8 +138,7 @@ export async function downloadWhatsappMedia(input: {
   message_id?: string | null;
   company_id?: string;
 }): Promise<Blob> {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error('No hay sesión activa');
+  const accessToken = await getSupabaseAccessToken();
 
   const payload = {
     action: 'media.download' as const,
@@ -157,7 +156,7 @@ export async function downloadWhatsappMedia(input: {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${session.access_token}`,
+      Authorization: `Bearer ${accessToken}`,
       apikey: (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ?? '',
     },
     body: JSON.stringify(payload),

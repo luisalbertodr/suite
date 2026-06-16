@@ -1,6 +1,7 @@
 import type { Appointment, Employee } from '@/types/agenda';
 import type { AppointmentTimeSegment } from '@/types/agenda';
 import { employeeTailwindColor } from '@/lib/dunasoftColors';
+import { normLegacyCodcli } from '@/lib/appointmentCustomerResolve';
 
 export type DunasoftPlan2009Row = {
   _row_id: number;
@@ -106,6 +107,17 @@ export function mapPlanArtToSegments(
     });
   }
   return segments;
+}
+
+export function attachCustomerIdsToAppointments(
+  appointments: Appointment[],
+  legacyToCustomerId: Map<string, string>,
+): Appointment[] {
+  return appointments.map((apt) => {
+    if (apt.customerId || !apt.legacyClientCode) return apt;
+    const customerId = legacyToCustomerId.get(normLegacyCodcli(apt.legacyClientCode)) ?? null;
+    return customerId ? { ...apt, customerId } : apt;
+  });
 }
 
 export function mapPlan2009ToAppointments(

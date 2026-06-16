@@ -16,12 +16,18 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Bell,
   CalendarClock,
-  CreditCard,
+  Clock,
   FlaskConical,
-  MessageSquare,
   Phone,
   Send,
 } from 'lucide-react';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import {
   DEFAULT_DAY_BEFORE,
@@ -29,8 +35,6 @@ import {
   useWhatsappAutomationLog,
   useWhatsappAutomationSettings,
 } from '@/hooks/useWhatsappAutomationSettings';
-import { useMetaConfig } from '@/hooks/useMetaConfig';
-import { WHATSAPP_MESSAGE_TEMPLATE_VARS } from '@/lib/whatsappMessageTemplates';
 
 const APPOINTMENT_VARS = [
   { key: 'nombre', description: 'Nombre del cliente' },
@@ -40,11 +44,13 @@ const APPOINTMENT_VARS = [
   { key: 'profesional', description: 'Profesional asignado' },
 ];
 
+const HOUR_START_OPTIONS = Array.from({ length: 24 }, (_, i) => i);
+const HOUR_END_OPTIONS = Array.from({ length: 24 }, (_, i) => i + 1);
+
 export const WhatsappAutomationConfig: React.FC = () => {
   const { toast } = useToast();
   const { data: settings, isLoading, save, sendTest } = useWhatsappAutomationSettings();
   const { data: log } = useWhatsappAutomationLog(15);
-  const { forms, updateForm } = useMetaConfig();
 
   const [testMode, setTestMode] = useState(true);
   const [testPhone, setTestPhone] = useState('667435503');
@@ -53,7 +59,8 @@ export const WhatsappAutomationConfig: React.FC = () => {
   const [hourBeforeEnabled, setHourBeforeEnabled] = useState(true);
   const [dayBeforeMsg, setDayBeforeMsg] = useState(DEFAULT_DAY_BEFORE);
   const [hourBeforeMsg, setHourBeforeMsg] = useState(DEFAULT_HOUR_BEFORE);
-  const [sendHourStart, setSendHourStart] = useState(9);
+  const [automationHourStart, setAutomationHourStart] = useState(10);
+  const [automationHourEnd, setAutomationHourEnd] = useState(20);
   const [phoneAlertsEnabled, setPhoneAlertsEnabled] = useState(true);
   const [phoneAlertsPhone, setPhoneAlertsPhone] = useState('881242909');
 
@@ -66,7 +73,8 @@ export const WhatsappAutomationConfig: React.FC = () => {
     setHourBeforeEnabled(settings.appointment_reminder_hour_before_enabled);
     setDayBeforeMsg(settings.appointment_reminder_day_before_message ?? DEFAULT_DAY_BEFORE);
     setHourBeforeMsg(settings.appointment_reminder_hour_before_message ?? DEFAULT_HOUR_BEFORE);
-    setSendHourStart(settings.appointment_reminder_send_hour_start ?? 9);
+    setAutomationHourStart(settings.marketing_queue_hour_start ?? 10);
+    setAutomationHourEnd(settings.marketing_queue_hour_end ?? 20);
     setPhoneAlertsEnabled(settings.phone_missed_whatsapp_enabled ?? true);
     setPhoneAlertsPhone(settings.phone_missed_whatsapp_phone ?? '881242909');
   }, [settings]);
@@ -93,7 +101,8 @@ export const WhatsappAutomationConfig: React.FC = () => {
       appointment_reminder_hour_before_enabled: hourBeforeEnabled,
       appointment_reminder_day_before_message: dayBeforeMsg,
       appointment_reminder_hour_before_message: hourBeforeMsg,
-      appointment_reminder_send_hour_start: sendHourStart,
+      marketing_queue_hour_start: automationHourStart,
+      marketing_queue_hour_end: Math.max(automationHourStart + 1, automationHourEnd),
       phone_missed_whatsapp_enabled: phoneAlertsEnabled,
       phone_missed_whatsapp_phone: phoneAlertsPhone.replace(/\D/g, '') || '881242909',
     });
@@ -123,6 +132,69 @@ export const WhatsappAutomationConfig: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      <p className="text-sm text-muted-foreground rounded-lg border bg-muted/30 px-3 py-2">
+        Los textos de <strong>leads Meta</strong> (bienvenida, recordatorio 3 h, señal Stripe) están
+        en <strong>Meta / Leads</strong>. Aquí defines el <strong>horario de envío</strong> común,
+        recordatorios de agenda, alertas de centralita e historial.
+      </p>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Clock className="h-4 w-4" />
+            Horario de envíos automáticos
+          </CardTitle>
+          <CardDescription>
+            Todos los WhatsApp automáticos (bienvenida a leads, cola, recordatorios Meta, citas,
+            alertas de teléfono y post-pago Stripe) solo salen entre estas horas (hora de Madrid).
+            Los leads nuevos dentro del horario reciben la bienvenida al instante; fuera del horario
+            se encolan y salen al abrir la ventana.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-end gap-4">
+          <div className="space-y-1">
+            <Label className="text-xs">Desde</Label>
+            <Select
+              value={String(automationHourStart)}
+              onValueChange={(v) => setAutomationHourStart(Number(v))}
+            >
+              <SelectTrigger className="w-[120px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {HOUR_START_OPTIONS.map((h) => (
+                  <SelectItem key={h} value={String(h)}>
+                    {String(h).padStart(2, '0')}:00
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Hasta (no inclusive)</Label>
+            <Select
+              value={String(automationHourEnd)}
+              onValueChange={(v) => setAutomationHourEnd(Number(v))}
+            >
+              <SelectTrigger className="w-[120px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {HOUR_END_OPTIONS.filter((h) => h > automationHourStart).map((h) => (
+                  <SelectItem key={h} value={String(h)}>
+                    {String(h).padStart(2, '0')}:00
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <p className="text-[11px] text-muted-foreground max-w-md">
+            Ejemplo: 10:00–20:00 envía de 10:00 a 19:59. La cola gradual (máx. 50/día) sigue activa
+            dentro de este horario.
+          </p>
+        </CardContent>
+      </Card>
+
       <Card className="border-amber-200/80 bg-amber-50/40 dark:border-amber-900 dark:bg-amber-950/20">
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
@@ -158,10 +230,6 @@ export const WhatsappAutomationConfig: React.FC = () => {
             <CalendarClock className="h-3.5 w-3.5" />
             Citas
           </TabsTrigger>
-          <TabsTrigger value="meta" className="gap-1.5">
-            <MessageSquare className="h-3.5 w-3.5" />
-            Leads Meta
-          </TabsTrigger>
           <TabsTrigger value="telefono" className="gap-1.5">
             <Phone className="h-3.5 w-3.5" />
             Teléfono
@@ -177,8 +245,10 @@ export const WhatsappAutomationConfig: React.FC = () => {
             <CardHeader>
               <CardTitle className="text-base">Recordatorios de cita</CardTitle>
               <CardDescription>
-                Aviso al cliente el día anterior (desde las {sendHourStart}:00 h) y 1 hora antes de
-                la cita. Requiere teléfono en la ficha del cliente.
+                Aviso al cliente el día anterior y 1 hora antes de la cita, solo dentro del horario
+                de envíos automáticos ({String(automationHourStart).padStart(2, '0')}:00–
+                {String(automationHourEnd).padStart(2, '0')}:00 Madrid). Requiere teléfono en la
+                ficha del cliente.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -243,142 +313,6 @@ export const WhatsappAutomationConfig: React.FC = () => {
                   </Button>
                 </div>
               </div>
-
-              <div className="space-y-1 max-w-xs">
-                <Label className="text-xs">Hora mínima envío “día anterior”</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  max={23}
-                  value={sendHourStart}
-                  onChange={(e) => setSendHourStart(Number(e.target.value))}
-                />
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="meta" className="mt-4 space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Leads Meta — mensajes por formulario/campaña</CardTitle>
-              <CardDescription>
-                Al importar un lead se envía el mensaje inicial (según campaña/formulario). Si
-                responde <strong>1</strong> o <strong>2</strong>, se envía la respuesta configurada.
-                En la opción 1 puedes incluir <code>{'{link_pago}'}</code> (Stripe); la cita se
-                confirma al recibir el pago.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex flex-wrap gap-1.5">
-                {WHATSAPP_MESSAGE_TEMPLATE_VARS.map((v) => (
-                  <Badge key={v.key} variant="outline" className="font-mono text-[10px]" title={v.description}>
-                    {`{${v.key}}`}
-                  </Badge>
-                ))}
-              </div>
-
-              {forms.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No hay formularios Meta. Configúralos en la pestaña Marketing.
-                </p>
-              ) : (
-                forms.map((form) => (
-                  <div
-                    key={form.id}
-                    className="space-y-3 rounded-xl border border-emerald-200/80 bg-emerald-50/30 p-4 dark:border-emerald-900 dark:bg-emerald-950/20"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <p className="font-medium text-sm">{form.form_name ?? form.form_id}</p>
-                        <p className="text-[11px] text-muted-foreground">
-                          Automatización WhatsApp por formulario (campaña Meta asociada)
-                        </p>
-                      </div>
-                      <Switch
-                        checked={form.whatsapp_automation_enabled ?? false}
-                        onCheckedChange={(v) =>
-                          updateForm.mutate({ id: form.id, values: { whatsapp_automation_enabled: v } })
-                        }
-                      />
-                    </div>
-
-                    {form.whatsapp_automation_enabled ? (
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <div className="space-y-1 md:col-span-2">
-                          <Label className="text-[11px]">Mensaje inicial (pide 1 o 2)</Label>
-                          <Textarea
-                            defaultValue={form.whatsapp_initial_message ?? ''}
-                            rows={3}
-                            className="text-xs"
-                            onBlur={(e) =>
-                              updateForm.mutate({
-                                id: form.id,
-                                values: { whatsapp_initial_message: e.target.value },
-                              })
-                            }
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-[11px] flex items-center gap-1">
-                            Respuesta opción 1
-                            <CreditCard className="h-3 w-3 text-muted-foreground" />
-                          </Label>
-                          <Textarea
-                            defaultValue={form.whatsapp_reply_1_message ?? ''}
-                            rows={3}
-                            className="text-xs"
-                            placeholder="Incluye {link_pago} para señal Stripe…"
-                            onBlur={(e) =>
-                              updateForm.mutate({
-                                id: form.id,
-                                values: { whatsapp_reply_1_message: e.target.value },
-                              })
-                            }
-                          />
-                          {form.stripe_deposit_enabled ? (
-                            <p className="text-[10px] text-emerald-700 dark:text-emerald-400">
-                              Señal Stripe activa — tras opción 1 se espera pago para confirmar.
-                            </p>
-                          ) : (
-                            <p className="text-[10px] text-muted-foreground">
-                              Activa señal Stripe en Marketing para confirmar cita tras pago.
-                            </p>
-                          )}
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-[11px]">Respuesta opción 2</Label>
-                          <Textarea
-                            defaultValue={form.whatsapp_reply_2_message ?? ''}
-                            rows={3}
-                            className="text-xs"
-                            onBlur={(e) =>
-                              updateForm.mutate({
-                                id: form.id,
-                                values: { whatsapp_reply_2_message: e.target.value },
-                              })
-                            }
-                          />
-                        </div>
-                        <div className="space-y-1 md:col-span-2">
-                          <Label className="text-[11px]">Respuesta inválida (opcional)</Label>
-                          <Textarea
-                            defaultValue={form.whatsapp_reply_invalid_message ?? ''}
-                            rows={2}
-                            className="text-xs"
-                            onBlur={(e) =>
-                              updateForm.mutate({
-                                id: form.id,
-                                values: { whatsapp_reply_invalid_message: e.target.value },
-                              })
-                            }
-                          />
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                ))
-              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -388,9 +322,9 @@ export const WhatsappAutomationConfig: React.FC = () => {
             <CardHeader>
               <CardTitle className="text-base">Alertas de centralita</CardTitle>
               <CardDescription>
-                Aviso por WhatsApp de llamadas perdidas y mensajes en el buzón de voz de Issabel.
-                Incluye transcripción del audio cuando está disponible. Estos avisos van siempre al
-                número indicado (no usan el modo prueba).
+                Aviso por WhatsApp de llamadas perdidas y mensajes en el buzón de voz de Issabel,
+                solo dentro del horario de envíos automáticos. Incluye transcripción del audio cuando
+                está disponible. Estos avisos van siempre al número indicado (no usan el modo prueba).
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">

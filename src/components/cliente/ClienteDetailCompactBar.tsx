@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowLeft, Phone, MessageCircle, CalendarPlus, Save } from 'lucide-react';
+import { ArrowLeft, Phone, MessageCircle, CalendarPlus, Save, ClipboardList } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -12,6 +12,7 @@ type Props = {
   onBack: () => void;
   backLabel: string;
   onNewAppointment?: () => void;
+  onOpenCuestionario?: () => void;
   hasChanges?: boolean;
   onSave?: () => void;
   saving?: boolean;
@@ -23,6 +24,7 @@ export const ClienteDetailCompactBar: React.FC<Props> = ({
   onBack,
   backLabel,
   onNewAppointment,
+  onOpenCuestionario,
   hasChanges,
   onSave,
   saving,
@@ -105,6 +107,17 @@ export const ClienteDetailCompactBar: React.FC<Props> = ({
         >
           <MessageCircle className="h-3 w-3" />
           WhatsApp
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-7 px-2 text-[11px] gap-1 border-violet-200 text-violet-700 hover:bg-violet-50 dark:border-violet-800 dark:text-violet-300"
+          onClick={onOpenCuestionario}
+          disabled={!onOpenCuestionario}
+        >
+          <ClipboardList className="h-3 w-3" />
+          Cuestionario
         </Button>
         <Button
           type="button"

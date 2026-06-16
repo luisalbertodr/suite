@@ -918,6 +918,15 @@ async function syncMissedCallWhatsappAlerts(
     return { sent: 0, skipped: 0, failed: 0, pending: 0 };
   }
 
+  const { isWithinAutomationHours } = await import('../_shared/whatsappAutomationHours.ts');
+  if (!isWithinAutomationHours(settings)) {
+    const alertCallsPreview = calls.filter((call) => {
+      const displayType = computeDisplayType(call);
+      return displayType === 'missed' || displayType === 'voicemail';
+    });
+    return { sent: 0, skipped: alertCallsPreview.length, failed: 0, pending: alertCallsPreview.length };
+  }
+
   const destPhone = (settings.phone_missed_whatsapp_phone ?? BUSINESS_PHONE).replace(/\D/g, '') ||
     BUSINESS_PHONE;
   const alertCalls = calls.filter((call) => {

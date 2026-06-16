@@ -90,9 +90,9 @@ export async function fetchCustomerAttachments(customerId: string): Promise<Cust
       .order('fecha', { ascending: false }),
     supabase
       .from('consentimientos')
-      .select('id, titulo, firma_url, fecha_firma, created_at, firmado')
+      .select('id, titulo, firma_url, documento_pdf_url, fecha_firma, created_at, firmado')
       .eq('customer_id', customerId)
-      .not('firma_url', 'is', null),
+      .or('firma_url.not.is.null,documento_pdf_url.not.is.null'),
   ]);
 
   if (logsRes.error) throw logsRes.error;
@@ -171,9 +171,11 @@ export async function fetchCustomerAttachments(customerId: string): Promise<Cust
   }
 
   for (const c of consentRes.data ?? []) {
-    const url = resolveUrl(c.firma_url);
+    const rawPath = c.documento_pdf_url || c.firma_url;
+    const url = resolveUrl(rawPath);
     if (!url) continue;
     const date = toYmd(c.fecha_firma) ?? toYmd(c.created_at) ?? '1970-01-01';
+    const isPdf = /\.pdf(\?|$)/i.test(rawPath ?? '') || (c.documento_pdf_url && !c.firma_url);
     items.push({
       id: `consent:${c.id}`,
       date,
@@ -183,7 +185,7 @@ export async function fetchCustomerAttachments(customerId: string): Promise<Cust
       kind: 'consent',
       source: 'consentimiento',
       sourceLabel: 'Consentimiento',
-      isImage: isCustomerAttachmentImage(url, 'consent'),
+      isImage: isPdf ? false : isCustomerAttachmentImage(url, 'consent'),
       refTable: 'consentimientos',
       refId: c.id,
     });

@@ -9,7 +9,7 @@ $cronSh = Join-Path $repoRoot 'scripts\whatsapp-automation-cron.sh'
 
 Write-Host "Subiendo whatsapp-automation-cron.sh ..." -ForegroundColor Green
 scp $cronSh "${SshTarget}:/usr/local/bin/suite-whatsapp-automation-cron.sh"
-ssh $SshTarget "chmod +x /usr/local/bin/suite-whatsapp-automation-cron.sh"
+ssh $SshTarget "sed -i 's/\r$//' /usr/local/bin/suite-whatsapp-automation-cron.sh && chmod +x /usr/local/bin/suite-whatsapp-automation-cron.sh"
 
 Write-Host "Instalando crontab (*/5) ..." -ForegroundColor Green
 ssh $SshTarget "( crontab -l 2>/dev/null | grep -v suite-whatsapp-automation-cron; echo '*/5 * * * * /usr/local/bin/suite-whatsapp-automation-cron.sh' ) | crontab - && crontab -l | grep whatsapp-automation"
