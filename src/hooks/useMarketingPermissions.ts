@@ -10,30 +10,36 @@ export function useMarketingPermissions() {
   const { user, isSuperuser } = useAuth();
   const { hasPermission, loading } = usePermissions();
 
+  const fetchMarketingPermission = async (action: 'read' | 'write'): Promise<boolean | undefined> => {
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (attempt > 1) {
+        await new Promise((r) => setTimeout(r, 250 * attempt));
+      }
+      const { data, error } = await runWhenAuthReady(() =>
+        supabase.rpc('current_user_has_marketing_permission', { p_action: action }),
+      );
+      if (error) {
+        if (attempt < maxAttempts) continue;
+        return undefined;
+      }
+      return data === true;
+    }
+    return undefined;
+  };
+
   const { data: rpcWrite } = useQuery({
     queryKey: ['marketing-permission-rpc', user?.id, 'write'],
     enabled: !!user && !isSuperuser,
     staleTime: 60_000,
-    queryFn: async () => {
-      const { data, error } = await runWhenAuthReady(() =>
-        supabase.rpc('current_user_has_marketing_permission', { p_action: 'write' }),
-      );
-      if (error) return false;
-      return data === true;
-    },
+    queryFn: () => fetchMarketingPermission('write'),
   });
 
   const { data: rpcRead } = useQuery({
     queryKey: ['marketing-permission-rpc', user?.id, 'read'],
     enabled: !!user && !isSuperuser,
     staleTime: 60_000,
-    queryFn: async () => {
-      const { data, error } = await runWhenAuthReady(() =>
-        supabase.rpc('current_user_has_marketing_permission', { p_action: 'read' }),
-      );
-      if (error) return false;
-      return data === true;
-    },
+    queryFn: () => fetchMarketingPermission('read'),
   });
 
   const canWrite =

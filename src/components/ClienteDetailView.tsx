@@ -148,7 +148,7 @@ export const ClienteDetailView: React.FC<Props> = ({
       <Tabs value={tab} onValueChange={setTab} className="w-full">
         <TabsList
           className={cn(
-            'w-full grid grid-cols-4 sm:grid-cols-7 bg-sky-50/50 dark:bg-sky-950/20 border border-sky-100/50 dark:border-sky-900/20 rounded-lg p-0.5',
+            'w-full bg-sky-50/50 dark:bg-sky-950/20 border border-sky-100/50 dark:border-sky-900/20 rounded-lg p-0.5',
             compact && 'h-8',
           )}
         >

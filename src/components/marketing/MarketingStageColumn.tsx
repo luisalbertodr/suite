@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { MarketingLeadCardSlot } from './MarketingLeadCardSlot';
+import { isMarketingLeadUnread } from '@/hooks/useMarketingUnread';
 
 interface MarketingStageColumnProps {
   stage: MarketingLeadStage;
@@ -24,7 +25,7 @@ interface MarketingStageColumnProps {
   matchedCustomerByLead: Map<string, CustomerLookupRow | null>;
   noteCountByLead: Record<string, number>;
   notePreviewsByLead: Record<string, MarketingLeadNotePreview[]>;
-  viewedLeadIds: Set<string>;
+  waQueuePendingLeadIds?: Set<string>;
   onLeadClickById: (leadId: string) => void;
   onOpenCustomer: (customerId: string) => void;
   onLeadOpenNotesById: (leadId: string) => void;
@@ -59,7 +60,7 @@ export const MarketingStageColumn = memo(function MarketingStageColumn({
   matchedCustomerByLead,
   noteCountByLead,
   notePreviewsByLead,
-  viewedLeadIds,
+  waQueuePendingLeadIds,
   onLeadClickById,
   onLeadOpenNotesById,
   onLeadPromoteById,
@@ -232,7 +233,8 @@ export const MarketingStageColumn = memo(function MarketingStageColumn({
                     noteCount={noteCountByLead[lead.id] ?? 0}
                     notePreviews={notePreviewsByLead[lead.id] ?? []}
                     isDragging={draggedLeadId === lead.id}
-                    isUnread={!viewedLeadIds.has(lead.id)}
+                    isUnread={isMarketingLeadUnread(lead)}
+                    waQueuePending={waQueuePendingLeadIds?.has(lead.id) ?? false}
                     onLeadClick={onLeadClickById}
                     onOpenCustomer={onOpenCustomer}
                     onLeadOpenNotes={onLeadOpenNotesById}

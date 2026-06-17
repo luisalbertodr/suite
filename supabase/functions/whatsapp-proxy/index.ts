@@ -36,6 +36,14 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
+/** Evita colgar hasta que Kong/runtime devuelva 504 sin cabeceras CORS. */
+const WAHA_FETCH_TIMEOUT_MS = 25_000;
+
+// deno-lint-ignore no-explicit-any
+const edgeRuntime: { waitUntil?: (p: Promise<unknown>) => void } | undefined =
+  // deno-lint-ignore no-explicit-any
+  (globalThis as any).EdgeRuntime;
+
 type WhatsappConfig = {
   company_id: string;
   base_url: string | null;
@@ -223,7 +231,20 @@ async function wahaFetch(
     headers.set('Content-Type', 'application/json');
   }
   const url = `${trimSlash(cfg.base_url)}${path}`;
-  return await fetch(url, { ...init, headers });
+  try {
+    return await fetch(url, {
+      ...init,
+      headers,
+      signal: AbortSignal.timeout(WAHA_FETCH_TIMEOUT_MS),
+    });
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'TimeoutError') {
+      throw new Error(
+        `Waha no respondió en ${Math.round(WAHA_FETCH_TIMEOUT_MS / 1000)}s (${path}). Compruebe que el servicio WAHA está activo.`,
+      );
+    }
+    throw e;
+  }
 }
 
 class WahaError extends Error {
@@ -1847,19 +1868,28 @@ serve(async (req) => {
             .from('whatsapp_chats')
             .upsert(rows, { onConflict: 'company_id,chat_id' });
 
-          // Intentamos auto-vincular cada chat con cliente/lead. Lo hacemos en
-          // serie para no saturar PG, pero sin frenar la respuesta más de unos
-          // milisegundos por chat.
-          for (const c of data) {
-            const chatId = String(c.id ?? '');
-            if (isSystemChatJid(chatId)) continue;
-            try {
-              await admin.rpc('whatsapp_auto_link_chat', {
-                p_company_id: companyId,
-                p_chat_id: chatId,
-              });
-            } catch {
-              // Ignorar: solo es una mejora opcional
+          // Auto-vincular en segundo plano (máx. 10) — no bloquear la respuesta HTTP.
+          const linkIds = data
+            .map((c) => String(c.id ?? ''))
+            .filter((id) => !isSystemChatJid(id))
+            .slice(0, 10);
+          if (linkIds.length > 0) {
+            const linkTask = (async () => {
+              for (const chatId of linkIds) {
+                try {
+                  await admin.rpc('whatsapp_auto_link_chat', {
+                    p_company_id: companyId,
+                    p_chat_id: chatId,
+                  });
+                } catch {
+                  // opcional
+                }
+              }
+            })();
+            if (edgeRuntime?.waitUntil) {
+              edgeRuntime.waitUntil(linkTask);
+            } else {
+              linkTask.catch(() => undefined);
             }
           }
         }
@@ -2599,6 +2629,8 @@ serve(async (req) => {
     }
     const msg = e instanceof Error ? e.message : 'Error inesperado';
     console.error('whatsapp-proxy unhandled error:', msg, e);
-    return err(msg, 500);
+    const status =
+      msg.includes('no respondió en') || /timeout/i.test(msg) ? 504 : 500;
+    return err(msg, status);
   }
 });

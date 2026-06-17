@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { format, parseISO, subDays } from 'date-fns';
+import { format, parseISO, subDays, addDays } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { Loader2, Images, Calendar, CheckSquare, Square, Video } from 'lucide-react';
+import { Loader2, Images, Calendar, CheckSquare, Square, Video, ChevronDown, ChevronUp } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -62,6 +62,14 @@ function formatDayLabel(ymd: string): string {
 
 function previousYmd(ymd: string): string {
   return format(subDays(parseISO(`${ymd}T12:00:00`), 1), 'yyyy-MM-dd');
+}
+
+function nextYmd(ymd: string): string {
+  return format(addDays(parseISO(`${ymd}T12:00:00`), 1), 'yyyy-MM-dd');
+}
+
+function sortDayGroupsDesc(groups: DayGroup[]): DayGroup[] {
+  return [...groups].sort((a, b) => b.date.localeCompare(a.date));
 }
 
 function ImmichAssetThumb({
@@ -140,15 +148,21 @@ export const ImmichImportDialog: React.FC<Props> = ({
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const scrollRef = useRef<HTMLDivElement>(null);
-  const loadingMoreRef = useRef(false);
+  const loadOlderSentinelRef = useRef<HTMLDivElement>(null);
+  const loadNewerSentinelRef = useRef<HTMLDivElement>(null);
+  const loadingOlderRef = useRef(false);
+  const loadingNewerRef = useRef(false);
 
   const [anchorDate, setAnchorDate] = useState(todayYmd);
   const [anchorReady, setAnchorReady] = useState(false);
   const [dayGroups, setDayGroups] = useState<DayGroup[]>([]);
   const [oldestLoadedDate, setOldestLoadedDate] = useState<string | null>(null);
+  const [newestLoadedDate, setNewestLoadedDate] = useState<string | null>(null);
   const [loadingInitial, setLoadingInitial] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [loadingNewer, setLoadingNewer] = useState(false);
+  const [hasMoreOlder, setHasMoreOlder] = useState(true);
+  const [hasMoreNewer, setHasMoreNewer] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [importing, setImporting] = useState(false);
@@ -172,10 +186,13 @@ export const ImmichImportDialog: React.FC<Props> = ({
   const resetFeed = useCallback(() => {
     setDayGroups([]);
     setOldestLoadedDate(null);
-    setHasMore(true);
+    setNewestLoadedDate(null);
+    setHasMoreOlder(true);
+    setHasMoreNewer(false);
     setLoadError(null);
     setSelected(new Set());
-    loadingMoreRef.current = false;
+    loadingOlderRef.current = false;
+    loadingNewerRef.current = false;
   }, []);
 
   const loadAnchorDay = useCallback(
@@ -187,7 +204,9 @@ export const ImmichImportDialog: React.FC<Props> = ({
         const group = await loadDay(ymd);
         setDayGroups([group]);
         setOldestLoadedDate(ymd);
-        setHasMore(true);
+        setNewestLoadedDate(ymd);
+        setHasMoreOlder(true);
+        setHasMoreNewer(ymd < todayYmd());
       } catch (e) {
         setLoadError((e as Error).message || 'Error al cargar Immich');
         setDayGroups([]);
@@ -199,9 +218,9 @@ export const ImmichImportDialog: React.FC<Props> = ({
   );
 
   const appendOlderDays = useCallback(async () => {
-    if (loadingMoreRef.current || !hasMore || !oldestLoadedDate) return;
-    loadingMoreRef.current = true;
-    setLoadingMore(true);
+    if (loadingOlderRef.current || !hasMoreOlder || !oldestLoadedDate) return;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
     try {
       let cursor = oldestLoadedDate;
       let emptyStreak = 0;
@@ -219,19 +238,70 @@ export const ImmichImportDialog: React.FC<Props> = ({
       }
 
       if (appended.length > 0) {
-        setDayGroups((prev) => [...prev, ...appended]);
+        setDayGroups((prev) => sortDayGroupsDesc([...prev, ...appended]));
         setOldestLoadedDate(appended[appended.length - 1].date);
       }
       if (emptyStreak >= MAX_EMPTY_DAYS_BEFORE_STOP) {
-        setHasMore(false);
+        setHasMoreOlder(false);
       }
     } catch (e) {
-      setLoadError((e as Error).message || 'Error al cargar más días');
+      setLoadError((e as Error).message || 'Error al cargar días anteriores');
     } finally {
-      setLoadingMore(false);
-      loadingMoreRef.current = false;
+      setLoadingOlder(false);
+      loadingOlderRef.current = false;
     }
-  }, [hasMore, oldestLoadedDate, loadDay]);
+  }, [hasMoreOlder, oldestLoadedDate, loadDay]);
+
+  const prependNewerDays = useCallback(async () => {
+    if (loadingNewerRef.current || !hasMoreNewer || !newestLoadedDate) return;
+    if (newestLoadedDate >= todayYmd()) {
+      setHasMoreNewer(false);
+      return;
+    }
+    loadingNewerRef.current = true;
+    setLoadingNewer(true);
+    try {
+      let cursor = newestLoadedDate;
+      let emptyStreak = 0;
+      const prepended: DayGroup[] = [];
+
+      while (emptyStreak < MAX_EMPTY_DAYS_BEFORE_STOP && cursor < todayYmd()) {
+        cursor = nextYmd(cursor);
+        const group = await loadDay(cursor);
+        if (group.assets.length > 0) {
+          prepended.push(group);
+          emptyStreak = 0;
+          break;
+        }
+        emptyStreak += 1;
+        if (cursor >= todayYmd()) break;
+      }
+
+      if (prepended.length > 0) {
+        const newest = prepended[0].date;
+        setDayGroups((prev) => sortDayGroupsDesc([...prepended, ...prev]));
+        setNewestLoadedDate(newest);
+        setHasMoreNewer(newest < todayYmd());
+      } else if (cursor >= todayYmd() || emptyStreak >= MAX_EMPTY_DAYS_BEFORE_STOP) {
+        setHasMoreNewer(false);
+      }
+    } catch (e) {
+      setLoadError((e as Error).message || 'Error al cargar días posteriores');
+    } finally {
+      setLoadingNewer(false);
+      loadingNewerRef.current = false;
+    }
+  }, [hasMoreNewer, newestLoadedDate, loadDay]);
+
+  /** Si el contenido no llena el scroll, cargar más días automáticamente. */
+  const ensureScrollableFeed = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el || loadingInitial || loadingOlder || loadingNewer) return;
+    const needsMore = el.scrollHeight <= el.clientHeight + SCROLL_LOAD_THRESHOLD_PX;
+    if (needsMore && hasMoreOlder) {
+      void appendOlderDays();
+    }
+  }, [appendOlderDays, hasMoreOlder, loadingInitial, loadingOlder, loadingNewer]);
 
   useEffect(() => {
     if (!open) {
@@ -270,14 +340,46 @@ export const ImmichImportDialog: React.FC<Props> = ({
     void loadAnchorDay(anchorDate);
   }, [open, anchorReady, anchorDate, loadAnchorDay]);
 
+  useEffect(() => {
+    if (!open || !anchorReady || loadingInitial) return;
+    const t = window.setTimeout(() => ensureScrollableFeed(), 80);
+    return () => window.clearTimeout(t);
+  }, [open, anchorReady, loadingInitial, dayGroups, ensureScrollableFeed]);
+
+  useEffect(() => {
+    if (!open || loadingInitial) return;
+    const root = scrollRef.current;
+    const olderTarget = loadOlderSentinelRef.current;
+    const newerTarget = loadNewerSentinelRef.current;
+    if (!root) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          if (entry.target === olderTarget) void appendOlderDays();
+          if (entry.target === newerTarget) void prependNewerDays();
+        }
+      },
+      { root, rootMargin: '120px', threshold: 0 },
+    );
+
+    if (olderTarget) observer.observe(olderTarget);
+    if (newerTarget) observer.observe(newerTarget);
+    return () => observer.disconnect();
+  }, [open, loadingInitial, appendOlderDays, prependNewerDays, dayGroups.length, hasMoreOlder, hasMoreNewer]);
+
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
-    if (!el || loadingInitial || loadingMore || !hasMore) return;
+    if (!el || loadingInitial || loadingOlder || loadingNewer) return;
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-    if (distance < SCROLL_LOAD_THRESHOLD_PX) {
+    if (distance < SCROLL_LOAD_THRESHOLD_PX && hasMoreOlder) {
       void appendOlderDays();
     }
-  }, [appendOlderDays, hasMore, loadingInitial, loadingMore]);
+    if (el.scrollTop < SCROLL_LOAD_THRESHOLD_PX && hasMoreNewer) {
+      void prependNewerDays();
+    }
+  }, [appendOlderDays, prependNewerDays, hasMoreOlder, hasMoreNewer, loadingInitial, loadingOlder, loadingNewer]);
 
   const toggleAll = useCallback(() => {
     if (selected.size === allAssets.length) {
@@ -355,7 +457,10 @@ export const ImmichImportDialog: React.FC<Props> = ({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         overlayClassName={dialogLayerClass}
-        className={cn(dialogLayerClass, 'max-w-2xl max-h-[90vh] flex flex-col overflow-hidden')}
+        className={cn(
+          dialogLayerClass,
+          'max-w-2xl max-h-[90vh] w-[calc(100%-2rem)] !flex !flex-col gap-3 overflow-hidden p-4 sm:p-6',
+        )}
       >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -363,9 +468,8 @@ export const ImmichImportDialog: React.FC<Props> = ({
             Importar desde Immich
           </DialogTitle>
           <DialogDescription>
-            Fotos y vídeos desde el día elegido hacia atrás. Desplázate hacia abajo para cargar días
-            anteriores. Se adjuntan a{' '}
-            <span className="font-medium text-foreground">{customerLabel}</span>.
+            Fotos y vídeos por día. Desplázate o usa los botones para ver días anteriores y posteriores. Se
+            adjuntan a <span className="font-medium text-foreground">{customerLabel}</span>.
           </DialogDescription>
         </DialogHeader>
 
@@ -394,23 +498,59 @@ export const ImmichImportDialog: React.FC<Props> = ({
           </Button>
         </div>
 
-        <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground shrink-0">
           <span>
             {loadingInitial
               ? 'Cargando…'
               : `${totalFiles} archivo(s) en ${dayGroups.length} día(s) · ${selected.size} seleccionado(s)`}
           </span>
-          {totalFiles > 0 ? (
-            <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={toggleAll}>
-              {selected.size === totalFiles ? 'Quitar selección' : 'Seleccionar todos'}
-            </Button>
-          ) : null}
+          <div className="flex items-center gap-1">
+            {hasMoreNewer ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs gap-1"
+                disabled={loadingNewer}
+                onClick={() => void prependNewerDays()}
+              >
+                {loadingNewer ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <ChevronUp className="h-3.5 w-3.5" />
+                )}
+                Días posteriores
+              </Button>
+            ) : null}
+            {hasMoreOlder ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs gap-1"
+                disabled={loadingOlder}
+                onClick={() => void appendOlderDays()}
+              >
+                {loadingOlder ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <ChevronDown className="h-3.5 w-3.5" />
+                )}
+                Días anteriores
+              </Button>
+            ) : null}
+            {totalFiles > 0 ? (
+              <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={toggleAll}>
+                {selected.size === totalFiles ? 'Quitar selección' : 'Seleccionar todos'}
+              </Button>
+            ) : null}
+          </div>
         </div>
 
         <div
           ref={scrollRef}
           onScroll={handleScroll}
-          className="flex-1 min-h-0 overflow-y-auto rounded-md border p-2 max-h-[min(58vh,520px)]"
+          className="min-h-[280px] h-[min(58vh,520px)] shrink-0 overflow-y-auto overscroll-y-contain rounded-md border p-2"
         >
           {loadError ? (
             <p className="text-sm text-destructive p-4 text-center">{loadError}</p>
@@ -425,7 +565,18 @@ export const ImmichImportDialog: React.FC<Props> = ({
             </p>
           ) : (
             <div className="space-y-4">
-              {dayGroups.map((group) => (
+              <div ref={loadNewerSentinelRef} className="flex justify-center py-1 min-h-[1px]">
+                {loadingNewer ? (
+                  <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Cargando días posteriores…
+                  </span>
+                ) : hasMoreNewer ? (
+                  <span className="text-[11px] text-muted-foreground">↑ Desplázate arriba o pulsa «Días posteriores»</span>
+                ) : null}
+              </div>
+
+              {sortDayGroupsDesc(dayGroups).map((group) => (
                 <section key={group.date}>
                   <h3 className="text-xs font-semibold text-foreground capitalize sticky top-0 z-[1] bg-background/95 backdrop-blur py-1.5 mb-2 border-b border-border/40">
                     {formatDayLabel(group.date)}
@@ -457,16 +608,16 @@ export const ImmichImportDialog: React.FC<Props> = ({
                 </section>
               ))}
 
-              <div className="flex justify-center py-3 text-xs text-muted-foreground">
-                {loadingMore ? (
+              <div ref={loadOlderSentinelRef} className="flex justify-center py-3 min-h-[1px] text-xs text-muted-foreground">
+                {loadingOlder ? (
                   <span className="inline-flex items-center gap-2">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Cargando días anteriores…
                   </span>
-                ) : hasMore ? (
-                  'Desplázate para cargar días anteriores'
+                ) : hasMoreOlder ? (
+                  '↓ Desplázate abajo o pulsa «Días anteriores»'
                 ) : (
-                  'No hay más días con archivos'
+                  'No hay más días con archivos hacia atrás'
                 )}
               </div>
             </div>

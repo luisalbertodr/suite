@@ -92,7 +92,7 @@ echo Style portable: %CD%
 echo Sync embebido en Duna.exe — log: Usuarios\_suite_sync.log
 echo.
 
-start "" "%STYLE_HOME%Duna.exe"
+start "" /D "%STYLE_HOME%" "%STYLE_HOME%Duna.exe"
 '@
 
 # DLLs VFP9 habituales (se completan con las encontradas en origen / VFP9).

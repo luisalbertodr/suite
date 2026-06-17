@@ -33,7 +33,7 @@ import {
   type MetaSyncResponse,
 } from '@/hooks/useMetaConfig';
 import {
-  useMarketingLeadViewedSet,
+  isMarketingLeadUnread,
   useMarkMarketingLeadViewed,
 } from '@/hooks/useMarketingUnread';
 import {
@@ -53,6 +53,8 @@ import { useRegisterTopBarContent } from '@/components/TopBarContentContext';
 import { useMarketingPermissions } from '@/hooks/useMarketingPermissions';
 import { MarketingSearchInput } from './marketing/MarketingSearchInput';
 import { MarketingWhatsappQueueTab } from './marketing/MarketingWhatsappQueueTab';
+import { useMarketingWhatsappQueue } from '@/hooks/useMarketingWhatsappQueue';
+import { findMarketingIntakeStage } from '@/lib/marketingIntakeStage';
 
 const COLLAPSED_STAGES_STORAGE_KEY = 'marketing-kanban-collapsed-stage-ids';
 const COMPACT_CARDS_STORAGE_KEY = 'marketing-kanban-compact-cards';
@@ -96,8 +98,26 @@ export const Marketing: React.FC = () => {
   const { config: metaConfig, forms: metaForms, syncNow } = useMetaConfig(marketingCompanyIdStable);
   const { data: notesIndex } = useMarketingLeadNotesIndex(marketingCompanyIdStable);
   const { index: customerIndex } = useCustomerLookup();
-  const { viewedLeadIds } = useMarketingLeadViewedSet(marketingCompanyIdStable);
   const markLeadViewed = useMarkMarketingLeadViewed();
+  const { queueRows } = useMarketingWhatsappQueue(marketingCompanyIdStable);
+  const intakeStageId = useMemo(
+    () => findMarketingIntakeStage(stages ?? [])?.id ?? null,
+    [stages],
+  );
+  const waQueuePendingLeadIds = useMemo(
+    () =>
+      new Set(
+        queueRows
+          .filter(
+            (row) =>
+              row.status === 'pending' &&
+              intakeStageId &&
+              row.marketing_leads?.stage_id === intakeStageId,
+          )
+          .map((row) => row.marketing_lead_id),
+      ),
+    [queueRows, intakeStageId],
+  );
 
   const [filterQuery, setFilterQuery] = useState('');
   const [sortField, setSortField] = useState<SortField>('external_created_at');
@@ -378,26 +398,26 @@ export const Marketing: React.FC = () => {
     (leadId: string) => {
       const lead = leadsRef.current.find((l) => l.id === leadId);
       if (!lead) return;
-      if (lead.company_id && !viewedLeadIds.has(lead.id)) {
+      if (lead.company_id && isMarketingLeadUnread(lead)) {
         markLeadViewed.mutate({ leadId: lead.id, companyId: lead.company_id });
       }
       prefetchLeadNotes(lead);
       setActiveLead(lead);
     },
-    [viewedLeadIds, markLeadViewed, prefetchLeadNotes],
+    [markLeadViewed, prefetchLeadNotes],
   );
 
   const handleLeadOpenNotesById = useCallback(
     (leadId: string) => {
       const lead = leadsRef.current.find((l) => l.id === leadId);
       if (!lead) return;
-      if (lead.company_id && !viewedLeadIds.has(lead.id)) {
+      if (lead.company_id && isMarketingLeadUnread(lead)) {
         markLeadViewed.mutate({ leadId: lead.id, companyId: lead.company_id });
       }
       prefetchLeadNotes(lead);
       setNotesLead(lead);
     },
-    [viewedLeadIds, markLeadViewed, prefetchLeadNotes],
+    [markLeadViewed, prefetchLeadNotes],
   );
 
   const handleLeadPromoteById = useCallback((leadId: string) => {
@@ -616,7 +636,7 @@ export const Marketing: React.FC = () => {
                   matchedCustomerByLead={matchedCustomerByLead}
                   noteCountByLead={notesIndex?.counts ?? {}}
                   notePreviewsByLead={notesIndex?.previews ?? {}}
-                  viewedLeadIds={viewedLeadIds}
+                  waQueuePendingLeadIds={waQueuePendingLeadIds}
                   collapsed={collapsedStageIds.has(stage.id)}
                   compact={compactCards}
                   onToggleCollapsed={() => toggleStageColumnCollapsed(stage.id)}

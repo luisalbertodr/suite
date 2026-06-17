@@ -18,7 +18,21 @@ SET MULTILOCKS ON
 SET DEFAULT TO (lcRoot)
 SET PATH TO (lcProgs), (lcRoot+"vcx"), (lcRoot+"scx"), (lcRoot+"MENUS"), (lcRoot+"gestion-dunasoft\gestion\vcx") ADDITIVE
 
-STRTOFILE("=== VfpBuildProject "+TTOC(DATETIME())+" ==="+CHR(13), lcLog, .T.)
+* Evitar dialogo "overwrite build_mscomctl.log?" en BUILD PROJECT
+IF FILE(lcLog)
+   ERASE (lcLog)
+ENDIF
+IF FILE(lcErr)
+   ERASE (lcErr)
+ENDIF
+IF FILE(lcProgs + "suite_full_unlock.fxp")
+   ERASE (lcProgs + "suite_full_unlock.fxp")
+ENDIF
+IF FILE(lcProgs + "suite_full_unlock.FXP")
+   ERASE (lcProgs + "suite_full_unlock.FXP")
+ENDIF
+
+STRTOFILE("=== VfpBuildProject "+TTOC(DATETIME())+" ==="+CHR(13), lcLog, .F.)
 
 IF .NOT. FILE(lcRoot+"mscomctl.pjx")
    MESSAGEBOX("No existe mscomctl.pjx. Ejecuta DO PROGS\RepairMscomctlFromLfn.prg", 16, "Build Duna")

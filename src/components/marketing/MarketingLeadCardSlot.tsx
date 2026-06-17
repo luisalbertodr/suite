@@ -16,6 +16,7 @@ type MarketingLeadCardSlotProps = {
   notePreviews: MarketingLeadNotePreview[];
   isDragging: boolean;
   isUnread: boolean;
+  waQueuePending?: boolean;
   onLeadClick: (leadId: string) => void;
   onOpenCustomer: (customerId: string) => void;
   onLeadOpenNotes: (leadId: string) => void;
@@ -35,6 +36,7 @@ export const MarketingLeadCardSlot = memo(function MarketingLeadCardSlot({
   notePreviews,
   isDragging,
   isUnread,
+  waQueuePending = false,
   onLeadClick,
   onOpenCustomer,
   onLeadOpenNotes,
@@ -54,6 +56,7 @@ export const MarketingLeadCardSlot = memo(function MarketingLeadCardSlot({
       notePreviews={notePreviews}
       isDragging={isDragging}
       isUnread={isUnread}
+      waQueuePending={waQueuePending}
       onClick={() => onLeadClick(lead.id)}
       onOpenCustomer={onOpenCustomer}
       onOpenNotes={() => onLeadOpenNotes(lead.id)}

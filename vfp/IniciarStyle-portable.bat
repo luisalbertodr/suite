@@ -26,4 +26,5 @@ echo Style portable: %CD%
 echo Log: Usuarios\_suite_sync.log
 echo.
 
-start "" "%STYLE_HOME%Duna.exe"
+REM /D fija el directorio de trabajo (critico: EMPRESA.DBF, dbf\, SuiteSync.cfg)
+start "" /D "%STYLE_HOME%" "%STYLE_HOME%Duna.exe"

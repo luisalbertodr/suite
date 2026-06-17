@@ -1,19 +1,91 @@
 * Suite: unlock offline + sync Style (componente embebido en duna.exe via ReFox Replace).
 * Solo hace falta SuiteSync.cfg junto al exe. PRG externo = fallback desarrollo.
-
-PUBLIC plSuiteFullUnlock, pcSuiteSyncUrl, pcSuiteSyncToken, pcSuiteSyncMac
-PUBLIC gnSuiteSyncInterval, gnSuiteSyncTimerId, plSuiteSyncBusy, plSuiteSyncEnabled
-PUBLIC pcSuiteStyleRoot, gnSuiteInstanceLockHandle
-plSuiteFullUnlock = .T.
-pcSuiteSyncUrl = ""
-pcSuiteSyncToken = ""
-pcSuiteSyncMac = "STYLE-VM"
-gnSuiteSyncInterval = 30
-gnSuiteSyncTimerId = 0
-plSuiteSyncBusy = .F.
-plSuiteSyncEnabled = .F.
-pcSuiteStyleRoot = ""
-gnSuiteInstanceLockHandle = 0
+* Sin PUBLIC aqui: re-ejecutar SET PROCEDURE TO rompe con "Illegal redefinition".
+**
+PROCEDURE SuiteEnsureSyncGlobals
+ * SET PROCEDURE TO .fxp no ejecuta el bloque PUBLIC superior.
+ * PUBLIC solo si TYPE="U" (evita "Illegal redefinition" con PRIVATE previo).
+ IF TYPE("plSuiteFullUnlock")="U"
+    PUBLIC plSuiteFullUnlock
+    plSuiteFullUnlock = .T.
+ ENDIF
+ IF TYPE("pcSuiteSyncUrl")="U"
+    PUBLIC pcSuiteSyncUrl
+    pcSuiteSyncUrl = ""
+ ENDIF
+ IF TYPE("pcSuiteSyncToken")="U"
+    PUBLIC pcSuiteSyncToken
+    pcSuiteSyncToken = ""
+ ENDIF
+ IF TYPE("pcSuiteSyncMac")="U"
+    PUBLIC pcSuiteSyncMac
+    pcSuiteSyncMac = "STYLE-VM"
+ ENDIF
+ IF TYPE("gnSuiteSyncInterval")="U"
+    PUBLIC gnSuiteSyncInterval
+    gnSuiteSyncInterval = 30
+ ELSE
+    IF TYPE("gnSuiteSyncInterval")="N" AND gnSuiteSyncInterval < 15
+       gnSuiteSyncInterval = 30
+    ENDIF
+ ENDIF
+ IF TYPE("gnSuiteSyncTimerId")="U"
+    PUBLIC gnSuiteSyncTimerId
+    gnSuiteSyncTimerId = 0
+ ENDIF
+ IF TYPE("plSuiteSyncBusy")="U"
+    PUBLIC plSuiteSyncBusy
+    plSuiteSyncBusy = .F.
+ ENDIF
+ IF TYPE("plSuiteSyncEnabled")="U"
+    PUBLIC plSuiteSyncEnabled
+    plSuiteSyncEnabled = .F.
+ ENDIF
+ IF TYPE("pcSuiteStyleRoot")="U"
+    PUBLIC pcSuiteStyleRoot
+    pcSuiteStyleRoot = ""
+ ENDIF
+ IF TYPE("gnSuiteInstanceLockHandle")="U"
+    PUBLIC gnSuiteInstanceLockHandle
+    gnSuiteInstanceLockHandle = 0
+ ENDIF
+ENDPROC
+**
+PROCEDURE SuiteEnsurePlan2009SyncFields
+ * DBF legacy sin columnas Suite: anadir enviar/enviadoand/idand/macand si faltan.
+ LOCAL lcalias, lcpath, llWasOpen
+ lcalias = SELECT()
+ llWasOpen = USED("plan2009")
+ lcpath = SuiteStyleRoot()+"dbf\plan2009"
+ IF  .NOT. FILE(lcpath+".dbf") AND FILE(SuiteStyleRoot()+"plan2009.dbf")
+    lcpath = SuiteStyleRoot()+"plan2009"
+ ENDIF
+ IF  .NOT. FILE(lcpath+".dbf")
+    RETURN
+ ENDIF
+ IF  .NOT. llWasOpen
+    USE EXCLUSIVE (lcpath) ALIAS plan2009 IN 0
+ ENDIF
+ SELECT plan2009
+ IF FIELD("enviar", "plan2009") = 0
+    ALTER TABLE plan2009 ADD COLUMN enviar L
+ ENDIF
+ IF FIELD("enviadoand", "plan2009") = 0
+    ALTER TABLE plan2009 ADD COLUMN enviadoand L
+ ENDIF
+ IF FIELD("idand", "plan2009") = 0
+    ALTER TABLE plan2009 ADD COLUMN idand N (15, 0)
+ ENDIF
+ IF FIELD("macand", "plan2009") = 0
+    ALTER TABLE plan2009 ADD COLUMN macand C (30)
+ ENDIF
+ IF  .NOT. llWasOpen AND USED("plan2009")
+    USE IN plan2009
+ ENDIF
+ IF  .NOT. EMPTY(lcalias)
+    SELECT (lcalias)
+ ENDIF
+ENDPROC
 **
 PROCEDURE SuiteEnsureGlobals
  IF TYPE("pcidioma")#"C"
@@ -147,6 +219,7 @@ PROCEDURE SuiteShutdown
 ENDPROC
 **
 PROCEDURE SuiteApplyFullUnlock
+ DO SuiteEnsureSyncGlobals
  DO SuiteEnsureGlobals
  plSuiteFullUnlock = .T.
  plversiondemo = .F.
@@ -181,12 +254,22 @@ PROCEDURE SuiteApplyFullUnlock
  plverfacturaciononlineclientes = .T.
  plverstockonlinearticulos = .T.
  cfgenviarresumenonline = .F.
- cfgseguridad = .F.
+ * Preservar seguridad/menus/aniversarios de EMPRESA (RESTORE config) si ya estaban activos
+ IF TYPE("cfgseguridad")="L" AND cfgseguridad
+    * mantener .T.
+ ELSE
+    cfgseguridad = .F.
+ ENDIF
+ IF TYPE("cfgnomostrarpantallassinpermiso")#"L"
+    cfgnomostrarpantallassinpermiso = .F.
+ ENDIF
+ IF TYPE("cfgavisaraniversarios")#"L"
+    cfgavisaraniversarios = .T.
+ ENDIF
  cfglicenciaandroid = .F.
  cfglicenciacentralreservas = .F.
  cfgcontabilidad = .T.
  cfgcontabilidaddunasoft = .T.
- cfgnomostrarpantallassinpermiso = .F.
  IF TYPE("policencias") = "O"
     policencias.nlicenciasmaximas = 999
  ENDIF
@@ -225,8 +308,23 @@ PROCEDURE Suite_SyncLog
  STRTOFILE(lcline, lcf, .T.)
 ENDPROC
 **
+PROCEDURE SuiteEnsureUnlockPrgLoaded
+ * VFP prefiere .fxp sobre .prg; el FXP no registra DEFINE CLASS.
+ LOCAL lcRoot, lcPrg
+ lcRoot = SuiteStyleRoot()
+ lcPrg = lcRoot+"PROGS\suite_full_unlock.prg"
+ IF  .NOT. FILE(lcPrg)
+    lcPrg = lcRoot+"suite_full_unlock.prg"
+ ENDIF
+ IF FILE(lcPrg)
+    SET PROCEDURE TO (lcPrg) ADDITIVE
+ ENDIF
+ENDPROC
+**
 PROCEDURE Suite_SyncInit
  LOCAL lcfichero, lcline, lckey, lcval, lccontent, lnlines, i
+ DO SuiteEnsureUnlockPrgLoaded
+ DO SuiteEnsureSyncGlobals
  DO Suite_SyncLog WITH "[INIT-01] Suite_SyncInit entrada"
  lcfichero = SuiteStyleRoot()+"SuiteSync.cfg"
  IF  .NOT. FILE(lcfichero)
@@ -267,6 +365,7 @@ PROCEDURE Suite_SyncInit
  ENDIF
  plSuiteSyncEnabled = .T.
  DO Suite_SyncLog WITH "[INIT-03] cfg OK url="+pcSuiteSyncUrl+" mac="+pcSuiteSyncMac+" interval="+ALLTRIM(STR(gnSuiteSyncInterval))+" file="+lcfichero
+ DO SuiteEnsurePlan2009SyncFields
  DO Suite_SyncStartTimer
  DO Suite_SyncLog WITH "[INIT-05] primer ciclo sync"
  DO Suite_SyncCycle
@@ -274,6 +373,8 @@ ENDPROC
 **
 PROCEDURE Suite_SyncStartTimer
  LOCAL lnsec
+ DO SuiteEnsureUnlockPrgLoaded
+ DO SuiteEnsureSyncGlobals
  IF  .NOT. plSuiteSyncEnabled
     DO Suite_SyncLog WITH "[INIT-06E] timer omitido: plSuiteSyncEnabled=.F."
     RETURN
@@ -290,7 +391,8 @@ PROCEDURE Suite_SyncStartTimer
     DO Suite_SyncLog WITH "[INIT-06] timer reutilizado interval="+ALLTRIM(STR(lnsec))+"s"
     RETURN
  ENDIF
- _SCREEN.AddObject("oSuiteSyncTimer", "SuiteSyncTimer")
+ _SCREEN.AddObject("oSuiteSyncTimer", "Timer")
+ BINDEVENT(_SCREEN.oSuiteSyncTimer, "Timer", "suite_full_unlock", "Suite_SyncCycle")
  _SCREEN.oSuiteSyncTimer.Interval = lnsec * 1000
  _SCREEN.oSuiteSyncTimer.Enabled = .T.
  gnSuiteSyncTimerId = 1
@@ -313,7 +415,7 @@ FUNCTION Suite_HttpPost
     loxml = CREATEOBJECT("MSXML2.ServerXMLHTTP.6.0")
     loxml.open("POST", tcurl, .F.)
     loxml.setRequestHeader("Content-Type", "application/x-www-form-urlencoded")
-    loxml.setTimeouts(15000, 15000, 30000, 60000)
+    loxml.setTimeouts(30000, 30000, 120000, 180000)
     loxml.send(tcbody)
     lcresp = loxml.responseText
     loxml = .NULL.
@@ -329,18 +431,16 @@ ENDFUNC
 **
 FUNCTION Suite_HttpPostOk
  PARAMETER tcurl, tcbody
- LOCAL lcresp
+ LOCAL lcresp, lcu
  lcresp = Suite_HttpPost(tcurl, tcbody)
  IF EMPTY(lcresp)
     RETURN .F.
  ENDIF
- IF AT("ERROR", UPPER(lcresp)) > 0
+ lcu = UPPER(CHRTRAN(ALLTRIM(lcresp), CHR(13)+CHR(10)+CHR(0), ""))
+ IF LEFT(lcu, 5) = "ERROR"
     RETURN .F.
  ENDIF
- IF AT("OK", UPPER(lcresp)) > 0
-    RETURN .T.
- ENDIF
- RETURN .F.
+ RETURN (lcu = "OK" OR LEFT(lcu, 2) = "OK")
 ENDFUNC
 **
 FUNCTION Suite_UrlEncode
@@ -376,6 +476,7 @@ ENDFUNC
 **
 PROCEDURE Suite_SyncCycle
  LOCAL lnSyncLock
+ DO SuiteEnsureSyncGlobals
  IF  .NOT. plSuiteSyncEnabled
     RETURN
  ENDIF
@@ -744,8 +845,17 @@ ENDPROC
 **
 PROCEDURE Suite_SyncPushOne
  PARAMETER tnidplan
- LOCAL lcaccion, lcparams, lcfec, lccamposerv, lcfact, llok
+ LOCAL lcaccion, lcparams, lcfec, lccamposerv, lcfact, llok, lcresp, lcu
+ IF tnidplan <= 0
+    DO Suite_SyncLog WITH "PUSH omitido idplan<=0"
+    RETURN
+ ENDIF
  IF  .NOT. SEEK(tnidplan, "plan2009", "idplan")
+    DO Suite_SyncLog WITH "PUSH omitido idplan="+ALLTRIM(STR(tnidplan))+" no en plan2009"
+    RETURN
+ ENDIF
+ IF EMPTY(plan2009.fecha) OR YEAR(plan2009.fecha) < 1980
+    DO Suite_SyncLog WITH "PUSH omitido idplan="+ALLTRIM(STR(tnidplan))+" fecha invalida"
     RETURN
  ENDIF
  lccamposerv = Suite_BuildServiciosPlan(tnidplan)
@@ -775,7 +885,12 @@ PROCEDURE Suite_SyncPushOne
  lcparams = lcparams+"&"+Suite_FormParam("idand", STR(plan2009.idand))
  lcparams = lcparams+"&"+Suite_FormParam("macand", pcSuiteSyncMac)
  lcparams = lcparams+"&"+Suite_FormParam("modificado", STR(Suite_TsToEpoch(DATETIME())))
- llok = Suite_HttpPostOk(pcSuiteSyncUrl, lcparams)
+ lcresp = Suite_HttpPost(pcSuiteSyncUrl, lcparams)
+ llok = .F.
+ IF  .NOT. EMPTY(lcresp)
+    lcu = UPPER(CHRTRAN(ALLTRIM(lcresp), CHR(13)+CHR(10)+CHR(0), ""))
+    llok = (LEFT(lcu, 5) <> "ERROR" AND (lcu = "OK" OR LEFT(lcu, 2) = "OK"))
+ ENDIF
  IF llok
     DO Suite_SyncLog WITH "PUSH ok idplan="+ALLTRIM(STR(tnidplan))
     IF RLOCK("plan2009")
@@ -783,7 +898,7 @@ PROCEDURE Suite_SyncPushOne
      UNLOCK IN plan2009
     ENDIF
  ELSE
-    DO Suite_SyncLog WITH "PUSH fallo idplan="+ALLTRIM(STR(tnidplan))
+    DO Suite_SyncLog WITH "PUSH fallo idplan="+ALLTRIM(STR(tnidplan))+" resp="+LEFT(ALLTRIM(lcresp), 120)
  ENDIF
 ENDPROC
 **
@@ -821,47 +936,6 @@ PROCEDURE Suite_SyncPushDelete
  llok = Suite_HttpPostOk(pcSuiteSyncUrl, lcparams)
  DO SuiteSyncReleaseLock WITH lnSyncLock
 ENDPROC
-**
-DEFINE CLASS SuiteSyncTimer AS Timer
- Interval = 30000
- Enabled = .F.
-**
- PROCEDURE Timer
-  DO Suite_SyncCycle
- ENDPROC
-ENDDEFINE
-**
-DEFINE CLASS licencias_unlock AS licencias
- nlicenciasmaximas = 999
- msgerror = ""
- nhandlelicencia = 0
-**
- FUNCTION compruebalicencias
-  RETURN .T.
- ENDFUNC
-**
- FUNCTION entrausuario
-  LOCAL lcruta, lcfichero, lcnompc, lcsess
-  lcruta = ADDBS(SuiteStyleRoot())+"Usuarios\"
-  IF .NOT. DIRECTORY(lcruta)
-     MD (lcruta)
-  ENDIF
-  lcnompc = SuiteIdUser()
-  lcsess = ALLTRIM(STR(_SCREEN.HWnd))
-  lcfichero = lcruta + lcnompc + "_" + lcsess + ".lic"
-  STRTOFILE("", lcfichero)
-  this.nhandlelicencia = FOPEN(lcfichero, 2)
-  RETURN .T.
- ENDFUNC
-**
- FUNCTION saleusuario
-  IF this.nhandlelicencia > 0
-     = FCLOSE(this.nhandlelicencia)
-     this.nhandlelicencia = 0
-  ENDIF
-  RETURN .T.
- ENDFUNC
-ENDDEFINE
 **
 DEFINE CLASS httpasp_local AS Custom
  httpweb = ""
@@ -904,17 +978,22 @@ FUNCTION SuiteCreateHttp
  llFail = .F.
  lcSavErr = ON("ERROR")
  ON ERROR llFail = .T.
- SET PROCEDURE TO suite_full_unlock ADDITIVE
- lo = CREATEOBJECT("httpasp_local")
- IF llFail OR VARTYPE(lo)#"O"
-    llFail = .F.
-    lcRoot = SuiteStyleRoot()
-    lcPrg = lcRoot+"PROGS\suite_full_unlock.prg"
+ lcRoot = IIF(TYPE("pcSuiteStyleRoot")="C" .AND. .NOT. EMPTY(pcSuiteStyleRoot), ADDBS(pcSuiteStyleRoot), ADDBS(SYS(5)+SYS(2003)))
+ lcPrg = lcRoot+"PROGS\suite_full_unlock.prg"
+ IF  .NOT. FILE(lcPrg)
+    lcPrg = lcRoot+"suite_full_unlock.prg"
+ ENDIF
+ IF TYPE("SuiteEnsureSyncGlobals")="U"
     IF FILE(lcPrg)
        SET PROCEDURE TO (lcPrg) ADDITIVE
-       lo = CREATEOBJECT("httpasp_local")
+    ELSE
+       SET PROCEDURE TO suite_full_unlock ADDITIVE
     ENDIF
  ENDIF
+ IF TYPE("SuiteEnsureSyncGlobals")#"U"
+    DO SuiteEnsureSyncGlobals
+ ENDIF
+ lo = CREATEOBJECT("httpasp_local")
  ON ERROR &lcSavErr
  RETURN lo
 ENDFUNC

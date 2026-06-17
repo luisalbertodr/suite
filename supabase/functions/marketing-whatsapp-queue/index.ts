@@ -2,9 +2,11 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { loadAutomationSettings } from '../_shared/whatsappAutomationDispatch.ts';
 import {
-  enqueueEligibleMarketingLeads,
+  enqueueMarketingLeadsById,
   getMarketingWhatsappQueueStats,
+  listEligibleMarketingLeadsForQueue,
   resendWelcomeWhatsappForLeads,
+  sendQueueLeadNow,
   type MarketingWhatsappQueueSettings,
 } from '../_shared/marketingWhatsappQueue.ts';
 
@@ -22,8 +24,9 @@ const json = (body: unknown, status = 200) =>
   });
 
 type Body = {
-  action?: 'stats' | 'enqueue_all' | 'cancel' | 'resend_welcome';
+  action?: 'stats' | 'list_eligible' | 'enqueue' | 'cancel' | 'send_now' | 'resend_welcome';
   company_id?: string;
+  queue_id?: string;
   queue_ids?: string[];
   lead_ids?: string[];
 };
@@ -112,10 +115,18 @@ serve(async (req) => {
     return json({ ok: true, ...stats });
   }
 
-  if (action === 'enqueue_all') {
-    const result = await enqueueEligibleMarketingLeads(
+  if (action === 'list_eligible') {
+    const leads = await listEligibleMarketingLeadsForQueue(admin, companyId);
+    return json({ ok: true, leads });
+  }
+
+  if (action === 'enqueue') {
+    const leadIds = (body.lead_ids ?? []).filter(Boolean);
+    if (leadIds.length === 0) return json({ error: 'lead_ids vacío' }, 400);
+    const result = await enqueueMarketingLeadsById(
       admin,
       companyId,
+      leadIds,
       userData.user.id,
     );
     const stats = await getMarketingWhatsappQueueStats(admin, companyId, settings);
@@ -134,6 +145,14 @@ serve(async (req) => {
     if (error) return json({ error: error.message }, 500);
     const stats = await getMarketingWhatsappQueueStats(admin, companyId, settings);
     return json({ ok: true, cancelled: ids.length, stats });
+  }
+
+  if (action === 'send_now') {
+    const queueId = body.queue_id?.trim();
+    if (!queueId) return json({ error: 'queue_id vacío' }, 400);
+    const result = await sendQueueLeadNow(admin, companyId, queueId, settings);
+    const stats = await getMarketingWhatsappQueueStats(admin, companyId, settings);
+    return json({ ...result, stats });
   }
 
   if (action === 'resend_welcome') {

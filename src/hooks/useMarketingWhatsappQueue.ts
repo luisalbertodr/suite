@@ -12,6 +12,17 @@ export type MarketingWhatsappQueueStats = {
   hour_end: number;
 };
 
+export type EligibleQueueLead = {
+  id: string;
+  first_name: string | null;
+  last_name: string | null;
+  phone: string | null;
+  form_name: string | null;
+  campaign: string | null;
+  external_created_at: string | null;
+  created_at: string;
+};
+
 export type MarketingWhatsappQueueRow = {
   id: string;
   status: string;
@@ -29,6 +40,7 @@ export type MarketingWhatsappQueueRow = {
     created_at: string;
     wa_automation_status: string;
     wa_automation_error: string | null;
+    stage_id: string | null;
   } | null;
 };
 
@@ -84,33 +96,48 @@ export function useMarketingWhatsappQueue(companyId: string | null | undefined) 
             external_created_at,
             created_at,
             wa_automation_status,
-            wa_automation_error
+            wa_automation_error,
+            stage_id
           )
         `,
         )
         .eq('company_id', companyId!)
-        .order('queued_at', { ascending: true })
+        .order('queued_at', { ascending: false })
         .limit(500);
       if (error) throw error;
       return (data ?? []) as MarketingWhatsappQueueRow[];
     },
   });
 
-  const enqueueAll = useMutation({
-    mutationFn: async () => {
+  const fetchEligibleLeads = useQuery({
+    queryKey: ['marketing-whatsapp-queue-eligible', companyId],
+    enabled: false,
+    queryFn: async () => {
+      const data = await invokeQueue<{ ok: boolean; leads: EligibleQueueLead[] }>({
+        action: 'list_eligible',
+        company_id: companyId,
+      });
+      return data.leads ?? [];
+    },
+  });
+
+  const enqueueLeads = useMutation({
+    mutationFn: async (leadIds: string[]) => {
       return invokeQueue<{
         ok: boolean;
         enqueued: number;
         skipped: number;
         stats: MarketingWhatsappQueueStats;
       }>({
-        action: 'enqueue_all',
+        action: 'enqueue',
         company_id: companyId,
+        lead_ids: leadIds,
       });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['marketing-whatsapp-queue-stats', companyId] });
       queryClient.invalidateQueries({ queryKey: ['marketing-whatsapp-queue-list', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['marketing-whatsapp-queue-eligible', companyId] });
     },
   });
 
@@ -125,6 +152,31 @@ export function useMarketingWhatsappQueue(companyId: string | null | undefined) 
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['marketing-whatsapp-queue-stats', companyId] });
       queryClient.invalidateQueries({ queryKey: ['marketing-whatsapp-queue-list', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['marketing-whatsapp-queue-eligible', companyId] });
+    },
+  });
+
+  const sendNow = useMutation({
+    mutationFn: async (queueId: string) => {
+      const data = await invokeQueue<{
+        ok: boolean;
+        send_error?: string;
+        stats: MarketingWhatsappQueueStats;
+      }>({
+        action: 'send_now',
+        company_id: companyId,
+        queue_id: queueId,
+      });
+      if (!data.ok) {
+        throw new Error(data.send_error ?? 'No se pudo enviar el WhatsApp');
+      }
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['marketing-whatsapp-queue-stats', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['marketing-whatsapp-queue-list', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['marketing-whatsapp-queue-eligible', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['marketing-leads', companyId] });
     },
   });
 
@@ -133,8 +185,10 @@ export function useMarketingWhatsappQueue(companyId: string | null | undefined) 
     statsLoading: statsQuery.isLoading,
     queueRows: listQuery.data ?? [],
     queueLoading: listQuery.isLoading,
-    enqueueAll,
+    fetchEligibleLeads,
+    enqueueLeads,
     cancelPending,
+    sendNow,
     refetch: () => {
       statsQuery.refetch();
       listQuery.refetch();

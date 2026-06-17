@@ -9,7 +9,7 @@ SET SAFETY OFF
 SET DEFAULT TO (lcRoot)
 STRTOFILE("=== VfpCompilePrgs "+TTOC(DATETIME())+" ==="+CHR(13), lcLog, .F.)
 
-lcList = "general,funciones,suite_full_unlock"
+lcList = "general,funciones"
 FOR lnI = 1 TO GETWORDCOUNT(lcList, ",")
    lcBase = GETWORDNUM(lcList, lnI, ",")
    IF FILE(lcProgs + lcBase + ".ERR")
@@ -29,5 +29,13 @@ FOR lnI = 1 TO GETWORDCOUNT(lcList, ",")
       QUIT
    ENDIF
 ENDFOR
+* suite_full_unlock: solo .prg en el proyecto (el .fxp no registra DEFINE CLASS -> 1732)
+IF FILE(lcProgs + "suite_full_unlock.fxp")
+   ERASE (lcProgs + "suite_full_unlock.fxp")
+ENDIF
+IF FILE(lcProgs + "suite_full_unlock.FXP")
+   ERASE (lcProgs + "suite_full_unlock.FXP")
+ENDIF
+STRTOFILE("suite_full_unlock: solo .prg (fxp borrado si existia)"+CHR(13), lcLog, .T.)
 STRTOFILE("PRGs listos. Siguiente: DO PROGS\VfpBuildProject en VFP (BUILD-DUNA-INTERACTIVO.bat)"+CHR(13), lcLog, .T.)
 QUIT

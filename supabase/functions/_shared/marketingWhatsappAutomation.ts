@@ -31,6 +31,7 @@ export type MetaFormAutomation = {
   whatsapp_reply_invalid_message: string | null;
   whatsapp_reminder_message: string | null;
   whatsapp_reminder_delay_hours?: number | null;
+  whatsapp_reminder_enabled?: boolean | null;
   stripe_deposit_enabled?: boolean;
   stripe_deposit_amount_cents?: number | null;
 };
@@ -278,7 +279,7 @@ export async function loadMetaFormAutomation(
   const { data, error } = await admin
     .from('meta_forms')
     .select(
-      'id, form_id, form_name, whatsapp_automation_enabled, whatsapp_initial_message, whatsapp_reply_1_message, whatsapp_reply_2_message, whatsapp_reply_invalid_message, whatsapp_reminder_message, whatsapp_reminder_delay_hours, stripe_deposit_enabled, stripe_deposit_amount_cents',
+      'id, form_id, form_name, whatsapp_automation_enabled, whatsapp_initial_message, whatsapp_reply_1_message, whatsapp_reply_2_message, whatsapp_reply_invalid_message, whatsapp_reminder_message, whatsapp_reminder_delay_hours, whatsapp_reminder_enabled, stripe_deposit_enabled, stripe_deposit_amount_cents',
     )
     .eq('id', metaFormId)
     .maybeSingle();
@@ -824,6 +825,11 @@ export async function runMarketingLeadRemindersForCompany(
 
     const form = await loadMetaFormAutomation(admin, lead.meta_form_id);
     if (!form?.whatsapp_automation_enabled) {
+      skipped++;
+      continue;
+    }
+
+    if (form.whatsapp_reminder_enabled === false) {
       skipped++;
       continue;
     }

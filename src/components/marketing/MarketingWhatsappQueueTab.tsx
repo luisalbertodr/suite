@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { formatDistanceToNow, format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import {
@@ -8,6 +8,7 @@ import {
   MessageSquare,
   PauseCircle,
   PlayCircle,
+  Send,
   X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -18,12 +19,34 @@ import {
   useMarketingWhatsappQueue,
   type MarketingWhatsappQueueRow,
 } from '@/hooks/useMarketingWhatsappQueue';
+import { useMarketingStages } from '@/hooks/useMarketingStages';
+import { findMarketingIntakeStage } from '@/lib/marketingIntakeStage';
+import { MarketingWhatsappEnqueueDialog } from './MarketingWhatsappEnqueueDialog';
 
-function leadLabel(row: MarketingWhatsappQueueRow): string {
+function leadName(row: MarketingWhatsappQueueRow): string {
   const lead = row.marketing_leads;
   if (!lead) return 'Lead desconocido';
   const name = [lead.first_name, lead.last_name].filter(Boolean).join(' ').trim();
-  return name || lead.phone || 'Sin nombre';
+  return name || 'Sin nombre';
+}
+
+function leadPhone(row: MarketingWhatsappQueueRow): string | null {
+  const phone = row.marketing_leads?.phone?.trim();
+  return phone || null;
+}
+
+function LeadNameWithPhone({ row }: { row: MarketingWhatsappQueueRow }) {
+  const name = leadName(row);
+  const phone = leadPhone(row);
+  const showName = name !== 'Sin nombre' && name !== 'Lead desconocido';
+  return (
+    <span className="truncate font-medium">
+      {showName ? name : phone ?? name}
+      {showName && phone ? (
+        <span className="font-normal text-muted-foreground"> · {phone}</span>
+      ) : null}
+    </span>
+  );
 }
 
 function leadDate(row: MarketingWhatsappQueueRow): string {
@@ -42,19 +65,44 @@ export const MarketingWhatsappQueueTab: React.FC<{
   canWrite: boolean;
 }> = ({ companyId, canWrite }) => {
   const { toast } = useToast();
+  const [enqueueOpen, setEnqueueOpen] = useState(false);
+  const [sendingQueueId, setSendingQueueId] = useState<string | null>(null);
   const {
     stats,
     statsLoading,
     queueRows,
     queueLoading,
-    enqueueAll,
     cancelPending,
+    sendNow,
     refetch,
   } = useMarketingWhatsappQueue(companyId);
+  const { stages } = useMarketingStages(companyId);
+  const intakeStageId = useMemo(
+    () => findMarketingIntakeStage(stages ?? [])?.id ?? null,
+    [stages],
+  );
 
   const pendingRows = useMemo(
-    () => queueRows.filter((r) => r.status === 'pending'),
-    [queueRows],
+    () =>
+      queueRows
+        .filter(
+          (r) =>
+            r.status === 'pending' &&
+            intakeStageId &&
+            r.marketing_leads?.stage_id === intakeStageId,
+        )
+        .sort((a, b) => {
+          const ka =
+            a.marketing_leads?.external_created_at ??
+            a.marketing_leads?.created_at ??
+            a.queued_at;
+          const kb =
+            b.marketing_leads?.external_created_at ??
+            b.marketing_leads?.created_at ??
+            b.queued_at;
+          return kb.localeCompare(ka);
+        }),
+    [queueRows, intakeStageId],
   );
   const recentRows = useMemo(
     () =>
@@ -64,22 +112,6 @@ export const MarketingWhatsappQueueTab: React.FC<{
         .slice(0, 40),
     [queueRows],
   );
-
-  const handleEnqueueAll = async () => {
-    try {
-      const res = await enqueueAll.mutateAsync();
-      toast({
-        title: 'Cola actualizada',
-        description: `${res.enqueued} lead(s) encolados. Pendientes en cola: ${res.stats.pending}.`,
-      });
-    } catch (e) {
-      toast({
-        title: 'No se pudo encolar',
-        description: e instanceof Error ? e.message : 'Error desconocido',
-        variant: 'destructive',
-      });
-    }
-  };
 
   const handleCancel = async (id: string) => {
     try {
@@ -91,6 +123,22 @@ export const MarketingWhatsappQueueTab: React.FC<{
         description: e instanceof Error ? e.message : 'No se pudo cancelar',
         variant: 'destructive',
       });
+    }
+  };
+
+  const handleSendNow = async (id: string) => {
+    setSendingQueueId(id);
+    try {
+      await sendNow.mutateAsync(id);
+      toast({ title: 'WhatsApp enviado' });
+    } catch (e) {
+      toast({
+        title: 'Error al enviar',
+        description: e instanceof Error ? e.message : 'No se pudo enviar',
+        variant: 'destructive',
+      });
+    } finally {
+      setSendingQueueId(null);
     }
   };
 
@@ -115,7 +163,7 @@ export const MarketingWhatsappQueueTab: React.FC<{
             {stats?.sent_today ?? 0}
             <span className="text-sm font-normal text-muted-foreground">
               {' '}
-              / {stats?.daily_limit ?? 50}
+              / {stats?.daily_limit ?? 100}
             </span>
           </p>
         </div>
@@ -154,24 +202,24 @@ export const MarketingWhatsappQueueTab: React.FC<{
         {canWrite ? (
           <Button
             size="sm"
-            onClick={handleEnqueueAll}
-            disabled={enqueueAll.isPending || (stats?.eligible_not_queued ?? 0) === 0}
+            onClick={() => setEnqueueOpen(true)}
+            disabled={(stats?.eligible_not_queued ?? 0) === 0}
           >
-            {enqueueAll.isPending ? (
-              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <ListOrdered className="mr-1.5 h-3.5 w-3.5" />
-            )}
-            Encolar pendientes ({stats?.eligible_not_queued ?? 0})
+            <ListOrdered className="mr-1.5 h-3.5 w-3.5" />
+            Encolar
+            {(stats?.eligible_not_queued ?? 0) > 0
+              ? ` (${stats?.eligible_not_queued})`
+              : ''}
           </Button>
         ) : null}
         <Button variant="outline" size="sm" onClick={() => refetch()}>
           Actualizar
         </Button>
         <p className="text-[11px] text-muted-foreground">
-          Máx. {stats?.daily_limit ?? 50}/día · pausas aleatorias 3–15 min · orden: leads más
-          antiguos primero. Horario configurable en Configuración → Marketing → WhatsApp (citas y
-          alertas). Tras el mensaje inicial, el recordatorio a 3 h sigue automático.
+          Máx. {stats?.daily_limit ?? 100}/día · pausas aleatorias 3–15 min · solo etapa{' '}
+          <strong>Nuevo lead</strong> · orden: más recientes primero. Horario en Configuración →
+          Marketing → WhatsApp (citas y alertas). El recordatorio (mensaje 2) depende de la
+          configuración de cada formulario Meta.
         </p>
       </div>
 
@@ -187,7 +235,7 @@ export const MarketingWhatsappQueueTab: React.FC<{
             </div>
           ) : pendingRows.length === 0 ? (
             <p className="py-10 text-center text-sm text-muted-foreground">
-              No hay leads en cola. Usa «Encolar pendientes» para añadir leads sin WhatsApp inicial.
+              No hay leads en cola. Pulsa «Encolar» para elegir leads sin WhatsApp inicial.
             </p>
           ) : (
             <ul className="divide-y">
@@ -199,7 +247,7 @@ export const MarketingWhatsappQueueTab: React.FC<{
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] font-mono text-muted-foreground">#{index + 1}</span>
-                      <span className="font-medium truncate">{leadLabel(row)}</span>
+                      <LeadNameWithPhone row={row} />
                       {row.marketing_leads?.form_name ? (
                         <Badge variant="secondary" className="text-[10px] shrink-0">
                           {row.marketing_leads.form_name}
@@ -207,21 +255,43 @@ export const MarketingWhatsappQueueTab: React.FC<{
                       ) : null}
                     </div>
                     <p className="text-xs text-muted-foreground truncate">
-                      {row.marketing_leads?.phone ?? ''}
-                      {leadDate(row) ? ` · Lead ${leadDate(row)}` : ''}
+                      {leadDate(row) ? `Lead ${leadDate(row)}` : ''}
                     </p>
                   </div>
                   {canWrite ? (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 shrink-0"
-                      title="Quitar de la cola"
-                      onClick={() => handleCancel(row.id)}
-                      disabled={cancelPending.isPending}
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </Button>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        title="Enviar WhatsApp ahora (sin esperar al cron)"
+                        onClick={() => handleSendNow(row.id)}
+                        disabled={
+                          sendNow.isPending ||
+                          cancelPending.isPending ||
+                          sendingQueueId === row.id
+                        }
+                      >
+                        {sendingQueueId === row.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <>
+                            <Send className="mr-1 h-3 w-3" />
+                            Enviar ahora
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        title="Quitar de la cola"
+                        onClick={() => handleCancel(row.id)}
+                        disabled={cancelPending.isPending || sendNow.isPending}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   ) : null}
                 </li>
               ))}
@@ -240,8 +310,8 @@ export const MarketingWhatsappQueueTab: React.FC<{
             <ul className="divide-y">
               {recentRows.map((row) => (
                 <li key={row.id} className="px-3 py-2 text-xs">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium">{leadLabel(row)}</span>
+                  <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                    <LeadNameWithPhone row={row} />
                     <Badge
                       variant={
                         row.status === 'sent' ? 'default' : row.status === 'failed' ? 'destructive' : 'secondary'
@@ -259,6 +329,14 @@ export const MarketingWhatsappQueueTab: React.FC<{
             </ul>
           </ScrollArea>
         </div>
+      ) : null}
+
+      {canWrite ? (
+        <MarketingWhatsappEnqueueDialog
+          open={enqueueOpen}
+          onOpenChange={setEnqueueOpen}
+          companyId={companyId}
+        />
       ) : null}
     </div>
   );

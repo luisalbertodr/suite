@@ -49,6 +49,7 @@ interface MarketingLeadCardProps {
   notePreviews: MarketingLeadNotePreview[];
   isDragging: boolean;
   isUnread?: boolean;
+  waQueuePending?: boolean;
   onClick: () => void;
   onOpenCustomer: (customerId: string) => void;
   onOpenNotes: () => void;
@@ -95,7 +96,19 @@ const formatLeadValue = (value: number | null | undefined): string | null => {
 function waAutomationBadge(
   status: string | null | undefined,
   error: string | null | undefined,
+  queuePending = false,
 ): { label: string; title: string; className: string } | null {
+  if (
+    queuePending &&
+    (!status || status === 'none' || status === 'pending')
+  ) {
+    return {
+      label: 'WA · en cola',
+      title: 'Bienvenida WhatsApp encolada; se enviará en horario 10:00–20:00',
+      className: 'bg-amber-500/15 text-amber-800 dark:text-amber-200',
+    };
+  }
+
   switch (status) {
     case 'awaiting_reply':
       return {
@@ -148,6 +161,7 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
   notePreviews,
   isDragging,
   isUnread = false,
+  waQueuePending = false,
   onClick,
   onOpenCustomer,
   onOpenNotes,
@@ -167,7 +181,7 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
   const tags = Array.isArray(lead.tags)
     ? lead.tags.filter(Boolean).filter((t) => !isMarketingNoiseText(t, lead))
     : [];
-  const waBadge = waAutomationBadge(lead.wa_automation_status, lead.wa_automation_error);
+  const waBadge = waAutomationBadge(lead.wa_automation_status, lead.wa_automation_error, waQueuePending);
 
   const stopPropagation = (e: React.MouseEvent) => e.stopPropagation();
 

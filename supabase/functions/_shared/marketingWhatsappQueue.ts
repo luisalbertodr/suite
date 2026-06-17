@@ -5,12 +5,16 @@ import {
   type MarketingLeadAutomationRow,
   type MetaFormAutomation,
 } from './marketingWhatsappAutomation.ts';
-import type { WhatsappAutomationSettings } from './whatsappAutomationDispatch.ts';
 import {
+  loadMarketingIntakeStageId,
+} from './marketingIntakeStage.ts';
+import {
+  isMorningCatchupWindow,
   isWithinAutomationHours,
   madridDateKey,
   normalizeAutomationHours,
 } from './whatsappAutomationHours.ts';
+import type { WhatsappAutomationSettings } from './whatsappAutomationDispatch.ts';
 
 export type MarketingWhatsappQueueSettings = WhatsappAutomationSettings & {
   marketing_queue_daily_limit: number;
@@ -27,7 +31,7 @@ export function normalizeQueueSettings(
 ): MarketingWhatsappQueueSettings {
   return {
     ...settings,
-    marketing_queue_daily_limit: settings.marketing_queue_daily_limit ?? 50,
+    marketing_queue_daily_limit: settings.marketing_queue_daily_limit ?? 100,
     marketing_queue_hour_start: settings.marketing_queue_hour_start ?? 10,
     marketing_queue_hour_end: settings.marketing_queue_hour_end ?? 20,
     marketing_queue_min_pause_seconds: settings.marketing_queue_min_pause_seconds ?? 180,
@@ -39,22 +43,84 @@ type LeadRow = MarketingLeadAutomationRow & {
   external_created_at: string | null;
   created_at: string;
   archived_at: string | null;
+  stage_id: string | null;
 };
 
-function randomPauseMs(settings: MarketingWhatsappQueueSettings): number {
+function randomPauseMs(
+  settings: MarketingWhatsappQueueSettings,
+  morningCatchup = false,
+): number {
   const s = normalizeQueueSettings(settings);
   const min = Math.min(s.marketing_queue_min_pause_seconds, s.marketing_queue_max_pause_seconds);
   const max = Math.max(s.marketing_queue_min_pause_seconds, s.marketing_queue_max_pause_seconds);
-  const seconds = min + Math.random() * (max - min);
+  const effectiveMax = morningCatchup ? Math.min(max, 120) : max;
+  const effectiveMin = morningCatchup ? Math.min(min, 60) : min;
+  const seconds = effectiveMin + Math.random() * (effectiveMax - effectiveMin);
   return Math.round(seconds * 1000);
+}
+
+const MAX_AUTO_ENQUEUE_AGE_MS = 72 * 60 * 60 * 1000;
+
+function isRecentLeadForAutoEnqueue(lead: LeadRow): boolean {
+  const key = lead.external_created_at ?? lead.created_at;
+  if (!key) return false;
+  const t = new Date(key).getTime();
+  return Number.isFinite(t) && Date.now() - t < MAX_AUTO_ENQUEUE_AGE_MS;
+}
+
+async function autoEnqueueEligibleLeads(
+  admin: SupabaseClient,
+  companyId: string,
+): Promise<number> {
+  const eligible = await collectEligibleLeadsNotInQueue(admin, companyId);
+  const recent = eligible.filter(isRecentLeadForAutoEnqueue);
+  if (recent.length === 0) return 0;
+  const { enqueued } = await enqueueMarketingLeadsById(
+    admin,
+    companyId,
+    recent.map((l) => l.id),
+    null,
+  );
+  return enqueued;
+}
+
+/** Al abrir el día, no heredar pausas de la jornada anterior si hay cola pendiente. */
+async function resetQueuePauseAtDayStart(
+  admin: SupabaseClient,
+  companyId: string,
+  settings: MarketingWhatsappQueueSettings,
+): Promise<void> {
+  const { count } = await admin
+    .from('marketing_whatsapp_queue')
+    .select('id', { count: 'exact', head: true })
+    .eq('company_id', companyId)
+    .eq('status', 'pending');
+  if (!count) return;
+
+  const lastSent = settings.marketing_queue_last_sent_at;
+  const todayKey = madridDateKey();
+  const lastKey = lastSent ? madridDateKey(new Date(lastSent)) : null;
+  if (lastKey && lastKey >= todayKey) return;
+
+  await admin
+    .from('whatsapp_automation_settings')
+    .update({
+      marketing_queue_next_send_at: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('company_id', companyId);
 }
 
 function leadSortKey(lead: LeadRow): string {
   return lead.external_created_at ?? lead.created_at ?? '';
 }
 
+function compareLeadsNewestFirst(a: LeadRow, b: LeadRow): number {
+  return leadSortKey(b).localeCompare(leadSortKey(a));
+}
+
 const META_FORM_SELECT =
-  'id, form_id, form_name, whatsapp_automation_enabled, whatsapp_initial_message, whatsapp_reply_1_message, whatsapp_reply_2_message, whatsapp_reply_invalid_message, whatsapp_reminder_message, whatsapp_reminder_delay_hours, stripe_deposit_enabled, stripe_deposit_amount_cents';
+  'id, form_id, form_name, whatsapp_automation_enabled, whatsapp_initial_message, whatsapp_reply_1_message, whatsapp_reply_2_message, whatsapp_reply_invalid_message, whatsapp_reminder_message, whatsapp_reminder_delay_hours, whatsapp_reminder_enabled, stripe_deposit_enabled, stripe_deposit_amount_cents';
 
 async function loadMetaFormByName(
   admin: SupabaseClient,
@@ -91,11 +157,160 @@ async function resolveMetaFormForLead(
   return await loadMetaFormByName(admin, companyId, formName);
 }
 
-export function isLeadEligibleForWhatsappQueue(lead: LeadRow): boolean {
+export function isLeadEligibleForWhatsappQueue(
+  lead: LeadRow,
+  intakeStageId: string | null,
+): boolean {
+  if (!intakeStageId) return false;
+  if (lead.stage_id !== intakeStageId) return false;
   if (lead.archived_at) return false;
   if (!lead.phone?.trim()) return false;
   if (lead.wa_automation_initial_sent_at) return false;
   return true;
+}
+
+const QUEUE_CANCEL_NOT_INTAKE = 'Lead fuera de la etapa «Nuevo lead»';
+
+async function pruneQueueNotInIntakeStage(
+  admin: SupabaseClient,
+  companyId: string,
+  intakeStageId: string,
+): Promise<number> {
+  const { data: rows, error } = await admin
+    .from('marketing_whatsapp_queue')
+    .select('id, marketing_lead_id')
+    .eq('company_id', companyId)
+    .eq('status', 'pending');
+  if (error) throw error;
+  if (!rows?.length) return 0;
+
+  const leadIds = rows.map((r) => r.marketing_lead_id as string);
+  const { data: leads, error: lErr } = await admin
+    .from('marketing_leads')
+    .select('id, stage_id')
+    .in('id', leadIds);
+  if (lErr) throw lErr;
+
+  const stageByLead = new Map((leads ?? []).map((l) => [l.id as string, l.stage_id as string | null]));
+  const toCancel = rows
+    .filter((r) => stageByLead.get(r.marketing_lead_id as string) !== intakeStageId)
+    .map((r) => r.id as string);
+
+  if (toCancel.length === 0) return 0;
+
+  const { error: upErr } = await admin
+    .from('marketing_whatsapp_queue')
+    .update({ status: 'cancelled', error: QUEUE_CANCEL_NOT_INTAKE })
+    .in('id', toCancel)
+    .eq('status', 'pending');
+  if (upErr) throw upErr;
+  return toCancel.length;
+}
+
+export type EligibleQueueLead = {
+  id: string;
+  first_name: string | null;
+  last_name: string | null;
+  phone: string | null;
+  form_name: string | null;
+  campaign: string | null;
+  external_created_at: string | null;
+  created_at: string;
+};
+
+async function collectEligibleLeadsNotInQueue(
+  admin: SupabaseClient,
+  companyId: string,
+): Promise<LeadRow[]> {
+  const intakeStageId = await loadMarketingIntakeStageId(admin, companyId);
+  if (!intakeStageId) return [];
+
+  const { data: leads, error } = await admin
+    .from('marketing_leads')
+    .select(
+      'id, company_id, phone, first_name, last_name, email, campaign, form_name, appointment_at, appointment_label, source, meta_form_id, field_data, wa_automation_status, wa_automation_initial_sent_at, external_created_at, created_at, archived_at, stage_id',
+    )
+    .eq('company_id', companyId)
+    .eq('stage_id', intakeStageId)
+    .is('wa_automation_initial_sent_at', null)
+    .is('archived_at', null)
+    .not('phone', 'is', null);
+
+  if (error) throw error;
+
+  const { data: queuedRows } = await admin
+    .from('marketing_whatsapp_queue')
+    .select('marketing_lead_id, status')
+    .eq('company_id', companyId)
+    .in('status', ['pending', 'sent']);
+
+  const blockedIds = new Set(
+    (queuedRows ?? []).map((r) => r.marketing_lead_id as string),
+  );
+
+  const eligible: LeadRow[] = [];
+  for (const row of leads ?? []) {
+    const lead = row as LeadRow;
+    if (!isLeadEligibleForWhatsappQueue(lead, intakeStageId)) continue;
+    if (blockedIds.has(lead.id)) continue;
+    const form = await resolveMetaFormForLead(admin, companyId, lead);
+    if (!form?.whatsapp_automation_enabled || !form.whatsapp_initial_message?.trim()) continue;
+    eligible.push(lead);
+  }
+
+  eligible.sort(compareLeadsNewestFirst);
+  return eligible;
+}
+
+export async function listEligibleMarketingLeadsForQueue(
+  admin: SupabaseClient,
+  companyId: string,
+): Promise<EligibleQueueLead[]> {
+  const eligible = await collectEligibleLeadsNotInQueue(admin, companyId);
+  return eligible.map((lead) => ({
+    id: lead.id,
+    first_name: lead.first_name,
+    last_name: lead.last_name,
+    phone: lead.phone,
+    form_name: lead.form_name,
+    campaign: lead.campaign,
+    external_created_at: lead.external_created_at,
+    created_at: lead.created_at,
+  }));
+}
+
+export async function enqueueMarketingLeadsById(
+  admin: SupabaseClient,
+  companyId: string,
+  leadIds: string[],
+  queuedBy?: string | null,
+): Promise<{ enqueued: number; skipped: number }> {
+  const uniqueIds = [...new Set(leadIds.filter(Boolean))];
+  if (uniqueIds.length === 0) return { enqueued: 0, skipped: 0 };
+
+  const eligible = await collectEligibleLeadsNotInQueue(admin, companyId);
+  const eligibleIds = new Set(eligible.map((l) => l.id));
+  const toEnqueue = uniqueIds.filter((id) => eligibleIds.has(id));
+  const skipped = uniqueIds.length - toEnqueue.length;
+
+  if (toEnqueue.length === 0) return { enqueued: 0, skipped };
+
+  const inserts = toEnqueue.map((leadId) => ({
+    company_id: companyId,
+    marketing_lead_id: leadId,
+    status: 'pending',
+    queued_by: queuedBy ?? null,
+    error: null,
+    sent_at: null,
+  }));
+
+  const { error: insErr } = await admin.from('marketing_whatsapp_queue').upsert(inserts, {
+    onConflict: 'company_id,marketing_lead_id',
+    ignoreDuplicates: false,
+  });
+  if (insErr) throw insErr;
+
+  return { enqueued: inserts.length, skipped };
 }
 
 export async function countQueueSendsToday(
@@ -116,61 +331,6 @@ export async function countQueueSendsToday(
   return count ?? 0;
 }
 
-export async function enqueueEligibleMarketingLeads(
-  admin: SupabaseClient,
-  companyId: string,
-  queuedBy?: string | null,
-): Promise<{ enqueued: number; skipped: number }> {
-  const { data: leads, error } = await admin
-    .from('marketing_leads')
-    .select(
-      'id, company_id, phone, first_name, last_name, email, campaign, form_name, appointment_at, appointment_label, source, meta_form_id, field_data, wa_automation_status, wa_automation_initial_sent_at, external_created_at, created_at, archived_at',
-    )
-    .eq('company_id', companyId)
-    .is('wa_automation_initial_sent_at', null)
-    .is('archived_at', null)
-    .not('phone', 'is', null);
-
-  if (error) throw error;
-
-  const { data: pendingRows } = await admin
-    .from('marketing_whatsapp_queue')
-    .select('marketing_lead_id')
-    .eq('company_id', companyId)
-    .eq('status', 'pending');
-
-  const pendingIds = new Set((pendingRows ?? []).map((r) => r.marketing_lead_id as string));
-
-  const eligible: LeadRow[] = [];
-  for (const row of leads ?? []) {
-    const lead = row as LeadRow;
-    if (!isLeadEligibleForWhatsappQueue(lead)) continue;
-    if (pendingIds.has(lead.id)) continue;
-    const form = await resolveMetaFormForLead(admin, companyId, lead);
-    if (!form?.whatsapp_automation_enabled || !form.whatsapp_initial_message?.trim()) continue;
-    eligible.push(lead);
-  }
-
-  eligible.sort((a, b) => leadSortKey(a).localeCompare(leadSortKey(b)));
-
-  if (eligible.length === 0) return { enqueued: 0, skipped: (leads?.length ?? 0) };
-
-  const inserts = eligible.map((lead) => ({
-    company_id: companyId,
-    marketing_lead_id: lead.id,
-    status: 'pending',
-    queued_by: queuedBy ?? null,
-  }));
-
-  const { error: insErr } = await admin.from('marketing_whatsapp_queue').upsert(inserts, {
-    onConflict: 'company_id,marketing_lead_id',
-    ignoreDuplicates: false,
-  });
-  if (insErr) throw insErr;
-
-  return { enqueued: inserts.length, skipped: (leads?.length ?? 0) - inserts.length };
-}
-
 export async function getMarketingWhatsappQueueStats(
   admin: SupabaseClient,
   companyId: string,
@@ -186,44 +346,54 @@ export async function getMarketingWhatsappQueueStats(
   hour_end: number;
 }> {
   const s = normalizeQueueSettings(settings);
-  const { count: pending } = await admin
-    .from('marketing_whatsapp_queue')
-    .select('id', { count: 'exact', head: true })
-    .eq('company_id', companyId)
-    .eq('status', 'pending');
+  const intakeStageId = await loadMarketingIntakeStageId(admin, companyId);
+
+  let pending = 0;
+  if (intakeStageId) {
+    const { data: pendingQueue } = await admin
+      .from('marketing_whatsapp_queue')
+      .select('id, marketing_leads!inner(stage_id)')
+      .eq('company_id', companyId)
+      .eq('status', 'pending')
+      .eq('marketing_leads.stage_id', intakeStageId);
+    pending = pendingQueue?.length ?? 0;
+  }
 
   const sentToday = await countQueueSendsToday(admin, companyId);
 
-  const { data: leads } = await admin
-    .from('marketing_leads')
-    .select(
-      'id, company_id, phone, first_name, last_name, email, campaign, form_name, appointment_at, appointment_label, source, meta_form_id, field_data, wa_automation_status, wa_automation_initial_sent_at, external_created_at, created_at, archived_at',
-    )
-    .eq('company_id', companyId)
-    .is('wa_automation_initial_sent_at', null)
-    .is('archived_at', null)
-    .not('phone', 'is', null);
-
-  const { data: pendingRows } = await admin
-    .from('marketing_whatsapp_queue')
-    .select('marketing_lead_id')
-    .eq('company_id', companyId)
-    .in('status', ['pending', 'sent', 'failed']);
-
-  const queuedIds = new Set((pendingRows ?? []).map((r) => r.marketing_lead_id as string));
-
   let eligibleNotQueued = 0;
-  for (const row of leads ?? []) {
-    const lead = row as LeadRow;
-    if (!isLeadEligibleForWhatsappQueue(lead)) continue;
-    if (queuedIds.has(lead.id)) continue;
-    const form = await resolveMetaFormForLead(admin, companyId, lead);
-    if (!form?.whatsapp_automation_enabled || !form.whatsapp_initial_message?.trim()) continue;
-    eligibleNotQueued++;
+  if (intakeStageId) {
+    const { data: leads } = await admin
+      .from('marketing_leads')
+      .select(
+        'id, company_id, phone, first_name, last_name, email, campaign, form_name, appointment_at, appointment_label, source, meta_form_id, field_data, wa_automation_status, wa_automation_initial_sent_at, external_created_at, created_at, archived_at, stage_id',
+      )
+      .eq('company_id', companyId)
+      .eq('stage_id', intakeStageId)
+      .is('wa_automation_initial_sent_at', null)
+      .is('archived_at', null)
+      .not('phone', 'is', null);
+
+    const { data: pendingRows } = await admin
+      .from('marketing_whatsapp_queue')
+      .select('marketing_lead_id')
+      .eq('company_id', companyId)
+      .in('status', ['pending', 'sent', 'failed']);
+
+    const queuedIds = new Set((pendingRows ?? []).map((r) => r.marketing_lead_id as string));
+
+    for (const row of leads ?? []) {
+      const lead = row as LeadRow;
+      if (!isLeadEligibleForWhatsappQueue(lead, intakeStageId)) continue;
+      if (queuedIds.has(lead.id)) continue;
+      const form = await resolveMetaFormForLead(admin, companyId, lead);
+      if (!form?.whatsapp_automation_enabled || !form.whatsapp_initial_message?.trim()) continue;
+      eligibleNotQueued++;
+    }
   }
 
   return {
-    pending: pending ?? 0,
+    pending,
     sent_today: sentToday,
     daily_limit: s.marketing_queue_daily_limit,
     eligible_not_queued: eligibleNotQueued,
@@ -239,31 +409,94 @@ export async function runMarketingWhatsappQueueForCompany(
   companyId: string,
   settings: MarketingWhatsappQueueSettings,
 ): Promise<{ sent: number; skipped: number; reason?: string }> {
-  const s = normalizeQueueSettings(settings);
+  let s = normalizeQueueSettings(settings);
+
+  const intakeStageId = await loadMarketingIntakeStageId(admin, companyId);
+  if (!intakeStageId) {
+    return { sent: 0, skipped: 0, reason: 'no_intake_stage' };
+  }
+
+  try {
+    await pruneQueueNotInIntakeStage(admin, companyId, intakeStageId);
+  } catch (e) {
+    console.error('pruneQueueNotInIntakeStage failed:', companyId, e);
+  }
+
+  try {
+    await autoEnqueueEligibleLeads(admin, companyId);
+  } catch (e) {
+    console.error('autoEnqueueEligibleLeads failed:', companyId, e);
+  }
+
   if (!isWithinAutomationHours(s)) {
     return { sent: 0, skipped: 0, reason: 'outside_hours' };
   }
 
-  const now = Date.now();
-  if (settings.marketing_queue_next_send_at) {
-    const nextAt = new Date(settings.marketing_queue_next_send_at).getTime();
-    if (Number.isFinite(nextAt) && now < nextAt) {
-      return { sent: 0, skipped: 0, reason: 'pause' };
+  try {
+    await resetQueuePauseAtDayStart(admin, companyId, s);
+  } catch (e) {
+    console.error('resetQueuePauseAtDayStart failed:', companyId, e);
+  }
+
+  const morningCatchup = isMorningCatchupWindow(s);
+  const maxPerRun = morningCatchup ? 3 : 1;
+  let totalSent = 0;
+  let totalSkipped = 0;
+  let lastReason: string | undefined;
+
+  for (let attempt = 0; attempt < maxPerRun; attempt++) {
+    const { data: freshSettings } = await admin
+      .from('whatsapp_automation_settings')
+      .select('*')
+      .eq('company_id', companyId)
+      .maybeSingle();
+    if (freshSettings) {
+      s = normalizeQueueSettings(freshSettings as MarketingWhatsappQueueSettings);
     }
+
+    const now = Date.now();
+    if (s.marketing_queue_next_send_at) {
+      const nextAt = new Date(s.marketing_queue_next_send_at).getTime();
+      if (Number.isFinite(nextAt) && now < nextAt) {
+        lastReason = 'pause';
+        break;
+      }
+    }
+
+    const sentToday = await countQueueSendsToday(admin, companyId);
+    if (sentToday >= s.marketing_queue_daily_limit) {
+      lastReason = 'daily_limit';
+      break;
+    }
+
+    const result = await processNextPendingQueueLead(admin, companyId, s, morningCatchup, intakeStageId);
+    if (result.sent > 0) {
+      totalSent += result.sent;
+      if (!morningCatchup) break;
+      continue;
+    }
+
+    totalSkipped += result.skipped;
+    lastReason = result.reason;
+    break;
   }
 
-  const sentToday = await countQueueSendsToday(admin, companyId);
-  if (sentToday >= s.marketing_queue_daily_limit) {
-    return { sent: 0, skipped: 0, reason: 'daily_limit' };
-  }
+  if (totalSent > 0) return { sent: totalSent, skipped: totalSkipped };
+  return { sent: 0, skipped: totalSkipped, reason: lastReason ?? 'empty' };
+}
 
+async function processNextPendingQueueLead(
+  admin: SupabaseClient,
+  companyId: string,
+  settings: MarketingWhatsappQueueSettings,
+  morningCatchup: boolean,
+  intakeStageId: string,
+): Promise<{ sent: number; skipped: number; reason?: string }> {
   const { data: queueRows, error: qErr } = await admin
     .from('marketing_whatsapp_queue')
     .select('id, marketing_lead_id')
     .eq('company_id', companyId)
-    .eq('status', 'pending')
-    .order('queued_at', { ascending: true })
-    .limit(80);
+    .eq('status', 'pending');
 
   if (qErr) throw qErr;
   if (!queueRows?.length) return { sent: 0, skipped: 0, reason: 'empty' };
@@ -272,9 +505,10 @@ export async function runMarketingWhatsappQueueForCompany(
   const { data: leadRows, error: lErr } = await admin
     .from('marketing_leads')
     .select(
-      'id, company_id, phone, first_name, last_name, email, campaign, form_name, appointment_at, appointment_label, source, meta_form_id, field_data, wa_automation_status, wa_automation_initial_sent_at, external_created_at, created_at, archived_at',
+      'id, company_id, phone, first_name, last_name, email, campaign, form_name, appointment_at, appointment_label, source, meta_form_id, field_data, wa_automation_status, wa_automation_initial_sent_at, external_created_at, created_at, archived_at, stage_id',
     )
-    .in('id', leadIds);
+    .in('id', leadIds)
+    .eq('stage_id', intakeStageId);
   if (lErr) throw lErr;
 
   const leadMap = new Map((leadRows ?? []).map((l) => [l.id as string, l as LeadRow]));
@@ -285,7 +519,7 @@ export async function runMarketingWhatsappQueueForCompany(
       lead: leadMap.get(q.marketing_lead_id as string),
     }))
     .filter((x) => x.lead)
-    .sort((a, b) => leadSortKey(a.lead!).localeCompare(leadSortKey(b.lead!)));
+    .sort((a, b) => compareLeadsNewestFirst(a.lead!, b.lead!));
 
   for (const item of ordered) {
     const lead = item.lead!;
@@ -310,7 +544,7 @@ export async function runMarketingWhatsappQueueForCompany(
 
     const result = await sendInitialAutomationForLead(admin, companyId, lead.id, lead, form);
     const sentNow = new Date().toISOString();
-    const pauseMs = randomPauseMs(s);
+    const pauseMs = randomPauseMs(settings, morningCatchup);
     const nextSendAt = new Date(Date.now() + pauseMs).toISOString();
 
     if (result.ok && result.status === 'awaiting_reply') {
@@ -382,6 +616,102 @@ export async function enqueueMarketingLeadForInitialWhatsapp(
     { onConflict: 'company_id,marketing_lead_id' },
   );
   if (error) throw error;
+}
+
+const LEAD_SELECT_FOR_QUEUE =
+  'id, company_id, phone, first_name, last_name, email, campaign, form_name, appointment_at, appointment_label, source, meta_form_id, field_data, wa_automation_status, wa_automation_initial_sent_at, external_created_at, created_at, archived_at, stage_id';
+
+/** Envío manual inmediato de un lead pendiente en cola (sin horario ni pausa del cron). */
+export async function sendQueueLeadNow(
+  admin: SupabaseClient,
+  companyId: string,
+  queueId: string,
+  settings: MarketingWhatsappQueueSettings,
+): Promise<{ ok: boolean; send_error?: string }> {
+  const s = normalizeQueueSettings(settings);
+  const intakeStageId = await loadMarketingIntakeStageId(admin, companyId);
+  if (!intakeStageId) {
+    return { ok: false, send_error: 'Etapa «Nuevo lead» no configurada' };
+  }
+
+  const { data: queueRow, error: qErr } = await admin
+    .from('marketing_whatsapp_queue')
+    .select('id, marketing_lead_id, status')
+    .eq('company_id', companyId)
+    .eq('id', queueId)
+    .maybeSingle();
+  if (qErr) throw qErr;
+  if (!queueRow || queueRow.status !== 'pending') {
+    return { ok: false, send_error: 'La fila no está pendiente en cola' };
+  }
+
+  const leadId = queueRow.marketing_lead_id as string;
+  const { data: lead, error: lErr } = await admin
+    .from('marketing_leads')
+    .select(LEAD_SELECT_FOR_QUEUE)
+    .eq('id', leadId)
+    .eq('company_id', companyId)
+    .maybeSingle();
+  if (lErr) throw lErr;
+  if (!lead) return { ok: false, send_error: 'Lead no encontrado' };
+
+  const leadRow = lead as LeadRow;
+  if (!isLeadEligibleForWhatsappQueue(leadRow, intakeStageId)) {
+    return {
+      ok: false,
+      send_error: 'Lead no elegible (etapa, teléfono o mensaje ya enviado)',
+    };
+  }
+
+  const sentToday = await countQueueSendsToday(admin, companyId);
+  if (sentToday >= s.marketing_queue_daily_limit) {
+    return {
+      ok: false,
+      send_error: `Límite diario alcanzado (${s.marketing_queue_daily_limit}/día)`,
+    };
+  }
+
+  const form = await resolveMetaFormForLead(admin, companyId, leadRow);
+  if (!form?.whatsapp_automation_enabled || !form.whatsapp_initial_message?.trim()) {
+    await admin
+      .from('marketing_whatsapp_queue')
+      .update({ status: 'failed', error: 'Formulario sin automatización WhatsApp' })
+      .eq('id', queueId)
+      .eq('status', 'pending');
+    return { ok: false, send_error: 'Formulario sin automatización WhatsApp' };
+  }
+
+  const result = await sendInitialAutomationForLead(admin, companyId, leadId, leadRow, form);
+  const sentNow = new Date().toISOString();
+
+  if (result.ok && result.status === 'awaiting_reply') {
+    await admin
+      .from('marketing_whatsapp_queue')
+      .update({ status: 'sent', sent_at: sentNow, error: null })
+      .eq('id', queueId)
+      .eq('status', 'pending');
+
+    await admin
+      .from('whatsapp_automation_settings')
+      .update({
+        marketing_queue_last_sent_at: sentNow,
+        updated_at: sentNow,
+      })
+      .eq('company_id', companyId);
+
+    return { ok: true };
+  }
+
+  await admin
+    .from('marketing_whatsapp_queue')
+    .update({
+      status: result.status === 'skipped' ? 'cancelled' : 'failed',
+      error: (result.error ?? 'Envío fallido').slice(0, 500),
+    })
+    .eq('id', queueId)
+    .eq('status', 'pending');
+
+  return { ok: false, send_error: result.error ?? result.status };
 }
 
 /** Reenvía bienvenida WA a leads concretos (modo prueba si está activo). */

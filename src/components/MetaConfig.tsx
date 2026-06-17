@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import {
   Select,
@@ -28,7 +29,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Checkbox } from '@/components/ui/checkbox';
 import {
   Eye,
   EyeOff,
@@ -558,11 +558,12 @@ export const MetaConfig: React.FC = () => {
               <div>
                 <p className="text-sm font-medium">WhatsApp automático</p>
                 <p className="text-[11px] text-muted-foreground">
-                  Al sincronizar un lead nuevo se envía el mensaje 1 (bienvenida). Si no responde,
-                  el mensaje 2 (recordatorio) sale tras las horas configuradas. Para el histórico sin
-                  WhatsApp, usa <strong>Marketing → Cola</strong> (envío gradual). Incluye{' '}
-                  <code>{'{link_pago}'}</code> si activas señal Stripe. Respuestas 1/2 opcionales;
-                  si no las configuras, cualquier respuesta del lead pasa a gestión humana.
+                  Al sincronizar un lead nuevo se envía el mensaje 1 (bienvenida). Si no responde y el
+                  recordatorio está activo, el mensaje 2 sale tras las horas configuradas. Para el
+                  histórico sin WhatsApp, usa <strong>Marketing → Cola</strong> (envío gradual).
+                  Incluye <code>{'{link_pago}'}</code> si activas señal Stripe. Respuestas 1/2
+                  opcionales; si no las configuras, cualquier respuesta del lead pasa a gestión
+                  humana.
                 </p>
               </div>
             </div>
@@ -617,9 +618,23 @@ export const MetaConfig: React.FC = () => {
                 />
               </div>
               <div className="space-y-1 md:col-span-2">
-                <Label className="text-[11px]">
-                  Mensaje 2 · Recordatorio si no responde
-                </Label>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Label className="text-[11px]">
+                    Mensaje 2 · Recordatorio si no responde
+                  </Label>
+                  <label className="flex cursor-pointer items-center gap-2 text-[11px] text-muted-foreground">
+                    <Checkbox
+                      checked={form.whatsapp_reminder_enabled !== false}
+                      onCheckedChange={(v) =>
+                        updateForm.mutate({
+                          id: form.id,
+                          values: { whatsapp_reminder_enabled: v === true },
+                        })
+                      }
+                    />
+                    Enviar recordatorio automático
+                  </label>
+                </div>
                 <div className="mb-2 flex flex-wrap items-center gap-2">
                   <Label className="text-[10px] text-muted-foreground shrink-0">
                     Enviar tras
@@ -630,15 +645,17 @@ export const MetaConfig: React.FC = () => {
                     max={72}
                     className="h-7 w-16 text-xs"
                     defaultValue={form.whatsapp_reminder_delay_hours ?? 3}
+                    disabled={form.whatsapp_reminder_enabled === false}
                     onBlur={(e) => saveFormWhatsappDelay(form, e.target.value, updateForm)}
                   />
                   <span className="text-[10px] text-muted-foreground">horas sin respuesta</span>
                 </div>
                 <Textarea
-                  key={`${form.id}-reminder-${form.whatsapp_reminder_message ?? ''}`}
+                  key={`${form.id}-reminder-${form.whatsapp_reminder_enabled}-${form.whatsapp_reminder_message ?? ''}`}
                   defaultValue={form.whatsapp_reminder_message ?? ''}
                   rows={5}
                   className="text-xs"
+                  disabled={form.whatsapp_reminder_enabled === false}
                   placeholder="¡Hola de nuevo, {nombre}!… {propuesta_dia_1} / {propuesta_dia_2}"
                   onBlur={(e) =>
                     saveFormWhatsappField(

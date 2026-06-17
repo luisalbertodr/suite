@@ -76,7 +76,8 @@ export const MarketingLeadNotesPanel: React.FC<MarketingLeadNotesPanelProps> = (
   compact = false,
 }) => {
   const { toast } = useToast();
-  const { canWrite: canEditMarketing } = useMarketingPermissions();
+  const { canWrite: canEditMarketing, loading: marketingPermsLoading } = useMarketingPermissions();
+  const notesWriteBlocked = !marketingPermsLoading && !canEditMarketing;
   const {
     notes,
     isLoading,
@@ -236,7 +237,7 @@ export const MarketingLeadNotesPanel: React.FC<MarketingLeadNotesPanelProps> = (
           className="text-xs"
         />
         <div className="flex justify-end">
-          <Button size="sm" type="button" onClick={handleAdd} disabled={addNote.isPending || !canEditMarketing}>
+          <Button size="sm" type="button" onClick={handleAdd} disabled={addNote.isPending || notesWriteBlocked}>
             <Save className="mr-2 h-3.5 w-3.5" />
             {addNote.isPending ? 'Guardando…' : 'Añadir nota'}
           </Button>

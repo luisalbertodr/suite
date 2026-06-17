@@ -2629,6 +2629,8 @@ export type Database = {
           stage_id: string | null
           stripe_deposit_paid_at: string | null
           tags: string[]
+          team_viewed_at: string | null
+          team_viewed_by: string | null
           updated_at: string
           value: number
           wa_automation_completed_at: string | null
@@ -2664,6 +2666,8 @@ export type Database = {
           stage_id?: string | null
           stripe_deposit_paid_at?: string | null
           tags?: string[]
+          team_viewed_at?: string | null
+          team_viewed_by?: string | null
           updated_at?: string
           value?: number
           wa_automation_completed_at?: string | null
@@ -2699,6 +2703,8 @@ export type Database = {
           stage_id?: string | null
           stripe_deposit_paid_at?: string | null
           tags?: string[]
+          team_viewed_at?: string | null
+          team_viewed_by?: string | null
           updated_at?: string
           value?: number
           wa_automation_completed_at?: string | null
@@ -2827,6 +2833,7 @@ export type Database = {
           whatsapp_reply_invalid_message: string | null
           whatsapp_reminder_message: string | null
           whatsapp_reminder_delay_hours: number
+          whatsapp_reminder_enabled: boolean
           stripe_deposit_enabled: boolean
           stripe_deposit_amount_cents: number | null
         }
@@ -2853,6 +2860,7 @@ export type Database = {
           whatsapp_reply_invalid_message?: string | null
           whatsapp_reminder_message?: string | null
           whatsapp_reminder_delay_hours?: number
+          whatsapp_reminder_enabled?: boolean
           stripe_deposit_enabled?: boolean
           stripe_deposit_amount_cents?: number | null
         }
@@ -2879,6 +2887,7 @@ export type Database = {
           whatsapp_reply_invalid_message?: string | null
           whatsapp_reminder_message?: string | null
           whatsapp_reminder_delay_hours?: number
+          whatsapp_reminder_enabled?: boolean
           stripe_deposit_enabled?: boolean
           stripe_deposit_amount_cents?: number | null
         }
@@ -4723,6 +4732,10 @@ export type Database = {
       count_marketing_unviewed_leads: {
         Args: { p_company_ids?: string[] | null }
         Returns: number
+      }
+      mark_marketing_lead_team_viewed: {
+        Args: { p_lead_id: string }
+        Returns: undefined
       }
       create_superuser: {
         Args: { p_email: string; p_password: string }

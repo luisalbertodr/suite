@@ -2,8 +2,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { withSupabaseTimeout } from '@/lib/marketingNotesApi';
-import { runWhenAuthReady } from '@/lib/authSession';
 import { notifyMetaConversionStageChange } from '@/lib/metaConversionStageNotify';
+import { markMarketingLeadTeamViewed } from '@/hooks/useMarketingUnread';
 import type { Database, Json } from '@/integrations/supabase/types';
 
 export type MarketingLead = Database['public']['Tables']['marketing_leads']['Row'];
@@ -369,13 +369,18 @@ export const useMarketingLeads = (scopeCompanyId?: string | null) => {
           .update(input.values)
           .eq('id', input.id);
         if (companyId) q = q.eq('company_id', companyId);
-        const { data, error } = await runWhenAuthReady(() => q.select('*').single());
+        const { data, error } = await q.select('*').single();
         if (error) {
           const msg = error.message ?? 'Error al actualizar el lead';
           if (/permission|policy|42501|403/i.test(msg)) {
             throw new Error('No tienes permiso para editar este lead.');
           }
           throw new Error(msg);
+        }
+        try {
+          await markMarketingLeadTeamViewed(input.id);
+        } catch {
+          /* no bloquear la edición si falla el marcado de visto */
         }
         return data;
       });
@@ -384,17 +389,36 @@ export const useMarketingLeads = (scopeCompanyId?: string | null) => {
       await queryClient.cancelQueries({ queryKey: ['marketing-leads', companyId] });
       const prev = queryClient.getQueryData<MarketingLead[]>(['marketing-leads', companyId]);
       if (prev) {
+        const viewedAt = new Date().toISOString();
         queryClient.setQueryData<MarketingLead[]>(
           ['marketing-leads', companyId],
-          prev.map((l) => (l.id === id ? { ...l, ...values } as MarketingLead : l)),
+          prev.map((l) =>
+            l.id === id
+              ? ({
+                  ...l,
+                  ...values,
+                  team_viewed_at: l.team_viewed_at ?? viewedAt,
+                } as MarketingLead)
+              : l,
+          ),
         );
       }
       return { prev };
     },
     onSuccess: (data, variables) => {
       queryClient.setQueryData<MarketingLead[]>(['marketing-leads', companyId], (prev) =>
-        prev ? prev.map((l) => (l.id === data.id ? data : l)) : prev,
+        prev
+          ? prev.map((l) => {
+              if (l.id !== data.id) return l;
+              return {
+                ...data,
+                team_viewed_at: data.team_viewed_at ?? l.team_viewed_at,
+                team_viewed_by: data.team_viewed_by ?? l.team_viewed_by,
+              };
+            })
+          : prev,
       );
+      queryClient.invalidateQueries({ queryKey: ['marketing-unread-count'] });
       if (variables.values.stage_id !== undefined) {
         void notifyMetaConversionStageChange(data.id);
       }
@@ -417,13 +441,18 @@ export const useMarketingLeads = (scopeCompanyId?: string | null) => {
           })
           .eq('id', input.id);
         if (companyId) q = q.eq('company_id', companyId);
-        const { data, error } = await runWhenAuthReady(() => q.select('*').single());
+        const { data, error } = await q.select('*').single();
         if (error) {
           const msg = error.message ?? 'Error al mover el lead';
           if (/permission|policy|42501|403/i.test(msg)) {
             throw new Error('No tienes permiso para mover tarjetas en Marketing.');
           }
           throw new Error(msg);
+        }
+        try {
+          await markMarketingLeadTeamViewed(input.id);
+        } catch {
+          /* no bloquear el movimiento si falla el marcado de visto */
         }
         return data;
       });
@@ -432,10 +461,18 @@ export const useMarketingLeads = (scopeCompanyId?: string | null) => {
       await queryClient.cancelQueries({ queryKey: ['marketing-leads', companyId] });
       const prev = queryClient.getQueryData<MarketingLead[]>(['marketing-leads', companyId]);
       if (prev) {
+        const viewedAt = new Date().toISOString();
         queryClient.setQueryData<MarketingLead[]>(
           ['marketing-leads', companyId],
           prev.map((l) =>
-            l.id === id ? { ...l, stage_id, position_in_stage } : l,
+            l.id === id
+              ? {
+                  ...l,
+                  stage_id,
+                  position_in_stage,
+                  team_viewed_at: l.team_viewed_at ?? viewedAt,
+                }
+              : l,
           ),
         );
       }
@@ -443,8 +480,18 @@ export const useMarketingLeads = (scopeCompanyId?: string | null) => {
     },
     onSuccess: (data) => {
       queryClient.setQueryData<MarketingLead[]>(['marketing-leads', companyId], (prev) =>
-        prev ? prev.map((l) => (l.id === data.id ? data : l)) : prev,
+        prev
+          ? prev.map((l) => {
+              if (l.id !== data.id) return l;
+              return {
+                ...data,
+                team_viewed_at: data.team_viewed_at ?? l.team_viewed_at,
+                team_viewed_by: data.team_viewed_by ?? l.team_viewed_by,
+              };
+            })
+          : prev,
       );
+      queryClient.invalidateQueries({ queryKey: ['marketing-unread-count'] });
       void notifyMetaConversionStageChange(data.id);
     },
     onError: (_err, _vars, ctx) => {

@@ -11,22 +11,53 @@ export function normalizeAutomationHours(settings: AutomationHoursSettings): {
   hour_start: number;
   hour_end: number;
 } {
-  const start = settings.marketing_queue_hour_start ?? 10;
-  const end = settings.marketing_queue_hour_end ?? 20;
+  const start = Number(settings.marketing_queue_hour_start ?? 10);
+  const end = Number(settings.marketing_queue_hour_end ?? 20);
   return {
-    hour_start: Math.max(0, Math.min(23, start)),
-    hour_end: Math.max(1, Math.min(24, end)),
+    hour_start: Math.max(0, Math.min(23, Number.isFinite(start) ? start : 10)),
+    hour_end: Math.max(1, Math.min(24, Number.isFinite(end) ? end : 20)),
   };
 }
 
 export function madridHour(date = new Date()): number {
   const fmt = new Intl.DateTimeFormat('en-GB', {
     timeZone: MADRID_TZ,
-    hour: '2-digit',
+    hour: 'numeric',
     hour12: false,
   });
-  const hour = Number.parseInt(fmt.format(date), 10);
-  return Number.isFinite(hour) ? hour : 0;
+  const raw = fmt.format(date);
+  const hour = Number.parseInt(raw, 10);
+  if (!Number.isFinite(hour)) return 0;
+  return hour === 24 ? 0 : hour;
+}
+
+export function madridMinute(date = new Date()): number {
+  const fmt = new Intl.DateTimeFormat('en-GB', {
+    timeZone: MADRID_TZ,
+    minute: 'numeric',
+  });
+  const minute = Number.parseInt(fmt.format(date), 10);
+  return Number.isFinite(minute) ? minute : 0;
+}
+
+/** Minutos transcurridos desde la apertura del horario de envío (Madrid). */
+export function madridMinutesSinceWindowOpen(
+  settings: AutomationHoursSettings,
+  date = new Date(),
+): number {
+  const { hour_start } = normalizeAutomationHours(settings);
+  const hour = madridHour(date);
+  const minute = madridMinute(date);
+  return (hour - hour_start) * 60 + minute;
+}
+
+/** Primera hora de la ventana: priorizar leads acumulados fuera de horario. */
+export function isMorningCatchupWindow(
+  settings: AutomationHoursSettings,
+  date = new Date(),
+): boolean {
+  if (!isWithinAutomationHours(settings, date)) return false;
+  return madridMinutesSinceWindowOpen(settings, date) < 60;
 }
 
 export function madridDateKey(date = new Date()): string {

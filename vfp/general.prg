@@ -1084,7 +1084,7 @@
              LOCAL lcSavDet
              lcSavDet = ON("ERROR")
              ON ERROR
-             tmrcheck = CREATEOBJECT("DetectActivity")
+             tmrcheck = SuiteSafeCreateObject("DetectActivity")
              ON ERROR &lcSavDet
           ENDIF
           IF pltpvbar
@@ -1246,7 +1246,27 @@ PROCEDURE SuiteLoadUnlockProgram
  IF  .NOT. EMPTY(lcerr)
     DO SuiteBootstrapLog WITH "[BOOT-05] embebido sin SyncInit: "+lcerr
  ENDIF
- DO SuiteBootstrapLog WITH "[BOOT-07] FALLO: recompilar Duna.exe (BUILD-DUNA.bat en Export)"
+ * .prg obligatorio: .fxp no registra DEFINE CLASS (error 1732 al arrancar sync)
+ LOCAL lcPrg, llPrg
+ lcPrg = tcStyleRoot+"PROGS\suite_full_unlock.prg"
+ IF  .NOT. FILE(lcPrg)
+    lcPrg = tcStyleRoot+"suite_full_unlock.prg"
+ ENDIF
+ IF FILE(lcPrg)
+    lcerr = ""
+    ON ERROR lcerr = MESSAGE()
+    SET PROCEDURE TO (lcPrg) ADDITIVE
+    llPrg = (TYPE("Suite_SyncInit")#"U")
+    ON ERROR &lcSavErr
+    IF llPrg
+       DO SuiteBootstrapLog WITH "[BOOT-06] OK desde "+lcPrg
+       RETURN
+    ENDIF
+    IF  .NOT. EMPTY(lcerr)
+       DO SuiteBootstrapLog WITH "[BOOT-06E] "+lcPrg+" "+lcerr
+    ENDIF
+ ENDIF
+ DO SuiteBootstrapLog WITH "[BOOT-07] FALLO: falta PROGS\suite_full_unlock.prg o recompilar Duna.exe"
 ENDPROC
 **
 PROCEDURE SuiteStartSyncIfReady

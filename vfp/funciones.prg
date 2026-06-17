@@ -1002,6 +1002,7 @@ FUNCTION SuiteLoadUnlockFromFunciones
  lcSavErr = ON("ERROR")
  lcerr = ""
  ON ERROR lcerr = MESSAGE()
+ * Embebido en Duna.exe (sin .prg externo)
  SET PROCEDURE TO suite_full_unlock ADDITIVE
  llOk = (TYPE("Suite_SyncInit")#"U")
  ON ERROR &lcSavErr
@@ -1011,14 +1012,37 @@ FUNCTION SuiteLoadUnlockFromFunciones
     ENDIF
     RETURN .T.
  ENDIF
+ * .prg obligatorio: el .fxp no registra DEFINE CLASS (SuiteSyncTimer -> 1732)
+ LOCAL lcPrg
+ lcPrg = ADDBS(tcStyleRoot)+"PROGS\suite_full_unlock.prg"
+ IF  .NOT. FILE(lcPrg)
+    lcPrg = ADDBS(tcStyleRoot)+"suite_full_unlock.prg"
+ ENDIF
+ IF FILE(lcPrg)
+    lcerr = ""
+    ON ERROR lcerr = MESSAGE()
+    SET PROCEDURE TO (lcPrg) ADDITIVE
+    llOk = (TYPE("Suite_SyncInit")#"U")
+    ON ERROR &lcSavErr
+    IF llOk
+       IF TYPE("SuiteBootstrapLog")#"U"
+          DO SuiteBootstrapLog WITH "[BOOT-06] OK desde "+lcPrg+" (funciones loader)"
+       ENDIF
+       RETURN .T.
+    ENDIF
+    IF TYPE("SuiteBootstrapLog")#"U"
+       DO SuiteBootstrapLog WITH "[BOOT-06E] "+lcPrg+IIF( .NOT. EMPTY(lcerr), " "+lcerr, " sin Suite_SyncInit")
+    ENDIF
+    RETURN .F.
+ ENDIF
  IF TYPE("SuiteBootstrapLog")#"U"
-    DO SuiteBootstrapLog WITH "[BOOT-07] falta suite_full_unlock embebido — ejecutar BUILD-DUNA.bat"
+    DO SuiteBootstrapLog WITH "[BOOT-07] falta PROGS\suite_full_unlock.prg en "+tcStyleRoot
  ENDIF
  RETURN .F.
 ENDFUNC
 **
 FUNCTION SuiteGetHttpLocal
- LOCAL lo, lcSavErr, llFail
+ LOCAL lo, lcSavErr, llFail, lcRoot, lcPrg
  lo = .NULL.
  IF TYPE("SuiteCreateHttp")#"U"
     RETURN SuiteCreateHttp()
@@ -1026,7 +1050,21 @@ FUNCTION SuiteGetHttpLocal
  llFail = .F.
  lcSavErr = ON("ERROR")
  ON ERROR llFail = .T.
- SET PROCEDURE TO suite_full_unlock ADDITIVE
+ lcRoot = IIF(TYPE("pcSuiteStyleRoot")="C" .AND. .NOT. EMPTY(pcSuiteStyleRoot), ADDBS(pcSuiteStyleRoot), ADDBS(SYS(5)+SYS(2003)))
+ lcPrg = lcRoot+"PROGS\suite_full_unlock.prg"
+ IF  .NOT. FILE(lcPrg)
+    lcPrg = lcRoot+"suite_full_unlock.prg"
+ ENDIF
+ IF TYPE("SuiteEnsureSyncGlobals")="U"
+    IF FILE(lcPrg)
+       SET PROCEDURE TO (lcPrg) ADDITIVE
+    ELSE
+       SET PROCEDURE TO suite_full_unlock ADDITIVE
+    ENDIF
+ ENDIF
+ IF TYPE("SuiteEnsureSyncGlobals")#"U"
+    DO SuiteEnsureSyncGlobals
+ ENDIF
  lo = CREATEOBJECT("httpasp_local")
  ON ERROR &lcSavErr
  IF llFail OR VARTYPE(lo)#"O"

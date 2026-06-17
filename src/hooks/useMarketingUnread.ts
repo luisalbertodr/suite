@@ -2,13 +2,10 @@ import { useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { MARKETING_HOST_COMPANY_ID } from '@/lib/marketingScope';
+import type { MarketingLead } from '@/hooks/useMarketingLeads';
 
 function unreadCountQueryKey(companyIds: string[]) {
   return ['marketing-unread-count', companyIds.slice().sort().join(',')] as const;
-}
-
-function viewedSetQueryKey(companyId: string | null) {
-  return ['marketing-lead-viewed', companyId] as const;
 }
 
 /** Empresa del tablero de marketing (siempre Estética). */
@@ -16,7 +13,35 @@ export function useMarketingUnreadScopeCompanyIds(): string[] {
   return [MARKETING_HOST_COMPANY_ID];
 }
 
-/** Total de leads no vistos por el usuario (badge en DockBar). */
+/** Lead pendiente de consultar por el equipo (sin team_viewed_at). */
+export function isMarketingLeadUnread(lead: Pick<MarketingLead, 'team_viewed_at'>): boolean {
+  return !lead.team_viewed_at;
+}
+
+/** Marca un lead como visto por el equipo (idempotente). */
+export async function markMarketingLeadTeamViewed(leadId: string): Promise<void> {
+  const { error } = await supabase.rpc('mark_marketing_lead_team_viewed', {
+    p_lead_id: leadId,
+  });
+  if (error) throw error;
+}
+
+function patchLeadTeamViewedInCache(
+  queryClient: ReturnType<typeof useQueryClient>,
+  companyId: string,
+  leadId: string,
+  viewedAt: string,
+) {
+  queryClient.setQueryData<MarketingLead[]>(['marketing-leads', companyId], (prev) =>
+    prev?.map((l) =>
+      l.id === leadId && !l.team_viewed_at
+        ? { ...l, team_viewed_at: viewedAt }
+        : l,
+    ),
+  );
+}
+
+/** Total de leads no consultados por el equipo (badge en DockBar). */
 export function useMarketingUnread() {
   const queryClient = useQueryClient();
   const scopeIds = useMarketingUnreadScopeCompanyIds();
@@ -55,15 +80,7 @@ export function useMarketingUnread() {
         { event: '*', schema: 'public', table: 'marketing_leads', filter },
         () => {
           queryClient.invalidateQueries({ queryKey: ['marketing-unread-count'] });
-          queryClient.invalidateQueries({ queryKey: ['marketing-lead-viewed'] });
-        },
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'marketing_lead_views' },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ['marketing-unread-count'] });
-          queryClient.invalidateQueries({ queryKey: ['marketing-lead-viewed'] });
+          queryClient.invalidateQueries({ queryKey: ['marketing-leads'] });
         },
       )
       .subscribe();
@@ -79,61 +96,21 @@ export function useMarketingUnread() {
   };
 }
 
-/** Conjunto de lead_id ya vistos por el usuario en una empresa (tarjetas del kanban). */
-export function useMarketingLeadViewedSet(scopeCompanyId: string | null) {
-  const query = useQuery({
-    queryKey: viewedSetQueryKey(scopeCompanyId),
-    enabled: !!scopeCompanyId,
-    staleTime: 30_000,
-    queryFn: async (): Promise<Set<string>> => {
-      if (!scopeCompanyId) return new Set();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) return new Set();
-
-      const { data, error } = await supabase
-        .from('marketing_lead_views')
-        .select('lead_id')
-        .eq('user_id', user.id)
-        .eq('company_id', scopeCompanyId);
-      if (error) throw error;
-      return new Set((data ?? []).map((r) => r.lead_id));
-    },
-  });
-
-  return {
-    viewedLeadIds: query.data ?? new Set<string>(),
-    isLoading: query.isLoading,
-  };
-}
-
 export function useMarkMarketingLeadViewed() {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async (input: { leadId: string; companyId: string }) => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const { error } = await supabase.from('marketing_lead_views').upsert(
-        {
-          user_id: user.id,
-          lead_id: input.leadId,
-          company_id: input.companyId,
-          viewed_at: new Date().toISOString(),
-        },
-        { onConflict: 'user_id,lead_id' },
-      );
-      if (error) throw error;
+      await markMarketingLeadTeamViewed(input.leadId);
+    },
+    onMutate: async (vars) => {
+      const viewedAt = new Date().toISOString();
+      patchLeadTeamViewedInCache(queryClient, vars.companyId, vars.leadId, viewedAt);
+      return { viewedAt };
     },
     onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: ['marketing-unread-count'] });
-      queryClient.invalidateQueries({
-        queryKey: viewedSetQueryKey(vars.companyId),
-      });
+      queryClient.invalidateQueries({ queryKey: ['marketing-leads', vars.companyId] });
     },
   });
 }

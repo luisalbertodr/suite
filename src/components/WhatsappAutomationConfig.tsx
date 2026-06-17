@@ -189,7 +189,7 @@ export const WhatsappAutomationConfig: React.FC = () => {
             </Select>
           </div>
           <p className="text-[11px] text-muted-foreground max-w-md">
-            Ejemplo: 10:00–20:00 envía de 10:00 a 19:59. La cola gradual (máx. 50/día) sigue activa
+            Ejemplo: 10:00–20:00 envía de 10:00 a 19:59. La cola gradual (máx. 100/día) sigue activa
             dentro de este horario.
           </p>
         </CardContent>

@@ -52,7 +52,8 @@ export const MarketingLeadDetailDialog: React.FC<MarketingLeadDetailDialogProps>
   const { updateLead, deleteLead, archiveLead } = useMarketingLeads(companyId);
   const navigate = useNavigate();
   const { hasPermission } = usePermissions();
-  const { canWrite: canEditMarketing } = useMarketingPermissions();
+  const { canWrite: canEditMarketing, loading: marketingPermsLoading } = useMarketingPermissions();
+  const saveBlocked = !marketingPermsLoading && !canEditMarketing;
   const canUseWhatsapp = hasPermission('whatsapp', 'read');
 
   const [firstName, setFirstName] = useState('');
@@ -348,8 +349,8 @@ export const MarketingLeadDetailDialog: React.FC<MarketingLeadDetailDialogProps>
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               Cancelar
             </Button>
-            <Button onClick={handleSave} disabled={updateLead.isPending || !canEditMarketing}>
-              Guardar
+            <Button onClick={handleSave} disabled={updateLead.isPending || saveBlocked}>
+              {updateLead.isPending ? 'Guardando…' : 'Guardar'}
             </Button>
           </div>
         </DialogFooter>
