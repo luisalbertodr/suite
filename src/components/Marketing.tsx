@@ -138,7 +138,6 @@ export const Marketing: React.FC = () => {
   const [promoteLead, setPromoteLead] = useState<MarketingLead | null>(null);
   const [customerDetailId, setCustomerDetailId] = useState<string | null>(null);
   const [marketingView, setMarketingView] = useState<'board' | 'queue'>('board');
-  const autoSyncTriggered = useRef(false);
 
   const toastMetaSyncResult = useCallback(
     (data: MetaSyncResponse) => {
@@ -240,22 +239,28 @@ export const Marketing: React.FC = () => {
     [fields],
   );
 
-  // Auto-sync con Meta cuando se abre Marketing y ha pasado el intervalo configurado.
+  // Sincronización periódica con Meta mientras Marketing está abierto.
   useEffect(() => {
-    if (autoSyncTriggered.current) return;
-    if (!metaConfig || !metaConfig.enabled || !metaConfig.access_token) return;
+    if (!metaConfig?.enabled || !metaConfig.access_token) return;
     if (!metaForms.some((f) => f.enabled)) return;
-    const intervalMs = Math.max(5, metaConfig.sync_interval_minutes ?? 60) * 60 * 1000;
-    const last = metaConfig.last_sync_at ? new Date(metaConfig.last_sync_at).getTime() : 0;
-    if (Date.now() - last < intervalMs) return;
-    autoSyncTriggered.current = true;
-    syncNow.mutate(undefined, {
-      onSuccess: toastMetaSyncResult,
-      onError: (e) => {
-        const message = e instanceof Error ? e.message : 'Error sincronizando con Meta';
-        toast({ title: 'Sincronización Meta', description: message, variant: 'destructive' });
-      },
-    });
+
+    const runSyncIfDue = () => {
+      const intervalMs = Math.max(5, metaConfig.sync_interval_minutes ?? 60) * 60 * 1000;
+      const last = metaConfig.last_sync_at ? new Date(metaConfig.last_sync_at).getTime() : 0;
+      if (Date.now() - last < intervalMs) return;
+      if (syncNow.isPending) return;
+      syncNow.mutate(undefined, {
+        onSuccess: toastMetaSyncResult,
+        onError: (e) => {
+          const message = e instanceof Error ? e.message : 'Error sincronizando con Meta';
+          toast({ title: 'Sincronización Meta', description: message, variant: 'destructive' });
+        },
+      });
+    };
+
+    runSyncIfDue();
+    const timerId = window.setInterval(runSyncIfDue, 60_000);
+    return () => window.clearInterval(timerId);
   }, [metaConfig, metaForms, syncNow, toastMetaSyncResult, toast]);
 
   const matchLeadToCustomer = useCallback(

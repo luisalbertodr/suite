@@ -1,13 +1,30 @@
-* Compila general + funciones + suite_full_unlock (headless OK desde CMD).
-LOCAL lcRoot, lcProgs, lcLog, lcList, lnI, lcBase, lcErrTxt, lcSav
+* Compila general + funciones (headless OK desde CMD).
+LOCAL lcRoot, lcProgs, lcLog, lcList, lnI, lcBase, lcErrTxt, lcSav, lcStem, lcHere, llRepair
 
-lcRoot = "C:\Duna\Export\"
-lcProgs = lcRoot + "PROGS\"
-lcLog = lcRoot + "build_mscomctl.log"
+lcHere = FULLPATH(SYS(16))
+IF EMPTY(lcHere)
+   lcHere = FULLPATH("VfpCompilePrgs.prg")
+ENDIF
+lcProgs = ADDBS(JUSTPATH(lcHere))
+IF RIGHT(LOWER(lcProgs), 6) <> "progs\"
+   lcProgs = ADDBS(JUSTPATH(lcProgs)) + "PROGS\"
+ENDIF
 
 SET SAFETY OFF
+DO (lcProgs + "VfpLoadRepairLib.prg")
+
+lcRoot = VfpExportRootFromProgs(lcProgs)
+lcStem = VfpBootstrapProjectStem(lcRoot)
+llRepair = VfpLoadRepairLib(lcProgs)
+IF llRepair .AND. TYPE("SuiteResolveExportRoot")#"U"
+   lcRoot = SuiteResolveExportRoot(lcProgs)
+   lcStem = SuiteResolveProjectStem(lcRoot)
+ENDIF
+
 SET DEFAULT TO (lcRoot)
-STRTOFILE("=== VfpCompilePrgs "+TTOC(DATETIME())+" ==="+CHR(13), lcLog, .F.)
+lcLog = lcRoot + "build_" + lcStem + ".log"
+
+STRTOFILE("=== VfpCompilePrgs "+TTOC(DATETIME())+" root="+lcRoot+" stem="+lcStem+" repair="+IIF(llRepair, "1", "0")+" ==="+CHR(13), lcLog, .F.)
 
 lcList = "general,funciones"
 FOR lnI = 1 TO GETWORDCOUNT(lcList, ",")
@@ -26,16 +43,23 @@ FOR lnI = 1 TO GETWORDCOUNT(lcList, ",")
    STRTOFILE("COMPILE "+lcBase+" "+IIF(EMPTY(lcErrTxt), "OK", "FAIL")+" "+lcErrTxt+CHR(13), lcLog, .T.)
    IF .NOT. EMPTY(lcErrTxt)
       STRTOFILE("ABORT: compile "+lcBase+CHR(13), lcLog, .T.)
-      QUIT
+      DO VfpBuildExit WITH .T., "Error compilando "+lcBase+CHR(13)+lcErrTxt+CHR(13)+CHR(13)+"Log: "+lcLog
    ENDIF
 ENDFOR
-* suite_full_unlock: solo .prg en el proyecto (el .fxp no registra DEFINE CLASS -> 1732)
+
+* VFP prefiere FXP sobre PRG: limpiar compilados obsoletos.
 IF FILE(lcProgs + "suite_full_unlock.fxp")
    ERASE (lcProgs + "suite_full_unlock.fxp")
 ENDIF
 IF FILE(lcProgs + "suite_full_unlock.FXP")
    ERASE (lcProgs + "suite_full_unlock.FXP")
 ENDIF
-STRTOFILE("suite_full_unlock: solo .prg (fxp borrado si existia)"+CHR(13), lcLog, .T.)
-STRTOFILE("PRGs listos. Siguiente: DO PROGS\VfpBuildProject en VFP (BUILD-DUNA-INTERACTIVO.bat)"+CHR(13), lcLog, .T.)
-QUIT
+IF FILE(lcProgs + "suite_cola_sync.fxp")
+   ERASE (lcProgs + "suite_cola_sync.fxp")
+ENDIF
+IF FILE(lcProgs + "suite_cola_sync.FXP")
+   ERASE (lcProgs + "suite_cola_sync.FXP")
+ENDIF
+STRTOFILE("FXP obsoletos borrados (suite_full_unlock/suite_cola_sync)"+CHR(13), lcLog, .T.)
+STRTOFILE("PRGs listos. Siguiente: DO PROGS\VfpBuildProject en VFP (PM abierto)"+CHR(13), lcLog, .T.)
+DO VfpBuildExit WITH .F., "Compilacion OK (general + funciones)."+CHR(13)+CHR(13)+"Siguiente paso:"+CHR(13)+"DO PROGS\VfpBuildProject.prg"+CHR(13)+CHR(13)+"Log: "+lcLog

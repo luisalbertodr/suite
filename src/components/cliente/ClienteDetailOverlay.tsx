@@ -1,6 +1,7 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { ClienteDetailView } from '@/components/ClienteDetailView';
+import { useRoutePanelActive } from '@/contexts/RoutePanelContext';
 import { AGENDA_CUSTOMER_DETAIL_OVERLAY_Z } from '@/lib/agendaResourceColors';
 import { cn } from '@/lib/utils';
 
@@ -28,7 +29,8 @@ export const ClienteDetailOverlay: React.FC<Props> = ({
   backLabel = 'Volver a la cita',
   className,
 }) => {
-  if (!open || typeof document === 'undefined') return null;
+  const panelActive = useRoutePanelActive();
+  if (!open || !panelActive || typeof document === 'undefined') return null;
 
   return createPortal(
     <div

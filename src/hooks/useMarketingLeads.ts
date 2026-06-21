@@ -334,6 +334,32 @@ export const parseMetaLeadPayload = (raw: MetaLeadFormPayload): ParsedMetaLead[]
   });
 };
 
+const MARKETING_LEADS_PAGE_SIZE = 1000;
+
+async function fetchAllMarketingLeads(companyId: string): Promise<MarketingLead[]> {
+  const rows: MarketingLead[] = [];
+  let from = 0;
+
+  while (true) {
+    const to = from + MARKETING_LEADS_PAGE_SIZE - 1;
+    const { data, error } = await supabase
+      .from('marketing_leads')
+      .select('*')
+      .eq('company_id', companyId)
+      .is('archived_at', null)
+      .order('created_at', { ascending: false })
+      .range(from, to);
+
+    if (error) throw error;
+    const batch = data ?? [];
+    rows.push(...batch);
+    if (batch.length < MARKETING_LEADS_PAGE_SIZE) break;
+    from += MARKETING_LEADS_PAGE_SIZE;
+  }
+
+  return rows;
+}
+
 export const useMarketingLeads = (scopeCompanyId?: string | null) => {
   const queryClient = useQueryClient();
   const { companyId: hostCompanyId, loading: companyLoading } = useCompanyFilter();
@@ -342,20 +368,12 @@ export const useMarketingLeads = (scopeCompanyId?: string | null) => {
   const query = useQuery({
     queryKey: ['marketing-leads', companyId],
     enabled: !!companyId && !companyLoading,
-    staleTime: 45_000,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
     queryFn: async (): Promise<MarketingLead[]> => {
       if (!companyId) return [];
-
-      const { data, error } = await supabase
-        .from('marketing_leads')
-        .select('*')
-        .eq('company_id', companyId)
-        .is('archived_at', null)
-        .order('position_in_stage', { ascending: true })
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      return data ?? [];
+      return fetchAllMarketingLeads(companyId);
     },
   });
 

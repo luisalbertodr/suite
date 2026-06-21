@@ -1,0 +1,53 @@
+/* WhatsApp Web — burbujas, fondo y barra de envío (Suite) */
+
+.wa-chat-panel {
+  position: relative;
+  background-color: #efeae2;
+}
+
+.dark .wa-chat-panel {
+  background-color: hsl(var(--muted));
+}
+
+.wa-chat-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.06;
+  background-image: url('/whatsapp-chat-tile.png');
+  background-repeat: repeat;
+  background-size: 412px 412px;
+}
+
+.dark .wa-chat-panel::before {
+  opacity: 0.08;
+}
+
+.wa-bubble-out {
+  background-color: #d9fdd3;
+  box-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.13);
+}
+
+.dark .wa-bubble-out {
+  background-color: hsl(152 45% 22%);
+}
+
+.wa-bubble-in {
+  background-color: #fff;
+  box-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.13);
+}
+
+.dark .wa-bubble-in {
+  background-color: hsl(var(--card));
+}
+
+.wa-send-bar {
+  border-radius: 1.5rem;
+  background-color: #f0f2f5;
+  box-shadow: 0 1px 3px rgba(11, 20, 26, 0.08);
+}
+
+.dark .wa-send-bar {
+  background-color: hsl(var(--muted));
+}

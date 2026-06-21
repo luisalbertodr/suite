@@ -30,6 +30,11 @@ import type { CustomerLookupRow } from '@/hooks/useCustomerLookup';
 import { formatLeadFieldValue, humanizeFieldKey } from './marketingFormatters';
 import { MarketingLeadNotesPanel } from './MarketingLeadNotesPanel';
 import { resolveLeadAppointmentParts } from '@/lib/marketingLeadAppointment';
+import { cn } from '@/lib/utils';
+import {
+  ABOVE_DOCK_DIALOG_POSITION,
+  ABOVE_DOCK_DIALOG_Z,
+} from '@/lib/dialogLayers';
 
 interface MarketingLeadDetailDialogProps {
   lead: MarketingLead | null;
@@ -169,7 +174,14 @@ export const MarketingLeadDetailDialog: React.FC<MarketingLeadDetailDialogProps>
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[90vh] max-w-3xl flex-col gap-0 overflow-hidden p-0">
+      <DialogContent
+        overlayClassName={ABOVE_DOCK_DIALOG_Z}
+        className={cn(
+          ABOVE_DOCK_DIALOG_Z,
+          ABOVE_DOCK_DIALOG_POSITION,
+          'flex max-h-full max-w-3xl flex-col gap-0 overflow-hidden p-0',
+        )}
+      >
         <div className="flex-1 overflow-y-auto px-6 pt-6 pb-4">
         <DialogHeader>
           <DialogTitle>Detalle del lead</DialogTitle>
@@ -295,7 +307,7 @@ export const MarketingLeadDetailDialog: React.FC<MarketingLeadDetailDialogProps>
               <SelectTrigger>
                 <SelectValue placeholder="Selecciona etapa" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="z-[130]">
                 {stages.map((s) => (
                   <SelectItem key={s.id} value={s.id}>
                     {s.name}

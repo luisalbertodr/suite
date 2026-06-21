@@ -1,9 +1,9 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Loader2, RefreshCw, Power, LogOut, QrCode, Smartphone, AlertTriangle } from 'lucide-react';
 import { useWhatsappConfig, type WhatsappConfigRow } from '@/hooks/useWhatsappConfig';
 import { useToast } from '@/hooks/use-toast';
-import { waTheme } from './whatsappUtils';
+import { useWhatsappTheme } from './WhatsappThemeContext';
 
 interface Props {
   config: WhatsappConfigRow;
@@ -31,6 +31,7 @@ function statusLabel(status: string | null | undefined): string {
 
 /** Panel inline (columna derecha) para conectar la sesión Waha — no modal ni pantalla completa. */
 export const WhatsappSessionPanel: React.FC<Props> = ({ config, onConnected }) => {
+  const theme = useWhatsappTheme();
   const { toast } = useToast();
   const {
     sessionStatus,
@@ -40,6 +41,8 @@ export const WhatsappSessionPanel: React.FC<Props> = ({ config, onConnected }) =
     fetchQr,
   } = useWhatsappConfig();
 
+  const connectedNotifiedRef = useRef(false);
+
   useEffect(() => {
     sessionStatus.mutate(undefined, { onError: () => undefined });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -48,9 +51,13 @@ export const WhatsappSessionPanel: React.FC<Props> = ({ config, onConnected }) =
   useEffect(() => {
     const status = (config.last_status ?? '').toUpperCase();
     if (status === 'WORKING') {
-      onConnected?.();
+      if (!connectedNotifiedRef.current) {
+        connectedNotifiedRef.current = true;
+        onConnected?.();
+      }
       return;
     }
+    connectedNotifiedRef.current = false;
     const id = setInterval(() => {
       sessionStatus.mutate(undefined, { onError: () => undefined });
       if (status === 'SCAN_QR_CODE') {
@@ -78,7 +85,7 @@ export const WhatsappSessionPanel: React.FC<Props> = ({ config, onConnected }) =
 
   return (
     <div
-      className={`flex h-full flex-col items-center justify-center p-6 ${waTheme.chatBg}`}
+      className={`flex h-full flex-col items-center justify-center p-6 ${theme.chatBg}`}
     >
       <div className="w-full max-w-md space-y-4 rounded-lg border bg-white p-5 shadow-sm dark:bg-zinc-900 dark:border-zinc-800">
         <div className="flex items-start gap-3">

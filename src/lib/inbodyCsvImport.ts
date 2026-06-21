@@ -10,6 +10,11 @@ import {
   type InbodySegmentalFat,
   type InbodySegmentalLean,
 } from '@/lib/inbodyMeasurements';
+import {
+  buildInbodyDataQuality,
+  fixBodyFatMassRangeKg,
+  type InbodyDataQuality,
+} from '@/lib/inbodyQuality';
 
 export interface InbodyCsvImportRow {
   company_id: string;
@@ -56,6 +61,7 @@ export interface InbodyCsvImportRow {
   bca: Record<string, unknown>;
   source: string;
   import_batch: string;
+  data_quality?: InbodyDataQuality;
 }
 
 export interface InbodyCsvParseResult {
@@ -65,6 +71,8 @@ export interface InbodyCsvParseResult {
   skipped: number;
   /** Filas vacías o basura al final del fichero (sin aviso). */
   skippedBlank: number;
+  /** Mediciones con datos incoherentes (conviene repetir escaneo). */
+  suspicious: number;
 }
 
 const HEADER_ALIASES: Record<string, string[]> = {
@@ -384,6 +392,12 @@ function rowToImportPayload(
   if (!userId || !measuredAt) return null;
 
   const customerId = findCustomerIdByDniKeys(userId, customerByTax);
+  const weightKg = pickFloat(raw, 'weight_kg');
+  const bfmRange = fixBodyFatMassRangeKg(
+    weightKg,
+    pickFloat(raw, 'body_fat_min_kg'),
+    pickFloat(raw, 'body_fat_max_kg'),
+  );
 
   return {
     company_id: companyId,
@@ -393,15 +407,15 @@ function rowToImportPayload(
     height_cm: pickFloat(raw, 'height_cm'),
     age_years: pickFloat(raw, 'age_years'),
     sex: pick(raw, 'sex') || null,
-    weight_kg: pickFloat(raw, 'weight_kg'),
+    weight_kg: weightKg,
     weight_min_kg: pickFloat(raw, 'weight_min_kg'),
     weight_max_kg: pickFloat(raw, 'weight_max_kg'),
     smm_kg: pickFloat(raw, 'smm_kg'),
     smm_min_kg: pickFloat(raw, 'smm_min_kg'),
     smm_max_kg: pickFloat(raw, 'smm_max_kg'),
     body_fat_kg: pickFloat(raw, 'body_fat_kg'),
-    body_fat_min_kg: pickFloat(raw, 'body_fat_min_kg'),
-    body_fat_max_kg: pickFloat(raw, 'body_fat_max_kg'),
+    body_fat_min_kg: bfmRange.min,
+    body_fat_max_kg: bfmRange.max,
     tbw_kg: pickFloat(raw, 'tbw_kg'),
     tbw_min_kg: pickFloat(raw, 'tbw_min_kg'),
     tbw_max_kg: pickFloat(raw, 'tbw_max_kg'),
@@ -446,7 +460,7 @@ export function parseInbodyCsv(
   let skipped = 0;
 
   if (table.length < 2) {
-    return { rows: [], errors: ['El CSV está vacío o no tiene filas de datos.'], skipped: 0, skippedBlank: 0 };
+    return { rows, errors, skipped, skippedBlank, suspicious: 0 };
   }
 
   const headerMap = mapHeaders(table[0]);
@@ -487,7 +501,9 @@ export function parseInbodyCsv(
     rows.push(payload);
   }
 
-  return { rows, errors, skipped, skippedBlank };
+  const annotated = annotateInbodyImportQuality(rows);
+  const suspicious = annotated.filter((r) => r.data_quality?.needs_repeat).length;
+  return { rows: annotated, errors, skipped, skippedBlank, suspicious };
 }
 
 export async function loadCustomerTaxMap(companyId: string): Promise<Map<string, string>> {
@@ -654,13 +670,45 @@ export function enrichInbodyRowsWithCustomerMap(
   });
 }
 
+export function annotateInbodyImportQuality(rows: InbodyCsvImportRow[]): InbodyCsvImportRow[] {
+  const byUser = new Map<string, InbodyCsvImportRow[]>();
+  for (const row of rows) {
+    const key = normInbodyUserId(row.inbody_user_id);
+    const list = byUser.get(key) ?? [];
+    list.push(row);
+    byUser.set(key, list);
+  }
+
+  return rows.map((row) => {
+    const siblings = byUser.get(normInbodyUserId(row.inbody_user_id)) ?? [row];
+    const pseudoId = `${row.inbody_user_id}|${row.measured_at}`;
+    const asMeasurement = {
+      ...row,
+      id: pseudoId,
+      segmental_lean: row.segmental_lean,
+      segmental_fat: row.segmental_fat,
+      impedance: row.impedance,
+      edema: row.edema,
+    };
+    const siblingMeasurements = siblings.map((s) => ({
+      ...s,
+      id: `${s.inbody_user_id}|${s.measured_at}`,
+    }));
+    return {
+      ...row,
+      data_quality: buildInbodyDataQuality(asMeasurement as never, siblingMeasurements as never),
+    };
+  });
+}
+
 export async function upsertInbodyCsvRows(rows: InbodyCsvImportRow[]): Promise<number> {
   if (rows.length === 0) return 0;
+  const prepared = annotateInbodyImportQuality(rows);
   const chunkSize = 100;
   let total = 0;
 
-  for (let i = 0; i < rows.length; i += chunkSize) {
-    const chunk = rows.slice(i, i + chunkSize).map((row) => ({
+  for (let i = 0; i < prepared.length; i += chunkSize) {
+    const chunk = prepared.slice(i, i + chunkSize).map((row) => ({
       ...row,
       bca: row.bca,
       mfa: {},
@@ -668,6 +716,7 @@ export async function upsertInbodyCsvRows(rows: InbodyCsvImportRow[]): Promise<n
       wc: {},
       imp: row.impedance,
       ed: row.edema,
+      data_quality: row.data_quality,
     }));
 
     const { error } = await (supabase as any).from('inbody_measurements').upsert(chunk, {

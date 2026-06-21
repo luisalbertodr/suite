@@ -13,9 +13,9 @@ import {
   displayNameForChat,
   resolvePhoneLabelForChat,
   customerProfilePath,
-  waTheme,
   type MetaLeadInfo,
 } from './whatsappUtils';
+import { useWhatsappTheme } from './WhatsappThemeContext';
 import { Check, CheckCheck } from 'lucide-react';
 import type { WhatsappChatRow } from '@/hooks/useWhatsappChats';
 
@@ -47,6 +47,8 @@ function sessionStatusLabel(status: string | null | undefined): string {
   return status ?? 'Sin sesión';
 }
 
+type ChatFilter = 'all' | 'unread' | 'groups';
+
 export const WhatsappChatList: React.FC<Props> = ({
   chats,
   selectedChatId,
@@ -65,29 +67,37 @@ export const WhatsappChatList: React.FC<Props> = ({
   sessionPhone,
   onCreateCustomer,
 }) => {
+  const theme = useWhatsappTheme();
   const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<ChatFilter>('all');
 
   const filtered = useMemo(() => {
+    let list = chats;
+    if (filter === 'unread') {
+      list = list.filter((c) => (c.unread_count ?? 0) > 0);
+    } else if (filter === 'groups') {
+      list = list.filter((c) => c.is_group || isGroupJid(c.chat_id));
+    }
     const q = search.trim().toLowerCase();
-    if (!q) return chats;
-    return chats.filter((c) => {
+    if (!q) return list;
+    return list.filter((c) => {
       const haystack = [c.name ?? '', jidToDisplay(c.chat_id), c.last_message_preview ?? '']
         .join(' ')
         .toLowerCase();
       return haystack.includes(q);
     });
-  }, [chats, search]);
+  }, [chats, search, filter]);
 
   const clinicLabel = sessionPushName?.trim() || 'WhatsApp clínica';
   const clinicPhone = sessionPhone?.trim() || '';
 
   return (
     <div
-      className={`flex h-full min-h-0 min-w-[340px] max-w-[400px] flex-col overflow-hidden border-r ${waTheme.border} ${waTheme.sidebarBg}`}
+      className={`flex h-full min-h-0 w-full flex-col overflow-hidden border-r ${theme.border} ${theme.sidebarBg}`}
     >
       {/* Header de sesión (estilo WhatsApp Web) */}
       <div
-        className={`flex h-[60px] shrink-0 items-center justify-between px-4 ${waTheme.headerBg} border-b ${waTheme.border}`}
+        className={`flex h-[60px] shrink-0 items-center justify-between px-4 ${theme.headerBg} border-b ${theme.border}`}
       >
         <div className="flex min-w-0 items-center gap-3">
           <WhatsappAvatar name={clinicLabel} className="h-10 w-10" />
@@ -95,10 +105,10 @@ export const WhatsappChatList: React.FC<Props> = ({
             <p className="truncate text-sm font-medium text-[#111b21] dark:text-zinc-100">
               {clinicLabel}
               {clinicPhone ? (
-                <span className={`font-normal ${waTheme.textMuted}`}> · {clinicPhone}</span>
+                <span className={`font-normal ${theme.textMuted}`}> · {clinicPhone}</span>
               ) : null}
             </p>
-            <p className={`truncate text-xs ${waTheme.textMuted}`}>
+            <p className={`truncate text-xs ${theme.textMuted}`}>
               {sessionStatusLabel(sessionStatus)}
             </p>
           </div>
@@ -107,7 +117,7 @@ export const WhatsappChatList: React.FC<Props> = ({
           <Button
             variant="ghost"
             size="icon"
-            className={`h-9 w-9 ${waTheme.textIcon}`}
+            className={`h-9 w-9 ${theme.textIcon}`}
             onClick={onStartNew}
             title="Nuevo chat"
           >
@@ -116,7 +126,7 @@ export const WhatsappChatList: React.FC<Props> = ({
           <Button
             variant="ghost"
             size="icon"
-            className={`h-9 w-9 ${waTheme.textIcon}`}
+            className={`h-9 w-9 ${theme.textIcon}`}
             onClick={onRefresh}
             disabled={isRefreshing}
             title="Sincronizar chats e histórico desde Waha"
@@ -127,9 +137,9 @@ export const WhatsappChatList: React.FC<Props> = ({
       </div>
 
       {/* Buscador */}
-      <div className={`shrink-0 border-b p-2 ${waTheme.border} ${waTheme.sidebarBg}`}>
-        <div className={`flex items-center gap-3 rounded-lg p-2 ${waTheme.searchBg}`}>
-          <Search className={`h-4 w-4 shrink-0 ${waTheme.textIcon}`} />
+      <div className={`shrink-0 border-b p-2 ${theme.border} ${theme.sidebarBg}`}>
+        <div className={`flex items-center gap-3 rounded-lg p-2 ${theme.searchBg}`}>
+          <Search className={`h-4 w-4 shrink-0 ${theme.textIcon}`} />
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -139,10 +149,33 @@ export const WhatsappChatList: React.FC<Props> = ({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      <div className={`flex shrink-0 gap-1.5 border-b px-2 py-2 ${theme.border}`}>
+        {(
+          [
+            ['all', 'Todos'],
+            ['unread', 'No leídos'],
+            ['groups', 'Grupos'],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setFilter(id)}
+            className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+              filter === id
+                ? 'bg-emerald-600 text-white'
+                : `${theme.searchBg} ${theme.textMuted} hover:opacity-90`
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y [-webkit-overflow-scrolling:touch]">
         <ul className="divide-y divide-[#f0f2f5] dark:divide-zinc-800">
           {filtered.length === 0 ? (
-            <li className={`px-4 py-10 text-center text-xs ${waTheme.textMuted}`}>
+            <li className={`px-4 py-10 text-center text-xs ${theme.textMuted}`}>
               {chats.length === 0
                 ? 'No hay chats todavía. Pulsa el botón de sincronizar para traerlos desde WhatsApp.'
                 : 'No hay resultados.'}
@@ -187,8 +220,8 @@ export const WhatsappChatList: React.FC<Props> = ({
                     onClick={() => onSelect(c.chat_id)}
                     className={`flex w-full items-center gap-3 p-3 text-left transition ${
                       isActive
-                        ? waTheme.chatActive
-                        : waTheme.chatHover
+                        ? theme.chatActive
+                        : theme.chatHover
                     }`}
                   >
                     <WhatsappAvatar
@@ -225,7 +258,7 @@ export const WhatsappChatList: React.FC<Props> = ({
                             <span className="truncate">{displayName}</span>
                           )}
                           {showPhoneInline ? (
-                            <span className={`truncate font-normal ${waTheme.textMuted}`}>
+                            <span className={`truncate font-normal ${theme.textMuted}`}>
                               · {phoneLabel}
                             </span>
                           ) : null}
@@ -252,7 +285,7 @@ export const WhatsappChatList: React.FC<Props> = ({
                               <UserPlus className="h-2.5 w-2.5" />
                             </span>
                           ) : null}
-                          <span className={`text-xs ${waTheme.textMuted}`}>
+                          <span className={`text-xs ${theme.textMuted}`}>
                             {formatChatListTime(c.last_message_at)}
                           </span>
                         </div>
@@ -278,7 +311,7 @@ export const WhatsappChatList: React.FC<Props> = ({
                         </div>
                       ) : null}
                       {isGroup ? (
-                        <p className={`truncate text-[10px] ${waTheme.textMuted}`}>
+                        <p className={`truncate text-[10px] ${theme.textMuted}`}>
                           Grupo de WhatsApp
                         </p>
                       ) : null}
@@ -286,7 +319,7 @@ export const WhatsappChatList: React.FC<Props> = ({
                         {c.last_message_from_me ? (
                           <CheckCheck
                             className={`h-3 w-3 shrink-0 ${
-                              hasUnread ? waTheme.textMuted : 'text-sky-500 dark:text-sky-400'
+                              hasUnread ? theme.textMuted : 'text-sky-500 dark:text-sky-400'
                             }`}
                             aria-hidden
                           />
@@ -300,7 +333,7 @@ export const WhatsappChatList: React.FC<Props> = ({
                           className={`flex-1 truncate text-xs ${
                             hasUnread
                               ? 'font-medium text-[#111b21] dark:text-zinc-200'
-                              : waTheme.textMuted
+                              : theme.textMuted
                           }`}
                         >
                           {c.last_message_preview ?? ' '}

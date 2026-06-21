@@ -6,12 +6,12 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$ExportExe = "C:\Duna\Export\Duna.exe"
-$ExportRoot = "C:\Duna\Export"
+$ExportRoot = if ($env:SUITE_EXPORT_ROOT) { $env:SUITE_EXPORT_ROOT.TrimEnd('\') } else { "C:\Duna\Export" }
+$ExportExe = Join-Path $ExportRoot "Duna.exe"
 
 function Get-LatestBuildExe {
     param([string]$Root)
-    $names = @("mscomctl.exe", "Duna2.exe", "DunaNew.exe", "Duna.exe")
+    $names = @("mscomctlOk.exe", "mscomctl.exe", "Duna2.exe", "DunaNew.exe", "Duna.exe")
     $items = foreach ($n in $names) {
         $p = Join-Path $Root $n
         if (Test-Path $p) { Get-Item $p }
@@ -32,7 +32,7 @@ if ($env:SUITE_STYLE_ROOT) { $candidates += $env:SUITE_STYLE_ROOT.TrimEnd('\') }
 $candidates += @(
     "Z:\Style-Dunasoft",
     "C:\Style-Dunasoft",
-    "\\192.168.99.119\c$\Style-Dunasoft"
+    "\\192.168.99.16\c$\Style-Dunasoft"
 )
 $candidates = $candidates | Select-Object -Unique
 

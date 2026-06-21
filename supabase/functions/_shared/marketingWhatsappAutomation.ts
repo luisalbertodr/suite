@@ -8,17 +8,39 @@ import {
   isWhatsappTestChatId,
   type AutomationSendType,
 } from './whatsappAutomationDispatch.ts';
+import {
+  providerSendMedia,
+  providerSendText,
+} from './whatsappProviderClient.ts';
+import {
+  normalizeWhatsappProvider,
+  resolveWhatsappCredentials,
+  type WhatsappProvider,
+  type WhatsappProviderConfig,
+} from './whatsappProviderTypes.ts';
 
 export type WhatsappConfigRow = {
   company_id: string;
+  provider?: WhatsappProvider | string | null;
   base_url: string | null;
   api_key: string | null;
   session_name: string;
+  waha_base_url?: string | null;
+  waha_api_key?: string | null;
+  waha_session_name?: string | null;
+  openwa_base_url?: string | null;
+  openwa_api_key?: string | null;
+  openwa_session_name?: string | null;
+  webhook_secret?: string | null;
   default_country_code: string | null;
   enabled: boolean;
   last_status: string | null;
   me_jid: string | null;
 };
+
+function asProviderConfig(cfg: WhatsappConfigRow): WhatsappProviderConfig {
+  return resolveWhatsappCredentials(cfg);
+}
 
 export type MetaFormAutomation = {
   id: string;
@@ -26,6 +48,10 @@ export type MetaFormAutomation = {
   form_name: string | null;
   whatsapp_automation_enabled: boolean;
   whatsapp_initial_message: string | null;
+  whatsapp_initial_audio_enabled?: boolean | null;
+  whatsapp_initial_audio_path?: string | null;
+  whatsapp_initial_audio_filename?: string | null;
+  whatsapp_initial_audio_mime?: string | null;
   whatsapp_reply_1_message: string | null;
   whatsapp_reply_2_message: string | null;
   whatsapp_reply_invalid_message: string | null;
@@ -35,6 +61,23 @@ export type MetaFormAutomation = {
   stripe_deposit_enabled?: boolean;
   stripe_deposit_amount_cents?: number | null;
 };
+
+export type InitialWhatsappSendKind = 'text' | 'audio' | 'audio_link';
+
+export function resolveInitialWhatsappSendKind(
+  form: MetaFormAutomation,
+): InitialWhatsappSendKind | null {
+  if (!form.whatsapp_automation_enabled) return null;
+  if (form.whatsapp_initial_audio_enabled && form.whatsapp_initial_audio_path?.trim()) {
+    return 'audio';
+  }
+  if (form.whatsapp_initial_message?.trim()) return 'text';
+  return null;
+}
+
+export function formHasInitialWhatsappContent(form: MetaFormAutomation): boolean {
+  return resolveInitialWhatsappSendKind(form) !== null;
+}
 
 export type MarketingLeadAutomationRow = {
   id: string;
@@ -193,68 +236,94 @@ export function parseReplyChoice(body: string | null | undefined): '1' | '2' | n
   return null;
 }
 
-async function wahaFetch(
-  cfg: WhatsappConfigRow,
-  path: string,
-  init: RequestInit = {},
-): Promise<Response> {
-  if (!cfg.base_url) throw new Error('WhatsApp no configurado: falta base_url');
-  const headers = new Headers(init.headers ?? {});
-  if (cfg.api_key) headers.set('X-Api-Key', cfg.api_key);
-  if (!headers.has('Content-Type') && init.body && typeof init.body === 'string') {
-    headers.set('Content-Type', 'application/json');
-  }
-  const url = `${trimSlash(cfg.base_url)}${path}`;
-  return await fetch(url, { ...init, headers });
+function isWahaPlusOnlyMediaError(error: unknown, provider: WhatsappProvider): boolean {
+  if (provider !== 'waha') return false;
+  const msg = error instanceof Error ? error.message : String(error ?? '');
+  return /plus version|AvailableInPlusVersion|sendVoice|sendFile/i.test(msg);
 }
 
-async function wahaJson<T = unknown>(
-  cfg: WhatsappConfigRow,
-  path: string,
-  init: RequestInit = {},
-): Promise<T> {
-  const resp = await wahaFetch(cfg, path, init);
-  const text = await resp.text();
-  let data: unknown;
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    throw new Error(`Respuesta no JSON de Waha (HTTP ${resp.status}) en ${path}`);
-  }
-  if (!resp.ok) {
-    const msg =
-      (data && typeof data === 'object' && 'message' in (data as Record<string, unknown>)
-        ? String((data as Record<string, unknown>).message)
-        : null) ?? `HTTP ${resp.status}`;
-    throw new Error(`Waha (${resp.status}) en ${path}: ${msg}`);
-  }
-  return data as T;
-}
-
-function resolveOutgoingWahaId(
-  res: {
-    id?: { id?: string; _serialized?: string; remote?: string };
-    _data?: { id?: { id?: string; _serialized?: string; remote?: string }; to?: string };
+function extractRemoteFromSendRaw(raw: unknown, fallbackChatId: string): string | null {
+  const res = raw as {
+    id?: { _serialized?: string; remote?: string };
+    _data?: { id?: { _serialized?: string; remote?: string }; to?: string };
     to?: string;
-  },
-  chatId: string,
-): string | null {
-  const serialized =
-    res?.id?._serialized ??
-    res?._data?.id?._serialized ??
-    null;
-  if (typeof serialized === 'string' && serialized.trim()) return serialized.trim();
-  const keyId = res?.id?.id ?? res?._data?.id?.id ?? null;
-  const remote =
+  };
+  const detectedRemote =
     res?.id?.remote ??
     res?._data?.id?.remote ??
     res?.to ??
     res?._data?.to ??
-    chatId;
-  if (keyId && typeof remote === 'string' && remote.includes('@')) {
-    return `true_${remote}_${keyId}`;
+    null;
+  const fromSerialized = (() => {
+    const s = res?.id?._serialized ?? res?._data?.id?._serialized;
+    if (!s) return null;
+    const m = /^(?:true|false)_(.+?)_/.exec(s);
+    return m ? m[1] : null;
+  })();
+  return detectedRemote ?? fromSerialized ?? fallbackChatId;
+}
+
+async function persistOutgoingMessage(
+  admin: SupabaseClient,
+  cfg: WhatsappConfigRow,
+  companyId: string,
+  resolvedChatId: string,
+  wahaId: string | null,
+  ts: string,
+  type: string,
+  body: string,
+  media?: { mime: string; filename: string },
+  raw?: unknown,
+): Promise<string> {
+  const detectedRemote = extractRemoteFromSendRaw(raw, resolvedChatId);
+  let chatId = resolvedChatId;
+  if (detectedRemote && detectedRemote.includes('@') && detectedRemote !== chatId) {
+    await admin
+      .from('whatsapp_messages')
+      .update({ chat_id: detectedRemote })
+      .eq('company_id', companyId)
+      .eq('chat_id', chatId);
+    await admin
+      .from('whatsapp_chats')
+      .update({ chat_id: detectedRemote })
+      .eq('company_id', companyId)
+      .eq('chat_id', chatId);
+    chatId = detectedRemote;
   }
-  return null;
+
+  if (wahaId) {
+    await admin.from('whatsapp_messages').upsert(
+      {
+        company_id: companyId,
+        chat_id: chatId,
+        waha_message_id: wahaId,
+        from_jid: cfg.me_jid ?? null,
+        from_me: true,
+        type,
+        body,
+        media_mime_type: media?.mime ?? null,
+        media_filename: media?.filename ?? null,
+        ack: 0,
+        timestamp: ts,
+        raw: raw as unknown,
+      },
+      { onConflict: 'company_id,waha_message_id', ignoreDuplicates: false },
+    );
+  }
+
+  await admin.from('whatsapp_chats').upsert(
+    {
+      company_id: companyId,
+      chat_id: chatId,
+      is_group: false,
+      last_message_preview: body.slice(0, 200),
+      last_message_at: ts,
+      last_message_from_me: true,
+    },
+    { onConflict: 'company_id,chat_id', ignoreDuplicates: false },
+  );
+
+  return chatId;
 }
 
 export async function loadWhatsappConfig(
@@ -264,7 +333,7 @@ export async function loadWhatsappConfig(
   const { data, error } = await admin
     .from('whatsapp_config')
     .select(
-      'company_id, base_url, api_key, session_name, default_country_code, enabled, last_status, me_jid',
+      'company_id, provider, base_url, api_key, session_name, waha_base_url, waha_api_key, waha_session_name, openwa_base_url, openwa_api_key, openwa_session_name, webhook_secret, default_country_code, enabled, last_status, me_jid',
     )
     .eq('company_id', companyId)
     .maybeSingle();
@@ -279,7 +348,7 @@ export async function loadMetaFormAutomation(
   const { data, error } = await admin
     .from('meta_forms')
     .select(
-      'id, form_id, form_name, whatsapp_automation_enabled, whatsapp_initial_message, whatsapp_reply_1_message, whatsapp_reply_2_message, whatsapp_reply_invalid_message, whatsapp_reminder_message, whatsapp_reminder_delay_hours, whatsapp_reminder_enabled, stripe_deposit_enabled, stripe_deposit_amount_cents',
+      'id, form_id, form_name, whatsapp_automation_enabled, whatsapp_initial_message, whatsapp_initial_audio_enabled, whatsapp_initial_audio_path, whatsapp_initial_audio_filename, whatsapp_initial_audio_mime, whatsapp_reply_1_message, whatsapp_reply_2_message, whatsapp_reply_invalid_message, whatsapp_reminder_message, whatsapp_reminder_delay_hours, whatsapp_reminder_enabled, stripe_deposit_enabled, stripe_deposit_amount_cents',
     )
     .eq('id', metaFormId)
     .maybeSingle();
@@ -294,84 +363,103 @@ async function sendWhatsappText(
   chatId: string,
   text: string,
 ): Promise<{ chatId: string; wahaId: string | null }> {
-  const sessionName = cfg.session_name || 'default';
-  let resolvedChatId = chatId;
-  const res = await wahaJson<{
-    id?: { id?: string; _serialized?: string; remote?: string };
-    _data?: { id?: { _serialized?: string; remote?: string }; to?: string };
-    to?: string;
-    timestamp?: number;
-  }>(cfg, '/api/sendText', {
-    method: 'POST',
-    body: JSON.stringify({
-      session: sessionName,
-      chatId: resolvedChatId,
-      text,
-    }),
-  });
-
-  const wahaId = resolveOutgoingWahaId(res, resolvedChatId);
-  const ts = res?.timestamp
-    ? new Date(res.timestamp * 1000).toISOString()
+  const providerCfg = asProviderConfig(cfg);
+  const sent = await providerSendText(providerCfg, chatId, text);
+  const wahaId = sent.messageId;
+  const ts = sent.timestamp
+    ? new Date(sent.timestamp * 1000).toISOString()
     : new Date().toISOString();
-
-  const detectedRemote =
-    res?.id?.remote ??
-    res?._data?.id?.remote ??
-    res?.to ??
-    res?._data?.to ??
-    null;
-  const fromSerialized = (() => {
-    const s = res?.id?._serialized ?? res?._data?.id?._serialized;
-    if (!s) return null;
-    const m = /^(?:true|false)_(.+?)_/.exec(s);
-    return m ? m[1] : null;
-  })();
-  const realRemote = detectedRemote ?? fromSerialized ?? null;
-  if (realRemote && realRemote.includes('@') && realRemote !== resolvedChatId) {
-    await admin
-      .from('whatsapp_messages')
-      .update({ chat_id: realRemote })
-      .eq('company_id', companyId)
-      .eq('chat_id', resolvedChatId);
-    await admin
-      .from('whatsapp_chats')
-      .update({ chat_id: realRemote })
-      .eq('company_id', companyId)
-      .eq('chat_id', resolvedChatId);
-    resolvedChatId = realRemote;
-  }
-
-  if (wahaId) {
-    await admin.from('whatsapp_messages').upsert(
-      {
-        company_id: companyId,
-        chat_id: resolvedChatId,
-        waha_message_id: wahaId,
-        from_jid: cfg.me_jid ?? null,
-        from_me: true,
-        type: 'text',
-        body: text,
-        ack: 0,
-        timestamp: ts,
-        raw: res as unknown,
-      },
-      { onConflict: 'company_id,waha_message_id', ignoreDuplicates: false },
-    );
-  }
-
-  await admin.from('whatsapp_chats').upsert(
-    {
-      company_id: companyId,
-      chat_id: resolvedChatId,
-      is_group: false,
-      last_message_preview: text.slice(0, 200),
-      last_message_at: ts,
-      last_message_from_me: true,
-    },
-    { onConflict: 'company_id,chat_id', ignoreDuplicates: false },
+  const resolvedChatId = await persistOutgoingMessage(
+    admin,
+    cfg,
+    companyId,
+    chatId,
+    wahaId,
+    ts,
+    'text',
+    text,
+    undefined,
+    sent.raw,
   );
+  return { chatId: resolvedChatId, wahaId };
+}
 
+const WA_AUDIO_STORAGE_BUCKET = 'documents';
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+async function loadStorageFileBytes(
+  admin: SupabaseClient,
+  storagePath: string,
+): Promise<Uint8Array> {
+  const { data, error } = await admin.storage.from(WA_AUDIO_STORAGE_BUCKET).download(storagePath);
+  if (error) throw new Error(`No se pudo cargar el audio: ${error.message}`);
+  return new Uint8Array(await data.arrayBuffer());
+}
+
+function normalizeWhatsappAudioMime(mime: string, filename: string): string {
+  const m = mime.toLowerCase();
+  const f = filename.toLowerCase();
+  if (m.includes('ogg') || m.includes('opus') || m === 'application/ogg') return 'audio/ogg';
+  if (m && m !== 'application/octet-stream' && m.startsWith('audio/')) return m;
+  if (f.endsWith('.ogg') || f.endsWith('.opus')) return 'audio/ogg';
+  if (f.endsWith('.mp3')) return 'audio/mpeg';
+  if (f.endsWith('.m4a')) return 'audio/mp4';
+  if (f.endsWith('.wav')) return 'audio/wav';
+  if (f.endsWith('.webm')) return 'audio/webm';
+  return 'audio/ogg';
+}
+
+async function createStorageSignedUrl(
+  admin: SupabaseClient,
+  bucket: string,
+  path: string,
+  expiresInSeconds = 60 * 60 * 24 * 7,
+): Promise<string> {
+  const { data, error } = await admin.storage.from(bucket).createSignedUrl(path, expiresInSeconds);
+  if (error || !data?.signedUrl) {
+    throw new Error(`No se pudo firmar URL del audio: ${error?.message ?? 'sin URL'}`);
+  }
+  return data.signedUrl;
+}
+
+async function sendWhatsappMedia(
+  admin: SupabaseClient,
+  cfg: WhatsappConfigRow,
+  companyId: string,
+  chatId: string,
+  media: { base64: string; mime: string; filename: string },
+): Promise<{ chatId: string; wahaId: string | null }> {
+  const providerCfg = asProviderConfig(cfg);
+  const preview = `[audio] ${media.filename}`;
+  const sent = await providerSendMedia(providerCfg, chatId, 'audio', {
+    base64: media.base64,
+    mime: media.mime,
+    filename: media.filename,
+  });
+  const wahaId = sent.messageId;
+  const ts = sent.timestamp
+    ? new Date(sent.timestamp * 1000).toISOString()
+    : new Date().toISOString();
+  const resolvedChatId = await persistOutgoingMessage(
+    admin,
+    cfg,
+    companyId,
+    chatId,
+    wahaId,
+    ts,
+    'audio',
+    preview,
+    { mime: media.mime, filename: media.filename },
+    sent.raw,
+  );
   return { chatId: resolvedChatId, wahaId };
 }
 
@@ -416,6 +504,107 @@ async function sendAutomatedLeadMessage(
       intended_phone: intendedPhone,
       sent_to_phone: chatPhone,
       message_preview: body,
+      success: false,
+      error: msg,
+    });
+    throw e;
+  }
+}
+
+async function sendAutomatedLeadAudio(
+  admin: SupabaseClient,
+  cfg: WhatsappConfigRow,
+  companyId: string,
+  intendedPhone: string,
+  media: { base64: string; mime: string; filename: string },
+  meta: {
+    automation_type: AutomationSendType;
+    reference_id: string;
+    contactName?: string | null;
+  },
+): Promise<{ chatId: string; wahaId: string | null }> {
+  const settings = await loadAutomationSettings(admin, companyId);
+  const { chatPhone } = resolveRecipientPhone(intendedPhone, settings);
+  const chatId = normalizeChatId(chatPhone, cfg.default_country_code);
+  const preview = `[audio] ${media.filename}`;
+  try {
+    const sent = await sendWhatsappMedia(admin, cfg, companyId, chatId, media);
+    await logAutomationSend(admin, {
+      company_id: companyId,
+      automation_type: meta.automation_type,
+      reference_id: meta.reference_id,
+      intended_phone: intendedPhone,
+      sent_to_phone: chatPhone,
+      message_preview: preview,
+      success: true,
+    });
+    return sent;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Error al enviar';
+    await logAutomationSend(admin, {
+      company_id: companyId,
+      automation_type: meta.automation_type,
+      reference_id: meta.reference_id,
+      intended_phone: intendedPhone,
+      sent_to_phone: chatPhone,
+      message_preview: preview,
+      success: false,
+      error: msg,
+    });
+    throw e;
+  }
+}
+
+async function sendAutomatedLeadAudioLink(
+  admin: SupabaseClient,
+  cfg: WhatsappConfigRow,
+  companyId: string,
+  intendedPhone: string,
+  opts: {
+    storagePath: string;
+    filename: string;
+    introText?: string | null;
+  },
+  meta: {
+    automation_type: AutomationSendType;
+    reference_id: string;
+    contactName?: string | null;
+  },
+): Promise<{ chatId: string; wahaId: string | null }> {
+  const signedUrl = await createStorageSignedUrl(admin, WA_AUDIO_STORAGE_BUCKET, opts.storagePath);
+  const intro = opts.introText?.trim()
+    || '🎧 Te dejamos un mensaje de bienvenida. Pulsa el enlace para escucharlo:';
+  const body = `${intro}\n\n${signedUrl}`;
+  const settings = await loadAutomationSettings(admin, companyId);
+  const { chatPhone, intendedLabel } = resolveRecipientPhone(intendedPhone, settings);
+  const wrapped = wrapMessageForTestMode(
+    body,
+    settings,
+    meta.contactName ?? intendedLabel,
+  );
+  const chatId = normalizeChatId(chatPhone, cfg.default_country_code);
+  const preview = `[audio enlace] ${opts.filename}`;
+  try {
+    const sent = await sendWhatsappText(admin, cfg, companyId, chatId, wrapped);
+    await logAutomationSend(admin, {
+      company_id: companyId,
+      automation_type: meta.automation_type,
+      reference_id: meta.reference_id,
+      intended_phone: intendedPhone,
+      sent_to_phone: chatPhone,
+      message_preview: preview,
+      success: true,
+    });
+    return sent;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Error al enviar';
+    await logAutomationSend(admin, {
+      company_id: companyId,
+      automation_type: meta.automation_type,
+      reference_id: meta.reference_id,
+      intended_phone: intendedPhone,
+      sent_to_phone: chatPhone,
+      message_preview: preview,
       success: false,
       error: msg,
     });
@@ -469,7 +658,7 @@ export async function sendInitialAutomationForLead(
   lead: WhatsappTemplateContext &
     Pick<MarketingLeadAutomationRow, 'phone' | 'meta_form_id'>,
   form: MetaFormAutomation,
-): Promise<{ ok: boolean; status: string; error?: string }> {
+): Promise<{ ok: boolean; status: string; error?: string; sent_kind?: InitialWhatsappSendKind }> {
   if (!form.whatsapp_automation_enabled) {
     await admin
       .from('marketing_leads')
@@ -478,16 +667,22 @@ export async function sendInitialAutomationForLead(
     return { ok: true, status: 'none' };
   }
 
-  const initialRaw = form.whatsapp_initial_message?.trim();
-  if (!initialRaw) {
+  const sendKind = resolveInitialWhatsappSendKind(form);
+  if (!sendKind) {
     await admin
       .from('marketing_leads')
       .update({
         wa_automation_status: 'skipped',
-        wa_automation_error: 'Falta mensaje inicial en la configuración del formulario',
+        wa_automation_error: form.whatsapp_initial_audio_enabled
+          ? 'Falta archivo de audio en la configuración del formulario'
+          : 'Falta mensaje inicial en la configuración del formulario',
       })
       .eq('id', leadId);
-    return { ok: false, status: 'skipped', error: 'Falta mensaje inicial' };
+    return {
+      ok: false,
+      status: 'skipped',
+      error: form.whatsapp_initial_audio_enabled ? 'Falta audio inicial' : 'Falta mensaje inicial',
+    };
   }
 
   if (!lead.phone?.trim()) {
@@ -526,28 +721,88 @@ export async function sendInitialAutomationForLead(
 
   try {
     const contactName = leadDisplayName(lead);
-    const { renderWhatsappTemplateWithPaymentLinks } = await import('./stripeDeposit.ts');
-    const initialText = await renderWhatsappTemplateWithPaymentLinks(
-      admin,
-      companyId,
-      leadId,
-      initialRaw,
-      lead,
-      form,
-      null,
-    );
-    const sent = await sendAutomatedLeadMessage(
-      admin,
-      cfg,
-      companyId,
-      lead.phone!,
-      initialText,
-      {
-        automation_type: 'meta_initial',
-        reference_id: leadId,
-        contactName,
-      },
-    );
+    const providerCfg = asProviderConfig(cfg);
+    let sent: { chatId: string; wahaId: string | null };
+    let actualSentKind: InitialWhatsappSendKind = sendKind;
+
+    if (sendKind === 'audio') {
+      const audioPath = form.whatsapp_initial_audio_path!.trim();
+      const filename = form.whatsapp_initial_audio_filename?.trim() || 'bienvenida.ogg';
+      const bytes = await loadStorageFileBytes(admin, audioPath);
+      const base64 = bytesToBase64(bytes);
+      const mime = normalizeWhatsappAudioMime(
+        form.whatsapp_initial_audio_mime?.trim() || 'audio/ogg',
+        filename,
+      );
+      try {
+        sent = await sendAutomatedLeadAudio(
+          admin,
+          cfg,
+          companyId,
+          lead.phone!,
+          { base64, mime, filename },
+          {
+            automation_type: 'meta_initial_audio',
+            reference_id: leadId,
+            contactName,
+          },
+        );
+        actualSentKind = 'audio';
+      } catch (e) {
+        if (!isWahaPlusOnlyMediaError(e, providerCfg.provider)) throw e;
+        let introText: string | null = form.whatsapp_initial_message?.trim() || null;
+        if (introText) {
+          const { renderWhatsappTemplateWithPaymentLinks } = await import('./stripeDeposit.ts');
+          introText = await renderWhatsappTemplateWithPaymentLinks(
+            admin,
+            companyId,
+            leadId,
+            introText,
+            lead,
+            form,
+            null,
+          );
+        }
+        sent = await sendAutomatedLeadAudioLink(
+          admin,
+          cfg,
+          companyId,
+          lead.phone!,
+          { storagePath: audioPath, filename, introText },
+          {
+            automation_type: 'meta_initial_audio_link',
+            reference_id: leadId,
+            contactName,
+          },
+        );
+        actualSentKind = 'audio_link';
+      }
+    } else {
+      const initialRaw = form.whatsapp_initial_message!.trim();
+      const { renderWhatsappTemplateWithPaymentLinks } = await import('./stripeDeposit.ts');
+      const initialText = await renderWhatsappTemplateWithPaymentLinks(
+        admin,
+        companyId,
+        leadId,
+        initialRaw,
+        lead,
+        form,
+        null,
+      );
+      sent = await sendAutomatedLeadMessage(
+        admin,
+        cfg,
+        companyId,
+        lead.phone!,
+        initialText,
+        {
+          automation_type: 'meta_initial',
+          reference_id: leadId,
+          contactName,
+        },
+      );
+    }
+
     await linkChatToLead(admin, companyId, sent.chatId, leadId, contactName);
     const now = new Date().toISOString();
     await admin
@@ -556,10 +811,11 @@ export async function sendInitialAutomationForLead(
         wa_automation_status: 'awaiting_reply',
         wa_automation_error: null,
         wa_automation_initial_sent_at: now,
+        wa_automation_initial_sent_kind: actualSentKind,
         last_contacted_at: now,
       })
       .eq('id', leadId);
-    return { ok: true, status: 'awaiting_reply' };
+    return { ok: true, status: 'awaiting_reply', sent_kind: actualSentKind };
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Error al enviar WhatsApp';
     await admin

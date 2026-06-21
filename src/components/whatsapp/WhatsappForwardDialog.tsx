@@ -15,8 +15,8 @@ import {
   displayNameForChat,
   isSystemChatJid,
   jidToDisplay,
-  waTheme,
 } from './whatsappUtils';
+import { useWhatsappTheme } from './WhatsappThemeContext';
 import type { WhatsappChatRow } from '@/hooks/useWhatsappChats';
 import type { WhatsappMessageRow } from '@/hooks/useWhatsappMessages';
 
@@ -41,6 +41,7 @@ export const WhatsappForwardDialog: React.FC<Props> = ({
   forwarding,
   onForward,
 }) => {
+  const theme = useWhatsappTheme();
   const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -115,7 +116,7 @@ export const WhatsappForwardDialog: React.FC<Props> = ({
                     disabled={!message?.waha_message_id || forwarding}
                     onClick={() => setSelectedId(c.chat_id)}
                     className={`flex w-full items-center gap-3 rounded-md px-2 py-2 text-left text-sm transition-colors ${
-                      active ? waTheme.chatActive : waTheme.chatHover
+                      active ? theme.chatActive : theme.chatHover
                     }`}
                   >
                     <WhatsappAvatar
@@ -126,7 +127,7 @@ export const WhatsappForwardDialog: React.FC<Props> = ({
                     />
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-medium">{name}</p>
-                      <p className={`truncate text-xs ${waTheme.textMuted}`}>
+                      <p className={`truncate text-xs ${theme.textMuted}`}>
                         {jidToDisplay(c.chat_id) || c.chat_id}
                       </p>
                     </div>

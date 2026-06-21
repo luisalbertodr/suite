@@ -66,7 +66,8 @@ export type WhatsappProxyAction = {
   | { action: 'chat.search_link'; q: string; limit?: number }
   | { action: 'pictures.sync_batch'; chat_ids?: string[]; limit?: number }
   | { action: 'groups.sync_name'; chat_id: string }
-  | { action: 'media.download'; url?: string; chat_id?: string; message_id?: string }
+  | { action: 'media.download'; url?: string; chat_id?: string; message_id?: string; alt_chat_ids?: string[] }
+  | { action: 'messages.prefetch_media'; chat_id: string; limit?: number; alt_chat_ids?: string[] }
   | { action: 'data.purge'; logout_waha?: boolean }
 );
 
@@ -120,12 +121,17 @@ export async function invokeWhatsappProxy<T = unknown>(
         : typeof body === 'string' && body.length > 0
           ? body
           : `HTTP ${res.status}`) || `HTTP ${res.status}`;
-    // Logueamos para diagnóstico: en consola veremos el motivo aunque no
-    // hayamos visto el toast.
-    console.error(
-      `[whatsapp-proxy] ${payload.action} → ${res.status}:`,
-      serverMessage,
-    );
+    const quiet =
+      payload.action === 'messages.prefetch_media' ||
+      res.status === 410 ||
+      res.status === 502 ||
+      res.status === 504;
+    if (!quiet) {
+      console.error(
+        `[whatsapp-proxy] ${payload.action} → ${res.status}:`,
+        serverMessage,
+      );
+    }
     throw new Error(serverMessage);
   }
   return body as T;
@@ -136,6 +142,7 @@ export async function downloadWhatsappMedia(input: {
   url?: string | null;
   chat_id?: string;
   message_id?: string | null;
+  alt_chat_ids?: string[];
   company_id?: string;
 }): Promise<Blob> {
   const accessToken = await getSupabaseAccessToken();
@@ -145,6 +152,7 @@ export async function downloadWhatsappMedia(input: {
     url: input.url ?? undefined,
     chat_id: input.chat_id,
     message_id: input.message_id ?? undefined,
+    alt_chat_ids: input.alt_chat_ids?.length ? input.alt_chat_ids : undefined,
     company_id: input.company_id ?? getStoredWhatsappCompanyId() ?? undefined,
   };
 
@@ -171,7 +179,11 @@ export async function downloadWhatsappMedia(input: {
     } catch {
       // ignore
     }
-    throw new Error(msg || `HTTP ${res.status}`);
+    const expired = res.status === 410 || /expirad|gone/i.test(msg);
+    if (!expired) {
+      console.warn(`[whatsapp-proxy] media.download → ${res.status}:`, msg);
+    }
+    throw new Error(expired ? 'Media expirada' : msg || `HTTP ${res.status}`);
   }
   return res.blob();
 }
@@ -217,6 +229,7 @@ export const useWhatsappConfig = () => {
       ? crypto.randomUUID()
       : Math.random().toString(36).slice(2);
   }
+  const invalidateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!companyId) return;
     const channel = supabase
@@ -230,11 +243,16 @@ export const useWhatsappConfig = () => {
           filter: `company_id=eq.${companyId}`,
         },
         () => {
-          invalidate();
+          if (invalidateTimerRef.current) clearTimeout(invalidateTimerRef.current);
+          invalidateTimerRef.current = setTimeout(() => {
+            invalidateTimerRef.current = null;
+            invalidate();
+          }, 400);
         },
       )
       .subscribe();
     return () => {
+      if (invalidateTimerRef.current) clearTimeout(invalidateTimerRef.current);
       supabase.removeChannel(channel);
     };
   }, [companyId]); // eslint-disable-line react-hooks/exhaustive-deps

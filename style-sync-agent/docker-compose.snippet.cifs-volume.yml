@@ -1,0 +1,41 @@
+# Alternativa: volumen Docker con driver CIFS directo
+#
+# Solo si Docker corre en VM privilegiada o host con capacidad de montar CIFS.
+# NO recomendado en LXC unprivileged Proxmox — usar docker-compose.snippet.yml + PROXMOX-LXC-CIFS.md
+
+services:
+  style-sync-agent:
+    build:
+      context: ./style-sync-agent
+      dockerfile: Dockerfile
+    image: style-sync-agent:0.2.1
+    container_name: style-sync-agent
+    restart: unless-stopped
+    environment:
+      STYLE_ROOT: /style
+      SUPABASE_URL: https://supabase.lipoout.com
+      SUPABASE_SERVICE_ROLE_KEY: ${STYLE_SYNC_SERVICE_ROLE_KEY}
+      COMPANY_ID: ${STYLE_SYNC_COMPANY_ID}
+      POLL_MS: "1500"
+      INBOUND_POLL_MS: "3000"
+      INBOUND_BATCH: "50"
+      INBOUND_DIR: /style/sync/inbound
+      INBOUND_ACK_DIR: /style/sync/inbound_ack
+      ARCHIVE_DIR: /style/sync/archive
+      DEADLETTER_DIR: /style/sync/deadletter
+      HEARTBEAT_PATH: /style/sync/heartbeat.txt
+      HEARTBEAT_CHECK_MS: "60000"
+      HEARTBEAT_STALE_MS: "300000"
+      LAG_ALERT_MS: "30000"
+      FS_RETRY_MAX: "6"
+      FS_RETRY_BASE_MS: "100"
+    volumes:
+      - style_data:/style:rw
+
+volumes:
+  style_data:
+    driver: local
+    driver_opts:
+      type: cifs
+      o: username=REEMPLAZAR,password=REEMPLAZAR,iocharset=utf8,vers=3.0,noserverino,uid=1000,gid=1000,file_mode=0664,dir_mode=0775
+      device: "//192.168.99.16/c$/Style-Dunasoft"

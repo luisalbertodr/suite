@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
+import { useRoutePanelActive } from '@/contexts/RoutePanelContext';
 
 export type TopBarContent = {
   title?: React.ReactNode;
@@ -40,11 +41,13 @@ export function useTopBarContent(): TopBarContentContextValue {
 
 export function useRegisterTopBarContent(content: TopBarContent, deps: React.DependencyList = []) {
   const { setContent } = useTopBarContent();
+  const panelActive = useRoutePanelActive();
 
   useEffect(() => {
+    if (!panelActive) return;
     setContent(content);
     return () => setContent({});
     // `deps` lets each screen decide when dynamic actions must be refreshed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [setContent, ...deps]);
+  }, [setContent, panelActive, ...deps]);
 }

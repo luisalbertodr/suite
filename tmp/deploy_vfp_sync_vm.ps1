@@ -1,8 +1,8 @@
-# Despliegue automático agente + ficheros VFP sync a VM 119 (SMB).
+# Despliegue automático agente + ficheros VFP sync a VM 192.168.99.16 (SMB).
 # Ejecutar desde PowerShell en el portátil (requiere net use previo o contraseña).
 
 $ErrorActionPreference = "Stop"
-$VmHost = "192.168.99.119"
+$VmHost = "192.168.99.16"
 $SyncToken = "ec68f87cdbf6f2bbc4045ddda366d0251560e227ccb39608"
 $SyncUrl = "https://supabase.lipoout.com/functions/v1/style-reservas-sync"
 

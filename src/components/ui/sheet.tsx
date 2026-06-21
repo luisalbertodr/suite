@@ -4,8 +4,20 @@ import { X } from "lucide-react"
 import * as React from "react"
 
 import { cn } from "@/lib/utils"
+import { usePanelAwareOpen } from "@/hooks/usePanelAwareOpen"
 
-const Sheet = SheetPrimitive.Root
+type SheetProps = React.ComponentPropsWithoutRef<typeof SheetPrimitive.Root>
+
+const Sheet = ({ open, onOpenChange, ...props }: SheetProps) => {
+  const { effectiveOpen, handleOpenChange } = usePanelAwareOpen(open, onOpenChange);
+  return (
+    <SheetPrimitive.Root
+      open={effectiveOpen}
+      onOpenChange={handleOpenChange ?? onOpenChange}
+      {...props}
+    />
+  );
+}
 
 const SheetTrigger = SheetPrimitive.Trigger
 

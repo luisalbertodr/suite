@@ -3,8 +3,20 @@ import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog"
 
 import { cn } from "@/lib/utils"
 import { buttonVariants } from "@/components/ui/button"
+import { usePanelAwareOpen } from "@/hooks/usePanelAwareOpen"
 
-const AlertDialog = AlertDialogPrimitive.Root
+type AlertDialogProps = React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Root>
+
+const AlertDialog = ({ open, onOpenChange, ...props }: AlertDialogProps) => {
+  const { effectiveOpen, handleOpenChange } = usePanelAwareOpen(open, onOpenChange);
+  return (
+    <AlertDialogPrimitive.Root
+      open={effectiveOpen}
+      onOpenChange={handleOpenChange ?? onOpenChange}
+      {...props}
+    />
+  );
+}
 
 const AlertDialogTrigger = AlertDialogPrimitive.Trigger
 

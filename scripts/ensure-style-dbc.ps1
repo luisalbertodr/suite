@@ -2,7 +2,7 @@
 # -LegacyTableLinks: solo exe.bak sin bootstrap (enlaza wedb + tablas a raiz). STYLE_LEGACY=1 en bat.
 param(
     [string]$StyleRoot = "",
-    [string]$VmHost = "192.168.99.119",
+    [string]$VmHost = "192.168.99.16",
     [switch]$RemoveRootCopies,
     [switch]$RemoveWedbRootOnly,
     [switch]$LegacyTableLinks
@@ -13,7 +13,7 @@ $ErrorActionPreference = "Stop"
 function Resolve-StyleRootPath {
     param(
         [string]$Preferred = "",
-        [string]$VmHost = "192.168.99.119"
+        [string]$VmHost = "192.168.99.16"
     )
 
     $candidates = @()

@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Loader2, RefreshCw, Power, LogOut, QrCode, Smartphone, AlertTriangle } from 'lucide-react';
@@ -39,6 +39,8 @@ export const WhatsappSessionGate: React.FC<Props> = ({ config, onConnected }) =>
     fetchQr,
   } = useWhatsappConfig();
 
+  const connectedNotifiedRef = useRef(false);
+
   // Refresca el estado al montar
   useEffect(() => {
     sessionStatus.mutate(undefined, { onError: () => undefined });
@@ -49,9 +51,13 @@ export const WhatsappSessionGate: React.FC<Props> = ({ config, onConnected }) =>
   useEffect(() => {
     const status = (config.last_status ?? '').toUpperCase();
     if (status === 'WORKING') {
-      onConnected?.();
+      if (!connectedNotifiedRef.current) {
+        connectedNotifiedRef.current = true;
+        onConnected?.();
+      }
       return;
     }
+    connectedNotifiedRef.current = false;
     const id = setInterval(() => {
       sessionStatus.mutate(undefined, { onError: () => undefined });
       if (status === 'SCAN_QR_CODE') {

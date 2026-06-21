@@ -3,8 +3,20 @@ import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { usePanelAwareOpen } from "@/hooks/usePanelAwareOpen"
 
-const Dialog = DialogPrimitive.Root
+type DialogProps = React.ComponentPropsWithoutRef<typeof DialogPrimitive.Root>
+
+const Dialog = ({ open, onOpenChange, ...props }: DialogProps) => {
+  const { effectiveOpen, handleOpenChange } = usePanelAwareOpen(open, onOpenChange);
+  return (
+    <DialogPrimitive.Root
+      open={effectiveOpen}
+      onOpenChange={handleOpenChange ?? onOpenChange}
+      {...props}
+    />
+  );
+}
 
 const DialogTrigger = DialogPrimitive.Trigger
 

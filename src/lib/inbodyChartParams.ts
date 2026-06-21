@@ -1,4 +1,5 @@
 import type { InbodyMeasurement } from '@/lib/inbodyMeasurements';
+import { resolveBodyFatMassRangeKg } from '@/lib/inbodyMeasurements';
 
 export type InbodyChartParamId =
   | 'weight_kg'
@@ -59,8 +60,8 @@ export const INBODY_CHART_PARAMS: InbodyChartParam[] = [
     decimals: 1,
     group: 'composicion',
     getValue: (m) => m.body_fat_kg,
-    getMin: (m) => m.body_fat_min_kg,
-    getMax: (m) => m.body_fat_max_kg,
+    getMin: (m) => resolveBodyFatMassRangeKg(m).min,
+    getMax: (m) => resolveBodyFatMassRangeKg(m).max,
   },
   {
     id: 'tbw_kg',

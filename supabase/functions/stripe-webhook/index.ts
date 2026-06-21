@@ -8,10 +8,16 @@ import {
 import {
   loadWhatsappConfig,
   renderWhatsappTemplate,
+  normalizeChatId,
   type WhatsappTemplateContext,
 } from '../_shared/marketingWhatsappAutomation.ts';
 import { loadAutomationSettings } from '../_shared/whatsappAutomationDispatch.ts';
 import { isWithinAutomationHours } from '../_shared/whatsappAutomationHours.ts';
+import { providerSendText } from '../_shared/whatsappProviderClient.ts';
+import {
+  normalizeWhatsappProvider,
+  type WhatsappProviderConfig,
+} from '../_shared/whatsappProviderTypes.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -55,20 +61,23 @@ async function sendWhatsappAfterPayment(
     const importe = formatEurosFromCents(amountCents, currency ?? 'eur');
     text = text.replace(/\{importe_senal\}/gi, importe);
   }
-  const { normalizeChatId } = await import('../_shared/marketingWhatsappAutomation.ts');
   const chatId = normalizeChatId(lead.phone, cfg.default_country_code);
-  const sessionName = cfg.session_name || 'default';
-
-  const resp = await fetch(`${cfg.base_url!.replace(/\/+$/, '')}/api/sendText`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(cfg.api_key ? { 'X-Api-Key': cfg.api_key } : {}),
-    },
-    body: JSON.stringify({ session: sessionName, chatId, text }),
-  });
-  if (!resp.ok) {
-    console.error('WhatsApp post-payment send failed:', await resp.text());
+  const providerCfg: WhatsappProviderConfig = {
+    company_id: cfg.company_id,
+    provider: normalizeWhatsappProvider(cfg.provider),
+    base_url: cfg.base_url,
+    api_key: cfg.api_key,
+    session_name: cfg.session_name || 'default',
+    webhook_secret: cfg.webhook_secret ?? null,
+    default_country_code: cfg.default_country_code,
+    enabled: cfg.enabled,
+    last_status: cfg.last_status,
+    me_jid: cfg.me_jid,
+  };
+  try {
+    await providerSendText(providerCfg, chatId, text);
+  } catch (e) {
+    console.error('WhatsApp post-payment send failed:', e);
   }
 }
 

@@ -4,6 +4,8 @@ import { supabase } from '@/lib/supabase';
 export type MarketingWhatsappQueueStats = {
   pending: number;
   sent_today: number;
+  sent_today_text: number;
+  sent_today_audio: number;
   daily_limit: number;
   eligible_not_queued: number;
   within_hours: boolean;
@@ -28,6 +30,7 @@ export type MarketingWhatsappQueueRow = {
   status: string;
   queued_at: string;
   sent_at: string | null;
+  sent_kind: string | null;
   error: string | null;
   marketing_lead_id: string;
   marketing_leads: {
@@ -40,7 +43,9 @@ export type MarketingWhatsappQueueRow = {
     created_at: string;
     wa_automation_status: string;
     wa_automation_error: string | null;
+    wa_automation_initial_sent_kind: string | null;
     stage_id: string | null;
+    meta_form_id: string | null;
   } | null;
 };
 
@@ -85,6 +90,7 @@ export function useMarketingWhatsappQueue(companyId: string | null | undefined) 
           status,
           queued_at,
           sent_at,
+          sent_kind,
           error,
           marketing_lead_id,
           marketing_leads (
@@ -97,7 +103,9 @@ export function useMarketingWhatsappQueue(companyId: string | null | undefined) 
             created_at,
             wa_automation_status,
             wa_automation_error,
-            stage_id
+            wa_automation_initial_sent_kind,
+            stage_id,
+            meta_form_id
           )
         `,
         )

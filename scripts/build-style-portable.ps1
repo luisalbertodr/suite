@@ -123,7 +123,7 @@ function Resolve-StyleSourcePath {
     $candidates += @(
         "Z:\Style-Dunasoft",
         "C:\Style-Dunasoft",
-        "\\192.168.99.119\c$\Style-Dunasoft"
+        "\\192.168.99.16\c$\Style-Dunasoft"
     )
     foreach ($c in ($candidates | Select-Object -Unique)) {
         if ($c -and (Test-Path $c)) {

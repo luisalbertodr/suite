@@ -1,10 +1,19 @@
 # Normaliza el ultimo build VFP a Duna.exe (+ Duna2.exe copia de trabajo).
+param(
+    [string]$ExportRoot = ""
+)
+
 $ErrorActionPreference = "Stop"
-$Export = "C:\Duna\Export"
+
+if ([string]::IsNullOrWhiteSpace($ExportRoot)) {
+    if (Test-Path "C:\Duna\ExportZ") { $ExportRoot = "C:\Duna\ExportZ" }
+    else { $ExportRoot = "C:\Duna\Export" }
+}
+$ExportRoot = [IO.Path]::GetFullPath($ExportRoot.TrimEnd('\'))
 
 function Get-LatestBuildExe {
     param([string]$Root)
-    $names = @("mscomctl.exe", "Duna2.exe", "DunaNew.exe", "Duna.exe")
+    $names = @("mscomctlOk.exe", "mscomctl.exe", "Duna2.exe", "DunaNew.exe", "Duna.exe")
     $items = foreach ($n in $names) {
         $p = Join-Path $Root $n
         if (Test-Path $p) { Get-Item $p }
@@ -13,13 +22,13 @@ function Get-LatestBuildExe {
     return ($items | Sort-Object LastWriteTime -Descending | Select-Object -First 1)
 }
 
-$src = Get-LatestBuildExe $Export
+$src = Get-LatestBuildExe $ExportRoot
 if (-not $src) {
-    throw "No hay mscomctl.exe / Duna2.exe / Duna.exe en $Export. Build: DO PROGS\VfpBuildProject.prg"
+    throw "No hay mscomctlOk.exe / mscomctl.exe / Duna.exe en $ExportRoot. Build: DO PROGS\VfpBuildProject.prg"
 }
 
-$dst = Join-Path $Export "Duna.exe"
-$dst2 = Join-Path $Export "Duna2.exe"
+$dst = Join-Path $ExportRoot "Duna.exe"
+$dst2 = Join-Path $ExportRoot "Duna2.exe"
 $di = if (Test-Path $dst) { Get-Item $dst } else { $null }
 
 if ($di -and $src.FullName -eq $di.FullName) {

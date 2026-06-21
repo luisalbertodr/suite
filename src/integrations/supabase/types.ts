@@ -2557,6 +2557,7 @@ export type Database = {
           queued_at: string
           queued_by: string | null
           sent_at: string | null
+          sent_kind: string | null
           status: string
           updated_at: string
         }
@@ -2636,6 +2637,7 @@ export type Database = {
           wa_automation_completed_at: string | null
           wa_automation_error: string | null
           wa_automation_initial_sent_at: string | null
+          wa_automation_initial_sent_kind: string | null
           wa_automation_reminder_sent_at: string | null
           wa_automation_status: string
           win_status: string | null
@@ -2828,6 +2830,10 @@ export type Database = {
           updated_at: string
           whatsapp_automation_enabled: boolean
           whatsapp_initial_message: string | null
+          whatsapp_initial_audio_enabled: boolean
+          whatsapp_initial_audio_path: string | null
+          whatsapp_initial_audio_filename: string | null
+          whatsapp_initial_audio_mime: string | null
           whatsapp_reply_1_message: string | null
           whatsapp_reply_2_message: string | null
           whatsapp_reply_invalid_message: string | null
@@ -2855,6 +2861,10 @@ export type Database = {
           updated_at?: string
           whatsapp_automation_enabled?: boolean
           whatsapp_initial_message?: string | null
+          whatsapp_initial_audio_enabled?: boolean
+          whatsapp_initial_audio_path?: string | null
+          whatsapp_initial_audio_filename?: string | null
+          whatsapp_initial_audio_mime?: string | null
           whatsapp_reply_1_message?: string | null
           whatsapp_reply_2_message?: string | null
           whatsapp_reply_invalid_message?: string | null
@@ -2882,6 +2892,10 @@ export type Database = {
           updated_at?: string
           whatsapp_automation_enabled?: boolean
           whatsapp_initial_message?: string | null
+          whatsapp_initial_audio_enabled?: boolean
+          whatsapp_initial_audio_path?: string | null
+          whatsapp_initial_audio_filename?: string | null
+          whatsapp_initial_audio_mime?: string | null
           whatsapp_reply_1_message?: string | null
           whatsapp_reply_2_message?: string | null
           whatsapp_reply_invalid_message?: string | null
@@ -4581,6 +4595,13 @@ export type Database = {
           last_status_message: string | null
           me_jid: string | null
           me_pushname: string | null
+          provider: string
+          waha_base_url: string | null
+          waha_api_key: string | null
+          waha_session_name: string | null
+          openwa_base_url: string | null
+          openwa_api_key: string | null
+          openwa_session_name: string | null
           qr_data_url: string | null
           qr_updated_at: string | null
           session_name: string
@@ -4599,6 +4620,13 @@ export type Database = {
           last_status_message?: string | null
           me_jid?: string | null
           me_pushname?: string | null
+          provider?: string
+          waha_base_url?: string | null
+          waha_api_key?: string | null
+          waha_session_name?: string | null
+          openwa_base_url?: string | null
+          openwa_api_key?: string | null
+          openwa_session_name?: string | null
           qr_data_url?: string | null
           qr_updated_at?: string | null
           session_name?: string
@@ -4617,6 +4645,13 @@ export type Database = {
           last_status_message?: string | null
           me_jid?: string | null
           me_pushname?: string | null
+          provider?: string
+          waha_base_url?: string | null
+          waha_api_key?: string | null
+          waha_session_name?: string | null
+          openwa_base_url?: string | null
+          openwa_api_key?: string | null
+          openwa_session_name?: string | null
           qr_data_url?: string | null
           qr_updated_at?: string | null
           session_name?: string

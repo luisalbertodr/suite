@@ -1,6 +1,6 @@
-import html2pdf from 'html2pdf.js';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
+import { generatePdfBlobFromHtml } from '@/lib/pdfFromHtml';
 import {
   FACIAL_CORPORAL_EMPLOYEE_SECTIONS,
   patientSectionsForVisitMode,
@@ -76,7 +76,7 @@ export function buildQuestionnairePdfHtml(params: QuestionnairePdfParams): strin
   const height = answers.height_cm ?? customer.height_cm;
 
   return `
-    <div style="font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#111;padding:20px;max-width:720px;">
+    <div style="font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#111;background:#ffffff;padding:20px;max-width:720px;">
       <div style="border-bottom:2px solid #0ea5e9;padding-bottom:10px;margin-bottom:16px;">
         <h1 style="margin:0;font-size:16px;">Cuestionario Facial-Corporal 2026</h1>
         <p style="margin:4px 0 0;color:#555;">${escapeHtml(companyName)} · ${escapeHtml(VISIT_MODE_LABELS[visitMode])}</p>
@@ -116,24 +116,5 @@ export function buildQuestionnairePdfHtml(params: QuestionnairePdfParams): strin
 }
 
 export async function generateQuestionnairePdfBlob(html: string): Promise<Blob> {
-  const container = document.createElement('div');
-  container.style.position = 'fixed';
-  container.style.left = '-10000px';
-  container.style.width = '720px';
-  container.innerHTML = html;
-  document.body.appendChild(container);
-  try {
-    return await html2pdf()
-      .set({
-        margin: 0.35,
-        filename: 'cuestionario.pdf',
-        image: { type: 'jpeg' as const, quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, logging: false },
-        jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' as const },
-      })
-      .from(container)
-      .outputPdf('blob');
-  } finally {
-    document.body.removeChild(container);
-  }
+  return generatePdfBlobFromHtml(html, { filename: 'cuestionario.pdf', margin: 0.35 });
 }

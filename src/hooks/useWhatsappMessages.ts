@@ -20,11 +20,14 @@ type SyncChatHistoryResponse = {
 
 export type WhatsappSyncMode = 'auto' | 'full' | 'recent';
 
-/** Columnas para listado en UI (sin `raw` JSONB → evita 504 en PostgREST). */
 const MESSAGE_LIST_COLUMNS =
   'id,company_id,chat_id,waha_message_id,from_jid,from_me,type,body,caption,media_url,media_mime_type,media_filename,media_size,ack,quoted_message_id,timestamp,created_at,updated_at';
 
-const MESSAGE_PAGE_SIZE = 250;
+/** Mensajes recientes en BD (rápido). Historial completo se pagina aparte. */
+const MESSAGE_PAGE_SIZE = 100;
+/** Página ligera vía proxy (solo últimos mensajes del proveedor). */
+const RECENT_PROVIDER_LIMIT = 35;
+const RECENT_POLL_MS = 45_000;
 
 async function syncChatHistoryChunk(
   companyId: string,
@@ -41,7 +44,6 @@ async function syncChatHistoryChunk(
   });
 }
 
-/** Pagina el historial en peticiones cortas (evita timeout 504 del gateway). */
 async function syncChatHistoryPaginated(
   companyId: string,
   chatIds: string[],
@@ -64,17 +66,18 @@ async function syncChatHistoryPaginated(
   return total;
 }
 
-/** Trae solo la página más reciente (mensajes nuevos). */
-async function syncRecentMessagesFromWaha(
+/** Una sola petición al proveedor (messages.list) — mucho más rápida que sync_chat_history. */
+async function syncRecentMessagesFromProvider(
   companyId: string,
-  chatIds: string[],
+  chatId: string,
 ): Promise<number> {
-  let total = 0;
-  for (const id of chatIds) {
-    const res = await syncChatHistoryChunk(companyId, id, 0, false);
-    total += res.count ?? 0;
-  }
-  return total;
+  const res = await invokeWhatsappProxy<{ ok: boolean; count: number }>({
+    action: 'messages.list',
+    chat_id: chatId,
+    limit: RECENT_PROVIDER_LIMIT,
+    company_id: companyId,
+  });
+  return res.count ?? 0;
 }
 
 function parseMessageTime(m: WhatsappMessageRow): number {
@@ -91,7 +94,6 @@ function compareWhatsappMessages(a: WhatsappMessageRow, b: WhatsappMessageRow): 
   return a.from_me ? -1 : 1;
 }
 
-/** Corrige respuestas entrantes con hora anterior al último envío (reloj WAHA vs cliente). */
 function fixTimelineOrder(rows: WhatsappMessageRow[]): WhatsappMessageRow[] {
   if (rows.length < 2) return rows;
   const sorted = [...rows].sort(compareWhatsappMessages);
@@ -116,7 +118,6 @@ function fixTimelineOrder(rows: WhatsappMessageRow[]): WhatsappMessageRow[] {
   return sorted.sort(compareWhatsappMessages);
 }
 
-/** Evita burbujas duplicadas cuando webhook y send crean dos filas del mismo envío. */
 function dedupeWhatsappMessages(rows: WhatsappMessageRow[]): WhatsappMessageRow[] {
   const byKey = new Map<string, WhatsappMessageRow>();
   for (const m of rows) {
@@ -220,14 +221,33 @@ function appendMessageToCache(
   });
 }
 
+function newestMessageMs(rows: WhatsappMessageRow[] | undefined): number {
+  if (!rows?.length) return 0;
+  return rows.reduce((max, m) => Math.max(max, parseMessageTime(m)), 0);
+}
+
+function shouldSkipRecentProviderSync(
+  cached: WhatsappMessageRow[] | undefined,
+  historySyncedAt: string | null,
+  lastMessageAt: string | null | undefined,
+): boolean {
+  if (!cached?.length) return false;
+  if (!historySyncedAt) return false;
+  if (!lastMessageAt) return true;
+  const lastChatMs = Date.parse(lastMessageAt);
+  if (Number.isNaN(lastChatMs)) return false;
+  return lastChatMs <= newestMessageMs(cached) + 3000;
+}
+
 export const useWhatsappMessages = (
   chatId: string | null,
   relatedChatIds: string[] = [],
-  options?: { historySyncedAt?: string | null },
+  options?: { historySyncedAt?: string | null; lastMessageAt?: string | null },
 ) => {
   const queryClient = useQueryClient();
   const { companyId, loading: companyLoading } = useWhatsappCompanyId();
   const historySyncedAt = options?.historySyncedAt ?? null;
+  const lastMessageAt = options?.lastMessageAt ?? null;
 
   const chatIds = useMemo(() => {
     if (!chatId) return [];
@@ -240,7 +260,8 @@ export const useWhatsappMessages = (
   const messagesQuery = useQuery({
     queryKey: key,
     enabled,
-    staleTime: 15_000,
+    staleTime: 45_000,
+    gcTime: 10 * 60_000,
     refetchOnWindowFocus: false,
     retry: 1,
     queryFn: async (): Promise<WhatsappMessageRow[]> => {
@@ -318,11 +339,11 @@ export const useWhatsappMessages = (
 
   const refreshFromWaha = useMutation({
     mutationFn: async (mode: WhatsappSyncMode = 'auto') => {
-      if (chatIds.length === 0) throw new Error('Sin chat seleccionado');
+      if (!chatId || chatIds.length === 0) throw new Error('Sin chat seleccionado');
       if (!companyId) throw new Error('Sin empresa activa');
 
       if (mode === 'recent') {
-        const count = await syncRecentMessagesFromWaha(companyId, chatIds);
+        const count = await syncRecentMessagesFromProvider(companyId, chatId);
         return { ok: true, count, mode: 'recent' as const };
       }
 
@@ -340,56 +361,55 @@ export const useWhatsappMessages = (
   const openSyncKeyRef = useRef('');
   const forceRetryRef = useRef(false);
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !chatId) return;
     const syncKey = chatIds.slice().sort().join('|');
     if (openSyncKeyRef.current === syncKey) return;
     openSyncKeyRef.current = syncKey;
     forceRetryRef.current = false;
 
-    // Primero mensajes recientes (rápido); historial completo solo si la BD está vacía.
-    refreshFromWaha.mutate('recent', {
-      onSuccess: (res) => {
-        if ((res.count ?? 0) > 0) return;
-        const cached = queryClient.getQueryData<WhatsappMessageRow[]>(key);
-        if (cached && cached.length > 0) return;
-        if (historySyncedAt) return;
-        if (forceRetryRef.current) return;
-        forceRetryRef.current = true;
-        refreshFromWaha.mutate('auto', { onError: () => undefined });
-      },
-      onError: () => {
-        const cached = queryClient.getQueryData<WhatsappMessageRow[]>(key);
-        if (cached && cached.length > 0) return;
-        if (historySyncedAt || forceRetryRef.current) return;
-        forceRetryRef.current = true;
-        refreshFromWaha.mutate('auto', { onError: () => undefined });
-      },
-    });
-  }, [enabled, chatIds.join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
+    const cached = queryClient.getQueryData<WhatsappMessageRow[]>(key);
+    const skipRecent = shouldSkipRecentProviderSync(cached, historySyncedAt, lastMessageAt);
 
-  // Polling ligero de mensajes nuevos (pestaña visible).
+    const runSync = () => {
+      if (skipRecent) return;
+
+      refreshFromWaha.mutate('recent', {
+        onSuccess: (res) => {
+          if ((res.count ?? 0) > 0) return;
+          const latest = queryClient.getQueryData<WhatsappMessageRow[]>(key);
+          if (latest && latest.length > 0) return;
+          if (historySyncedAt) return;
+          if (forceRetryRef.current) return;
+          forceRetryRef.current = true;
+          refreshFromWaha.mutate('auto', { onError: () => undefined });
+        },
+        onError: () => {
+          const latest = queryClient.getQueryData<WhatsappMessageRow[]>(key);
+          if (latest && latest.length > 0) return;
+          if (historySyncedAt || forceRetryRef.current) return;
+          forceRetryRef.current = true;
+          refreshFromWaha.mutate('auto', { onError: () => undefined });
+        },
+      });
+    };
+
+    const delayMs = cached?.length ? 2800 : 800;
+    const timer = window.setTimeout(runSync, delayMs);
+    return () => window.clearTimeout(timer);
+  }, [enabled, chatId, chatIds.join('|'), historySyncedAt, lastMessageAt]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (!enabled) return;
     const tick = () => {
       if (document.visibilityState !== 'visible') return;
       if (refreshFromWaha.isPending) return;
+      const cached = queryClient.getQueryData<WhatsappMessageRow[]>(key);
+      if (shouldSkipRecentProviderSync(cached, historySyncedAt, lastMessageAt)) return;
       refreshFromWaha.mutate('recent', { onError: () => undefined });
     };
-    const timer = window.setInterval(tick, 12_000);
+    const timer = window.setInterval(tick, RECENT_POLL_MS);
     return () => window.clearInterval(timer);
-  }, [enabled, chatIds.join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Respaldo si Realtime falla (chats ya sincronizados).
-  useEffect(() => {
-    if (!enabled || !historySyncedAt) return;
-    const tick = () => {
-      if (document.visibilityState !== 'visible') return;
-      if (refreshFromWaha.isPending) return;
-      refreshFromWaha.mutate('recent', { onError: () => undefined });
-    };
-    const timer = window.setInterval(tick, 20_000);
-    return () => window.clearInterval(timer);
-  }, [enabled, chatIds.join('|'), historySyncedAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [enabled, chatIds.join('|'), historySyncedAt, lastMessageAt]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sendMessage = useMutation({
     mutationFn: async (input: SendMessageInput) => {
@@ -417,7 +437,7 @@ export const useWhatsappMessages = (
     },
     onSuccess: (res, input, ctx) => {
       const confirmed = res.message as WhatsappMessageRow | undefined;
-      const chatId = res.chat_id ?? input.chat_id;
+      const chatIdOut = res.chat_id ?? input.chat_id;
       if (confirmed) {
         queryClient.setQueryData<WhatsappMessageRow[]>(key, (prev) => {
           const optimistic = prev?.find((m) => m.id === ctx?.tempId);
@@ -435,7 +455,7 @@ export const useWhatsappMessages = (
       } else {
         invalidate(true);
       }
-      if (companyId && chatId) {
+      if (companyId && chatIdOut) {
         const preview =
           confirmed?.body?.trim() ||
           confirmed?.caption?.trim() ||
@@ -443,7 +463,7 @@ export const useWhatsappMessages = (
         patchChatsListAfterOutgoing(
           queryClient,
           companyId,
-          chatId,
+          chatIdOut,
           preview || null,
           confirmed?.timestamp,
         );

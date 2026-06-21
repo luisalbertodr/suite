@@ -2,6 +2,8 @@
 * Solo compilacion; en runtime el exe original tiene las implementaciones reales.
 
 PUBLIC laarrayclientesok, laarrayarticulosok, laarrayregistrosok, laarraycontactosok
+DIMENSION laarrayclientesok(1), laarrayarticulosok(1), laarrayregistrosok(1), laarraycontactosok(1)
+STORE .F. TO laarrayclientesok(1), laarrayarticulosok(1), laarrayregistrosok(1), laarraycontactosok(1)
 
 FUNCTION _messagebox_android
  PARAMETER tcmsg, tnicon, tctitle

@@ -1,5 +1,11 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { loadEmailConfig, sendOutgoingEmail } from './emailSender.ts';
+import { providerSendText } from './whatsappProviderClient.ts';
+import {
+  normalizeWhatsappProvider,
+  resolveWhatsappCredentials,
+  type WhatsappProviderConfig,
+} from './whatsappProviderTypes.ts';
 
 export type MonitorSettings = {
   enabled: boolean;
@@ -15,14 +21,27 @@ export type MonitorSettings = {
 
 export type WhatsappCfg = {
   company_id: string;
+  provider?: string | null;
   base_url: string;
   api_key: string;
   session_name: string;
   default_country_code: string | null;
+  waha_base_url?: string | null;
+  waha_api_key?: string | null;
+  waha_session_name?: string | null;
+  openwa_base_url?: string | null;
+  openwa_api_key?: string | null;
+  openwa_session_name?: string | null;
 };
 
-function trimSlash(url: string): string {
-  return url.replace(/\/+$/, '');
+function asMonitorProviderCfg(cfg: WhatsappCfg): WhatsappProviderConfig {
+  return resolveWhatsappCredentials({
+    ...cfg,
+    webhook_secret: null,
+    enabled: true,
+    last_status: null,
+    me_jid: null,
+  });
 }
 
 export function normalizeWhatsappDestination(raw: string, country = '34'): string {
@@ -32,15 +51,6 @@ export function normalizeWhatsappDestination(raw: string, country = '34'): strin
   return `${s}@c.us`;
 }
 
-async function wahaFetch(cfg: WhatsappCfg, path: string, init: RequestInit = {}): Promise<Response> {
-  const headers = new Headers(init.headers);
-  headers.set('X-Api-Key', cfg.api_key);
-  if (init.body && !headers.has('Content-Type')) {
-    headers.set('Content-Type', 'application/json');
-  }
-  return fetch(`${trimSlash(cfg.base_url)}${path}`, { ...init, headers });
-}
-
 export async function sendMonitorWhatsapp(
   cfg: WhatsappCfg,
   destination: string,
@@ -48,18 +58,7 @@ export async function sendMonitorWhatsapp(
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     const chatId = destination.includes('@') ? destination : normalizeWhatsappDestination(destination);
-    const resp = await wahaFetch(cfg, '/api/sendText', {
-      method: 'POST',
-      body: JSON.stringify({
-        session: cfg.session_name || 'default',
-        chatId,
-        text,
-      }),
-    });
-    if (!resp.ok) {
-      const body = await resp.text();
-      return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 200)}` };
-    }
+    await providerSendText(asMonitorProviderCfg(cfg), chatId, text);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
@@ -134,11 +133,26 @@ export async function loadWhatsappCfg(
 ): Promise<WhatsappCfg | null> {
   const { data, error } = await admin
     .from('whatsapp_config')
-    .select('company_id, base_url, api_key, session_name, default_country_code')
+    .select(
+      'company_id, provider, base_url, api_key, session_name, waha_base_url, waha_api_key, waha_session_name, openwa_base_url, openwa_api_key, openwa_session_name, default_country_code',
+    )
     .eq('company_id', companyId)
     .maybeSingle();
-  if (error || !data?.base_url || !data?.api_key) return null;
-  return data as WhatsappCfg;
+  if (error || !data) return null;
+  const resolved = resolveWhatsappCredentials({
+    ...data,
+    webhook_secret: null,
+    enabled: true,
+    last_status: null,
+    me_jid: null,
+  } as WhatsappCfg & { webhook_secret: null; enabled: true; last_status: null; me_jid: null });
+  if (!resolved.base_url || !resolved.api_key) return null;
+  return {
+    ...data,
+    base_url: resolved.base_url,
+    api_key: resolved.api_key,
+    session_name: resolved.session_name,
+  } as WhatsappCfg;
 }
 
 export function canNotify(

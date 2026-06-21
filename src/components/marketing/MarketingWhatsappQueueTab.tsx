@@ -10,6 +10,7 @@ import {
   PlayCircle,
   Send,
   X,
+  Mic,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -22,6 +23,43 @@ import {
 import { useMarketingStages } from '@/hooks/useMarketingStages';
 import { findMarketingIntakeStage } from '@/lib/marketingIntakeStage';
 import { MarketingWhatsappEnqueueDialog } from './MarketingWhatsappEnqueueDialog';
+import { useMetaConfig } from '@/hooks/useMetaConfig';
+import type { MetaFormRow } from '@/hooks/useMetaConfig';
+import { resolveFormInitialSendKind, sendKindLabel } from '@/lib/metaFormWhatsappAudio';
+
+function SendKindBadge({ kind }: { kind: 'audio' | 'audio_link' | 'text' | null | undefined }) {
+  if (!kind) return null;
+  const isAudio = kind === 'audio' || kind === 'audio_link';
+  return (
+    <Badge
+      variant={isAudio ? 'secondary' : 'outline'}
+      className="text-[10px] shrink-0"
+    >
+      {isAudio ? (
+        <>
+          <Mic className="mr-0.5 inline h-3 w-3" />
+          {sendKindLabel(kind)}
+        </>
+      ) : (
+        'Texto'
+      )}
+    </Badge>
+  );
+}
+
+function resolveRowPlannedSendKind(
+  row: MarketingWhatsappQueueRow,
+  formById: Map<string, MetaFormRow>,
+  formByName: Map<string, MetaFormRow>,
+): 'audio' | 'text' | null {
+  const lead = row.marketing_leads;
+  if (!lead) return null;
+  const form =
+    (lead.meta_form_id ? formById.get(lead.meta_form_id) : undefined) ??
+    (lead.form_name ? formByName.get(lead.form_name) : undefined);
+  if (!form) return 'text';
+  return resolveFormInitialSendKind(form);
+}
 
 function leadName(row: MarketingWhatsappQueueRow): string {
   const lead = row.marketing_leads;
@@ -76,6 +114,20 @@ export const MarketingWhatsappQueueTab: React.FC<{
     sendNow,
     refetch,
   } = useMarketingWhatsappQueue(companyId);
+  const { forms: metaForms } = useMetaConfig(companyId);
+  const formById = useMemo(
+    () => new Map(metaForms.map((f) => [f.id, f])),
+    [metaForms],
+  );
+  const formByName = useMemo(
+    () =>
+      new Map(
+        metaForms
+          .filter((f) => f.form_name?.trim())
+          .map((f) => [f.form_name!.trim(), f] as const),
+      ),
+    [metaForms],
+  );
   const { stages } = useMarketingStages(companyId);
   const intakeStageId = useMemo(
     () => findMarketingIntakeStage(stages ?? [])?.id ?? null,
@@ -198,6 +250,20 @@ export const MarketingWhatsappQueueTab: React.FC<{
         </div>
       </div>
 
+      <div className="rounded-xl border bg-muted/30 p-3">
+        <p className="text-[11px] text-muted-foreground">Seguimiento bienvenida hoy (texto vs audio)</p>
+        <div className="mt-1 flex flex-wrap gap-4 text-sm">
+          <span>
+            <span className="font-semibold tabular-nums">{stats?.sent_today_text ?? 0}</span>{' '}
+            <span className="text-muted-foreground">Texto</span>
+          </span>
+          <span>
+            <span className="font-semibold tabular-nums">{stats?.sent_today_audio ?? 0}</span>{' '}
+            <span className="text-muted-foreground">Audio</span>
+          </span>
+        </div>
+      </div>
+
       <div className="flex flex-wrap items-center gap-2">
         {canWrite ? (
           <Button
@@ -253,6 +319,7 @@ export const MarketingWhatsappQueueTab: React.FC<{
                           {row.marketing_leads.form_name}
                         </Badge>
                       ) : null}
+                      <SendKindBadge kind={resolveRowPlannedSendKind(row, formById, formByName)} />
                     </div>
                     <p className="text-xs text-muted-foreground truncate">
                       {leadDate(row) ? `Lead ${leadDate(row)}` : ''}
@@ -318,7 +385,9 @@ export const MarketingWhatsappQueueTab: React.FC<{
                       }
                       className="text-[10px]"
                     >
-                      {row.status}
+                      {row.status === 'sent'
+                        ? sendKindLabel((row.sent_kind as 'audio' | 'audio_link' | 'text' | null) ?? null)
+                        : row.status}
                     </Badge>
                   </div>
                   {row.error ? (

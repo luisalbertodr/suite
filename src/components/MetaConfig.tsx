@@ -47,6 +47,7 @@ import {
   MessageSquare,
   CreditCard,
   Settings2,
+  Mic,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -65,6 +66,10 @@ import { MarketingImportDialog } from './marketing/MarketingImportDialog';
 import { MarketingFieldsConfigDialog } from './marketing/MarketingFieldsConfigDialog';
 import { MarketingStagesManager } from './marketing/MarketingStagesManager';
 import { WHATSAPP_MESSAGE_TEMPLATE_VARS } from '@/lib/whatsappMessageTemplates';
+import {
+  removeMetaFormWhatsappAudio,
+  uploadMetaFormWhatsappAudio,
+} from '@/lib/metaFormWhatsappAudio';
 import { centsToEurosInput, eurosToCents } from '@/hooks/useStripeConfig';
 
 const NONE_STAGE_VALUE = '__none__';
@@ -129,6 +134,140 @@ function saveFormWhatsappDelay(
     id: form.id,
     values: { whatsapp_reminder_delay_hours: parsed },
   });
+}
+
+function MetaFormWhatsappAudioField({
+  form,
+  companyId,
+  updateForm,
+  onToast,
+}: {
+  form: MetaFormRow;
+  companyId: string;
+  updateForm: ReturnType<typeof useMetaConfig>['updateForm'];
+  onToast: (input: { title: string; description?: string; variant?: 'destructive' }) => void;
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const audioEnabled = form.whatsapp_initial_audio_enabled === true;
+
+  const handleUpload = async (file: File | null) => {
+    if (!file) return;
+    setUploading(true);
+    try {
+      const uploaded = await uploadMetaFormWhatsappAudio(companyId, form.id, file);
+      updateForm.mutate({
+        id: form.id,
+        values: {
+          whatsapp_initial_audio_enabled: true,
+          whatsapp_initial_audio_path: uploaded.path,
+          whatsapp_initial_audio_filename: uploaded.filename,
+          whatsapp_initial_audio_mime: uploaded.mime,
+        },
+      });
+      onToast({ title: 'Audio guardado', description: uploaded.filename });
+    } catch (e) {
+      onToast({
+        title: 'Error al subir audio',
+        description: e instanceof Error ? e.message : 'No se pudo subir el archivo',
+        variant: 'destructive',
+      });
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleRemove = async () => {
+    const path = form.whatsapp_initial_audio_path;
+    if (path) {
+      try {
+        await removeMetaFormWhatsappAudio(path);
+      } catch {
+        /* ignorar si ya no existe */
+      }
+    }
+    updateForm.mutate({
+      id: form.id,
+      values: {
+        whatsapp_initial_audio_path: null,
+        whatsapp_initial_audio_filename: null,
+        whatsapp_initial_audio_mime: null,
+      },
+    });
+  };
+
+  return (
+    <div className="space-y-2 rounded-lg border border-dashed border-violet-300/70 bg-violet-50/40 p-3 dark:border-violet-900 dark:bg-violet-950/20">
+      <label className="flex cursor-pointer items-start gap-2">
+        <Checkbox
+          checked={audioEnabled}
+          onCheckedChange={(v) =>
+            updateForm.mutate({
+              id: form.id,
+              values: { whatsapp_initial_audio_enabled: v === true },
+            })
+          }
+        />
+        <span className="text-[11px] leading-snug">
+          <span className="font-medium text-foreground">Enviar audio en lugar de texto</span>
+            <span className="block text-muted-foreground">
+              Sin WAHA Plus el audio se envía como enlace de escucha (sendText). Con Plus se adjunta
+              como archivo o nota de voz. Opcional: deja un texto de bienvenida guardado para usarlo
+              como introducción al enlace.
+            </span>
+        </span>
+      </label>
+      {audioEnabled ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="audio/*,.ogg,.opus,.mp3,.m4a,.wav,.webm"
+            className="hidden"
+            aria-label="Adjuntar audio de bienvenida"
+            onChange={(e) => void handleUpload(e.target.files?.[0] ?? null)}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs"
+            disabled={uploading || updateForm.isPending}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            {uploading ? (
+              <RefreshCw className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Mic className="mr-1.5 h-3.5 w-3.5" />
+            )}
+            {form.whatsapp_initial_audio_filename ? 'Cambiar audio' : 'Adjuntar audio'}
+          </Button>
+          {form.whatsapp_initial_audio_filename ? (
+            <>
+              <span className="truncate text-xs text-muted-foreground max-w-[220px]">
+                {form.whatsapp_initial_audio_filename}
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                title="Quitar audio"
+                onClick={() => void handleRemove()}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </>
+          ) : (
+            <span className="text-[10px] text-amber-700 dark:text-amber-400">
+              OGG/Opus (WhatsApp), MP3, M4A o WAV
+            </span>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export const MetaConfig: React.FC = () => {
@@ -598,15 +737,27 @@ export const MetaConfig: React.FC = () => {
                 </div>
               </div>
               <div className="space-y-1 md:col-span-2">
+                <MetaFormWhatsappAudioField
+                  form={form}
+                  companyId={form.company_id}
+                  updateForm={updateForm}
+                  onToast={toast}
+                />
+              </div>
+              <div className="space-y-1 md:col-span-2">
                 <Label className="text-[11px]">
                   Mensaje 1 · Bienvenida (al recibir el lead)
                 </Label>
                 <Textarea
-                  key={`${form.id}-initial-${form.whatsapp_initial_message ?? ''}`}
+                  key={`${form.id}-initial-${form.whatsapp_initial_message ?? ''}-${form.whatsapp_initial_audio_enabled}`}
                   defaultValue={form.whatsapp_initial_message ?? ''}
                   rows={6}
                   className="text-xs"
-                  placeholder="Hola {nombre}… Usa {respuesta_zona} para personalizar según el formulario."
+                  placeholder={
+                    form.whatsapp_initial_audio_enabled
+                      ? 'Opcional: texto introductorio antes del enlace de audio (sin WAHA Plus).'
+                      : 'Hola {nombre}… Usa {respuesta_zona} para personalizar según el formulario.'
+                  }
                   onBlur={(e) =>
                     saveFormWhatsappField(
                       form,

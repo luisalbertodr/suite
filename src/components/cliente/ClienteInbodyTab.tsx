@@ -17,6 +17,8 @@ import {
   inbodySexLabel,
   type InbodyMeasurement,
 } from '@/lib/inbodyMeasurements';
+import { resolveInbodyDataQuality } from '@/lib/inbodyQuality';
+import { InbodyQualityAlert } from './inbody/InbodyQualityAlert';
 import { InbodyMetricRow, InbodyRangeBar } from './inbody/InbodyRangeBar';
 import { InbodyCompositionRangeGroup } from './inbody/InbodyCompositionRangeGroup';
 import { InbodyHistoryChart } from './inbody/InbodyHistoryChart';
@@ -90,11 +92,13 @@ function ImpedanceTable({ measurement }: { measurement: InbodyMeasurement }) {
   );
 }
 
-function sessionLabel(m: InbodyMeasurement, index: number, total: number): string {
+function sessionLabel(m: InbodyMeasurement, index: number, total: number, all: InbodyMeasurement[]): string {
   const date = format(new Date(m.measured_at), 'dd/MM/yyyy HH:mm', { locale: es });
   const weight = m.weight_kg != null ? formatInbodyNumber(m.weight_kg, 1, ' kg') : 'sin peso';
   const pbf = m.pbf_pct != null ? ` · PGC ${formatInbodyNumber(m.pbf_pct, 1, '%')}` : '';
-  return `${total - index}. ${date} · ${weight}${pbf}`;
+  const q = resolveInbodyDataQuality(m, all);
+  const warn = q.needs_repeat ? ' ⚠' : '';
+  return `${total - index}. ${date} · ${weight}${pbf}${warn}`;
 }
 
 function MeasurementSessionBar({
@@ -119,7 +123,7 @@ function MeasurementSessionBar({
         <SelectContent>
           {measurements.map((m, idx) => (
             <SelectItem key={m.id} value={m.id}>
-              {sessionLabel(m, idx, measurements.length)}
+              {sessionLabel(m, idx, measurements.length, measurements)}
             </SelectItem>
           ))}
         </SelectContent>
@@ -145,9 +149,25 @@ function MeasurementSessionBar({
   );
 }
 
-function MeasurementReport({ measurement, compact }: { measurement: InbodyMeasurement; compact?: boolean }) {
+function MeasurementReport({
+  measurement,
+  siblings,
+  onSelectReference,
+  compact,
+}: {
+  measurement: InbodyMeasurement;
+  siblings: InbodyMeasurement[];
+  onSelectReference?: (id: string) => void;
+  compact?: boolean;
+}) {
   return (
     <div className="space-y-4">
+      <InbodyQualityAlert
+        measurement={measurement}
+        siblings={siblings}
+        onSelectReference={onSelectReference}
+        compact={compact}
+      />
       <Card className="border-sky-100/50 dark:border-sky-900/20">
         <CardHeader className="pb-2">
           <CardTitle className="text-sm">
@@ -332,7 +352,14 @@ export const ClienteInbodyTab: React.FC<Props> = ({ customerId, taxId, companyId
         />
       )}
 
-      {selected && <MeasurementReport measurement={selected} compact={compact} />}
+      {selected && (
+        <MeasurementReport
+          measurement={selected}
+          siblings={measurements}
+          onSelectReference={setSelectedId}
+          compact={compact}
+        />
+      )}
 
       {selected && (
         <InbodyReportExport

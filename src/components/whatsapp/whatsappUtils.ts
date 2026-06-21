@@ -11,8 +11,8 @@ export const waTheme = {
   chatBg: 'bg-[#efeae2] dark:bg-zinc-900',
   chatActive: 'bg-[#f0f2f5] dark:bg-zinc-800',
   chatHover: 'hover:bg-[#f5f6f6] dark:hover:bg-zinc-900/80',
-  bubbleOut: 'bg-[#d9fdd3] dark:bg-emerald-900',
-  bubbleIn: 'bg-white dark:bg-zinc-800',
+  bubbleOut: 'wa-bubble-out',
+  bubbleIn: 'wa-bubble-in',
   searchBg: 'bg-[#f0f2f5] dark:bg-zinc-900',
   inputBg: 'bg-white dark:bg-zinc-800',
 } as const;
@@ -489,6 +489,31 @@ export function isExternalWhatsappCdnUrl(url: string | null | undefined): boolea
   }
 }
 
+/** Reescribe URLs de Storage guardadas con host interno (kong:8000) → VITE_SUPABASE_URL. */
+export function resolveSupabasePublicStorageUrl(
+  url: string | null | undefined,
+): string | null {
+  if (!url) return null;
+  if (!url.includes('/storage/v1/object/public/')) return url;
+  try {
+    const u = new URL(url, typeof window !== 'undefined' ? window.location.origin : undefined);
+    const h = u.hostname.toLowerCase();
+    if (
+      h === 'kong' ||
+      h === 'localhost' ||
+      h === '127.0.0.1' ||
+      h.startsWith('192.168.') ||
+      h.startsWith('10.')
+    ) {
+      const base = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.replace(/\/+$/, '');
+      if (base) return `${base}${u.pathname}${u.search}`;
+    }
+  } catch {
+    // mantener
+  }
+  return url;
+}
+
 const BAILEYS_WRAP_KEYS = [
   'ephemeralMessage',
   'viewOnceMessage',
@@ -550,6 +575,75 @@ export function resolveWhatsappMessageType(m: WhatsappMessageTypeSource): string
     return 'sticker';
   }
   return rawType;
+}
+
+/** Base64 embebido en raw (OpenWA history o webhook con media.data). */
+export function extractEmbeddedMediaBase64(
+  raw: unknown,
+): { data: string; mime: string } | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const root = raw as Record<string, unknown>;
+  const media = root.media;
+  if (!media || typeof media !== 'object') return null;
+  const m = media as Record<string, unknown>;
+  const data = m.data;
+  if (typeof data !== 'string' || data.length < 32) return null;
+  const mime =
+    typeof m.mimetype === 'string' && m.mimetype.trim()
+      ? m.mimetype
+      : 'application/octet-stream';
+  return { data, mime };
+}
+
+export function base64ToBlob(b64: string, mime: string): Blob {
+  const cleaned = b64.replace(/^data:[^;]+;base64,/, '').replace(/\s/g, '');
+  const bin = atob(cleaned);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
+export function resolveWhatsappMediaMessageId(
+  message: { waha_message_id?: string | null; raw?: unknown },
+): string | null {
+  if (message.waha_message_id?.trim()) return message.waha_message_id.trim();
+  if (!message.raw || typeof message.raw !== 'object') return null;
+  const r = message.raw as Record<string, unknown>;
+  const id = r.id;
+  if (typeof id === 'string' && id.trim()) return id.trim();
+  if (id && typeof id === 'object') {
+    const ser = (id as Record<string, unknown>)._serialized;
+    if (typeof ser === 'string' && ser.trim()) return ser.trim();
+  }
+  return null;
+}
+
+/** Extrae chat JID del id serializado WhatsApp (p.ej. false_346...@c.us_ABC). */
+export function chatIdFromSerializedMessageId(messageId: string | null | undefined): string | null {
+  if (!messageId?.trim()) return null;
+  const parts = messageId.split('_');
+  if (parts.length >= 3 && parts[1]?.includes('@')) return parts[1];
+  return null;
+}
+
+/** Chat id más fiable para pedir media a OpenWA (prioriza @lid del mensaje). */
+export function resolveMediaDownloadChatId(
+  message: { chat_id?: string; from_jid?: string | null; waha_message_id?: string | null; raw?: unknown },
+  activeChatId: string,
+  relatedChatIds: string[] = [],
+): string {
+  const msgId = resolveWhatsappMediaMessageId(message);
+  const fromSerialized = chatIdFromSerializedMessageId(msgId);
+  if (fromSerialized) return fromSerialized;
+  if (message.from_jid?.includes('@') && (isLidJid(message.from_jid) || isPhoneJid(message.from_jid))) {
+    return message.from_jid;
+  }
+  if (isLidJid(message.chat_id)) return message.chat_id!;
+  if (isLidJid(activeChatId)) return activeChatId;
+  for (const id of relatedChatIds) {
+    if (isLidJid(id)) return id;
+  }
+  return message.chat_id ?? activeChatId;
 }
 
 /** URL HTTP de sticker/imagen en el payload Baileys/Waha (si está expuesta). */

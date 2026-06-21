@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import type { InbodyMetricId } from '@/lib/inbodyGlossary';
 import type { InbodyMeasurement } from '@/lib/inbodyMeasurements';
+import type { InbodyChartParamId } from '@/lib/inbodyChartParams';
 import {
   buildInbodyCompositionMarkerCurve,
   formatInbodyNumber,
@@ -9,6 +10,7 @@ import {
   inbodyRangeStatus,
   inbodyStatusClass,
   inbodyStatusLabel,
+  resolveBodyFatMassRangeKg,
 } from '@/lib/inbodyMeasurements';
 import { InbodyMetricHelp } from './InbodyMetricHelp';
 
@@ -64,6 +66,8 @@ function CompositionBarMarker({
 
 /** Peso, MME y masa grasa con barras de rango y curva azul tipo informe InBody. */
 export const InbodyCompositionRangeGroup: React.FC<Props> = ({ measurement, className }) => {
+  const bfmRange = useMemo(() => resolveBodyFatMassRangeKg(measurement), [measurement]);
+
   const rows: RowDef[] = useMemo(
     () => [
       {
@@ -81,11 +85,11 @@ export const InbodyCompositionRangeGroup: React.FC<Props> = ({ measurement, clas
       {
         metricId: 'body_fat_kg',
         value: measurement.body_fat_kg,
-        min: measurement.body_fat_min_kg,
-        max: measurement.body_fat_max_kg,
+        min: bfmRange.min,
+        max: bfmRange.max,
       },
     ],
-    [measurement],
+    [measurement, bfmRange.min, bfmRange.max],
   );
 
   const scales = useMemo(

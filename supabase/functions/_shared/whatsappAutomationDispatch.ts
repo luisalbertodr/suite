@@ -5,6 +5,12 @@ import {
   normalizeChatId,
   type WhatsappConfigRow,
 } from './marketingWhatsappAutomation.ts';
+import {
+  normalizeWhatsappProvider,
+  resolveWhatsappCredentials,
+  type WhatsappProviderConfig,
+} from './whatsappProviderTypes.ts';
+import { providerSendText } from './whatsappProviderClient.ts';
 
 export type WhatsappAutomationSettings = {
   company_id: string;
@@ -26,6 +32,8 @@ export type AutomationSendType =
   | 'appointment_day_before'
   | 'appointment_hour_before'
   | 'meta_initial'
+  | 'meta_initial_audio'
+  | 'meta_initial_audio_link'
   | 'meta_queue_initial'
   | 'meta_reply_1'
   | 'meta_reply_2'
@@ -154,28 +162,12 @@ export async function logAutomationSend(
   if (error) console.error('logAutomationSend failed:', error.message);
 }
 
-async function wahaSendText(
+async function providerSendTextFromRow(
   cfg: WhatsappConfigRow,
   chatId: string,
   text: string,
 ): Promise<void> {
-  const base = (cfg.base_url ?? '').replace(/\/+$/, '');
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (cfg.api_key) headers['X-Api-Key'] = cfg.api_key;
-  const resp = await fetch(`${base}/api/sendText`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      session: cfg.session_name || 'default',
-      chatId,
-      text,
-    }),
-    signal: AbortSignal.timeout(25_000),
-  });
-  if (!resp.ok) {
-    const t = await resp.text();
-    throw new Error(`WAHA HTTP ${resp.status}: ${t.slice(0, 200)}`);
-  }
+  await providerSendText(resolveWhatsappCredentials(cfg), chatId, text);
 }
 
 export async function sendAutomatedWhatsapp(
@@ -207,7 +199,7 @@ export async function sendAutomatedWhatsapp(
   const chatId = normalizeChatId(chatPhone, cfg.default_country_code);
 
   try {
-    await wahaSendText(cfg, chatId, body);
+    await providerSendTextFromRow(cfg, chatId, body);
     await logAutomationSend(admin, {
       company_id: companyId,
       automation_type: meta.automation_type,
@@ -255,7 +247,7 @@ export async function sendDirectWhatsapp(
 
   const chatId = normalizeChatId(phone.replace(/\D/g, ''), cfg.default_country_code);
   try {
-    await wahaSendText(cfg, chatId, text);
+    await providerSendTextFromRow(cfg, chatId, text);
     await logAutomationSend(admin, {
       company_id: companyId,
       automation_type: meta.automation_type,

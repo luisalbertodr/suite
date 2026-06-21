@@ -21,7 +21,8 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
-import { fileToBase64, mediaKindFromMime, messagePreviewText, waTheme } from './whatsappUtils';
+import { fileToBase64, mediaKindFromMime, messagePreviewText } from './whatsappUtils';
+import { useWhatsappTheme } from './WhatsappThemeContext';
 import { WHATSAPP_EMOJI_GRID } from './whatsappEmojis';
 import type { SendMessageInput, WhatsappMessageRow } from '@/hooks/useWhatsappMessages';
 
@@ -48,6 +49,7 @@ export const WhatsappMessageInput: React.FC<Props> = ({
   onClearReply,
   onSend,
 }) => {
+  const theme = useWhatsappTheme();
   const { toast } = useToast();
   const [text, setText] = useState('');
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -270,7 +272,7 @@ export const WhatsappMessageInput: React.FC<Props> = ({
 
   return (
     <footer
-      className={`z-10 flex shrink-0 flex-col border-t pb-[env(safe-area-inset-bottom)] max-md:pb-[calc(env(safe-area-inset-bottom)+4.75rem)] ${waTheme.headerBg} ${waTheme.border}`}
+      className={`z-10 flex shrink-0 flex-col border-t pb-[env(safe-area-inset-bottom)] ${theme.headerBg} ${theme.border}`}
     >
       {replyTo ? (
         <div className="flex items-center gap-2 border-b border-[#e9edef] px-4 py-2 dark:border-zinc-800">
@@ -295,7 +297,7 @@ export const WhatsappMessageInput: React.FC<Props> = ({
         </div>
       ) : null}
 
-      <div className="flex h-[60px] items-center gap-3 px-4">
+      <div className="wa-send-bar mx-3 mb-2 mt-1 flex h-[52px] items-center gap-3 px-3">
         <input
           ref={imageInputRef}
           type="file"
@@ -376,7 +378,7 @@ export const WhatsappMessageInput: React.FC<Props> = ({
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className={`h-9 w-9 shrink-0 rounded-full ${waTheme.textIcon}`}
+                  className={`h-9 w-9 shrink-0 rounded-full ${theme.textIcon}`}
                   disabled={disabled || sending}
                 >
                   <Paperclip className="h-5 w-5" />
@@ -401,7 +403,7 @@ export const WhatsappMessageInput: React.FC<Props> = ({
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className={`h-9 w-9 shrink-0 rounded-full ${waTheme.textIcon}`}
+                  className={`h-9 w-9 shrink-0 rounded-full ${theme.textIcon}`}
                   disabled={disabled || sending}
                   title="Emojis"
                 >
@@ -441,7 +443,7 @@ export const WhatsappMessageInput: React.FC<Props> = ({
               placeholder={disabled ? 'Selecciona un chat…' : 'Escribe un mensaje'}
               disabled={disabled || sending}
               rows={1}
-              className={`min-h-[42px] max-h-32 flex-1 resize-none rounded-lg border-0 px-3 py-2 text-sm shadow-none outline-none placeholder:text-[#667781] focus-visible:ring-1 focus-visible:ring-[#25d366] ${waTheme.inputBg}`}
+              className={`min-h-[42px] max-h-32 flex-1 resize-none rounded-lg border-0 px-3 py-2 text-sm shadow-none outline-none placeholder:text-[#667781] focus-visible:ring-1 focus-visible:ring-[#25d366] ${theme.inputBg}`}
             />
 
             {text.trim() ? (
@@ -451,7 +453,7 @@ export const WhatsappMessageInput: React.FC<Props> = ({
                 disabled={disabled || sending}
                 variant="ghost"
                 size="icon"
-                className={`h-9 w-9 shrink-0 rounded-full ${waTheme.textIcon} hover:bg-black/5`}
+                className={`h-9 w-9 shrink-0 rounded-full ${theme.textIcon} hover:bg-black/5`}
                 title="Enviar"
               >
                 {sending ? (
@@ -467,7 +469,7 @@ export const WhatsappMessageInput: React.FC<Props> = ({
                 disabled={disabled || sending}
                 variant="ghost"
                 size="icon"
-                className={`h-9 w-9 shrink-0 rounded-full ${waTheme.textIcon} hover:bg-black/5`}
+                className={`h-9 w-9 shrink-0 rounded-full ${theme.textIcon} hover:bg-black/5`}
                 title="Grabar nota de voz"
               >
                 <Mic className="h-5 w-5" />

@@ -1,5 +1,5 @@
 # Despliegue automático: agente VM + ficheros VFP sync (canal stylegetreservas).
-# Requiere SMB a \\192.168.99.119\c$ (net use o copy-to-vm.ps1 previo).
+# Requiere SMB a \\192.168.99.16\c$ (net use o copy-to-vm.ps1 previo).
 #
 # Uso:
 #   cd C:\Users\OportoW11\Suite\suite
@@ -10,7 +10,7 @@
 #   .\scripts\deploy-duna-exe-vm.ps1
 
 param(
-    [string]$VmHost = "192.168.99.119",
+    [string]$VmHost = "192.168.99.16",
     [string]$StyleDrive = "",
     [string]$SyncToken = "",
     [string]$SyncUrl = "https://supabase.lipoout.com/functions/v1/style-reservas-sync",

@@ -100,7 +100,7 @@ function Show-UserBuildStep {
 # --- Solo post-build (usuario ya hizo VfpBuildProject) ---
 if ($AfterBuild) {
     Write-Step "Post-build"
-    & (Join-Path $RepoRoot "scripts\copy-duna-exe.ps1")
+    & (Join-Path $RepoRoot "scripts\copy-duna-exe.ps1") -ExportRoot $ExportRoot
     $duna = Join-Path $ExportRoot "Duna.exe"
     if (-not (Test-Path $duna)) { throw "No existe $duna — ejecuta VfpBuildProject en VFP primero" }
     $fi = Get-Item $duna
@@ -203,7 +203,7 @@ try {
 $mscomctl = Join-Path $ExportRoot "mscomctl.exe"
 if (Test-Path $mscomctl) {
     Write-Ok ("mscomctl.exe  {0:N0} bytes" -f (Get-Item $mscomctl).Length)
-    & (Join-Path $RepoRoot "scripts\copy-duna-exe.ps1")
+    & (Join-Path $RepoRoot "scripts\copy-duna-exe.ps1") -ExportRoot $ExportRoot
     $duna = Join-Path $ExportRoot "Duna.exe"
     Write-Ok ("Duna.exe  {0:N0} bytes  {1}" -f (Get-Item $duna).Length, (Get-Item $duna).LastWriteTime)
     Write-Step "Deploy test"

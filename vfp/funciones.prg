@@ -989,7 +989,8 @@ ENDPROC
 FUNCTION SuiteLoadUnlockFromFunciones
  PARAMETER tcStyleRoot
  LOCAL lcSavErr, lcerr, llOk
- IF TYPE("Suite_SyncInit")#"U" AND TYPE("SuiteApplyFullUnlock")#"U"
+ * v2: el exe no embebe suite_full_unlock; la sincronización HTTP es legacy.
+ IF TYPE("SuiteEnqueuePlan2009")#"U"
     RETURN .T.
  ENDIF
  IF TYPE("pcidioma")#"C"
@@ -1003,40 +1004,40 @@ FUNCTION SuiteLoadUnlockFromFunciones
  lcerr = ""
  ON ERROR lcerr = MESSAGE()
  * Embebido en Duna.exe (sin .prg externo)
- SET PROCEDURE TO suite_full_unlock ADDITIVE
- llOk = (TYPE("Suite_SyncInit")#"U")
+ SET PROCEDURE TO suite_cola_sync ADDITIVE
+ llOk = (TYPE("SuiteEnqueuePlan2009")#"U")
  ON ERROR &lcSavErr
  IF llOk
     IF TYPE("SuiteBootstrapLog")#"U"
-       DO SuiteBootstrapLog WITH "[BOOT-04] embebido exe OK (funciones loader)"
+       DO SuiteBootstrapLog WITH "[BOOT-04] suite_cola_sync embebido exe OK (funciones loader)"
     ENDIF
     RETURN .T.
  ENDIF
- * .prg obligatorio: el .fxp no registra DEFINE CLASS (SuiteSyncTimer -> 1732)
+ * .prg externo opcional (si no va embebido)
  LOCAL lcPrg
- lcPrg = ADDBS(tcStyleRoot)+"PROGS\suite_full_unlock.prg"
+ lcPrg = ADDBS(tcStyleRoot)+"PROGS\suite_cola_sync.prg"
  IF  .NOT. FILE(lcPrg)
-    lcPrg = ADDBS(tcStyleRoot)+"suite_full_unlock.prg"
+    lcPrg = ADDBS(tcStyleRoot)+"suite_cola_sync.prg"
  ENDIF
  IF FILE(lcPrg)
     lcerr = ""
     ON ERROR lcerr = MESSAGE()
     SET PROCEDURE TO (lcPrg) ADDITIVE
-    llOk = (TYPE("Suite_SyncInit")#"U")
+    llOk = (TYPE("SuiteEnqueuePlan2009")#"U")
     ON ERROR &lcSavErr
     IF llOk
        IF TYPE("SuiteBootstrapLog")#"U"
-          DO SuiteBootstrapLog WITH "[BOOT-06] OK desde "+lcPrg+" (funciones loader)"
+          DO SuiteBootstrapLog WITH "[BOOT-06] suite_cola_sync OK desde "+lcPrg+" (funciones loader)"
        ENDIF
        RETURN .T.
     ENDIF
     IF TYPE("SuiteBootstrapLog")#"U"
-       DO SuiteBootstrapLog WITH "[BOOT-06E] "+lcPrg+IIF( .NOT. EMPTY(lcerr), " "+lcerr, " sin Suite_SyncInit")
+       DO SuiteBootstrapLog WITH "[BOOT-06E] "+lcPrg+IIF( .NOT. EMPTY(lcerr), " "+lcerr, " sin SuiteEnqueuePlan2009")
     ENDIF
     RETURN .F.
  ENDIF
  IF TYPE("SuiteBootstrapLog")#"U"
-    DO SuiteBootstrapLog WITH "[BOOT-07] falta PROGS\suite_full_unlock.prg en "+tcStyleRoot
+    DO SuiteBootstrapLog WITH "[BOOT-07] falta PROGS\suite_cola_sync.prg en "+tcStyleRoot
  ENDIF
  RETURN .F.
 ENDFUNC
@@ -1081,23 +1082,23 @@ FUNCTION Actualizar
  lnantiguaversion = ""
  llactualizar = .F.
  llregistroactualizacion = .T.
- IF TYPE("Suite_SyncInit")="U"
+ IF TYPE("SuiteEnqueuePlan2009")="U"
     = SuiteLoadUnlockFromFunciones(IIF(TYPE("pcSuiteStyleRoot")="C" .AND. .NOT. EMPTY(pcSuiteStyleRoot), ADDBS(pcSuiteStyleRoot), ADDBS(SYS(5)+SYS(2003))))
  ENDIF
  * Style Suite: sin comprobar/instalar actualizacion Dunasoft al arrancar
  IF TYPE("plSuiteFullUnlock")="L" AND plSuiteFullUnlock
     RETURN .T.
  ENDIF
- IF TYPE("Suite_SyncInit")#"U"
+ IF TYPE("SuiteEnqueuePlan2009")#"U"
     RETURN .T.
  ENDIF
  IF FILE(ADDBS(SYS(5)+SYS(2003))+"SuiteSync.cfg")
     RETURN .T.
  ENDIF
- IF FILE(ADDBS(SYS(5)+SYS(2003))+"suite_full_unlock.prg")
+ IF FILE(ADDBS(SYS(5)+SYS(2003))+"suite_cola_sync.prg")
     RETURN .T.
  ENDIF
- IF FILE(ADDBS(SYS(5)+SYS(2003))+"PROGS\suite_full_unlock.prg")
+ IF FILE(ADDBS(SYS(5)+SYS(2003))+"PROGS\suite_cola_sync.prg")
     RETURN .T.
  ENDIF
  lcExeVer = FULLPATH(tcnombreexe)
@@ -4326,14 +4327,8 @@ PROCEDURE Start_ServicioComunicaciones
  LOCAL lcRoot
  TRY
     lcRoot = IIF(TYPE("pcSuiteStyleRoot")="C" .AND. .NOT. EMPTY(pcSuiteStyleRoot), ADDBS(pcSuiteStyleRoot), ADDBS(SYS(5)+SYS(2003)))
-    IF TYPE("Suite_SyncInit")="U"
+    IF TYPE("SuiteEnqueuePlan2009")="U"
        = SuiteLoadUnlockFromFunciones(lcRoot)
-    ENDIF
-    IF TYPE("SuiteSyncEnsureLoaded")#"U"
-       = SuiteSyncEnsureLoaded()
-    ENDIF
-    IF TYPE("Suite_SyncInit")#"U"
-       DO Suite_SyncInit
     ENDIF
  CATCH TO oerr
  ENDTRY
@@ -4403,30 +4398,45 @@ FUNCTION Reservas_Incidencia
     SELECT (lcalias)
  ENDIF
  TRY
-    IF TYPE("SuiteSyncEnsureLoaded")#"U"
-       = SuiteSyncEnsureLoaded()
-    ENDIF
-    IF TYPE("Suite_SyncInit")#"U"
-       LOCAL lccfg
-       lccfg = ADDBS(SYS(5)+SYS(2003))+"SuiteSync.cfg"
-       IF TYPE("SuiteStyleRoot")#"U"
-          lccfg = SuiteStyleRoot()+"SuiteSync.cfg"
-       ENDIF
-       IF TYPE("plSuiteSyncEnabled")#"L" OR .NOT. plSuiteSyncEnabled
-          IF FILE(lccfg)
-             DO Suite_SyncInit
-          ENDIF
-       ENDIF
-    ENDIF
-    IF TYPE("plSuiteSyncEnabled")="L" AND plSuiteSyncEnabled
+    IF TYPE("SuiteEnqueuePlan2009")#"U"
+       LOCAL lcAcc
+       lcAcc = "UPD"
        DO CASE
           CASE UPPER(ALLTRIM(tctipinc))=="BORRAR"
-             DO Suite_SyncPushDelete WITH tnidplan, pccodemp, pccodcli, pdfecha, pchorini, pchorfin, pctexto, pccodrec, pcnomcli, pctel1cli, .F., pclineasreserva, 0, 0
-          CASE UPPER(ALLTRIM(tctipinc))=="MODIFICAR"
-             DO Suite_SyncAfterIncidencia WITH tctipinc, tnidplan
+             lcAcc = "DEL"
           CASE UPPER(ALLTRIM(tctipinc))=="CREAR"
-             DO Suite_SyncAfterIncidencia WITH tctipinc, tnidplan
+             lcAcc = "INS"
+          OTHERWISE
+             lcAcc = "UPD"
        ENDCASE
+       = SuiteEnqueuePlan2009(tnidplan, lcAcc)
+    ELSE
+       * Fallback legacy (si existe suite_full_unlock en runtime).
+       IF TYPE("SuiteSyncEnsureLoaded")#"U"
+          = SuiteSyncEnsureLoaded()
+       ENDIF
+       IF TYPE("Suite_SyncInit")#"U"
+          LOCAL lccfg
+          lccfg = ADDBS(SYS(5)+SYS(2003))+"SuiteSync.cfg"
+          IF TYPE("SuiteStyleRoot")#"U"
+             lccfg = SuiteStyleRoot()+"SuiteSync.cfg"
+          ENDIF
+          IF TYPE("plSuiteSyncEnabled")#"L" OR .NOT. plSuiteSyncEnabled
+             IF FILE(lccfg)
+                DO Suite_SyncInit
+             ENDIF
+          ENDIF
+       ENDIF
+       IF TYPE("plSuiteSyncEnabled")="L" AND plSuiteSyncEnabled
+          DO CASE
+             CASE UPPER(ALLTRIM(tctipinc))=="BORRAR"
+                DO Suite_SyncPushDelete WITH tnidplan, pccodemp, pccodcli, pdfecha, pchorini, pchorfin, pctexto, pccodrec, pcnomcli, pctel1cli, .F., pclineasreserva, 0, 0
+             CASE UPPER(ALLTRIM(tctipinc))=="MODIFICAR"
+                DO Suite_SyncAfterIncidencia WITH tctipinc, tnidplan
+             CASE UPPER(ALLTRIM(tctipinc))=="CREAR"
+                DO Suite_SyncAfterIncidencia WITH tctipinc, tnidplan
+          ENDCASE
+       ENDIF
     ENDIF
  CATCH
  ENDTRY

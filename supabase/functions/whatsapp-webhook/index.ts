@@ -19,6 +19,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { processAutomationReply } from '../_shared/marketingWhatsappAutomation.ts';
+import { mapOpenwaStatusToInternal } from '../_shared/whatsappProviderTypes.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -73,6 +74,114 @@ type WahaEnvelope = {
   me?: { id?: string; pushName?: string } | null;
   engine?: unknown;
 };
+
+type OpenwaWebhookEnvelope = {
+  event?: string;
+  sessionId?: string;
+  data?: Record<string, unknown>;
+  timestamp?: string;
+};
+
+function isOpenwaWebhookBody(body: unknown): boolean {
+  if (!body || typeof body !== 'object') return false;
+  const b = body as Record<string, unknown>;
+  return typeof b.event === 'string' && 'data' in b && !('payload' in b);
+}
+
+function openwaToWahaEnvelope(body: OpenwaWebhookEnvelope): WahaEnvelope {
+  const event = (body.event ?? '').toLowerCase();
+  const data = body.data ?? {};
+
+  if (event === 'test') {
+    return { event: 'test', payload: data };
+  }
+
+  if (event === 'message.received' || event === 'message.sent') {
+    const fromMe = !!data.fromMe;
+    return {
+      event: fromMe ? 'message.any' : 'message',
+      payload: {
+        id: data.id ?? data.messageId,
+        from: data.from,
+        to: data.to,
+        fromMe,
+        body: data.body,
+        caption: data.caption,
+        type: data.type ?? 'text',
+        timestamp: data.waTimestamp ?? data.timestamp,
+        hasMedia: data.hasMedia,
+        media: data.media ?? null,
+        mimetype: data.mimetype ?? null,
+        notifyName: (data.contact as { pushName?: string } | undefined)?.pushName,
+        pushName: (data.contact as { pushName?: string } | undefined)?.pushName,
+      },
+    };
+  }
+
+  if (event === 'message.ack') {
+    const ackMap: Record<string, number> = {
+      pending: 0,
+      sent: 1,
+      delivered: 2,
+      read: 3,
+      failed: -1,
+    };
+    const status = String(data.status ?? '');
+    return {
+      event: 'message.ack',
+      payload: {
+        id: data.id ?? data.messageId,
+        ack: typeof data.ack === 'number' ? data.ack : ackMap[status] ?? 0,
+      },
+    };
+  }
+
+  if (event === 'session.status' || event === 'session.authenticated' || event === 'session.disconnected') {
+    const phoneRaw = data.phoneNumber ?? data.phone ?? '';
+    const phone = phoneRaw ? String(phoneRaw).replace(/\D/g, '') : '';
+    const statusRaw = event === 'session.authenticated'
+      ? 'CONNECTED'
+      : event === 'session.disconnected'
+        ? 'DISCONNECTED'
+        : String(data.status ?? '');
+    return {
+      event: 'session.status',
+      payload: {
+        status: mapOpenwaStatusToInternal(statusRaw),
+        message: data.message ?? null,
+      },
+      me: phone ? { id: `${phone}@c.us`, pushName: undefined } : null,
+    };
+  }
+
+  if (event === 'session.qr') {
+    const qr = typeof data.qr === 'string'
+      ? data.qr
+      : typeof data.image === 'string'
+        ? data.image
+        : null;
+    return {
+      event: 'session.status',
+      payload: {
+        status: 'SCAN_QR_CODE',
+        qr,
+        message: null,
+      },
+    };
+  }
+
+  if (event === 'message.failed') {
+    return {
+      event: 'message.ack',
+      payload: {
+        id: data.id ?? data.messageId,
+        ack: -1,
+      },
+    };
+  }
+
+  return { event, payload: data };
+}
 
 /**
  * Estructura interna normalizada a partir de cualquiera de los dos formatos
@@ -677,7 +786,11 @@ function normalizeMessage(
     body: bodyOrPreview,
     caption: payload.caption ?? null,
     mediaUrl: payload.media?.url ?? null,
-    mediaMime: payload.media?.mimetype ?? null,
+    mediaMime:
+      payload.media?.mimetype ??
+      (typeof (payload as Record<string, unknown>).mimetype === 'string'
+        ? ((payload as Record<string, unknown>).mimetype as string)
+        : null),
     mediaFilename: payload.media?.filename ?? null,
     mediaSize: payload.media?.size ?? null,
     ack: Number(payload.ack ?? 0) || 0,
@@ -942,21 +1055,50 @@ async function handleAck(
   }
 }
 
+async function verifyOpenwaSignature(
+  bodyText: string,
+  secret: string,
+  signatureHeader: string | null,
+): Promise<boolean> {
+  if (!signatureHeader) return true;
+  const expected = signatureHeader.startsWith('sha256=')
+    ? signatureHeader.slice(7)
+    : signatureHeader;
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(bodyText));
+  const hex = [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return hex === expected;
+}
+
 async function handleStateChange(
   admin: SupabaseClient,
   companyId: string,
   envelope: WahaEnvelope,
 ) {
   const payload = envelope.payload as
-    | { status?: string; state?: string; message?: string }
+    | { status?: string; state?: string; message?: string; qr?: string | null }
     | undefined;
   const status = payload?.status ?? payload?.state ?? null;
+  const qrRaw = payload?.qr;
+  const qrDataUrl =
+    typeof qrRaw === 'string' && qrRaw.length > 0
+      ? qrRaw.startsWith('data:')
+        ? qrRaw
+        : `data:image/png;base64,${qrRaw}`
+      : undefined;
   await admin
     .from('whatsapp_config')
     .update({
       last_status: status,
       last_status_message: payload?.message ?? null,
       last_status_at: new Date().toISOString(),
+      ...(qrDataUrl ? { qr_data_url: qrDataUrl } : {}),
       ...(envelope.me?.id ? { me_jid: envelope.me.id } : {}),
       ...(envelope.me?.pushName ? { me_pushname: envelope.me.pushName } : {}),
     })
@@ -1022,14 +1164,27 @@ serve(async (req) => {
     }
     if (!cfgRow.enabled) return json({ ok: true, ignored: 'disabled' });
 
+    const bodyText = await req.text();
+    const openwaSig = req.headers.get('X-OpenWA-Signature');
+    if (openwaSig && !(await verifyOpenwaSignature(bodyText, cfgRow.webhook_secret, openwaSig))) {
+      return json({ error: 'Firma OpenWA inválida (X-OpenWA-Signature)' }, 401);
+    }
+
     let envelope: WahaEnvelope;
     try {
-      envelope = (await req.json()) as WahaEnvelope;
+      const rawBody = bodyText ? JSON.parse(bodyText) : null;
+      envelope = isOpenwaWebhookBody(rawBody)
+        ? openwaToWahaEnvelope(rawBody as OpenwaWebhookEnvelope)
+        : (rawBody as WahaEnvelope);
     } catch {
       return json({ error: 'Body JSON inválido' }, 400);
     }
     const event = (envelope.event ?? '').toLowerCase();
     const companyId = cfgRow.company_id;
+
+    if (event === 'test') {
+      return json({ ok: true, test: true });
+    }
 
     if (event === 'message' || event === 'message.any') {
       await handleMessage(admin, companyId, (envelope.payload ?? {}) as WahaMessagePayload, cfgRow.me_pushname);

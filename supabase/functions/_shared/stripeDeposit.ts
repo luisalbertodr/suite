@@ -9,6 +9,8 @@ import {
   loadAutomationSettings,
   isWhatsappTestChatId,
 } from './whatsappAutomationDispatch.ts';
+import { providerSendText } from './whatsappProviderClient.ts';
+import { resolveWhatsappCredentials, type WhatsappProviderConfig } from './whatsappProviderTypes.ts';
 
 export type StripeConfigRow = {
   company_id: string;
@@ -746,17 +748,11 @@ export async function sendDepositConfirmationWhatsapp(
   }
 
   const chatId = normalizeChatId(lead.phone, cfg.default_country_code);
-  const sessionName = cfg.session_name || 'default';
-  const resp = await fetch(`${cfg.base_url!.replace(/\/+$/, '')}/api/sendText`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(cfg.api_key ? { 'X-Api-Key': cfg.api_key } : {}),
-    },
-    body: JSON.stringify({ session: sessionName, chatId, text }),
-  });
-  if (!resp.ok) {
-    console.error('deposit confirmation WhatsApp failed:', await resp.text());
+  const providerCfg = resolveWhatsappCredentials(cfg);
+  try {
+    await providerSendText(providerCfg, chatId, text);
+  } catch (e) {
+    console.error('deposit confirmation WhatsApp failed:', e);
     return { sent: false, skipped_reason: 'send_failed' };
   }
   return { sent: true };

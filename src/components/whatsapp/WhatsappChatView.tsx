@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { RefreshCw, MoreVertical, UserCheck, UserPlus, Link as LinkIcon, Megaphone } from 'lucide-react';
+import { RefreshCw, MoreVertical, UserCheck, UserPlus, Link as LinkIcon, Megaphone, ArrowLeft } from 'lucide-react';
 import { WhatsappAvatar } from './WhatsappAvatar';
 import { WhatsappMessageBubble } from './WhatsappMessageBubble';
 import { WhatsappMessageInput } from './WhatsappMessageInput';
@@ -47,11 +47,12 @@ import {
   resolveGroupSenderJidFromRaw,
   resolvePhoneLabelForChat,
   customerProfilePath,
-  WA_CHAT_WALLPAPER,
-  waTheme,
   type MetaLeadInfo,
 } from './whatsappUtils';
+import { useWhatsappTheme } from './WhatsappThemeContext';
+import { WhatsappChatProvider } from './WhatsappChatContext';
 import type { WhatsappChatRow } from '@/hooks/useWhatsappChats';
+import { useWhatsappMediaPrefetch } from '@/hooks/useWhatsappMediaPrefetch';
 
 interface Props {
   chats: WhatsappChatRow[];
@@ -64,6 +65,7 @@ interface Props {
   leadNameById?: Record<string, string>;
   phoneLabelByChatId?: Record<string, string>;
   onMarkRead?: (chatId: string) => void;
+  onBack?: () => void;
   onCreateCustomer?: () => void;
 }
 
@@ -78,8 +80,10 @@ export const WhatsappChatView: React.FC<Props> = ({
   leadNameById = {},
   phoneLabelByChatId = {},
   onMarkRead,
+  onBack,
   onCreateCustomer,
 }) => {
+  const theme = useWhatsappTheme();
   const { toast } = useToast();
   const { companyId, loading: companyLoading } = useWhatsappCompanyId();
   const { data: waAutomationSettings } = useWhatsappAutomationSettings();
@@ -112,6 +116,7 @@ export const WhatsappChatView: React.FC<Props> = ({
     deleteMessage,
   } = useWhatsappMessages(chat.chat_id, relatedChatIds, {
     historySyncedAt: chat.history_synced_at,
+    lastMessageAt: chat.last_message_at,
   });
   const scrollRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -131,9 +136,17 @@ export const WhatsappChatView: React.FC<Props> = ({
   }, [chat.chat_id]);
 
   // Cuando entramos al chat, marcamos como leído (la sync la gestiona useWhatsappMessages).
+  const markReadAttemptedRef = useRef<string | null>(null);
+  useEffect(() => {
+    markReadAttemptedRef.current = null;
+  }, [chat.chat_id]);
+
   useEffect(() => {
     if (!chat.chat_id || companyLoading || !companyId) return;
-    if ((chat.unread_count ?? 0) > 0) onMarkRead?.(chat.chat_id);
+    if ((chat.unread_count ?? 0) <= 0) return;
+    if (markReadAttemptedRef.current === chat.chat_id) return;
+    markReadAttemptedRef.current = chat.chat_id;
+    onMarkRead?.(chat.chat_id);
   }, [chat.chat_id, chat.unread_count, companyId, companyLoading, onMarkRead]);
 
   // Auto-scroll al final cuando llegan mensajes
@@ -275,21 +288,37 @@ export const WhatsappChatView: React.FC<Props> = ({
     [isGroup, messages],
   );
 
+  const { loading: prefetchLoading, ready: prefetchReady, getPrefetchMedia } =
+    useWhatsappMediaPrefetch(chat.chat_id, relatedChatIds, messages);
+
   const isCustomer = isLinkedCustomer ?? !!effectiveCustomerId;
 
   return (
-    <div
-      className={`flex h-full min-h-0 flex-col overflow-hidden ${waTheme.chatBg}`}
-      style={{
-        backgroundImage: WA_CHAT_WALLPAPER,
-        backgroundBlendMode: 'overlay',
-        backgroundSize: 'auto',
-      }}
+    <WhatsappChatProvider
+      activeChatId={chat.chat_id}
+      relatedChatIds={relatedChatIds}
+      scrollRootRef={scrollRef}
+      prefetchLoading={prefetchLoading}
+      prefetchReady={prefetchReady}
+      getPrefetchMedia={getPrefetchMedia}
     >
+    <div className="relative z-[1] flex h-full min-h-0 flex-col overflow-hidden">
       <div
-        className={`z-10 flex h-[60px] shrink-0 items-center justify-between gap-3 border-b px-4 ${waTheme.headerBg} ${waTheme.border}`}
+        className={`z-10 flex h-[60px] shrink-0 items-center justify-between gap-3 border-b px-4 ${theme.headerBg} ${theme.border}`}
       >
-        <div className="flex min-w-0 items-center gap-3">
+        <div className="flex min-w-0 items-center gap-2 md:gap-3">
+          {onBack ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 shrink-0 md:hidden"
+              onClick={onBack}
+              title="Volver a chats"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+          ) : null}
           <WhatsappAvatar
             name={displayName}
             pictureUrl={chat.profile_picture_url}
@@ -310,10 +339,10 @@ export const WhatsappChatView: React.FC<Props> = ({
                 displayName
               )}
               {showPhoneInline ? (
-                <span className={`font-normal ${waTheme.textMuted}`}> · {phoneLabel}</span>
+                <span className={`font-normal ${theme.textMuted}`}> · {phoneLabel}</span>
               ) : null}
             </p>
-            <div className={`flex flex-wrap items-center gap-1.5 text-xs ${waTheme.textMuted}`}>
+            <div className={`flex flex-wrap items-center gap-1.5 text-xs ${theme.textMuted}`}>
               {!isGroup && showPhoneInline ? null : (
                 <span className="truncate" title={chat.chat_id}>
                   {isGroup
@@ -389,7 +418,7 @@ export const WhatsappChatView: React.FC<Props> = ({
             <Button
               variant="ghost"
               size="icon"
-              className={`h-9 w-9 ${waTheme.textIcon}`}
+              className={`h-9 w-9 ${theme.textIcon}`}
               title="Vincular con cliente o lead"
             >
               <LinkIcon className="h-4 w-4" />
@@ -398,7 +427,7 @@ export const WhatsappChatView: React.FC<Props> = ({
           <Button
             variant="ghost"
             size="icon"
-            className={`h-9 w-9 ${waTheme.textIcon}`}
+            className={`h-9 w-9 ${theme.textIcon}`}
             onClick={() => refreshFromWaha.mutate('full')}
             disabled={refreshFromWaha.isPending}
             title="Recargar historial desde Waha"
@@ -410,7 +439,7 @@ export const WhatsappChatView: React.FC<Props> = ({
           <Button
             variant="ghost"
             size="icon"
-            className={`h-9 w-9 ${waTheme.textIcon}`}
+            className={`h-9 w-9 ${theme.textIcon}`}
             title="Más opciones"
             disabled
           >
@@ -421,7 +450,7 @@ export const WhatsappChatView: React.FC<Props> = ({
 
       <div
         ref={scrollRef}
-        className="min-h-0 flex-1 overflow-y-auto overscroll-contain max-md:pb-2"
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y [-webkit-overflow-scrolling:touch]"
       >
           <div className="flex flex-col space-y-3 p-4 pb-6 sm:p-6">
             {isError && messages.length === 0 ? (
@@ -562,5 +591,6 @@ export const WhatsappChatView: React.FC<Props> = ({
         </AlertDialogContent>
       </AlertDialog>
     </div>
+    </WhatsappChatProvider>
   );
 };

@@ -1,6 +1,6 @@
-import html2pdf from 'html2pdf.js';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
+import { generatePdfBlobFromHtml } from '@/lib/pdfFromHtml';
 import type { ConsentimientoSnapshot } from '@/lib/consentimientoTypes';
 
 export type ConsentPdfParams = {
@@ -62,24 +62,5 @@ export function buildConsentimientoPdfHtml(params: ConsentPdfParams): string {
 }
 
 export async function generateConsentimientoPdfBlob(html: string): Promise<Blob> {
-  const container = document.createElement('div');
-  container.style.position = 'fixed';
-  container.style.left = '-10000px';
-  container.style.top = '0';
-  container.style.width = '720px';
-  container.innerHTML = html;
-  document.body.appendChild(container);
-
-  try {
-    const opt = {
-      margin: 0.4,
-      filename: 'consentimiento.pdf',
-      image: { type: 'jpeg' as const, quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true, logging: false },
-      jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' as const },
-    };
-    return await html2pdf().set(opt).from(container).outputPdf('blob');
-  } finally {
-    document.body.removeChild(container);
-  }
+  return generatePdfBlobFromHtml(html, { filename: 'consentimiento.pdf', margin: 0.4 });
 }

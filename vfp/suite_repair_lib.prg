@@ -13,6 +13,73 @@ FUNCTION SuiteLowerPath
  RETURN lc
 ENDFUNC
 
+FUNCTION SuiteParentPath
+ PARAMETER tcPath
+ LOCAL lc
+ lc = ALLTRIM(NVL(tcPath, ""))
+ DO WHILE RIGHT(lc, 1) = "\"
+    lc = LEFT(lc, LEN(lc)-1)
+ ENDDO
+ IF EMPTY(lc)
+    RETURN ADDBS(SYS(5)+SYS(2003))
+ ENDIF
+ RETURN ADDBS(JUSTPATH(lc))
+ENDFUNC
+
+FUNCTION SuiteResolveExportRoot
+ PARAMETER lcstart
+ LOCAL lcroot, lcparent, lnI
+ lcroot = ADDBS(NVL(lcstart, ""))
+ IF EMPTY(lcroot)
+    lcroot = ADDBS(SYS(5)+SYS(2003))
+ ENDIF
+ IF RIGHT(LOWER(lcroot), 6) = "progs\"
+    lcroot = SuiteParentPath(lcroot)
+ ENDIF
+ FOR lnI = 1 TO 6
+    IF FILE(lcroot+"mscomctlok.pjx") OR FILE(lcroot+"mscomctlOk.pjx") OR ;
+       FILE(lcroot+"mscomctl.pjx") OR FILE(lcroot+"suite_project.cfg")
+       RETURN lcroot
+    ENDIF
+    lcparent = SuiteParentPath(lcroot)
+    IF EMPTY(lcparent) OR LOWER(ADDBS(lcparent)) = LOWER(ADDBS(lcroot))
+       EXIT
+    ENDIF
+    lcroot = ADDBS(lcparent)
+ ENDFOR
+ IF RIGHT(LOWER(lcroot), 6) = "progs\"
+    lcroot = SuiteParentPath(lcroot)
+ ENDIF
+ RETURN lcroot
+ENDFUNC
+
+FUNCTION SuiteResolveProjectStem
+ PARAMETER lcroot
+ LOCAL lcstem, lccfg, lnN, lnI, lcfile
+ LOCAL ARRAY laPjx[1]
+ lcroot = ADDBS(NVL(lcroot, ""))
+ lccfg = lcroot + "suite_project.cfg"
+ IF FILE(lccfg)
+    lcstem = ALLTRIM(STRTRAN(FILETOSTR(lccfg), CHR(13)+CHR(10), ""))
+    IF .NOT. EMPTY(lcstem)
+       RETURN JUSTSTEM(lcstem)
+    ENDIF
+ ENDIF
+ lnN = ADIR(laPjx, lcroot + "mscomctl*.pjx")
+ FOR lnI = 1 TO lnN
+    lcfile = laPjx(lnI, 1)
+    IF .NOT. EMPTY(lcfile)
+       RETURN JUSTSTEM(lcfile)
+    ENDIF
+ ENDFOR
+ RETURN "mscomctl"
+ENDFUNC
+
+FUNCTION SuiteProjectFile
+ PARAMETER lcroot, tcext
+ RETURN ADDBS(lcroot) + SuiteResolveProjectStem(lcroot) + "." + tcext
+ENDFUNC
+
 FUNCTION SuiteProjHasFile
  PARAMETER toproj, tcfile
  LOCAL lnj, lcwant, lcpj
@@ -29,9 +96,42 @@ FUNCTION SuiteProjHasFile
  RETURN .F.
 ENDFUNC
 
+FUNCTION SuiteIsCorruptProjRef
+ PARAMETER tcname, tcfull
+ LOCAL lcraw, lcbase, lni, lnasc
+ lcraw = CHRTRAN(NVL(tcname, ""), CHR(0)+CHR(26), "")
+ IF EMPTY(lcraw)
+    lcraw = CHRTRAN(NVL(tcfull, ""), CHR(0)+CHR(26), "")
+ ENDIF
+ lcraw = ALLTRIM(lcraw)
+ IF EMPTY(lcraw)
+    RETURN .T.
+ ENDIF
+ IF RIGHT(lcraw, 1) = "\"
+    RETURN .T.
+ ENDIF
+ lcbase = ALLTRIM(JUSTFNAME(lcraw))
+ IF EMPTY(lcbase)
+    RETURN .T.
+ ENDIF
+ IF "visual foxpro projects\"$LOWER(lcraw)
+    RETURN .T.
+ ENDIF
+ FOR lni = 1 TO LEN(lcbase)
+    lnasc = ASC(SUBSTR(lcbase, lni, 1))
+    IF lnasc < 32
+       RETURN .T.
+    ENDIF
+ ENDFOR
+ RETURN .F.
+ENDFUNC
+
 FUNCTION SuiteShouldRemoveProjFile
  PARAMETER tcname, tcfull, lcroot
  LOCAL lcname, lcfull, llremove, lccanonfunc, lccanongen, lccanonunlock
+ IF SuiteIsCorruptProjRef(tcname, tcfull)
+    RETURN .T.
+ ENDIF
  lcname = LOWER(NVL(tcname, ""))
  lcfull = LOWER(NVL(tcfull, ""))
  llremove = .F.
@@ -41,11 +141,26 @@ FUNCTION SuiteShouldRemoveProjFile
  IF "suite_reservas_sync"$lcname
     llremove = .T.
  ENDIF
+ IF LEFT(lcname, 2)="z:" .OR. LEFT(lcfull, 2)="z:"
+    llremove = .T.
+ ENDIF
+ IF LEFT(lcname, 2)="y:" .OR. LEFT(lcfull, 2)="y:"
+    llremove = .T.
+ ENDIF
  IF "style-dunasoft"$lcname .OR. "style-dunasoft"$lcfull
     llremove = .T.
  ENDIF
- IF LEFT(lcname, 2)="z:" .OR. LEFT(lcfull, 2)="z:"
+ IF "c:\users\"$lcname .OR. "c:\users\"$lcfull
     llremove = .T.
+ ENDIF
+ IF .NOT. EMPTY(lcfull) .AND. FILE(lcfull)
+    * ruta absoluta existente bajo ExportZ: conservar
+ ELSE
+    IF .NOT. EMPTY(lcfull) .AND. (LEFT(lcfull, 2)="c:" .OR. LEFT(lcfull, 2)="d:")
+       IF .NOT. (LOWER(LEFT(lcfull, LEN(ADDBS(lcroot))))==LOWER(ADDBS(lcroot)))
+          llremove = .T.
+       ENDIF
+    ENDIF
  ENDIF
  IF "suite_full_unlock"$lcname
     IF JUSTEXT(lcname)<>"prg"
@@ -71,8 +186,6 @@ PROCEDURE SuiteCloseProject
  ON ERROR *
  IF TYPE("_VFP.ActiveProject")="O"
     _VFP.ActiveProject.Close()
- ELSE
-    CLOSE PROJECT
  ENDIF
  ON ERROR &lcsav
 ENDPROC
@@ -92,7 +205,7 @@ ENDFUNC
 FUNCTION SuitePjxExists
  PARAMETER lcroot
  LOCAL lcproj
- lcproj = ADDBS(lcroot) + "mscomctl.pjx"
+ lcproj = SuiteProjectFile(lcroot, "pjx")
  IF .NOT. FILE(lcproj)
     RETURN .F.
  ENDIF
@@ -102,7 +215,7 @@ ENDFUNC
 FUNCTION SuitePjxUsable
  PARAMETER lcroot
  LOCAL lcproj
- lcproj = ADDBS(lcroot) + "mscomctl.pjx"
+ lcproj = SuiteProjectFile(lcroot, "pjx")
  IF .NOT. FILE(lcproj)
     RETURN .F.
  ENDIF
@@ -112,7 +225,7 @@ ENDFUNC
 FUNCTION SuitePjtUsable
  PARAMETER lcroot
  LOCAL lcpjt
- lcpjt = ADDBS(lcroot) + "mscomctl.pjt"
+ lcpjt = SuiteProjectFile(lcroot, "pjt")
  IF .NOT. FILE(lcpjt)
     RETURN .F.
  ENDIF
@@ -127,7 +240,7 @@ ENDFUNC
 FUNCTION SuitePjtExists
  PARAMETER lcroot
  LOCAL lcpjt
- lcpjt = ADDBS(lcroot) + "mscomctl.pjt"
+ lcpjt = SuiteProjectFile(lcroot, "pjt")
  IF .NOT. FILE(lcpjt)
     RETURN .F.
  ENDIF
@@ -260,17 +373,18 @@ ENDFUNC
 
 FUNCTION SuiteGetActiveMscomctlProject
  PARAMETER lcroot
- LOCAL loProj, lcwant, lcname
+ LOCAL loProj, lcwant, lcname, lcstem
  IF TYPE("_VFP.ActiveProject")#"O"
     RETURN .NULL.
  ENDIF
  loProj = _VFP.ActiveProject
- lcwant = LOWER(FULLPATH(ADDBS(lcroot) + "mscomctl.pjx"))
+ lcstem = SuiteResolveProjectStem(lcroot)
+ lcwant = LOWER(FULLPATH(ADDBS(lcroot) + lcstem + ".pjx"))
  lcname = LOWER(FULLPATH(loProj.Name))
  IF lcname = lcwant
     RETURN loProj
  ENDIF
- IF UPPER(JUSTSTEM(loProj.Name)) = "MSCOMCTL"
+ IF UPPER(JUSTSTEM(loProj.Name)) = UPPER(lcstem)
     RETURN loProj
  ENDIF
  RETURN .NULL.
@@ -318,14 +432,23 @@ ENDFUNC
 
 FUNCTION SuiteFindMscomctlProject
  PARAMETER lcroot
- LOCAL loProj, lcwant, lnI, loP, lcn
- lcwant = LOWER(FULLPATH(ADDBS(lcroot) + "mscomctl.pjx"))
+ LOCAL loProj, lcwant, lnI, loP, lcn, lcstem, lcsav
+ lcstem = SuiteResolveProjectStem(lcroot)
+ lcwant = LOWER(FULLPATH(ADDBS(lcroot) + lcstem + ".pjx"))
  loProj = .NULL.
  IF TYPE("_VFP.Projects") #"O"
     RETURN .NULL.
  ENDIF
  FOR lnI = 1 TO _VFP.Projects.Count
-    loP = _VFP.Projects(lnI)
+    loP = .NULL.
+    lcsav = ON("ERROR")
+    ON ERROR *
+    IF TYPE("_VFP.Projects.Item")="U"
+       loP = _VFP.Projects(lnI)
+    ELSE
+       loP = _VFP.Projects.Item(lnI)
+    ENDIF
+    ON ERROR &lcsav
     IF TYPE("loP")="O"
        lcn = LOWER(FULLPATH(loP.Name))
        IF lcn = lcwant
@@ -339,8 +462,10 @@ ENDFUNC
 
 FUNCTION SuiteOpenMscomctlProject
  PARAMETER lcroot, tclog
- LOCAL lcproj, lcname, lcsav, loProj, lcerr
- lcname = ADDBS(lcroot) + "mscomctl"
+ LOCAL lcproj, lcname, lcsav, loProj, lcerr, lcstem, lcOldDef
+ lcstem = SuiteResolveProjectStem(lcroot)
+ lcroot = ADDBS(lcroot)
+ lcname = lcroot + lcstem
  lcproj = lcname + ".pjx"
  IF .NOT. FILE(lcproj)
     RETURN .NULL.
@@ -354,16 +479,25 @@ FUNCTION SuiteOpenMscomctlProject
  lcerr = ""
  lcsav = ON("ERROR")
  ON ERROR lcerr = MESSAGE()
- OPEN PROJECT mscomctl
- IF TYPE("_VFP.ActiveProject")="O"
-    loProj = _VFP.ActiveProject
- ENDIF
- IF TYPE("loProj")#"O"
-    OPEN PROJECT (lcname) EXCLUSIVE
+ * OPEN PROJECT devuelve Syntax error en VFP9 batch; MODIFY PROJECT abre el PM.
+ lcOldDef = SET("DEFAULT")
+ SET DEFAULT TO (lcroot)
+ MODIFY PROJECT (lcstem) NOWAIT
+ LOCAL lnWait
+ FOR lnWait = 1 TO 30
     IF TYPE("_VFP.ActiveProject")="O"
-       loProj = _VFP.ActiveProject
+       loProj = SuiteGetActiveMscomctlProject(lcroot)
+       IF TYPE("loProj")="O"
+          EXIT
+       ENDIF
     ENDIF
- ENDIF
+    loProj = SuiteFindMscomctlProject(lcroot)
+    IF TYPE("loProj")="O"
+       EXIT
+    ENDIF
+    = INKEY(0.2, "H")
+ ENDFOR
+ SET DEFAULT TO (lcOldDef)
  IF TYPE("loProj")#"O"
     loProj = SuiteFindMscomctlProject(lcroot)
  ENDIF
@@ -448,7 +582,7 @@ FUNCTION SuiteTryRemoveProc
  ENDIF
  lcsav = ON("ERROR")
  ON ERROR llok = .F.
- REMOVE PROCEDURE tcname
+ REMOVE PROCEDURE &tcname
  llok = .T.
  ON ERROR &lcsav
  RETURN llok
@@ -456,16 +590,30 @@ ENDFUNC
 
 FUNCTION SuitePersistProject
  PARAMETER toProj, tclog
- LOCAL lcsav
- IF TYPE("toProj")#"O"
+ LOCAL lcsav, loP, llok
+ llok = .F.
+ loP = .NULL.
+ IF TYPE("_VFP.ActiveProject")="O"
+    loP = _VFP.ActiveProject
+ ELSEIF TYPE("toProj")="O"
+    loP = toProj
+ ENDIF
+ IF TYPE("loP")#"O"
+    IF .NOT. EMPTY(tclog)
+       STRTOFILE("persist skip: sin ActiveProject"+CHR(13), tclog, .T.)
+    ENDIF
     RETURN .F.
  ENDIF
  lcsav = ON("ERROR")
  ON ERROR STRTOFILE("persist err: "+MESSAGE()+CHR(13), tclog, .T.)
- toProj.CleanUp()
- toProj.Close(.T.)
+ * No usar CleanUp: en VFP9 provoca OLE 0x80020011 en algunos builds.
+ loP.Close(.T.)
+ llok = .T.
  ON ERROR &lcsav
- RETURN .T.
+ IF llok .AND. .NOT. EMPTY(tclog)
+    STRTOFILE("persist OK"+CHR(13), tclog, .T.)
+ ENDIF
+ RETURN llok
 ENDFUNC
 
 PROCEDURE SuiteSafeAddProc
@@ -483,14 +631,15 @@ ENDPROC
 
 PROCEDURE SuiteRepairMscomctlProject
  PARAMETER lcroot, tclog
- LOCAL lcproj, lcunlock, lcstubs, lcsav, lni, lofile, loproj, lnremoved
+ LOCAL lcproj, lcstubs, lccola, lccontrol, lcsav, lni, lofile, loproj, lnremoved
  lnremoved = 0
  LOCAL lcname, lcfull, lcconta, lctienda, lcsaldos, lcselcentros
  LOCAL lcfunciones, lcgeneral, lci
  LOCAL ARRAY laadd[4]
 
- lcproj = lcroot+"mscomctl.pjx"
- lcunlock = lcroot+"PROGS\suite_full_unlock.prg"
+ lcproj = SuiteProjectFile(lcroot, "pjx")
+ lccola = lcroot+"PROGS\suite_cola_sync.prg"
+ lccontrol = lcroot+"PROGS\suite_control_sync.prg"
  lcstubs = lcroot+"PROGS\export_build_stubs.prg"
  lcconta = lcroot+"gestion-dunasoft\gestion\vcx\conta.vcx"
  lctienda = lcroot+"gestion-dunasoft\gestion\vcx\tiendaonline.vcx"
@@ -507,11 +656,24 @@ PROCEDURE SuiteRepairMscomctlProject
  ON ERROR &lcsav
 
  IF TYPE("loProj")#"O"
-    STRTOFILE("ERROR: no se pudo abrir mscomctl.pjx (cierra Project Manager)"+CHR(13), tclog, .T.)
+    STRTOFILE("ERROR: no se pudo abrir "+SuiteResolveProjectStem(lcroot)+".pjx (cierra Project Manager)"+CHR(13), tclog, .T.)
     RETURN
  ENDIF
 
- FOR lni = loProj.Files.Count TO 1 STEP -1
+ LOCAL lnFileCount, lcCountErr
+ lnFileCount = 0
+ lcCountErr = ""
+ lcSav = ON("ERROR")
+ ON ERROR lcCountErr = MESSAGE()
+ lnFileCount = loProj.Files.Count
+ ON ERROR &lcSav
+ IF .NOT. EMPTY(lcCountErr)
+    STRTOFILE("ERROR pjt memo: "+lcCountErr+CHR(13), tclog, .T.)
+    STRTOFILE("Usa: DO PROGS\RepairExportzFromLfn.prg (proyecto nuevo o Ignore All al abrir)"+CHR(13), tclog, .T.)
+    RETURN
+ ENDIF
+
+ FOR lni = lnFileCount TO 1 STEP -1
     loFile = loProj.Files(lni)
     IF TYPE("loFile")#"O"
        LOOP
@@ -530,6 +692,12 @@ PROCEDURE SuiteRepairMscomctlProject
  IF SuiteTryRemoveProc("suite_full_unlock")
     lnremoved = lnremoved+1
  ENDIF
+ IF SuiteTryRemoveProc("suite_cola_sync")
+    lnremoved = lnremoved+1
+ ENDIF
+ IF SuiteTryRemoveProc("suite_control_sync")
+    lnremoved = lnremoved+1
+ ENDIF
  IF SuiteTryRemoveProc("export_build_stubs")
     lnremoved = lnremoved+1
  ENDIF
@@ -540,7 +708,10 @@ PROCEDURE SuiteRepairMscomctlProject
  ON ERROR &lcsav
 
  DO SuiteSafeAddProc WITH lcstubs, "export_build_stubs", tclog
- DO SuiteSafeAddProc WITH lcunlock, "suite_full_unlock", tclog
+ DO SuiteSafeAddProc WITH lccola, "suite_cola_sync", tclog
+ IF FILE(lccontrol)
+    DO SuiteSafeAddProc WITH lccontrol, "suite_control_sync", tclog
+ ENDIF
 
  laadd[1] = lcconta
  laadd[2] = lctienda
@@ -561,10 +732,25 @@ PROCEDURE SuiteRepairMscomctlProject
     ENDIF
  ENDFOR
 
- lcsav = ON("ERROR")
- ON ERROR STRTOFILE("persist err: "+MESSAGE()+CHR(13), tclog, .T.)
- loProj.CleanUp()
- loProj.Close(.T.)
- ON ERROR &lcsav
+ IF FILE(lccola) .AND.  .NOT. SuiteProjHasFile(loProj, lccola)
+    loProj.Files.Add(lccola)
+    STRTOFILE("ADD: "+lccola+CHR(13), tclog, .T.)
+ ENDIF
+ IF FILE(lccontrol) .AND.  .NOT. SuiteProjHasFile(loProj, lccontrol)
+    loProj.Files.Add(lccontrol)
+    STRTOFILE("ADD: "+lccontrol+CHR(13), tclog, .T.)
+ ENDIF
+ IF FILE(lcstubs) .AND.  .NOT. SuiteProjHasFile(loProj, lcstubs)
+    loProj.Files.Add(lcstubs)
+    STRTOFILE("ADD: "+lcstubs+CHR(13), tclog, .T.)
+ ENDIF
+
+ LOCAL lcstem, lcolddef, lcPersistErr
+ lcstem = SuiteResolveProjectStem(lcroot)
+ lcPersistErr = ""
+ * Los cambios en Files quedan en el PM abierto; BUILD en verify guarda al compilar.
+ STRTOFILE("persist: omitido BUILD PROJECT (guardar al compilar exe)"+CHR(13), tclog, .T.)
+ * No llamar Close(): provoca OLE 0x80020011; BUILD PROJECT ya guardo .pjx/.pjt.
  STRTOFILE("Reparar proyecto OK removed="+ALLTRIM(STR(lnremoved))+CHR(13), tclog, .T.)
+ STRTOFILE("NOTA: si el PM sigue abierto, File > Save y cierra el proyecto"+CHR(13), tclog, .T.)
 ENDPROC

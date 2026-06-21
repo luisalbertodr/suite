@@ -65,6 +65,11 @@ export const InbodyCsvImportPanel: React.FC<InbodyCsvImportPanelProps> = ({
 
   const importSummary = (imported: number, result: ReturnType<typeof parseInbodyCsv>) => {
     const parts = [`${imported} mediciones importadas o actualizadas.`];
+    if (result.suspicious > 0) {
+      parts.push(
+        `${result.suspicious} medición(es) con datos incoherentes — conviene repetir el escaneo InBody.`,
+      );
+    }
     if (result.skipped > 0) {
       parts.push(`${result.skipped} fila(s) omitida(s) por datos inválidos.`);
     }
@@ -73,6 +78,10 @@ export const InbodyCsvImportPanel: React.FC<InbodyCsvImportPanelProps> = ({
 
   const linkedCount = useMemo(
     () => preview?.filter((r) => r.customer_id).length ?? 0,
+    [preview],
+  );
+  const suspiciousCount = useMemo(
+    () => preview?.filter((r) => r.data_quality?.needs_repeat).length ?? 0,
     [preview],
   );
 
@@ -142,7 +151,10 @@ export const InbodyCsvImportPanel: React.FC<InbodyCsvImportPanelProps> = ({
     }
 
     toast({
-      title: result.skipped > 0 ? 'Importación completada con avisos' : 'Importación completada',
+      title:
+        result.suspicious > 0 || result.skipped > 0
+          ? 'Importación completada con avisos'
+          : 'Importación completada',
       description: [importSummary(count, result), ...extras].filter(Boolean).join(' '),
     });
 
@@ -335,6 +347,11 @@ export const InbodyCsvImportPanel: React.FC<InbodyCsvImportPanelProps> = ({
                 <span className="font-medium">{preview.length - linkedCount}</span> pedirán vincular
                 por nombre al importar
               </p>
+              {suspiciousCount > 0 && (
+                <p className="text-amber-700 dark:text-amber-400">
+                  {suspiciousCount} medición(es) con datos incoherentes — se marcarán para repetir escaneo
+                </p>
+              )}
               {skipped > 0 && (
                 <p className="text-amber-700 dark:text-amber-400">
                   {skipped} fila(s) omitida(s) por DNI o fecha inválidos (el resto se importará)

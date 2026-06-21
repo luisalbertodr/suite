@@ -23,6 +23,11 @@ import {
   parseBirthDateValue,
 } from '@/lib/birthDateParse';
 import { formatAgeLabel } from '@/lib/patientAge';
+import { cn } from '@/lib/utils';
+import {
+  ABOVE_DOCK_DIALOG_POSITION,
+  ABOVE_DOCK_DIALOG_Z,
+} from '@/lib/dialogLayers';
 
 interface MarketingPromoteToCustomerDialogProps {
   lead: MarketingLead | null;
@@ -229,7 +234,14 @@ export const MarketingPromoteToCustomerDialog: React.FC<MarketingPromoteToCustom
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent
+        overlayClassName={ABOVE_DOCK_DIALOG_Z}
+        className={cn(
+          ABOVE_DOCK_DIALOG_Z,
+          ABOVE_DOCK_DIALOG_POSITION,
+          'max-h-full max-w-2xl overflow-y-auto',
+        )}
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <UserPlus className="h-5 w-5 text-emerald-600" />

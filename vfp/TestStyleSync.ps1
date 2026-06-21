@@ -1,4 +1,4 @@
-# Ejecutar EN LA VM Style (119) para comprobar red + token.
+# Ejecutar EN LA VM Style (192.168.99.16) para comprobar red + token.
 #   cd C:\Style-Dunasoft
 #   powershell -ExecutionPolicy Bypass -File C:\Style-Dunasoft\TestStyleSync.ps1
 

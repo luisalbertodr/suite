@@ -78,6 +78,7 @@ export interface InbodyMeasurement {
   bca?: Record<string, unknown>;
   lb?: Record<string, unknown>;
   imp?: Record<string, InbodyImpedanceFreq> | Record<string, unknown>;
+  data_quality?: import('@/lib/inbodyQuality').InbodyDataQuality | null;
 }
 
 export type InbodyRangeStatus = 'low' | 'normal' | 'high' | 'unknown';
@@ -200,6 +201,38 @@ export function inbodyStatusClass(status: InbodyRangeStatus): string {
     default:
       return 'text-muted-foreground bg-muted/50';
   }
+}
+
+/**
+ * LookInBody MFA guarda PBFM_MIN/PBFM_MAX como % normal (p. ej. 12,3–19,7), no kg.
+ * En importaciones antiguas se mapearon a body_fat_min_kg/max_kg sin convertir.
+ */
+export function resolveBodyFatMassRangeKg(
+  m: Pick<InbodyMeasurement, 'weight_kg' | 'body_fat_min_kg' | 'body_fat_max_kg'>,
+): { min: number | null; max: number | null } {
+  const w = m.weight_kg;
+  const rawMin = m.body_fat_min_kg;
+  const rawMax = m.body_fat_max_kg;
+  if (rawMin == null || rawMax == null) return { min: rawMin, max: rawMax };
+
+  if (rawMin > rawMax && rawMin <= 80 && rawMax <= 80 && w != null && w > 0) {
+    const loPct = Math.min(rawMin, rawMax);
+    const hiPct = Math.max(rawMin, rawMax);
+    return { min: (w * loPct) / 100, max: (w * hiPct) / 100 };
+  }
+
+  let min = rawMin;
+  let max = rawMax;
+  if (min > max) [min, max] = [max, min];
+  return { min, max };
+}
+
+/** Medición probablemente corrupta (escaneo abortado / datos incoherentes en LookInBody). */
+export function isSuspiciousInbodyMeasurement(m: InbodyMeasurement): boolean {
+  if (m.weight_kg == null || m.weight_kg < 40) return false;
+  if (m.pbf_pct != null && m.pbf_pct > 0 && m.pbf_pct < 8) return true;
+  if (m.body_fat_kg != null && m.body_fat_kg / m.weight_kg < 0.06) return true;
+  return false;
 }
 
 export type InbodySex = 'male' | 'female';
@@ -329,6 +362,10 @@ export function normalizeInbodyMeasurement(raw: InbodyMeasurement): InbodyMeasur
     out.impedance = imp as Record<string, InbodyImpedanceFreq>;
   }
 
+  const bfmRange = resolveBodyFatMassRangeKg(out);
+  out.body_fat_min_kg = bfmRange.min;
+  out.body_fat_max_kg = bfmRange.max;
+
   return out;
 }
 
@@ -340,6 +377,8 @@ function inbodyMeasurementScore(row: InbodyMeasurement): number {
   if (row.source?.includes('mdb')) score += 2;
   if (row.bmr_kcal != null) score += 1;
   if (row.segmental_lean && Object.keys(row.segmental_lean).length > 0) score += 1;
+  if (isSuspiciousInbodyMeasurement(row)) score -= 12;
+  if (row.pbf_pct != null && row.pbf_pct >= 8) score += 1;
   return score;
 }
 

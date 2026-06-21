@@ -16,6 +16,7 @@ import {
   formatMessageTime,
   ackLabel,
   extractBodyFromWahaMessageRaw,
+  extractEmbeddedMediaBase64,
   extractMediaUrlFromWahaMessageRaw,
   extractPushNameFromRaw,
   extractReplyToFromRaw,
@@ -26,10 +27,21 @@ import {
   resolveGroupSenderJidFromRaw,
   isMessageRevoked,
   resolveWhatsappMessageType,
+  resolveWhatsappMediaMessageId,
+  resolveMediaDownloadChatId,
+  resolveSupabasePublicStorageUrl,
   revokedMessageLabel,
-  waTheme,
+  base64ToBlob,
 } from './whatsappUtils';
+import { useWhatsappTheme } from './WhatsappThemeContext';
 import { downloadWhatsappMedia } from '@/hooks/useWhatsappConfig';
+import {
+  getCachedWhatsappMediaUrl,
+  invalidateWhatsappMediaCache,
+  loadWhatsappMediaCached,
+  whatsappMediaCacheKey,
+} from './whatsappMediaCache';
+import { useWhatsappChatContext } from './WhatsappChatContext';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -142,72 +154,245 @@ function MessageActions({
   );
 }
 
+function MediaPlaceholder({
+  label,
+  className,
+  onRetry,
+}: {
+  label: string;
+  className?: string;
+  onRetry?: () => void;
+}) {
+  return (
+    <div
+      className={`flex flex-col items-center justify-center gap-1 rounded-md bg-black/10 text-xs text-muted-foreground ${className ?? ''}`}
+    >
+      <span>{label}</span>
+      {onRetry ? (
+        <button
+          type="button"
+          className="text-emerald-700 underline hover:text-emerald-800 dark:text-emerald-400"
+          onClick={onRetry}
+        >
+          Reintentar
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function isInScrollViewport(
+  node: HTMLElement,
+  root: HTMLElement | null,
+  marginPx = 240,
+): boolean {
+  const n = node.getBoundingClientRect();
+  if (!root) {
+    return n.top < window.innerHeight + marginPx && n.bottom > -marginPx;
+  }
+  const r = root.getBoundingClientRect();
+  return n.bottom >= r.top - marginPx && n.top <= r.bottom + marginPx;
+}
+
 function MediaContent({ message }: { message: WhatsappMessageRow }) {
+  const {
+    activeChatId,
+    relatedChatIds,
+    scrollRootRef,
+    prefetchLoading,
+    prefetchReady,
+    getPrefetchMedia,
+  } = useWhatsappChatContext();
   const type = resolveWhatsappMessageType(message);
   const rawStickerUrl = extractMediaUrlFromWahaMessageRaw(message.raw);
-  const storedUrl = message.media_url || rawStickerUrl || null;
+  const storedUrl = resolveSupabasePublicStorageUrl(message.media_url || rawStickerUrl || null);
+  const isStorageUrl = !!storedUrl?.includes('/storage/v1/object/public/whatsapp-media/');
   const wahaDirectUrl =
-    storedUrl && !isExternalWhatsappCdnUrl(storedUrl) ? storedUrl : null;
+    storedUrl && !isExternalWhatsappCdnUrl(storedUrl) && !isStorageUrl
+      ? storedUrl
+      : null;
+  const mediaMessageId = resolveWhatsappMediaMessageId(message);
+  const downloadChatId = resolveMediaDownloadChatId(
+    message,
+    activeChatId,
+    relatedChatIds,
+  );
+  const cacheKey =
+    mediaMessageId && downloadChatId
+      ? whatsappMediaCacheKey(downloadChatId, mediaMessageId)
+      : null;
+  const embedded = React.useMemo(
+    () => extractEmbeddedMediaBase64(message.raw),
+    [message.raw],
+  );
   const canDownload =
-    !!wahaDirectUrl || !!(message.waha_message_id && message.chat_id);
+    !!embedded || !!wahaDirectUrl || !!(mediaMessageId && downloadChatId);
 
-  const [objectUrl, setObjectUrl] = React.useState<string | null>(null);
+  const prefetched = mediaMessageId ? getPrefetchMedia(mediaMessageId) : null;
+
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = React.useState(false);
+  const [objectUrl, setObjectUrl] = React.useState<string | null>(() => {
+    if (storedUrl?.includes('/storage/v1/object/public/whatsapp-media/')) return storedUrl;
+    return cacheKey ? getCachedWhatsappMediaUrl(cacheKey) : null;
+  });
   const [loadFailed, setLoadFailed] = React.useState(false);
+  const [expiredMedia, setExpiredMedia] = React.useState(false);
+  const [retryTick, setRetryTick] = React.useState(0);
+
   React.useEffect(() => {
-    let cancelled = false;
-    let revoke: string | null = null;
-    setObjectUrl(null);
+    const node = containerRef.current;
+    if (!node) return;
+    const root = scrollRootRef.current;
+    if (isInScrollViewport(node, root)) {
+      setVisible(true);
+      return;
+    }
+    if (objectUrl) {
+      setVisible(true);
+      return;
+    }
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setVisible(true);
+          obs.disconnect();
+        }
+      },
+      { root, rootMargin: '240px 0px' },
+    );
+    obs.observe(node);
+    return () => obs.disconnect();
+  }, [objectUrl, scrollRootRef, cacheKey, message.id]);
+
+  // Prefetch → URL pública en Storage (sin base64 ni blob).
+  React.useEffect(() => {
+    const url = resolveSupabasePublicStorageUrl(prefetched?.url ?? null);
+    if (!url || objectUrl) return;
+    setObjectUrl(url);
     setLoadFailed(false);
+  }, [prefetched, objectUrl]);
+
+  // media_url persistida en BD (Storage).
+  React.useEffect(() => {
+    if (objectUrl || prefetched?.url) return;
+    if (isStorageUrl && storedUrl) {
+      setObjectUrl(storedUrl);
+    }
+  }, [storedUrl, isStorageUrl, objectUrl, prefetched]);
+
+  React.useEffect(() => {
+    if (!visible || !canDownload || !cacheKey || objectUrl || prefetched) return;
+    if (isStorageUrl && storedUrl) return;
+    if (embedded) {
+      let cancelled = false;
+      (async () => {
+        try {
+          const url = await loadWhatsappMediaCached(cacheKey, async () =>
+            base64ToBlob(embedded.data, embedded.mime),
+          );
+          if (!cancelled) setObjectUrl(url);
+        } catch {
+          if (!cancelled) setLoadFailed(true);
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
+    if (!prefetchReady) return;
+
+    let cancelled = false;
+    setLoadFailed(false);
+
     const load = async () => {
-      if (!canDownload) return;
       try {
-        const blob = await downloadWhatsappMedia({
-          url: wahaDirectUrl,
-          chat_id: message.chat_id,
-          message_id: message.waha_message_id,
+        const url = await loadWhatsappMediaCached(cacheKey, async () => {
+          const altIds = [message.chat_id, activeChatId, ...relatedChatIds]
+            .filter((id, i, arr) => !!id && id !== downloadChatId && arr.indexOf(id) === i)
+            .slice(0, 2) as string[];
+          return downloadWhatsappMedia({
+            url: wahaDirectUrl,
+            chat_id: downloadChatId,
+            message_id: mediaMessageId,
+            alt_chat_ids: altIds,
+          });
         });
-        if (cancelled) return;
-        const url = URL.createObjectURL(blob);
-        revoke = url;
-        setObjectUrl(url);
-      } catch {
-        if (!cancelled) setLoadFailed(true);
+        if (!cancelled) setObjectUrl(url);
+      } catch (e) {
+        if (!cancelled) {
+          const msg = e instanceof Error ? e.message : '';
+          setLoadFailed(true);
+          setExpiredMedia(/expirad|410|gone/i.test(msg));
+        }
       }
     };
+
     load();
     return () => {
       cancelled = true;
-      if (revoke) URL.revokeObjectURL(revoke);
     };
-  }, [canDownload, wahaDirectUrl, message.chat_id, message.waha_message_id]);
+  }, [
+    visible,
+    canDownload,
+    cacheKey,
+    wahaDirectUrl,
+    downloadChatId,
+    mediaMessageId,
+    embedded,
+    prefetched,
+    prefetchReady,
+    retryTick,
+    message.chat_id,
+    activeChatId,
+    relatedChatIds,
+    objectUrl,
+    isStorageUrl,
+    storedUrl,
+  ]);
+
+  const retry = () => {
+    if (expiredMedia) return;
+    if (cacheKey) invalidateWhatsappMediaCache(cacheKey);
+    setObjectUrl(null);
+    setLoadFailed(false);
+    setExpiredMedia(false);
+    setRetryTick((n) => n + 1);
+  };
 
   if (type === 'image' || type === 'sticker') {
     return (
-      <div className="overflow-hidden rounded-md">
+      <div ref={containerRef} className="overflow-hidden rounded-md">
         {objectUrl ? (
           <img
             src={objectUrl}
             alt={type === 'sticker' ? 'sticker' : message.media_filename ?? 'imagen'}
+            loading="lazy"
+            decoding="async"
             className={
               type === 'sticker'
                 ? 'h-32 w-32 object-contain'
                 : 'max-h-80 w-auto max-w-full rounded-md'
             }
           />
-        ) : (
+        ) : !canDownload && type === 'sticker' ? (
           <div
-            className={`flex items-center justify-center rounded-md bg-black/10 text-xs text-muted-foreground ${
-              type === 'sticker' ? 'h-32 w-32' : 'h-40 w-60'
-            }`}
+            className="flex h-32 w-32 items-center justify-center rounded-md bg-black/10 text-4xl"
+            title="Sticker (sin vista previa)"
           >
-            {type === 'sticker' && !canDownload ? (
-              <span className="text-4xl" title="Sticker (sin vista previa en servidor)">
-                🎭
-              </span>
-            ) : (
-              'Cargando…'
-            )}
+            🎭
           </div>
+        ) : loadFailed ? (
+          <MediaPlaceholder
+            label={expiredMedia ? 'Media no disponible' : 'No se pudo cargar'}
+            className={type === 'sticker' ? 'h-32 w-32' : 'h-40 w-60'}
+            onRetry={expiredMedia ? undefined : retry}
+          />
+        ) : (
+          <MediaPlaceholder
+            label={prefetchLoading && visible ? 'Cargando…' : 'Cargando…'}
+            className={type === 'sticker' ? 'h-32 w-32' : 'h-40 w-60'}
+          />
         )}
       </div>
     );
@@ -215,34 +400,39 @@ function MediaContent({ message }: { message: WhatsappMessageRow }) {
 
   if (type === 'video') {
     return (
-      <div className="overflow-hidden rounded-md">
+      <div ref={containerRef} className="overflow-hidden rounded-md">
         {objectUrl ? (
           <video
             src={objectUrl}
             controls
+            preload="metadata"
             className="max-h-80 w-auto max-w-full rounded-md"
           />
+        ) : loadFailed ? (
+          <MediaPlaceholder label="No se pudo cargar el vídeo" className="h-40 w-60" onRetry={retry} />
         ) : (
-          <div className="flex h-40 w-60 items-center justify-center rounded-md bg-black/10 text-xs text-muted-foreground">
-            Cargando vídeo…
-          </div>
+          <MediaPlaceholder label="Cargando vídeo…" className="h-40 w-60" />
         )}
       </div>
     );
   }
 
   if (type === 'audio' || type === 'voice' || type === 'ptt') {
-    return objectUrl ? (
-      <audio src={objectUrl} controls className="w-64" />
-    ) : (
-      <div className="flex h-10 w-64 items-center justify-center rounded-md bg-black/5 text-xs text-muted-foreground">
-        Cargando audio…
+    return (
+      <div ref={containerRef}>
+        {objectUrl ? (
+          <audio src={objectUrl} controls preload="metadata" className="w-64" />
+        ) : loadFailed ? (
+          <MediaPlaceholder label="No se pudo cargar el audio" className="h-10 w-64" onRetry={retry} />
+        ) : (
+          <MediaPlaceholder label="Cargando audio…" className="h-10 w-64" />
+        )}
       </div>
     );
   }
 
   return (
-    <div className="flex items-center gap-2 rounded-md bg-black/5 p-2 text-xs">
+    <div ref={containerRef} className="flex items-center gap-2 rounded-md bg-black/5 p-2 text-xs">
       <FileText className="h-5 w-5 shrink-0 text-muted-foreground" />
       <div className="min-w-0 flex-1">
         <p className="truncate font-medium">
@@ -265,6 +455,10 @@ function MediaContent({ message }: { message: WhatsappMessageRow }) {
         >
           <Download className="h-4 w-4" />
         </a>
+      ) : loadFailed ? (
+        <button type="button" className="text-emerald-700 hover:underline" onClick={retry}>
+          Reintentar
+        </button>
       ) : null}
     </div>
   );
@@ -309,6 +503,7 @@ export const WhatsappMessageBubble: React.FC<Props> = ({
   onForward,
   onDeleteForEveryone,
 }) => {
+  const theme = useWhatsappTheme();
   const isOut = message.from_me;
   const type = resolveWhatsappMessageType(message);
   const revoked = isMessageRevoked(message);
@@ -333,13 +528,14 @@ export const WhatsappMessageBubble: React.FC<Props> = ({
     <div
       className={`group/bubble relative max-w-[65%] rounded-lg p-2 text-sm shadow-sm ${
         isOut
-          ? `rounded-tr-none ${waTheme.bubbleOut} text-[#111b21] dark:text-emerald-50`
-          : `rounded-tl-none ${waTheme.bubbleIn} text-[#111b21] dark:text-zinc-100${
+          ? `rounded-tr-none ${theme.bubbleOut} text-[#111b21] dark:text-emerald-50`
+          : `rounded-tl-none ${theme.bubbleIn} text-[#111b21] dark:text-zinc-100${
               isUnread
                 ? ' ring-2 ring-emerald-500/50 bg-emerald-50/90 dark:bg-emerald-950/50'
                 : ''
             }`
       }`}
+      onDoubleClick={() => onReply?.(message)}
     >
       {hasActions ? (
         <>
@@ -350,7 +546,18 @@ export const WhatsappMessageBubble: React.FC<Props> = ({
             onReply={onReply}
             onForward={onForward}
             onDeleteForEveryone={onDeleteForEveryone}
-            className={`absolute top-1 hidden group-hover/bubble:flex ${
+            className={`absolute top-1 flex md:hidden ${
+              isOut ? 'left-0 -translate-x-full pr-1' : 'right-0 translate-x-full pl-1'
+            }`}
+          />
+          <MessageActions
+            message={message}
+            canForward={canForward}
+            canDeleteForEveryone={canDeleteForEveryone}
+            onReply={onReply}
+            onForward={onForward}
+            onDeleteForEveryone={onDeleteForEveryone}
+            className={`absolute top-1 hidden group-hover/bubble:md:flex ${
               isOut ? 'left-0 -translate-x-full pr-1' : 'right-0 translate-x-full pl-1'
             }`}
           />

@@ -44,6 +44,9 @@ except ImportError:
 
 from legacy_company import get_company_id
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from inbody_quality import body_fat_mass_range_kg, build_data_quality
+
 ROOT = Path(__file__).resolve().parents[1]
 MADRID = ZoneInfo("Europe/Madrid")
 DEFAULT_MDB = r"Z:\Users\Lipoout\Lookin'BodyBasic\Database\LookinBody30.mdb"
@@ -174,6 +177,76 @@ def compact_json(row: dict[str, Any]) -> dict[str, Any]:
     return {k: json_safe(v) for k, v in row.items() if v is not None}
 
 
+def finalize_row_quality(dict_rows: list[dict[str, Any]]) -> int:
+    by_user: dict[str, list[dict[str, Any]]] = {}
+    for row in dict_rows:
+        by_user.setdefault(row["inbody_user_id"], []).append(row)
+    suspicious = 0
+    for group in by_user.values():
+        for row in group:
+            dq = build_data_quality(row, group)
+            row["data_quality"] = dq
+            if dq.get("needs_repeat"):
+                suspicious += 1
+    return suspicious
+
+
+def row_to_insert_tuple(row: dict[str, Any]) -> tuple:
+    return (
+        row["id"],
+        row["company_id"],
+        row["customer_id"],
+        row["inbody_user_id"],
+        row["measured_at"],
+        row["height_cm"],
+        row["age_years"],
+        row["sex"],
+        row["weight_kg"],
+        row["weight_min_kg"],
+        row["weight_max_kg"],
+        row["smm_kg"],
+        row["smm_min_kg"],
+        row["smm_max_kg"],
+        row["body_fat_kg"],
+        row["body_fat_min_kg"],
+        row["body_fat_max_kg"],
+        row["tbw_kg"],
+        row["tbw_min_kg"],
+        row["tbw_max_kg"],
+        row["ffm_kg"],
+        row["ffm_min_kg"],
+        row["ffm_max_kg"],
+        row["slm_kg"],
+        row["bmi"],
+        row["bmi_min"],
+        row["bmi_max"],
+        row["pbf_pct"],
+        row["pbf_min_pct"],
+        row["pbf_max_pct"],
+        row["whr"],
+        row["whr_min"],
+        row["whr_max"],
+        row["bmr_kcal"],
+        row["bmr_min_kcal"],
+        row["bmr_max_kcal"],
+        row["fat_control_kg"],
+        row["muscle_control_kg"],
+        Json(row["segmental_lean"]),
+        Json(row["segmental_fat"]),
+        Json(row["impedance"]),
+        Json(row["edema"]),
+        Json(row["bca"]),
+        Json(row["mfa"]),
+        Json(row["lb"]),
+        Json(row["wc"]),
+        Json(row["imp"]),
+        Json(row["ed"]),
+        Json(row["data_quality"]),
+        row["source"],
+        row["import_batch"],
+    )
+
+
 def segmental_lean(lb: dict[str, Any]) -> dict[str, Any]:
     return {
         "right_arm": {
@@ -268,8 +341,8 @@ def build_rows(
     ed = table_dict(db, "ED_TBL")
 
     n = len(bca.get("DATETIMES", []))
-    rows: list[tuple] = []
-    stats = {"total": 0, "skipped_no_user": 0, "skipped_no_date": 0, "linked": 0, "unlinked": 0}
+    dict_rows: list[dict[str, Any]] = []
+    stats = {"total": 0, "skipped_no_user": 0, "skipped_no_date": 0, "linked": 0, "unlinked": 0, "suspicious": 0}
 
     for idx in range(n):
         user_id = norm_inbody_user_id(str(bca.get("USERID", [""] * n)[idx] or "").strip())
@@ -295,65 +368,74 @@ def build_rows(
         else:
             stats["unlinked"] += 1
 
-        rows.append(
-            (
-                str(uuid.uuid4()),
-                company_id,
-                customer_id,
-                user_id,
-                measured_at,
-                to_float(wc_row.get("HT")),
-                to_float(wc_row.get("AGE")),
-                str(wc_row.get("SEX") or "").strip() or None,
-                to_float(bca_row.get("WT")),
-                to_float(mfa_row.get("WT_MIN")),
-                to_float(mfa_row.get("WT_MAX")),
-                to_float(mfa_row.get("SMM")),
-                to_float(mfa_row.get("SMM_MIN")),
-                to_float(mfa_row.get("SMM_MAX")),
-                to_float(bca_row.get("BFM")),
-                to_float(mfa_row.get("PBFM_MIN")),
-                to_float(mfa_row.get("PBFM_MAx") or mfa_row.get("PBFM_MAX")),
-                to_float(bca_row.get("TBW")),
-                to_float(bca_row.get("TBW_MIN")),
-                to_float(bca_row.get("TBW_MAX")),
-                to_float(bca_row.get("FFM")),
-                to_float(bca_row.get("FFM_MIN")),
-                to_float(bca_row.get("FFM_MAX")),
-                to_float(bca_row.get("SLM")),
-                to_float(mfa_row.get("BMI")),
-                to_float(mfa_row.get("BMI_MIN")),
-                to_float(mfa_row.get("BMI_MAX")),
-                to_float(mfa_row.get("PBF")),
-                to_float(mfa_row.get("PBF_MIN")),
-                to_float(mfa_row.get("PBF_MAX")),
-                to_float(mfa_row.get("WHR")),
-                to_float(mfa_row.get("WHR_MIN")),
-                to_float(mfa_row.get("WHR_MAX")),
-                to_float(wc_row.get("BMR")),
-                to_float(wc_row.get("BMR_MIN")),
-                to_float(wc_row.get("BMR_MAX")),
-                to_float(wc_row.get("FC")),
-                to_float(wc_row.get("MC")),
-                Json(segmental_lean(lb_row)),
-                Json(segmental_fat(lb_row)),
-                Json(impedance_data(imp_row)),
-                Json(compact_json({k: ed_row[k] for k in (
+        weight_kg = to_float(bca_row.get("WT"))
+        bfm_min_kg, bfm_max_kg = body_fat_mass_range_kg(
+            weight_kg,
+            to_float(mfa_row.get("PBFM_MIN")),
+            to_float(mfa_row.get("PBFM_MAx") or mfa_row.get("PBFM_MAX")),
+        )
+
+        dict_rows.append(
+            {
+                "id": str(uuid.uuid4()),
+                "company_id": company_id,
+                "customer_id": customer_id,
+                "inbody_user_id": user_id,
+                "measured_at": measured_at,
+                "height_cm": to_float(wc_row.get("HT")),
+                "age_years": to_float(wc_row.get("AGE")),
+                "sex": str(wc_row.get("SEX") or "").strip() or None,
+                "weight_kg": weight_kg,
+                "weight_min_kg": to_float(mfa_row.get("WT_MIN")),
+                "weight_max_kg": to_float(mfa_row.get("WT_MAX")),
+                "smm_kg": to_float(mfa_row.get("SMM")),
+                "smm_min_kg": to_float(mfa_row.get("SMM_MIN")),
+                "smm_max_kg": to_float(mfa_row.get("SMM_MAX")),
+                "body_fat_kg": to_float(bca_row.get("BFM")),
+                "body_fat_min_kg": bfm_min_kg,
+                "body_fat_max_kg": bfm_max_kg,
+                "tbw_kg": to_float(bca_row.get("TBW")),
+                "tbw_min_kg": to_float(bca_row.get("TBW_MIN")),
+                "tbw_max_kg": to_float(bca_row.get("TBW_MAX")),
+                "ffm_kg": to_float(bca_row.get("FFM")),
+                "ffm_min_kg": to_float(bca_row.get("FFM_MIN")),
+                "ffm_max_kg": to_float(bca_row.get("FFM_MAX")),
+                "slm_kg": to_float(bca_row.get("SLM")),
+                "bmi": to_float(mfa_row.get("BMI")),
+                "bmi_min": to_float(mfa_row.get("BMI_MIN")),
+                "bmi_max": to_float(mfa_row.get("BMI_MAX")),
+                "pbf_pct": to_float(mfa_row.get("PBF")),
+                "pbf_min_pct": to_float(mfa_row.get("PBF_MIN")),
+                "pbf_max_pct": to_float(mfa_row.get("PBF_MAX")),
+                "whr": to_float(mfa_row.get("WHR")),
+                "whr_min": to_float(mfa_row.get("WHR_MIN")),
+                "whr_max": to_float(mfa_row.get("WHR_MAX")),
+                "bmr_kcal": to_float(wc_row.get("BMR")),
+                "bmr_min_kcal": to_float(wc_row.get("BMR_MIN")),
+                "bmr_max_kcal": to_float(wc_row.get("BMR_MAX")),
+                "fat_control_kg": to_float(wc_row.get("FC")),
+                "muscle_control_kg": to_float(wc_row.get("MC")),
+                "segmental_lean": segmental_lean(lb_row),
+                "segmental_fat": segmental_fat(lb_row),
+                "impedance": impedance_data(imp_row),
+                "edema": compact_json({k: ed_row[k] for k in (
                     "NECK", "CHEST", "ABD", "HIP", "ACR", "ACL", "THIGHR", "THIGHL",
                     "FED", "WED", "AMC",
-                ) if k in ed_row})),
-                Json(compact_json(bca_row)),
-                Json(compact_json(mfa_row)),
-                Json(compact_json(lb_row)),
-                Json(compact_json(wc_row)),
-                Json(compact_json(imp_row)),
-                Json(compact_json(ed_row)),
-                "lookinbody_mdb",
-                IMPORT_BATCH,
-            )
+                ) if k in ed_row}),
+                "bca": compact_json(bca_row),
+                "mfa": compact_json(mfa_row),
+                "lb": compact_json(lb_row),
+                "wc": compact_json(wc_row),
+                "imp": compact_json(imp_row),
+                "ed": compact_json(ed_row),
+                "source": "lookinbody_mdb",
+                "import_batch": IMPORT_BATCH,
+            }
         )
         stats["total"] += 1
 
+    stats["suspicious"] = finalize_row_quality(dict_rows)
+    rows = [row_to_insert_tuple(r) for r in dict_rows]
     return rows, stats
 
 
@@ -373,7 +455,7 @@ INSERT INTO public.inbody_measurements (
   fat_control_kg, muscle_control_kg,
   segmental_lean, segmental_fat, impedance, edema,
   bca, mfa, lb, wc, imp, ed,
-  source, import_batch
+  data_quality, source, import_batch
 ) VALUES (
   %s::uuid, %s::uuid, %s::uuid, %s, %s,
   %s, %s, %s,
@@ -389,7 +471,7 @@ INSERT INTO public.inbody_measurements (
   %s, %s,
   %s, %s, %s, %s,
   %s, %s, %s, %s, %s, %s,
-  %s, %s
+  %s, %s, %s
 )
 ON CONFLICT (company_id, inbody_user_id, measured_at) DO UPDATE SET
   customer_id = EXCLUDED.customer_id,
@@ -436,6 +518,7 @@ ON CONFLICT (company_id, inbody_user_id, measured_at) DO UPDATE SET
   wc = EXCLUDED.wc,
   imp = EXCLUDED.imp,
   ed = EXCLUDED.ed,
+  data_quality = EXCLUDED.data_quality,
   source = EXCLUDED.source,
   import_batch = EXCLUDED.import_batch,
   updated_at = now()
@@ -473,6 +556,7 @@ def main() -> None:
         print(f"  Sin ficha en Suite: {stats['unlinked']}")
         print(f"  Omitidas sin USERID: {stats['skipped_no_user']}")
         print(f"  Omitidas sin fecha: {stats['skipped_no_date']}")
+        print(f"  Posiblemente erróneas (repetir escaneo): {stats.get('suspicious', 0)}")
 
         if args.dry_run:
             print("Dry-run: no se escribe en la base de datos.")

@@ -28,6 +28,42 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import {
+  mapOpenwaStatusToInternal,
+  normalizeWhatsappProvider,
+  providerLabel,
+  resolveWhatsappCredentials,
+  extractProviderErrorMessage,
+  type WhatsappProvider,
+  type WhatsappProviderConfig,
+} from '../_shared/whatsappProviderTypes.ts';
+import {
+  providerListSessions,
+  providerPing,
+  providerSendMedia,
+  providerSendText,
+  resolveOutgoingMessageId,
+  WhatsappProviderError,
+} from '../_shared/whatsappProviderClient.ts';
+import {
+  openwaConfigureWebhook,
+  openwaDownloadMedia,
+  openwaCollectRecentMedia,
+  openwaGetQr,
+  openwaGetSession,
+  openwaListChats,
+  openwaListChatMessages,
+  openwaListWebhooks,
+  openwaLogoutSession,
+  openwaMessageFromMe,
+  openwaMessageSerializedId,
+  openwaStartSession,
+  openwaStopSession,
+  openwaWebhooksConfigured,
+  normalizeOpenwaMessageToWahaShape,
+  buildOpenwaMessageUpsertRow,
+} from '../_shared/whatsappProviderOpenwa.ts';
+import { OPENWA_WEBHOOK_EVENTS } from '../_shared/whatsappProviderTypes.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -46,9 +82,16 @@ const edgeRuntime: { waitUntil?: (p: Promise<unknown>) => void } | undefined =
 
 type WhatsappConfig = {
   company_id: string;
+  provider?: string | null;
   base_url: string | null;
   api_key: string | null;
   session_name: string;
+  waha_base_url?: string | null;
+  waha_api_key?: string | null;
+  waha_session_name?: string | null;
+  openwa_base_url?: string | null;
+  openwa_api_key?: string | null;
+  openwa_session_name?: string | null;
   webhook_secret: string | null;
   default_country_code: string | null;
   enabled: boolean;
@@ -58,6 +101,14 @@ type WhatsappConfig = {
   me_jid: string | null;
   me_pushname: string | null;
 };
+
+function proxyProvider(cfg: WhatsappConfig): WhatsappProvider {
+  return normalizeWhatsappProvider(cfg.provider);
+}
+
+function proxyToProviderCfg(cfg: WhatsappConfig): WhatsappProviderConfig {
+  return resolveWhatsappCredentials(cfg);
+}
 
 type SendBody = {
   action: 'messages.send';
@@ -116,7 +167,8 @@ type ActionBody = {
   | SendBody
   | ForwardBody
   | DeleteMessageBody
-  | { action: 'media.download'; url?: string; chat_id?: string; message_id?: string }
+  | { action: 'media.download'; url?: string; chat_id?: string; message_id?: string; alt_chat_ids?: string[] }
+  | { action: 'messages.prefetch_media'; chat_id: string; limit?: number; alt_chat_ids?: string[] }
   | { action: 'chat.mark_read'; chat_id: string }
   | { action: 'chat.ensure'; chat_id: string; name?: string | null }
   | {
@@ -137,6 +189,24 @@ const json = (body: unknown, status = 200) =>
   });
 
 const err = (message: string, status = 400) => json({ error: message }, status);
+
+function mapWhatsappProviderFailure(message: string, status: number): Response {
+  const sessionNotReady =
+    status === 422 &&
+    (/session status/i.test(message) ||
+      /status.*FAILED/i.test(message) ||
+      /expected.*WORKING/i.test(message));
+  if (sessionNotReady) {
+    return err(
+      'La sesión de WhatsApp no está conectada. Ve a Configuración → WhatsApp, detén la sesión, iníciala de nuevo y escanea el QR si hace falta.',
+      422,
+    );
+  }
+  if (status === 401 || status === 403) return err(message, 401);
+  if (status === 422) return err(message, 422);
+  if (status >= 400 && status < 500) return err(message, status);
+  return err(message, 502);
+}
 
 function trimSlash(s: string): string {
   return s.replace(/\/+$/, '');
@@ -305,10 +375,7 @@ async function wahaJson<T = unknown>(
     );
   }
   if (!resp.ok) {
-    const msg =
-      (data && typeof data === 'object' && 'message' in (data as Record<string, unknown>)
-        ? String((data as Record<string, unknown>).message)
-        : null) ?? `HTTP ${resp.status}`;
+    const msg = extractProviderErrorMessage(data, resp.status);
     throw new WahaError(
       resp.status,
       path,
@@ -719,7 +786,218 @@ async function fetchWahaGroupSubject(
 }
 
 const WAHA_AVATAR_BUCKET = 'whatsapp-avatars';
+const WA_MEDIA_BUCKET = 'whatsapp-media';
 const WAHA_PICTURES_PER_REQUEST = 1;
+
+function edgePublicSupabaseBase(): string {
+  const keys = [
+    'SUPABASE_WEBHOOK_PUBLIC_URL',
+    'SUPABASE_PUBLIC_URL',
+    'API_EXTERNAL_URL',
+    'SUPABASE_URL',
+  ];
+  for (const key of keys) {
+    const raw = Deno.env.get(key)?.trim();
+    if (!raw) continue;
+    try {
+      const u = new URL(raw.replace(/\/+$/, ''));
+      const h = u.hostname.toLowerCase();
+      if (
+        h !== 'localhost' &&
+        h !== 'kong' &&
+        h !== '127.0.0.1' &&
+        !h.endsWith('.local') &&
+        !h.startsWith('192.168.') &&
+        !h.startsWith('10.') &&
+        !/^172\.(1[6-9]|2\d|3[01])\./.test(h)
+      ) {
+        return u.origin;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return 'https://supabase.lipoout.com';
+}
+
+/** URL accesible desde el navegador (no http://kong:8000). */
+function buildStoragePublicUrl(bucket: string, objectPath: string): string {
+  const base = edgePublicSupabaseBase();
+  const clean = objectPath.replace(/^\/+/, '');
+  return `${base}/storage/v1/object/public/${bucket}/${clean}`;
+}
+
+function normalizeStoragePublicUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  if (!url.includes('/storage/v1/object/public/')) return url;
+  try {
+    const u = new URL(url);
+    const h = u.hostname.toLowerCase();
+    if (
+      h === 'kong' ||
+      h === 'localhost' ||
+      h === '127.0.0.1' ||
+      h.startsWith('192.168.') ||
+      h.startsWith('10.')
+    ) {
+      return `${edgePublicSupabaseBase()}${u.pathname}${u.search}`;
+    }
+  } catch {
+    // mantener url original
+  }
+  return url;
+}
+
+function isPersistedMediaUrl(url: string | null | undefined): boolean {
+  return !!url && url.includes(`/storage/v1/object/public/${WA_MEDIA_BUCKET}/`);
+}
+
+function safeMessageStorageKey(messageId: string): string {
+  return messageId.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 160);
+}
+
+function mimeToMediaExt(mime: string): string {
+  const m = mime.toLowerCase();
+  if (m.includes('webp')) return 'webp';
+  if (m.includes('png')) return 'png';
+  if (m.includes('gif')) return 'gif';
+  if (m.includes('video')) return 'mp4';
+  if (m.includes('ogg')) return 'ogg';
+  if (m.includes('mpeg')) return 'mp3';
+  if (m.includes('webm')) return 'webm';
+  return 'jpg';
+}
+
+function mediaStoragePath(companyId: string, messageId: string, mime: string): string {
+  return `${companyId}/media/${safeMessageStorageKey(messageId)}.${mimeToMediaExt(mime)}`;
+}
+
+async function tryDownloadStoredMessageMedia(
+  admin: ReturnType<typeof createClient>,
+  companyId: string,
+  messageId: string,
+): Promise<{ buf: ArrayBuffer; contentType: string | null } | null> {
+  const base = `${companyId}/media/${safeMessageStorageKey(messageId)}`;
+  const extToMime: Record<string, string> = {
+    webp: 'image/webp',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    gif: 'image/gif',
+    mp4: 'video/mp4',
+    ogg: 'audio/ogg',
+    webm: 'video/webm',
+    mp3: 'audio/mpeg',
+  };
+  for (const ext of Object.keys(extToMime)) {
+    const { data, error } = await admin.storage
+      .from(WA_MEDIA_BUCKET)
+      .download(`${base}.${ext}`);
+    if (data && !error) {
+      return {
+        buf: await data.arrayBuffer(),
+        contentType: extToMime[ext] ?? null,
+      };
+    }
+  }
+  return null;
+}
+
+async function persistWhatsappMessageMedia(
+  admin: ReturnType<typeof createClient>,
+  companyId: string,
+  messageId: string,
+  buf: ArrayBuffer,
+  mime: string,
+): Promise<string | null> {
+  if (!buf.byteLength) return null;
+  const path = mediaStoragePath(companyId, messageId, mime);
+  const { error } = await admin.storage.from(WA_MEDIA_BUCKET).upload(path, buf, {
+    contentType: mime,
+    upsert: true,
+  });
+  if (error) {
+    console.warn('persistWhatsappMessageMedia:', messageId.slice(0, 40), error.message);
+    return null;
+  }
+  const url = buildStoragePublicUrl(WA_MEDIA_BUCKET, path);
+  if (url) {
+    await admin
+      .from('whatsapp_messages')
+      .update({ media_url: url, media_mime_type: mime })
+      .eq('company_id', companyId)
+      .eq('waha_message_id', messageId)
+      .then(() => undefined)
+      .catch(() => undefined);
+  }
+  return url;
+}
+
+function isPersistedWhatsappMediaUrl(url: string | null | undefined): boolean {
+  return !!url && url.includes(`/storage/v1/object/public/${WA_MEDIA_BUCKET}/`);
+}
+
+async function listDbStoredMediaForChat(
+  admin: ReturnType<typeof createClient>,
+  companyId: string,
+  chatId: string,
+  limit: number,
+): Promise<Array<{ message_id: string; url: string; mime: string }>> {
+  const { data } = await admin
+    .from('whatsapp_messages')
+    .select('waha_message_id, media_url, media_mime_type')
+    .eq('company_id', companyId)
+    .eq('chat_id', chatId)
+    .not('waha_message_id', 'is', null)
+    .not('media_url', 'is', null)
+    .order('timestamp', { ascending: false })
+    .limit(limit);
+  const items: Array<{ message_id: string; url: string; mime: string }> = [];
+  for (const row of data ?? []) {
+    const url = row.media_url as string | null;
+    const messageId = row.waha_message_id as string | null;
+    if (!messageId || !isPersistedWhatsappMediaUrl(url)) continue;
+    const publicUrl = normalizeStoragePublicUrl(url);
+    if (!publicUrl) continue;
+    items.push({
+      message_id: messageId,
+      url: publicUrl,
+      mime: (row.media_mime_type as string | null) ?? 'image/jpeg',
+    });
+  }
+  return items;
+}
+
+async function prefetchOpenwaMediaToStorage(
+  admin: ReturnType<typeof createClient>,
+  companyId: string,
+  providerCfg: WhatsappProviderConfig,
+  chatId: string,
+  limit: number,
+): Promise<Array<{ message_id: string; url: string; mime: string }>> {
+  const safeLimit = Math.min(Math.max(limit, 3), 8);
+  const items = await listDbStoredMediaForChat(admin, companyId, chatId, safeLimit);
+  if (items.length >= 3) return items;
+
+  const skipIds = new Set(items.map((i) => i.message_id));
+  const collected = await openwaCollectRecentMedia(providerCfg, chatId, 5, {
+    skipVideo: true,
+    maxItems: 2,
+    imagesOnly: true,
+    skipMessageIds: skipIds,
+  });
+  for (const c of collected) {
+    const url = await persistWhatsappMessageMedia(
+      admin,
+      companyId,
+      c.message_id,
+      c.buf,
+      c.mime,
+    );
+    if (url) items.push({ message_id: c.message_id, url, mime: c.mime });
+  }
+  return items;
+}
 
 function isPersistedAvatarUrl(url: string | null | undefined): boolean {
   return !!url && url.includes(`/storage/v1/object/public/${WAHA_AVATAR_BUCKET}/`);
@@ -821,8 +1099,7 @@ async function persistChatProfilePicture(
     return null;
   }
 
-  const { data: pub } = admin.storage.from(WAHA_AVATAR_BUCKET).getPublicUrl(path);
-  return pub.publicUrl ?? null;
+  return normalizeStoragePublicUrl(buildStoragePublicUrl(WAHA_AVATAR_BUCKET, path));
 }
 
 async function syncChatProfilePictures(
@@ -1043,6 +1320,72 @@ async function syncChatMessagesFromWaha(
   return data.length;
 }
 
+async function syncChatMessagesFromOpenwa(
+  admin: ReturnType<typeof createClient>,
+  providerCfg: WhatsappProviderConfig,
+  companyId: string,
+  chatId: string,
+  limit: number,
+  offset = 0,
+): Promise<number> {
+  if (isSystemChatJid(chatId)) return 0;
+
+  const rawMessages = await openwaListChatMessages(providerCfg, chatId, limit, offset);
+  if (!rawMessages.length) return 0;
+
+  const rows = rawMessages.map((raw) =>
+    buildOpenwaMessageUpsertRow(raw, chatId, companyId)
+  );
+
+  const { error: upsertError } = await admin
+    .from('whatsapp_messages')
+    .upsert(rows, {
+      onConflict: 'company_id,waha_message_id',
+      ignoreDuplicates: false,
+    });
+  if (upsertError) {
+    console.error('whatsapp_messages upsert failed (OpenWA):', upsertError.message, {
+      chatId,
+      rows: rows.length,
+    });
+    throw new Error(`No se pudieron guardar mensajes: ${upsertError.message}`);
+  }
+  return rawMessages.length;
+}
+
+async function syncChatMessagesFromProvider(
+  admin: ReturnType<typeof createClient>,
+  cfg: WhatsappConfig,
+  providerCfg: WhatsappProviderConfig,
+  companyId: string,
+  sessionName: string,
+  chatId: string,
+  limit: number,
+  downloadMedia = false,
+  offset = 0,
+): Promise<number> {
+  if (normalizeWhatsappProvider(cfg.provider) === 'openwa') {
+    return syncChatMessagesFromOpenwa(
+      admin,
+      providerCfg,
+      companyId,
+      chatId,
+      limit,
+      offset,
+    );
+  }
+  return syncChatMessagesFromWaha(
+    admin,
+    cfg,
+    companyId,
+    sessionName,
+    chatId,
+    limit,
+    downloadMedia,
+    offset,
+  );
+}
+
 const WAHA_HISTORY_PAGE_SIZE = 200;
 /** Páginas por petición HTTP (evita 504 del gateway ~60s). */
 const WAHA_HISTORY_PAGES_PER_REQUEST = 2;
@@ -1088,9 +1431,10 @@ async function markChatHistorySynced(
   }
 }
 
-async function syncFullChatHistoryFromWaha(
+async function syncFullChatHistoryFromProvider(
   admin: ReturnType<typeof createClient>,
   cfg: WhatsappConfig,
+  providerCfg: WhatsappProviderConfig,
   companyId: string,
   sessionName: string,
   chatId: string,
@@ -1107,9 +1451,10 @@ async function syncFullChatHistoryFromWaha(
   let hasMore = false;
 
   for (let page = 0; page < maxPages && page < WAHA_HISTORY_MAX_PAGES; page++) {
-    const count = await syncChatMessagesFromWaha(
+    const count = await syncChatMessagesFromProvider(
       admin,
       cfg,
+      providerCfg,
       companyId,
       sessionName,
       chatId,
@@ -1202,6 +1547,52 @@ function buildWebhookUrl(
   });
   const base = `${supabaseUrl.replace(/\/+$/, '')}/functions/v1/whatsapp-webhook`;
   return `${base}?${params.toString()}`;
+}
+
+/** URL pública para webhooks externos (OpenWA/WAHA no aceptan http://kong:8000). */
+function isInternalSupabaseHost(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  return (
+    h === 'localhost' ||
+    h === 'kong' ||
+    h === '127.0.0.1' ||
+    h.endsWith('.local') ||
+    h.startsWith('192.168.') ||
+    h.startsWith('10.') ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(h)
+  );
+}
+
+function resolvePublicSupabaseUrl(): string {
+  const keys = [
+    'SUPABASE_WEBHOOK_PUBLIC_URL',
+    'SUPABASE_PUBLIC_URL',
+    'API_EXTERNAL_URL',
+    'SUPABASE_URL',
+  ];
+  for (const key of keys) {
+    const raw = Deno.env.get(key)?.trim();
+    if (!raw) continue;
+    const url = raw.replace(/\/+$/, '');
+    try {
+      if (!isInternalSupabaseHost(new URL(url).hostname)) return url;
+    } catch {
+      continue;
+    }
+  }
+  throw new Error(
+    'Falta URL pública de Supabase para webhooks (OpenWA/WAHA rechazan http://kong:8000). ' +
+      'Define SUPABASE_PUBLIC_URL=https://supabase.lipoout.com en el contenedor edge.',
+  );
+}
+
+/** URL pública para registrar webhooks (OpenWA/WAHA). */
+function resolvePublicSupabaseUrlOrFallback(): string {
+  try {
+    return resolvePublicSupabaseUrl();
+  } catch {
+    return 'https://supabase.lipoout.com';
+  }
 }
 
 /** Config mínima de sesión Waha: store NOWEB + webhook hacia Supabase. */
@@ -1542,17 +1933,23 @@ serve(async (req) => {
       .eq('company_id', companyId)
       .maybeSingle();
     if (cfgErr) throw cfgErr;
-    const cfg = cfgRow as WhatsappConfig | null;
-    if (!cfg) {
+    if (!cfgRow) {
       return err(
         'WhatsApp no configurado. Configura Waha en Configuración → WhatsApp.',
       );
     }
+    const cfg = {
+      ...(cfgRow as WhatsappConfig),
+      ...resolveWhatsappCredentials(cfgRow as WhatsappConfig),
+    };
     if (!cfg.base_url) {
-      return err('Falta la URL base de Waha en la configuración.');
+      return err(`Falta la URL base de ${providerLabel(proxyProvider(cfg))} en la configuración.`);
     }
 
     const sessionName = cfg.session_name || 'default';
+    const provider = proxyProvider(cfg);
+    const providerCfg = proxyToProviderCfg(cfg);
+    const publicSupabaseUrl = resolvePublicSupabaseUrlOrFallback();
     const updateCfg = async (values: Partial<WhatsappConfig>) => {
       await admin
         .from('whatsapp_config')
@@ -1562,6 +1959,41 @@ serve(async (req) => {
 
     switch (body.action) {
       case 'session.status': {
+        if (provider === 'openwa') {
+          try {
+            const s = await openwaGetSession(providerCfg);
+            const webhookUrl = cfg.webhook_secret
+              ? buildWebhookUrl(publicSupabaseUrl, companyId, cfg.webhook_secret)
+              : '';
+            const webhooks = webhookUrl
+              ? await openwaListWebhooks(providerCfg).catch(() => [])
+              : [];
+            const hooksOk = webhookUrl
+              ? openwaWebhooksConfigured(webhooks, webhookUrl)
+              : false;
+            await updateCfg({
+              last_status: s.internalStatus,
+              last_status_message: null,
+              last_status_at: new Date().toISOString(),
+              me_jid: s.meJid,
+            });
+            return json({
+              ok: true,
+              status: s.internalStatus,
+              me: s.meJid ? { id: s.meJid } : null,
+              webhooks_configured: hooksOk,
+              noweb_store_enabled: false,
+            });
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : 'Error consultando sesión OpenWA';
+            await updateCfg({
+              last_status: 'UNKNOWN',
+              last_status_message: msg,
+              last_status_at: new Date().toISOString(),
+            });
+            return json({ ok: false, status: 'UNKNOWN', error: msg });
+          }
+        }
         try {
           const data = await wahaJson<{
             name?: string;
@@ -1597,9 +2029,35 @@ serve(async (req) => {
       }
 
       case 'session.start': {
+        if (provider === 'openwa') {
+          await openwaStartSession(providerCfg);
+          let webhooksConfigured = false;
+          if (cfg.webhook_secret) {
+            try {
+              const webhookUrl = buildWebhookUrl(publicSupabaseUrl, companyId, cfg.webhook_secret);
+              await openwaConfigureWebhook(
+                { ...providerCfg, webhook_secret: cfg.webhook_secret },
+                webhookUrl,
+              );
+              webhooksConfigured = true;
+            } catch (e) {
+              console.warn('OpenWA webhook auto-config failed:', e);
+            }
+          }
+          await updateCfg({
+            last_status: 'STARTING',
+            last_status_message: null,
+            last_status_at: new Date().toISOString(),
+          });
+          return json({
+            ok: true,
+            webhooks_configured: webhooksConfigured,
+            noweb_store_enabled: false,
+          });
+        }
         const health = await ensureWahaSessionConfig(
           cfg,
-          supabaseUrl,
+          publicSupabaseUrl,
           companyId,
           sessionName,
         );
@@ -1624,6 +2082,14 @@ serve(async (req) => {
       }
 
       case 'session.stop': {
+        if (provider === 'openwa') {
+          await openwaStopSession(providerCfg);
+          await updateCfg({
+            last_status: 'STOPPED',
+            last_status_at: new Date().toISOString(),
+          });
+          return json({ ok: true });
+        }
         try {
           await wahaJson(cfg, `/api/sessions/${encodeURIComponent(sessionName)}/stop`, {
             method: 'POST',
@@ -1643,6 +2109,22 @@ serve(async (req) => {
       }
 
       case 'session.logout': {
+        if (provider === 'openwa') {
+          try {
+            await openwaLogoutSession(providerCfg);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : 'Error en logout OpenWA';
+            return err(msg);
+          }
+          await updateCfg({
+            last_status: 'STOPPED',
+            me_jid: null,
+            me_pushname: null,
+            qr_data_url: null,
+            last_status_at: new Date().toISOString(),
+          });
+          return json({ ok: true });
+        }
         try {
           await wahaJson(cfg, `/api/sessions/${encodeURIComponent(sessionName)}/logout`, {
             method: 'POST',
@@ -1663,6 +2145,19 @@ serve(async (req) => {
       }
 
       case 'session.qr': {
+        if (provider === 'openwa') {
+          try {
+            const qr = await openwaGetQr(providerCfg);
+            if (!qr) return err('OpenWA no devolvió QR (sesión ya conectada o no lista)');
+            await updateCfg({
+              qr_data_url: qr,
+              qr_updated_at: new Date().toISOString(),
+            });
+            return json({ ok: true, qr_data_url: qr });
+          } catch (e) {
+            return err(e instanceof Error ? e.message : 'Error obteniendo QR OpenWA');
+          }
+        }
         // Waha expone /api/{session}/auth/qr?format=image (devuelve PNG) o
         // ?format=raw (devuelve el código de texto). Probamos image primero.
         const resp = await wahaFetch(
@@ -1759,8 +2254,22 @@ serve(async (req) => {
             'Falta el secreto del webhook. Genera uno en Configuración → WhatsApp.',
           );
         }
-        const webhookUrl = buildWebhookUrl(supabaseUrl, companyId, cfg.webhook_secret);
-        const sessionConfig = buildWahaSessionConfig(supabaseUrl, companyId, cfg);
+        const webhookUrl = buildWebhookUrl(publicSupabaseUrl, companyId, cfg.webhook_secret);
+        if (provider === 'openwa') {
+          const configured = await openwaConfigureWebhook(
+            { ...providerCfg, webhook_secret: cfg.webhook_secret },
+            webhookUrl,
+          );
+          return json({
+            ok: true,
+            webhook_url: webhookUrl,
+            webhook_id: configured.id,
+            events: configured.events.length ? configured.events : [...OPENWA_WEBHOOK_EVENTS],
+            webhooks_configured: true,
+            noweb_store_enabled: false,
+          });
+        }
+        const sessionConfig = buildWahaSessionConfig(publicSupabaseUrl, companyId, cfg);
         const putPath = `/api/sessions/${encodeURIComponent(sessionName)}`;
 
         let configured = false;
@@ -1787,7 +2296,7 @@ serve(async (req) => {
         if (!configured && lastError) {
           return err(lastError.message, lastError.status === 401 || lastError.status === 403 ? 401 : 502);
         }
-        const health = await ensureWahaSessionConfig(cfg, supabaseUrl, companyId, sessionName);
+        const health = await ensureWahaSessionConfig(cfg, publicSupabaseUrl, companyId, sessionName);
         return json({
           ok: true,
           webhook_url: webhookUrl,
@@ -1800,20 +2309,28 @@ serve(async (req) => {
         const limit = Math.min(Math.max(Number(body.limit ?? 100), 1), 200);
         const offset = Math.max(Number(body.offset ?? 0), 0);
         let data: Array<Record<string, unknown>> = [];
-        try {
-          data = await fetchWahaChatsOverview(cfg, sessionName, limit, offset);
-        } catch (e) {
-          if (e instanceof WahaError) {
-            // Auth: error real
-            if (e.status === 401 || e.status === 403) {
-              return err(e.message, 401);
-            }
-            // Otros errores (bug de webjs, sesión inestable…) no son fatales:
-            // los chats van llegando vía webhook. Devolvemos OK con warning.
-            console.warn('chats.list non-fatal failure:', e);
-            return json({ ok: true, count: 0, warning: e.message });
+
+        if (provider === 'openwa') {
+          try {
+            data = await openwaListChats(providerCfg, limit, offset);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : 'Error listando chats OpenWA';
+            console.warn('chats.list openwa non-fatal failure:', e);
+            return json({ ok: true, count: 0, warning: msg });
           }
-          throw e;
+        } else {
+          try {
+            data = await fetchWahaChatsOverview(cfg, sessionName, limit, offset);
+          } catch (e) {
+            if (e instanceof WahaError) {
+              if (e.status === 401 || e.status === 403) {
+                return err(e.message, 401);
+              }
+              console.warn('chats.list non-fatal failure:', e);
+              return json({ ok: true, count: 0, warning: e.message });
+            }
+            throw e;
+          }
         }
 
         if (Array.isArray(data) && data.length > 0) {
@@ -1833,7 +2350,10 @@ serve(async (req) => {
 
           const rows = data.map((c) => {
             const id = String(c.id ?? '');
-            const resolvedName = resolveWahaChatName(c);
+            const isOpenwa = provider === 'openwa';
+            const resolvedName = isOpenwa
+              ? (typeof c.name === 'string' && isGoodChatDisplayName(c.name) ? c.name.trim() : null)
+              : resolveWahaChatName(c);
             const lastMessage = c.lastMessage as Record<string, unknown> | undefined;
             let chatName =
               resolvedName ??
@@ -1842,21 +2362,31 @@ serve(async (req) => {
               const prev = existingById.get(id);
               if (isGoodChatDisplayName(prev)) chatName = prev!.trim();
             }
+            const ts = c.timestamp ?? lastMessage?.timestamp;
+            const tsNum = typeof ts === 'number' ? ts : Number(ts ?? 0);
             const row: Record<string, unknown> = {
               company_id: companyId,
               chat_id: id,
               is_group: !!c.isGroup || /@g\.us$/i.test(id),
-              profile_picture_url: resolveWahaChatPicture(c) ??
-                (typeof c.picture === 'string' ? c.picture : null),
+              profile_picture_url: isOpenwa
+                ? null
+                : resolveWahaChatPicture(c) ??
+                  (typeof c.picture === 'string' ? c.picture : null),
               last_message_preview:
-                typeof lastMessage?.body === 'string' ? lastMessage.body : null,
-              last_message_at: lastMessage?.timestamp
-                ? new Date(Number(lastMessage.timestamp) * 1000).toISOString()
-                : c.timestamp
-                  ? new Date(Number(c.timestamp) * 1000).toISOString()
+                typeof lastMessage?.body === 'string'
+                  ? lastMessage.body
+                  : typeof c.lastMessage === 'string'
+                    ? c.lastMessage
+                    : null,
+              last_message_at: tsNum
+                ? new Date(tsNum * 1000).toISOString()
+                : lastMessage?.timestamp
+                  ? new Date(Number(lastMessage.timestamp) * 1000).toISOString()
                   : null,
-              last_message_from_me: !!lastMessage?.fromMe,
-              unread_count: Number(c.unreadCount ?? 0) || 0,
+              last_message_from_me: isOpenwa
+                ? false
+                : !!lastMessage?.fromMe,
+              unread_count: Number(c.unreadCount ?? c.unread_count ?? 0) || 0,
               pinned: !!c.pinned,
               archived: !!c.archived,
               raw: c as unknown,
@@ -1868,7 +2398,6 @@ serve(async (req) => {
             .from('whatsapp_chats')
             .upsert(rows, { onConflict: 'company_id,chat_id' });
 
-          // Auto-vincular en segundo plano (máx. 10) — no bloquear la respuesta HTTP.
           const linkIds = data
             .map((c) => String(c.id ?? ''))
             .filter((id) => !isSystemChatJid(id))
@@ -1901,9 +2430,23 @@ serve(async (req) => {
         const offset = Math.max(Number(body.offset ?? 0), 0);
         const chatId = body.chat_id;
         if (!chatId) return err('Falta chat_id');
-        const count = await syncChatMessagesFromWaha(
+        if (provider === 'openwa') {
+          const rawMessages = await openwaListChatMessages(providerCfg, chatId, limit, offset);
+          const rows = rawMessages.map((raw) =>
+            buildOpenwaMessageUpsertRow(raw, chatId, companyId)
+          );
+          if (rows.length > 0) {
+            await admin.from('whatsapp_messages').upsert(rows, {
+              onConflict: 'company_id,waha_message_id',
+              ignoreDuplicates: false,
+            });
+          }
+          return json({ ok: true, count: rows.length, offset, has_more: rows.length >= limit });
+        }
+        const count = await syncChatMessagesFromProvider(
           admin,
           cfg,
+          providerCfg,
           companyId,
           sessionName,
           chatId,
@@ -1936,9 +2479,10 @@ serve(async (req) => {
                 .eq('company_id', companyId)
                 .eq('chat_id', chatId);
             } else {
-              const count = await syncChatMessagesFromWaha(
+              const count = await syncChatMessagesFromProvider(
                 admin,
                 cfg,
+                providerCfg,
                 companyId,
                 sessionName,
                 chatId,
@@ -1958,9 +2502,10 @@ serve(async (req) => {
           }
         }
 
-        const result = await syncFullChatHistoryFromWaha(
+        const result = await syncFullChatHistoryFromProvider(
           admin,
           cfg,
+          providerCfg,
           companyId,
           sessionName,
           chatId,
@@ -1976,7 +2521,12 @@ serve(async (req) => {
 
         if (refreshChats && messageOffset === 0) {
           try {
-            const chatData = await fetchWahaChatsOverview(cfg, sessionName, 150, 0);
+            let chatData: Array<Record<string, unknown>> = [];
+            if (provider === 'openwa') {
+              chatData = await openwaListChats(providerCfg, 150, 0);
+            } else {
+              chatData = await fetchWahaChatsOverview(cfg, sessionName, 150, 0);
+            }
             if (chatData.length > 0) {
               const rows = chatData.map((c) => ({
                 company_id: companyId,
@@ -2016,9 +2566,10 @@ serve(async (req) => {
 
         const warnings: string[] = [];
         try {
-          const result = await syncFullChatHistoryFromWaha(
+          const result = await syncFullChatHistoryFromProvider(
             admin,
             cfg,
+            providerCfg,
             companyId,
             sessionName,
             row.chat_id,
@@ -2083,45 +2634,38 @@ serve(async (req) => {
         // chats modernos). Lo iremos ajustando si Waha lo expone.
         let chatId = requestedChatId;
         const type = sendBody.type ?? 'text';
-        let endpoint = '';
-        let payload: Record<string, unknown> = { session: sessionName, chatId };
 
-        if (sendBody.reply_to_message_id?.trim()) {
-          payload.reply_to = sendBody.reply_to_message_id.trim();
-        }
-
+        let sendResult: { messageId: string | null; timestamp?: number; raw: unknown };
         if (type === 'text') {
           if (!sendBody.text) return err('Falta `text`');
-          endpoint = '/api/sendText';
-          payload = { ...payload, text: sendBody.text };
-        } else if (type === 'image' || type === 'video' || type === 'document' || type === 'audio' || type === 'voice') {
+          sendResult = await providerSendText(providerCfg, chatId, sendBody.text, {
+            replyToMessageId: sendBody.reply_to_message_id?.trim(),
+          });
+        } else if (
+          type === 'image' ||
+          type === 'video' ||
+          type === 'document' ||
+          type === 'audio' ||
+          type === 'voice'
+        ) {
           if (!sendBody.media_base64) return err('Falta `media_base64`');
-          if (type === 'image') endpoint = '/api/sendImage';
-          else if (type === 'video') endpoint = '/api/sendVideo';
-          else if (type === 'voice') endpoint = '/api/sendVoice';
-          else if (type === 'audio') endpoint = '/api/sendFile';
-          else endpoint = '/api/sendFile';
           const mime = sendBody.mime_type ?? 'application/octet-stream';
-          payload = {
-            ...payload,
-            caption: sendBody.caption ?? undefined,
-            file: {
-              mimetype: mime,
+          sendResult = await providerSendMedia(
+            providerCfg,
+            chatId,
+            type === 'document' ? 'document' : type,
+            {
+              base64: sendBody.media_base64,
+              mime,
               filename: sendBody.filename ?? 'file',
-              data: sendBody.media_base64,
+              caption: sendBody.caption,
             },
-          };
-          if (type === 'voice') {
-            const lowerMime = mime.toLowerCase();
-            payload.convert = !(
-              lowerMime.includes('ogg') || lowerMime.includes('opus')
-            );
-          }
+          );
         } else {
           return err(`Tipo no soportado: ${type}`);
         }
 
-        const res = await wahaJson<{
+        const res = sendResult.raw as {
           id?: { id?: string; _serialized?: string; remote?: string };
           _data?: {
             id?: { _serialized?: string; remote?: string };
@@ -2129,15 +2673,13 @@ serve(async (req) => {
           };
           to?: string;
           timestamp?: number;
-        }>(cfg, endpoint, {
-          method: 'POST',
-          body: JSON.stringify(payload),
-        });
-
-        const wahaId = resolveOutgoingWahaId(res, chatId);
-        const ts = res?.timestamp
-          ? new Date(res.timestamp * 1000).toISOString()
-          : new Date().toISOString();
+        };
+        const wahaId = sendResult.messageId ?? resolveOutgoingMessageId(provider, res, chatId);
+        const ts = sendResult.timestamp
+          ? new Date(sendResult.timestamp * 1000).toISOString()
+          : res?.timestamp
+            ? new Date(res.timestamp * 1000).toISOString()
+            : new Date().toISOString();
         const outgoingBody = type === 'text' ? sendBody.text ?? null : null;
 
         // Detectar el JID real del destinatario que devuelve Waha. WhatsApp
@@ -2435,6 +2977,34 @@ serve(async (req) => {
         return json({ ok: true, count, requested: chatIds.length });
       }
 
+      case 'messages.prefetch_media': {
+        const chatId = body.chat_id;
+        if (!chatId) return err('Falta chat_id');
+        const limit = Math.min(Math.max(Number(body.limit ?? 6), 3), 8);
+        if (provider !== 'openwa') {
+          return json({ ok: true, items: [], chat_id: chatId });
+        }
+        const altIds = body.alt_chat_ids ?? [];
+        const candidates = [chatId, ...altIds].filter(
+          (id, i, arr) => !!id && arr.indexOf(id) === i,
+        ).slice(0, 2);
+        for (const cid of candidates) {
+          try {
+            const items = await prefetchOpenwaMediaToStorage(
+              admin,
+              companyId,
+              providerCfg,
+              cid,
+              limit,
+            );
+            return json({ ok: true, chat_id: cid, items });
+          } catch (e) {
+            console.warn('prefetch_media failed for', cid, e);
+          }
+        }
+        return json({ ok: true, items: [], chat_id: chatId });
+      }
+
       case 'media.download': {
         const respondBytes = (buf: ArrayBuffer, contentType?: string | null) =>
           new Response(buf, {
@@ -2448,19 +3018,59 @@ serve(async (req) => {
 
         if (body.chat_id && body.message_id) {
           try {
-            const result = await downloadMediaViaMessage(
-              cfg,
-              sessionName,
-              body.chat_id,
+            const stored = await tryDownloadStoredMessageMedia(
+              admin,
+              companyId,
               body.message_id,
             );
+            if (stored) {
+              return respondBytes(stored.buf, stored.contentType);
+            }
+
+            const result =
+              provider === 'openwa'
+                ? await openwaDownloadMedia(
+                    providerCfg,
+                    body.chat_id,
+                    body.message_id,
+                    body.alt_chat_ids ?? [],
+                  )
+                : await downloadMediaViaMessage(
+                    cfg,
+                    sessionName,
+                    body.chat_id,
+                    body.message_id,
+                  );
+
+            if (provider === 'openwa' && body.message_id) {
+              const mime = result.contentType ?? 'application/octet-stream';
+              await persistWhatsappMessageMedia(
+                admin,
+                companyId,
+                body.message_id,
+                result.buf,
+                mime,
+              );
+            }
+
             return respondBytes(result.buf, result.contentType);
           } catch (e) {
             const msg = e instanceof Error ? e.message : 'No se pudo descargar media';
-            if (!body.url || isExternalCdnMediaUrl(body.url)) {
-              return err(msg, 502);
+            console.error('media.download failed:', msg, {
+              provider,
+              chat_id: body.chat_id,
+              message_id: body.message_id?.slice(0, 48),
+            });
+            const expired = /expirad/i.test(msg);
+            const status = expired ? 410 : 502;
+            if (provider === 'openwa' || !body.url || isExternalCdnMediaUrl(body.url)) {
+              return err(msg, status);
             }
           }
+        }
+
+        if (provider === 'openwa') {
+          return err('OpenWA requiere chat_id y message_id para descargar media', 400);
         }
 
         if (body.url && !isExternalCdnMediaUrl(body.url)) {
@@ -2625,7 +3235,10 @@ serve(async (req) => {
     }
   } catch (e) {
     if (e instanceof WahaError) {
-      return err(e.message, e.status === 401 || e.status === 403 ? 401 : 502);
+      return mapWhatsappProviderFailure(e.message, e.status);
+    }
+    if (e instanceof WhatsappProviderError) {
+      return mapWhatsappProviderFailure(e.message, e.status);
     }
     const msg = e instanceof Error ? e.message : 'Error inesperado';
     console.error('whatsapp-proxy unhandled error:', msg, e);

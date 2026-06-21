@@ -7,6 +7,7 @@ import {
   inbodyRangeStatus,
   inbodyStatusLabel,
   normalizeInbodyMeasurement,
+  resolveBodyFatMassRangeKg,
   type InbodyMeasurement,
   type InbodySegmentEntry,
 } from '@/lib/inbodyMeasurements';
@@ -420,6 +421,7 @@ function drawLogo(
 }
 
 function drawComposition(ctx: CanvasRenderingContext2D, w: number, h: number, m: InbodyMeasurement) {
+  const bfmRange = resolveBodyFatMassRangeKg(m);
   const rows: Array<{
     yRef: number;
     value: number | null | undefined;
@@ -428,7 +430,7 @@ function drawComposition(ctx: CanvasRenderingContext2D, w: number, h: number, m:
   }> = [
     { yRef: COMPOSITION_ROW_Y[0], value: m.weight_kg, min: m.weight_min_kg, max: m.weight_max_kg },
     { yRef: COMPOSITION_ROW_Y[1], value: m.smm_kg, min: m.smm_min_kg, max: m.smm_max_kg },
-    { yRef: COMPOSITION_ROW_Y[2], value: m.body_fat_kg, min: m.body_fat_min_kg, max: m.body_fat_max_kg },
+    { yRef: COMPOSITION_ROW_Y[2], value: m.body_fat_kg, min: bfmRange.min, max: bfmRange.max },
   ];
 
   for (const item of rows) {

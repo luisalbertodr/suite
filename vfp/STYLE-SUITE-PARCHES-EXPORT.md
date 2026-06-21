@@ -28,7 +28,7 @@ Documento de referencia para **reaplicar en una sola pasada** todos los cambios 
 |------|-----|
 | `C:\Duna\Export\` | Export ReFox + build (`mscomctl.pjx`, `mscomctl.exe`) |
 | `C:\Duna\Export\PROGS\` | PRGs editables (`general`, `funciones`, `suite_full_unlock`) |
-| `C:\Style-Dunasoft\` o VM `192.168.99.119` | Producción Style |
+| `C:\Style-Dunasoft\` o VM `192.168.99.16` | Producción Style |
 | `C:\Users\OportoW11\Suite\suite\vfp\` | **Fuente de verdad** de parches en el repo |
 | `C:\Users\OportoW11\Suite\suite\scripts\` | Deploy PowerShell |
 
@@ -178,7 +178,7 @@ ReFox XI+: abrir **`mscomctl.exe` original** de Style → **Replace component** 
 11. **Limpiar enlaces erróneos** (una vez, Style cerrado):
     ```powershell
     .\scripts\ensure-style-dbc.ps1 -RemoveWedbRootOnly
-    # Si Z: no montada: -StyleRoot "\\192.168.99.119\c$\Style-Dunasoft"
+    # Si Z: no montada: -StyleRoot "\\192.168.99.16\c$\Style-Dunasoft"
     # o: $env:SUITE_STYLE_ROOT = "ruta\Style-Dunasoft"
     ```
 
@@ -490,7 +490,7 @@ Con `STYLE_LEGACY=1` ejecuta `ensure-style-dbc.ps1 -LegacyTableLinks` (enlaces d
 .\scripts\ensure-style-dbc.ps1 -RemoveRootCopies
 ```
 
-Auto-detecta ruta si `Z:` no existe (prueba `SUITE_STYLE_ROOT`, UNC `\\192.168.99.119\c$\Style-Dunasoft`).
+Auto-detecta ruta si `Z:` no existe (prueba `SUITE_STYLE_ROOT`, UNC `\\192.168.99.16\c$\Style-Dunasoft`).
 
 ---
 

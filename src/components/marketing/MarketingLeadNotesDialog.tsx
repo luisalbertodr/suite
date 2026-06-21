@@ -9,6 +9,11 @@ import {
 import { MarketingLeadNotesPanel } from './MarketingLeadNotesPanel';
 import type { MarketingLead } from '@/hooks/useMarketingLeads';
 import { getLeadFullName } from './marketingFormatters';
+import { cn } from '@/lib/utils';
+import {
+  ABOVE_DOCK_DIALOG_POSITION,
+  ABOVE_DOCK_DIALOG_Z,
+} from '@/lib/dialogLayers';
 
 interface MarketingLeadNotesDialogProps {
   lead: MarketingLead | null;
@@ -24,7 +29,14 @@ export const MarketingLeadNotesDialog: React.FC<MarketingLeadNotesDialogProps> =
   if (!lead) return null;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
+      <DialogContent
+        overlayClassName={ABOVE_DOCK_DIALOG_Z}
+        className={cn(
+          ABOVE_DOCK_DIALOG_Z,
+          ABOVE_DOCK_DIALOG_POSITION,
+          'max-h-full max-w-xl overflow-y-auto',
+        )}
+      >
         <DialogHeader>
           <DialogTitle>Notas · {getLeadFullName(lead)}</DialogTitle>
           <DialogDescription>
