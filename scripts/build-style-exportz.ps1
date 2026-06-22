@@ -59,6 +59,17 @@ function Invoke-VfpPrg {
     Get-Process -Name vfp9 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 }
 
+function Remove-LegacyUnlockFromProgs {
+    param([string]$ProgsDir)
+    foreach ($name in @("suite_full_unlock.prg", "suite_full_unlock.fxp", "suite_full_unlock.FXP")) {
+        $p = Join-Path $ProgsDir $name
+        if (Test-Path $p) {
+            Remove-Item $p -Force -ErrorAction SilentlyContinue
+            Write-Ok "eliminado PROGS\$name (canal v1 legacy, no usar en ExportZ)"
+        }
+    }
+}
+
 function Sync-SuitePrgs {
     # v2: NO copiar suite_full_unlock.prg (canal HTTP legacy) al build ExportZ.
     $files = @("general.prg", "funciones.prg", "suite_cola_sync.prg", "suite_control_sync.prg", "suite_migrar_cola_sincro.prg")
@@ -210,6 +221,7 @@ Write-Ok "suite_project.cfg = $ProjectName"
 Write-Step "1/4 PRGs Suite desde repo"
 if (-not (Test-Path $Progs)) { New-Item -ItemType Directory -Path $Progs -Force | Out-Null }
 Sync-SuitePrgs
+Remove-LegacyUnlockFromProgs -ProgsDir $Progs
 
 if (-not $SkipPrepare) {
     Write-Step "2/4 Scripts de build"
@@ -293,6 +305,7 @@ foreach ($fxp in @("suite_full_unlock.fxp", "suite_full_unlock.FXP")) {
         Write-Ok "eliminado PROGS\$fxp"
     }
 }
+Remove-LegacyUnlockFromProgs -ProgsDir $Progs
 
 Write-Step "5/5 BUILD exe (VfpBuildProject headless, sin SendKeys)"
 $buildOk = $false

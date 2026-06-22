@@ -21,6 +21,14 @@ function Test-ExeContainsString {
     return $text.Contains($Needle)
 }
 
+# v1 embebido: clase HTTP + timer. general.prg v2 menciona el nombre en rutas; no usar solo esa cadena.
+$v1EmbeddedNeedles = @(
+    "embebido exe OK (suite_full_unlock en Duna.exe)",
+    "BINDEVENT(_SCREEN.oSuiteSyncTimer",
+    "NEWOBJECT(""licencias_unlock"""
+)
+$v2ColaNeedle = "suite_cola_sync embebido exe OK"
+
 if ([string]::IsNullOrWhiteSpace($StyleRemote)) {
     if (Test-Path "Z:\Style-Dunasoft") { $StyleRemote = "Z:\Style-Dunasoft" }
     else { $StyleRemote = "\\192.168.99.16\c$\Style-Dunasoft" }
@@ -44,21 +52,29 @@ if ($Backup -and (Test-Path $prodExe)) {
 
 $srcForV1Check = if (Test-Path $bakExe) { $bakExe } elseif (Test-Path $prodExe) { $prodExe } else { $null }
 if ($srcForV1Check) {
-    $hasUnlock = Test-ExeContainsString -Path $srcForV1Check -Needle "suite_full_unlock"
-    Write-Host "Referencia v1 contiene suite_full_unlock: $hasUnlock"
+    $hasUnlock = $false
+    foreach ($n in $v1EmbeddedNeedles) {
+        if (Test-ExeContainsString -Path $srcForV1Check -Needle $n) { $hasUnlock = $true; break }
+    }
+    Write-Host "Referencia v1 embebe canal HTTP legacy: $hasUnlock"
 }
 
-$newHasUnlock = Test-ExeContainsString -Path $NewExe -Needle "suite_full_unlock"
+$newHasV1Embed = $false
+foreach ($n in $v1EmbeddedNeedles) {
+    if (Test-ExeContainsString -Path $NewExe -Needle $n) { $newHasV1Embed = $true; break }
+}
 $newHasCola = Test-ExeContainsString -Path $NewExe -Needle "SuiteEnqueuePlan2009"
+$newHasColaBoot = Test-ExeContainsString -Path $NewExe -Needle $v2ColaNeedle
 
-Write-Host "Nuevo exe contiene suite_full_unlock: $newHasUnlock" -ForegroundColor $(if ($newHasUnlock) { "Red" } else { "Green" })
+Write-Host "Nuevo exe embebe v1 HTTP (unlock timer): $newHasV1Embed" -ForegroundColor $(if ($newHasV1Embed) { "Red" } else { "Green" })
 Write-Host "Nuevo exe contiene SuiteEnqueuePlan2009: $newHasCola" -ForegroundColor $(if ($newHasCola) { "Green" } else { "Yellow" })
+Write-Host "Nuevo exe mensaje BOOT-04 cola (funciones): $newHasColaBoot" -ForegroundColor $(if ($newHasColaBoot) { "Green" } else { "Yellow" })
 
 $newFi = Get-Item $NewExe
 Write-Host "Tamano nuevo: $([math]::Round($newFi.Length / 1MB, 2)) MB"
 
-if ($newHasUnlock -and -not $SkipAbortOnUnlockFound) {
-    throw "ABORTAR: el nuevo Duna.exe aun contiene suite_full_unlock. Rebuild ExportZ sin unlock HTTP."
+if ($newHasV1Embed -and -not $SkipAbortOnUnlockFound) {
+    throw "ABORTAR: el nuevo Duna.exe aun embebe sync HTTP v1. Quita suite_full_unlock del .pjx y recompila."
 }
 
 Write-Host ""

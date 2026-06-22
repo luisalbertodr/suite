@@ -367,3 +367,25 @@ FUNCTION SuiteEnqueuePlan2009
  ENDIF
  RETURN .T.
 ENDFUNC
+
+**
+PROCEDURE Suite_SyncInit
+ LOCAL lccfg, lcRoot
+ lcRoot = SuiteColaRoot()
+ lccfg = lcRoot+"SuiteSync.cfg"
+ DO SuiteEnsureColaSincro
+ = SuiteLoadControlSync()
+ PUBLIC plSuiteSyncEnabled
+ plSuiteSyncEnabled = .T.
+ IF TYPE("SuiteBootstrapLog")#"U"
+    DO SuiteBootstrapLog WITH "[INIT-03] Style sync v2 cola activa"
+ ENDIF
+ENDPROC
+
+**
+PROCEDURE Suite_SyncLog
+ PARAMETER tcLine
+ IF TYPE("SuiteBootstrapLog")#"U"
+    DO SuiteBootstrapLog WITH tcLine
+ ENDIF
+ENDPROC

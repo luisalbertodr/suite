@@ -1059,8 +1059,6 @@ FUNCTION SuiteGetHttpLocal
  IF TYPE("SuiteEnsureSyncGlobals")="U"
     IF FILE(lcPrg)
        SET PROCEDURE TO (lcPrg) ADDITIVE
-    ELSE
-       SET PROCEDURE TO suite_full_unlock ADDITIVE
     ENDIF
  ENDIF
  IF TYPE("SuiteEnsureSyncGlobals")#"U"

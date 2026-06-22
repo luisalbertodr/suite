@@ -1254,21 +1254,7 @@ PROCEDURE SuiteLoadUnlockProgram
        ENDIF
     ENDIF
  ENDIF
- * Sync embebida en Duna.exe (BUILD mscomctl.pjx con suite_full_unlock.prg)
- lcSavErr = ON("ERROR")
- lcerr = ""
- ON ERROR lcerr = MESSAGE()
- SET PROCEDURE TO suite_full_unlock ADDITIVE
- llEmbProc = (TYPE("Suite_SyncInit")#"U")
- ON ERROR &lcSavErr
- IF llEmbProc
-    DO SuiteBootstrapLog WITH "[BOOT-04] embebido exe OK (suite_full_unlock en Duna.exe)"
-    RETURN
- ENDIF
- IF  .NOT. EMPTY(lcerr)
-    DO SuiteBootstrapLog WITH "[BOOT-05] embebido sin SyncInit: "+lcerr
- ENDIF
- * .prg obligatorio: .fxp no registra DEFINE CLASS (error 1732 al arrancar sync)
+ * v1 legacy: solo si existe suite_full_unlock.prg en disco (no en proyecto v2).
  LOCAL lcPrg, llPrg
  lcPrg = tcStyleRoot+"PROGS\suite_full_unlock.prg"
  IF  .NOT. FILE(lcPrg)
@@ -1329,7 +1315,9 @@ PROCEDURE SuiteStartSyncIfReady
     RETURN
  ENDIF
  DO SuiteBootstrapLog WITH "[BOOT-09] llamando Suite_SyncInit cfg="+lccfg
- DO Suite_SyncInit
+ IF TYPE("Suite_SyncInit")#"U"
+    DO Suite_SyncInit
+ ENDIF
 ENDPROC
 **
 FUNCTION SuiteUnlockLibPath

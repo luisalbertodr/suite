@@ -25,7 +25,7 @@ SET DEFAULT TO (lcRoot)
 lcLog = lcRoot + "build_" + lcStem + ".log"
 STRTOFILE("=== VfpCompileSuitePrgs "+TTOC(DATETIME())+" root="+lcRoot+" ==="+CHR(13), lcLog, .F.)
 
-lcList = "general,funciones,suite_cola_sync,suite_control_sync,export_build_stubs"
+lcList = "export_build_stubs,general,funciones,suite_cola_sync,suite_control_sync"
 FOR lnI = 1 TO GETWORDCOUNT(lcList, ",")
    lcBase = GETWORDNUM(lcList, lnI, ",")
    IF .NOT. FILE(lcProgs + lcBase + ".prg")

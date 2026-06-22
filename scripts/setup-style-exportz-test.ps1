@@ -80,6 +80,18 @@ if ($KeepProgsFallback) {
     Write-Host "  PROGS vaciado (sync embebida en exe)" -ForegroundColor Green
 }
 
+Write-Step "DBF runtime desde ExportZ"
+$runtimeDbfs = @("_menus.dbf", "_menus.cdx", "foxypreviewer_locs.dbf")
+foreach ($name in $runtimeDbfs) {
+    $src = Join-Path $ExportRoot $name
+    if (-not (Test-Path $src)) { continue }
+    Copy-Item $src (Join-Path $DestRoot $name) -Force
+    Write-Host "  OK $name" -ForegroundColor Green
+}
+if (-not (Test-Path (Join-Path $DestRoot "_menus.dbf"))) {
+    Write-Warn "Falta _menus.dbf en ExportZ - Style pedira Buscar al arrancar"
+}
+
 Write-Step "Scripts de arranque"
 Copy-Item (Join-Path $RepoRoot "scripts\ensure-style-dbc.ps1") (Join-Path $DestRoot "ensure-style-dbc.ps1") -Force
 

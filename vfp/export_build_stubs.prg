@@ -20,6 +20,47 @@ FUNCTION damemargen
  RETURN ROUND(lnmargen, 2)
 ENDFUNC
 
+* --- Stubs enlace build v2 (sin suite_full_unlock.prg en el proyecto) ---
+PROCEDURE SuiteEnsureGlobals
+ IF TYPE("pcidioma")#"C"
+    PUBLIC pcidioma, pcpais, pcversionpais
+    pcidioma = "CA"
+    pcpais = "ESP"
+    pcversionpais = "ESP"
+ ENDIF
+ENDPROC
+
+PROCEDURE SuiteShutdown
+ENDPROC
+
+PROCEDURE SuiteApplyFullUnlock
+ DO SuiteEnsureGlobals
+ENDPROC
+
+FUNCTION SuiteSyncEnsureLoaded
+ RETURN (TYPE("Suite_SyncInit")#"U")
+ENDFUNC
+
+PROCEDURE SuiteEnsureSyncGlobals
+ENDPROC
+
+FUNCTION SuiteCreateHttp
+ RETURN .NULL.
+ENDFUNC
+
+PROCEDURE Suite_SyncStopTimer
+ENDPROC
+
+FUNCTION SuiteStyleRoot
+ RETURN ADDBS(IIF(TYPE("pcSuiteStyleRoot")="C" .AND. .NOT. EMPTY(pcSuiteStyleRoot), pcSuiteStyleRoot, SYS(5)+SYS(2003)))
+ENDFUNC
+
+PROCEDURE Suite_SyncPushDelete
+ENDPROC
+
+PROCEDURE Suite_SyncAfterIncidencia
+ENDPROC
+
 FUNCTION enviaremailpresupuesto
  PARAMETER tcnumpre, tcemail, tcmsgretorno
  RETURN .T.

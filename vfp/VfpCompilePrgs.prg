@@ -26,7 +26,7 @@ lcLog = lcRoot + "build_" + lcStem + ".log"
 
 STRTOFILE("=== VfpCompilePrgs "+TTOC(DATETIME())+" root="+lcRoot+" stem="+lcStem+" repair="+IIF(llRepair, "1", "0")+" ==="+CHR(13), lcLog, .F.)
 
-lcList = "general,funciones"
+lcList = "export_build_stubs,general,funciones"
 FOR lnI = 1 TO GETWORDCOUNT(lcList, ",")
    lcBase = GETWORDNUM(lcList, lnI, ",")
    IF FILE(lcProgs + lcBase + ".ERR")

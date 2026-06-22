@@ -52,7 +52,7 @@ Get-Process vfp9 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorActio
 
 foreach ($base in @("general", "funciones", "suite_cola_sync", "suite_control_sync")) {
     $err = Join-Path $ProgsExport "$base.ERR"
-    if (Test-Path $err) { throw "Error compilando $base — ver $err" }
+    if (Test-Path $err) { throw "Error compilando $base - ver $err" }
 }
 
 if (-not (Test-Path $TestRoot)) { New-Item -ItemType Directory -Path $TestRoot -Force | Out-Null }
@@ -71,7 +71,7 @@ Write-Host "  OK config.fpw STARTUP v2" -ForegroundColor Green
 $testProgs = Join-Path $TestRoot "PROGS"
 if (-not (Test-Path $testProgs)) { New-Item -ItemType Directory -Path $testProgs -Force | Out-Null }
 
-$repoPrgs = @("general.prg", "funciones.prg", "suite_cola_sync.prg", "suite_control_sync.prg", "suite_inbound_worker.prg", "suite_v2_startup.prg", "suite_full_unlock.prg")
+$repoPrgs = @("general.prg", "funciones.prg", "suite_cola_sync.prg", "suite_control_sync.prg", "suite_inbound_worker.prg", "suite_v2_startup.prg")
 foreach ($f in $repoPrgs) {
     Copy-Item (Join-Path $VfpRepo $f) (Join-Path $testProgs $f) -Force
 }
