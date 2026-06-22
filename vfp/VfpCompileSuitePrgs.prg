@@ -1,4 +1,4 @@
-* Compila PRGs Suite para ReFox Replace (v2: cola sync, sin suite_full_unlock).
+* Compila PRGs Suite para build VFP9 nativo (v2: cola sync, sin suite_full_unlock).
 LOCAL lcRoot, lcProgs, lcLog, lcList, lnI, lcBase, lcErrTxt, lcSav, lcStem, lcHere, llRepair
 
 lcHere = FULLPATH(SYS(16))
@@ -60,5 +60,5 @@ FOR lnI = 1 TO GETWORDCOUNT("suite_full_unlock", ",")
    ENDIF
 ENDFOR
 
-STRTOFILE("Suite PRGs listos para ReFox Replace."+CHR(13), lcLog, .T.)
-DO VfpBuildExit WITH .F., "Compilacion Suite OK (general, funciones, suite_cola_sync)."+CHR(13)+CHR(13)+"Siguiente: ReFox Replace en Duna.exe"+CHR(13)+CHR(13)+"Log: "+lcLog
+STRTOFILE("Suite PRGs listos para BUILD EXE VFP9."+CHR(13), lcLog, .T.)
+DO VfpBuildExit WITH .F., "Compilacion Suite OK (general, funciones, suite_cola_sync)."+CHR(13)+CHR(13)+"Siguiente: BUILD EXE Duna.exe en VFP9 IDE"+CHR(13)+CHR(13)+"Log: "+lcLog

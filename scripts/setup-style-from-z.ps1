@@ -259,7 +259,7 @@ echo Style test (exe Z): %CD%
 echo Log: Usuarios\_suite_sync.log
 echo.
 
-start "" /D "%STYLE_HOME%" "%STYLE_HOME%Duna.exe"
+start "" /D "%STYLE_HOME%" "%STYLE_HOME%\Duna.exe"
 "@
 Set-Content -Path (Join-Path $DestRoot "IniciarStyle.bat") -Value $bat -Encoding ASCII
 Write-Host "  OK IniciarStyle.bat" -ForegroundColor Green

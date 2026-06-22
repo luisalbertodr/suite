@@ -580,6 +580,7 @@ export function buildOpenwaMessageUpsertRow(
   return {
     company_id: companyId,
     chat_id: chatId,
+    source_provider: 'openwa',
     waha_message_id: id,
     from_jid: String(raw.from ?? m.from ?? chatId),
     from_me: openwaMessageFromMe(raw),

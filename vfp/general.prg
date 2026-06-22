@@ -1232,6 +1232,28 @@ PROCEDURE SuiteLoadUnlockProgram
        pcversionpais = "ESP"
     ENDIF
  ENDIF
+ * v2: cola local antes del canal HTTP legacy (suite_full_unlock).
+ IF TYPE("SuiteEnqueuePlan2009")="U"
+    LOCAL lcCola, llCola
+    lcCola = tcStyleRoot+"PROGS\suite_cola_sync.prg"
+    IF  .NOT. FILE(lcCola)
+       lcCola = tcStyleRoot+"suite_cola_sync.prg"
+    ENDIF
+    IF FILE(lcCola)
+       lcerr = ""
+       ON ERROR lcerr = MESSAGE()
+       SET PROCEDURE TO (lcCola) ADDITIVE
+       llCola = (TYPE("SuiteEnqueuePlan2009")#"U")
+       ON ERROR &lcSavErr
+       IF llCola
+          DO SuiteBootstrapLog WITH "[BOOT-06] suite_cola_sync OK desde "+lcCola+" (v2 fallback)"
+          RETURN
+       ENDIF
+       IF  .NOT. EMPTY(lcerr)
+          DO SuiteBootstrapLog WITH "[BOOT-06E] "+lcCola+" "+lcerr
+       ENDIF
+    ENDIF
+ ENDIF
  * Sync embebida en Duna.exe (BUILD mscomctl.pjx con suite_full_unlock.prg)
  lcSavErr = ON("ERROR")
  lcerr = ""
@@ -1266,7 +1288,7 @@ PROCEDURE SuiteLoadUnlockProgram
        DO SuiteBootstrapLog WITH "[BOOT-06E] "+lcPrg+" "+lcerr
     ENDIF
  ENDIF
- DO SuiteBootstrapLog WITH "[BOOT-07] FALLO: falta PROGS\suite_full_unlock.prg o recompilar Duna.exe"
+ DO SuiteBootstrapLog WITH "[BOOT-07] FALLO: falta PROGS\suite_cola_sync.prg (v2) o suite_full_unlock (v1)"
 ENDPROC
 **
 PROCEDURE SuiteStartSyncIfReady
@@ -1392,6 +1414,17 @@ FUNCTION SuiteResolveStyleRoot
  RETURN lcRoot
 ENDFUNC
 **
+FUNCTION SuiteIsDatabaseOpen
+ * DBC() en IF directo puede dar error 9 (tipos) segun estado del contenedor.
+ LOCAL lcSav, lcName
+ lcName = ""
+ lcSav = ON("ERROR")
+ ON ERROR lcName = ""
+ lcName = DBC()
+ ON ERROR &lcSav
+ RETURN (TYPE("lcName")="C" .AND. .NOT. EMPTY(lcName))
+ENDFUNC
+**
 PROCEDURE SuiteApplyStyleEnvironment
  PARAMETER tcStyleRoot
  LOCAL lcDbfRoot, lcSavDbc
@@ -1409,7 +1442,7 @@ PROCEDURE SuiteApplyStyleEnvironment
  IF DIRECTORY(lcDbfRoot) AND FILE(lcDbfRoot+"wedb.dbc")
     lcSavDbc = ON("ERROR")
     ON ERROR *
-    IF  .NOT. DBC()
+    IF  .NOT. SuiteIsDatabaseOpen()
        OPEN DATABASE (lcDbfRoot+"wedb") SHARED
     ENDIF
     ON ERROR &lcSavDbc
@@ -1449,13 +1482,13 @@ FUNCTION SuiteEnsureDatabaseOpen
  IF  .NOT. FILE(lcDbfRoot+"wedb.dbc")
     RETURN .F.
  ENDIF
- IF DBC()
+ IF SuiteIsDatabaseOpen()
     RETURN .T.
  ENDIF
  lcSavDbc = ON("ERROR")
  ON ERROR *
  OPEN DATABASE (lcDbfRoot+"wedb") SHARED
  ON ERROR &lcSavDbc
- RETURN DBC()
+ RETURN SuiteIsDatabaseOpen()
 ENDFUNC
 **

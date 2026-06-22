@@ -296,6 +296,7 @@ async function persistOutgoingMessage(
       {
         company_id: companyId,
         chat_id: chatId,
+        source_provider: normalizeWhatsappProvider(cfg.provider),
         waha_message_id: wahaId,
         from_jid: cfg.me_jid ?? null,
         from_me: true,

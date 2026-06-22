@@ -69,6 +69,7 @@ export type WhatsappProxyAction = {
   | { action: 'media.download'; url?: string; chat_id?: string; message_id?: string; alt_chat_ids?: string[] }
   | { action: 'messages.prefetch_media'; chat_id: string; limit?: number; alt_chat_ids?: string[] }
   | { action: 'data.purge'; logout_waha?: boolean }
+  | { action: 'data.purge_openwa' }
 );
 
 export async function invokeWhatsappProxy<T = unknown>(
@@ -368,6 +369,23 @@ export const useWhatsappConfig = () => {
     },
   });
 
+  const purgeOpenwaHistory = useMutation({
+    mutationFn: async () =>
+      invokeWhatsappProxy<{
+        ok: boolean;
+        messages_deleted: number;
+        chats_removed: number;
+        chats_updated: number;
+      }>({
+        action: 'data.purge_openwa',
+      }),
+    onSuccess: () => {
+      invalidate();
+      queryClient.invalidateQueries({ queryKey: ['whatsapp-chats'] });
+      queryClient.invalidateQueries({ queryKey: ['whatsapp-messages'] });
+    },
+  });
+
   return {
     config: configQuery.data ?? null,
     isLoading: configQuery.isLoading,
@@ -383,5 +401,6 @@ export const useWhatsappConfig = () => {
     configureWebhook,
     ping,
     purgeHistory,
+    purgeOpenwaHistory,
   };
 };

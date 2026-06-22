@@ -12,6 +12,8 @@ param(
     [string]$ProjectName = "mscomctlOk",  # proyecto nativo del decompile ExportZ (NO mscomctl de Export)
     [switch]$AfterBuild,
     [switch]$SkipRepair,
+    [switch]$SkipCompile,
+    [switch]$SkipBuildExe,
     [switch]$SkipPrepare,
     [switch]$DeployTest,
     [switch]$DeployVm,
@@ -46,15 +48,12 @@ function Invoke-VfpPrg {
     if (-not (Test-Path $PrgPath)) { throw "No existe $PrgPath" }
     Get-Process -Name vfp9 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 1
-    $env:SUITE_VFP_HEADLESS = "1"
-    try {
-        $proc = Start-Process -FilePath $VfpExe -ArgumentList "`"$PrgPath`"" -WorkingDirectory $ExportRoot -PassThru -WindowStyle Hidden
-    } finally {
-        Remove-Item Env:\SUITE_VFP_HEADLESS -ErrorAction SilentlyContinue
-    }
+    $cmd = 'set SUITE_VFP_HEADLESS=1&& "' + $VfpExe + '" /C "DO ' + $PrgPath + '"'
+    $proc = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", $cmd -WorkingDirectory $ExportRoot -PassThru -WindowStyle Hidden
     $null = $proc.WaitForExit($TimeoutSec * 1000)
     if (-not $proc.HasExited) {
         Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+        Get-Process -Name vfp9 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
         throw "Timeout VFP ($TimeoutSec s): $PrgPath"
     }
     Get-Process -Name vfp9 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
@@ -103,7 +102,8 @@ function Sync-BuildScripts {
         "VfpCompilePrgs.prg",
         "VfpCompileSuitePrgs.prg",
         "VfpHeadlessBuild.prg",
-        "VfpBuildProject.prg"
+        "VfpBuildProject.prg",
+        "RepairExportzFromLfn.prg"
     )
     foreach ($f in $scripts) {
         $src = Join-Path $VfpRepo $f
@@ -138,29 +138,33 @@ function Test-PrgCompileOk {
 function Show-UserBuildStep {
     Write-Host ""
     Write-Host "========================================" -ForegroundColor Magenta
-    Write-Host " TU UNICO PASO MANUAL (VFP9 IDE)" -ForegroundColor Magenta
+    Write-Host " BUILD NATIVO VFP9 IDE (obligatorio)" -ForegroundColor Magenta
     Write-Host "========================================" -ForegroundColor Magenta
     Write-Host @"
 
-  1. Abre Visual FoxPro 9
-  2. File > Open Project > $ExportRoot\$ProjectName
-     (archivo: mscomctlok.pjx / mscomctlOk.pjx segun decompile)
-  3. Ventana de comandos (Ctrl+F2):
+  Si el .pjt da memo invalid: cierra VFP y ejecuta .\scripts\fix-exportz-pjt.ps1
+  Luego en VFP9:
+    A) File > New > Project > $ProjectName  en  $ExportRoot
+       DO PROGS\RepairExportzFromLfn.prg
+       File > Save
+    B) O File > Open Project > $ExportRoot\$ProjectName
+       Locate File: Ignore All
+       DO PROGS\RepairExportzFromLfn.prg
+       File > Save
 
+  Compilar (Ctrl+F2):
        SET DEFAULT TO $ExportRoot
        DO PROGS\VfpCompilePrgs.prg
        DO PROGS\VfpBuildProject.prg
 
-     Si falla el script: martillo Build > Win32 executable
-     carpeta $ExportRoot\
+  O en Project Manager: Build (martillo) > Win32 executable
+  O comando: BUILD EXE Duna.exe FROM $ProjectName RECOMPILE
 
-  Alternativa sin BUILD PROJECT (recomendada si PM da guerra):
-       .\scripts\refox-replace-exportz.ps1
-
-  4. Cuando termine, en PowerShell:
-
+  Post-build PowerShell:
        cd C:\Users\OportoW11\Suite\suite
        .\scripts\build-style-exportz.ps1 -AfterBuild -DeployTest
+       .\scripts\validate-style-exportz-build.ps1
+       .\scripts\verify-style-cutover.ps1 -NewExe "$ExportRoot\Duna.exe"
 
 "@ -ForegroundColor White
 }
@@ -169,11 +173,11 @@ if ($AfterBuild) {
     Write-Step "Post-build ExportZ"
     & (Join-Path $RepoRoot "scripts\copy-duna-exe.ps1") -ExportRoot $ExportRoot
     $duna = Join-Path $ExportRoot "Duna.exe"
-    if (-not (Test-Path $duna)) { throw "No existe $duna — ejecuta VfpBuildProject en VFP primero" }
+    if (-not (Test-Path $duna)) { throw "No existe $duna - ejecuta VfpBuildProject en VFP primero" }
     $fi = Get-Item $duna
     Write-Ok ("Duna.exe  {0:N0} bytes  {1}" -f $fi.Length, $fi.LastWriteTime)
     if ($fi.Length -gt 34MB) {
-        Write-Warn "Exe > 34 MB — revisar si arranca sin 1732 (objetivo ~30-31 MB)"
+        Write-Warn "Exe > 34 MB - revisar si arranca sin 1732 (objetivo ~30-31 MB)"
     }
     if ($DeployTest) {
         Write-Step "Copiar a test"
@@ -197,7 +201,7 @@ Write-Host "Proyecto: $ProjectName"
 
 if (-not (Test-Path $VfpExe)) { throw "Instala VFP9 en $VfpExe" }
 if (-not (Test-Path $Pjx)) {
-    throw "Falta $Pjx — descompila Duna.exe de Z:\Style-Dunasoft en ExportZ primero"
+    throw "Falta $Pjx - descompila Duna.exe de Z:\Style-Dunasoft en ExportZ primero"
 }
 
 Set-Content -Path (Join-Path $ExportRoot "suite_project.cfg") -Value $ProjectName -Encoding ASCII -NoNewline
@@ -261,6 +265,9 @@ if (-not $SkipRepair) {
 }
 
 Write-Step "4/4 Compilar general + funciones"
+if ($SkipCompile -and (Test-PrgCompileOk)) {
+    Write-Ok "SkipCompile: FXP al dia (general + funciones)"
+} else {
 Remove-StaleBuildFxp -ProgsDir $Progs
 $compile = Join-Path $Progs "VfpCompilePrgs.prg"
 Invoke-VfpPrg -PrgPath $compile -TimeoutSec 600
@@ -277,6 +284,7 @@ Write-Ok "general + funciones compilados (sin .ERR)"
 if (Test-Path $Log) {
     Get-Content $Log -Tail 6 | ForEach-Object { if (-not $Quiet) { Write-Host "  $_" -ForegroundColor DarkGray } }
 }
+}
 
 foreach ($fxp in @("suite_full_unlock.fxp", "suite_full_unlock.FXP")) {
     $p = Join-Path $Progs $fxp
@@ -286,8 +294,11 @@ foreach ($fxp in @("suite_full_unlock.fxp", "suite_full_unlock.FXP")) {
     }
 }
 
-Write-Step "5/5 BUILD exe (solo VfpBuildProject headless; sin SendKeys)"
+Write-Step "5/5 BUILD exe (VfpBuildProject headless, sin SendKeys)"
 $buildOk = $false
+if ($SkipBuildExe) {
+    Write-Ok "SkipBuildExe: compilar en VFP9 IDE (BUILD EXE Duna.exe FROM $ProjectName RECOMPILE)"
+} else {
 $buildPrg = Join-Path $Progs "VfpBuildProject.prg"
 try {
     Invoke-VfpPrg -PrgPath $buildPrg -TimeoutSec 120
@@ -297,6 +308,7 @@ try {
     }
 } catch {
     Write-Warn $_.Exception.Message
+}
 }
 
 $builtExe = Join-Path $ExportRoot "$ProjectName.exe"
@@ -320,6 +332,4 @@ if ($buildOk -and (Test-Path $builtExe)) {
 
 Show-UserBuildStep
 Write-Host ""
-Write-Warn "BUILD PROJECT no funciona headless en este VFP9."
-Write-Host "Alternativa rapida (ReFox Replace):" -ForegroundColor Yellow
-Write-Host "  .\scripts\refox-replace-exportz.ps1" -ForegroundColor White
+Write-Warn "BUILD EXE requiere VFP9 IDE (ReFox no compila ni enlaza el proyecto v2)."

@@ -207,6 +207,61 @@ PROCEDURE SuiteReleaseInstanceLock
  RETURN
 ENDPROC
 **
+FUNCTION SuiteSyncV2Redirect
+ PARAMETER tcPhase
+ LOCAL lcRoot, lcCola, lcCtrl, llV2, lcSavErr, lcErr
+ lcRoot = IIF(TYPE("pcSuiteStyleRoot")="C" .AND. .NOT. EMPTY(pcSuiteStyleRoot), ADDBS(pcSuiteStyleRoot), ADDBS(SYS(5)+SYS(2003)))
+ llV2 = .F.
+ IF TYPE("SuiteColaIsV2Active")#"U" AND SuiteColaIsV2Active()
+    llV2 = .T.
+ ELSE
+    IF FILE(lcRoot+"control_sincro.dbf")
+       lcSavErr = ON("ERROR")
+       lcErr = ""
+       ON ERROR lcErr = MESSAGE()
+       USE (lcRoot+"control_sincro.dbf") IN 0 SHARED ALIAS _ctl_sync
+       ON ERROR &lcSavErr
+       IF USED("_ctl_sync")
+          SELECT _ctl_sync
+          llV2 = (ALLTRIM(modo_activo)=="2")
+          USE IN _ctl_sync
+       ENDIF
+    ELSE
+       llV2 = .T.
+    ENDIF
+ ENDIF
+ IF  .NOT. llV2
+    RETURN .F.
+ ENDIF
+ lcCtrl = lcRoot+"PROGS\suite_control_sync.prg"
+ lcCola = lcRoot+"PROGS\suite_cola_sync.prg"
+ IF FILE(lcCtrl)
+    SET PROCEDURE TO (lcCtrl) ADDITIVE
+ ENDIF
+ IF FILE(lcCola)
+    lcSavErr = ON("ERROR")
+    lcErr = ""
+    ON ERROR lcErr = MESSAGE()
+    SET PROCEDURE TO (lcCola) ADDITIVE
+    ON ERROR &lcSavErr
+ ENDIF
+ IF TYPE("SuiteEnqueuePlan2009")="U"
+    RETURN .F.
+ ENDIF
+ DO SuiteEnsureSyncGlobals
+ plSuiteSyncEnabled = .T.
+ plSuiteFullUnlock = .F.
+ IF TYPE("SuiteBootstrapLog")#"U"
+    DO SuiteBootstrapLog WITH "[BOOT-06] v2 redirect suite_full_unlock ("+tcPhase+")"
+ ENDIF
+ IF UPPER(ALLTRIM(tcPhase))=="INIT"
+    IF TYPE("Suite_SyncLog")#"U"
+       DO Suite_SyncLog WITH "[INIT-03] Style sync v2 cola activa (sin HTTP)"
+    ENDIF
+ ENDIF
+ RETURN .T.
+ENDFUNC
+**
 PROCEDURE SuiteShutdown
  TRY
     IF TYPE("Suite_SyncStopTimer")#"U"
@@ -219,6 +274,9 @@ PROCEDURE SuiteShutdown
 ENDPROC
 **
 PROCEDURE SuiteApplyFullUnlock
+ IF SuiteSyncV2Redirect("unlock")
+    RETURN
+ ENDIF
  DO SuiteEnsureSyncGlobals
  DO SuiteEnsureGlobals
  plSuiteFullUnlock = .T.
@@ -322,6 +380,9 @@ PROCEDURE SuiteEnsureUnlockPrgLoaded
 ENDPROC
 **
 PROCEDURE Suite_SyncInit
+ IF SuiteSyncV2Redirect("init")
+    RETURN
+ ENDIF
  LOCAL lcfichero, lcline, lckey, lcval, lccontent, lnlines, i
  DO SuiteEnsureUnlockPrgLoaded
  DO SuiteEnsureSyncGlobals

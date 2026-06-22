@@ -130,5 +130,5 @@ STRTOFILE("RepairExportzFromLfn OK"+CHR(13), lcLog, .T.)
 
 lcMsg = "Proyecto "+lcStem+" listo ("+ALLTRIM(STR(lnTotal))+" archivos)."+CHR(13)+CHR(13)
 lcMsg = lcMsg+"File > Save en Project Manager"+CHR(13)
-lcMsg = lcMsg+"Luego: martillo Build o refox-replace-exportz.ps1"
+lcMsg = lcMsg+"Luego: BUILD EXE Duna.exe FROM "+lcStem+" RECOMPILE"
 DO SuiteNotifyUser WITH lcMsg, 64, "Repair ExportZ", lcLog

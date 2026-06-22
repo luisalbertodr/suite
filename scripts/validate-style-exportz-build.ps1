@@ -48,7 +48,7 @@ if (Test-Path $log) {
         Test-Check $false "Log menciona error 1732"
     }
 } else {
-    Write-Host "  INFO Sin log aun — arranca IniciarStyle.bat y vuelve a ejecutar" -ForegroundColor Yellow
+    Write-Host "  INFO Sin log aun - arranca IniciarStyle.bat y vuelve a ejecutar" -ForegroundColor Yellow
 }
 
 $cfg = Join-Path $TestRoot "SuiteSync.cfg"
@@ -58,8 +58,8 @@ Test-Check (Test-Path $vcx) "vcx\pellib.vcx en test"
 
 Write-Host ""
 if ($fail -eq 0) {
-    Write-Host "Validacion OK ($fail fallos)" -ForegroundColor Green
+    Write-Host ("Validacion OK ({0} fallos)" -f $fail) -ForegroundColor Green
     exit 0
 }
-Write-Host "Validacion con $fail fallo(s) — revisa build y arranque" -ForegroundColor Red
+Write-Host ("Validacion con {0} fallo(s) - revisa build y arranque" -f $fail) -ForegroundColor Red
 exit 1

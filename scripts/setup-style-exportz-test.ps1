@@ -47,7 +47,7 @@ if (-not (Test-Path $DestRoot)) {
 
 $duna = Join-Path $DestRoot "Duna.exe"
 if (-not (Test-Path $duna)) {
-    throw "Falta $duna — ejecuta build-style-exportz.ps1 -AfterBuild -DeployTest primero"
+    throw "Falta $duna - ejecuta build-style-exportz.ps1 -AfterBuild -DeployTest primero"
 }
 
 $quarantine = Join-Path $DestRoot ("_suite_quarantine\" + (Get-Date -Format "yyyyMMdd-HHmmss"))
@@ -95,7 +95,7 @@ if exist "%~dp0ensure-style-dbc.ps1" (
 )
 
 if not exist "%CD%\Duna.exe" (
-  echo ERROR: falta Duna.exe — build-style-exportz.ps1 -AfterBuild -DeployTest
+  echo ERROR: falta Duna.exe - build-style-exportz.ps1 -AfterBuild -DeployTest
   pause & exit /b 1
 )
 if not exist SuiteSync.cfg (
@@ -113,7 +113,7 @@ echo Style ExportZ test: %CD%
 echo Log: Usuarios\_suite_sync.log
 echo.
 
-start "" /D "%STYLE_HOME%" "%STYLE_HOME%Duna.exe"
+start "" /D "%STYLE_HOME%" "%STYLE_HOME%\Duna.exe"
 "@
 Set-Content -Path (Join-Path $DestRoot "IniciarStyle.bat") -Value $bat -Encoding ASCII
 
@@ -143,7 +143,7 @@ if (-not $SkipEmpresaCopy -and (Test-Path $SourceRoot)) {
 
 $fi = Get-Item $duna
 $leeme = @"
-Style-Suite-Test — build ExportZ (decompile Z)
+Style-Suite-Test - build ExportZ (decompile Z)
 ==============================================
 Fecha: $(Get-Date -Format 'yyyy-MM-dd HH:mm')
 

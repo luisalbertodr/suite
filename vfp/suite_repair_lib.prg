@@ -350,6 +350,12 @@ ENDPROC
 
 PROCEDURE SuiteNotifyUser
  PARAMETER tcmsg, tnicon, tctitle, tclog
+ IF UPPER(ALLTRIM(GETENV("SUITE_VFP_HEADLESS"))) == "1"
+    IF .NOT. EMPTY(tclog)
+       STRTOFILE(ALLTRIM(tctitle)+": "+tcmsg+CHR(13), tclog, .T.)
+    ENDIF
+    RETURN
+ ENDIF
  DO SuiteActivateVfp
  IF .NOT. EMPTY(tclog)
     STRTOFILE(ALLTRIM(tctitle)+": "+tcmsg+CHR(13), tclog, .T.)

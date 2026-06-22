@@ -117,6 +117,9 @@ ENDFUNC
 PROCEDURE VfpBuildExit
  PARAMETER tlError, tcMsg
  IF VfpShouldQuitAfterBuild()
+    IF TYPE("gcSuiteBuildLog")="C" .AND. .NOT. EMPTY(gcSuiteBuildLog)
+       STRTOFILE(IIF(tlError, "EXIT ERROR: ", "EXIT OK: ")+tcMsg+CHR(13), gcSuiteBuildLog, .T.)
+    ENDIF
     QUIT
  ENDIF
  IF tlError

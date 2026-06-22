@@ -112,6 +112,7 @@ export const WhatsappConfig: React.FC = () => {
     configureWebhook,
     ping,
     purgeHistory,
+    purgeOpenwaHistory,
   } = useWhatsappConfig();
 
   const [pingResult, setPingResult] = useState<null | {
@@ -753,6 +754,41 @@ export const WhatsappConfig: React.FC = () => {
             <Button
               variant="destructive"
               className="border-destructive/50"
+              disabled={purgeOpenwaHistory.isPending}
+              onClick={() => {
+                if (
+                  !window.confirm(
+                    '¿Borrar solo los mensajes guardados con OpenWA?\n\n' +
+                      'Se conservará el historial sincronizado con WAHA. ' +
+                      'Los chats sin mensajes restantes se eliminarán.\n\n' +
+                      'Esta acción no se puede deshacer.',
+                  )
+                ) {
+                  return;
+                }
+                purgeOpenwaHistory.mutate(undefined, {
+                  onSuccess: (res) => {
+                    toast({
+                      title: 'Mensajes OpenWA eliminados',
+                      description: `${res.messages_deleted} mensajes borrados. ${res.chats_removed} chats vacíos eliminados.`,
+                    });
+                  },
+                  onError: (e) => {
+                    toast({
+                      title: 'Error',
+                      description: e instanceof Error ? e.message : 'No se pudo limpiar OpenWA',
+                      variant: 'destructive',
+                    });
+                  },
+                });
+              }}
+            >
+              <Trash2 className="mr-2 h-3.5 w-3.5" />
+              {purgeOpenwaHistory.isPending ? 'Limpiando OpenWA…' : 'Borrar mensajes OpenWA'}
+            </Button>
+            <Button
+              variant="destructive"
+              className="border-destructive/50"
               disabled={purgeHistory.isPending}
               onClick={() => {
                 if (
@@ -787,7 +823,8 @@ export const WhatsappConfig: React.FC = () => {
             </Button>
           </div>
           <p className="text-[11px] text-muted-foreground">
-            Usa «Limpiar historial» antes de escanear el QR con un teléfono nuevo para no mezclar conversaciones antiguas.
+            «Borrar mensajes OpenWA» quita solo el historial importado con OpenWA y mantiene WAHA.
+            «Limpiar historial» borra todo antes de vincular un teléfono nuevo.
           </p>
           {config?.qr_data_url ? (
             <div className="flex justify-center pt-2">

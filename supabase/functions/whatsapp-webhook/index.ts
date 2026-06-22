@@ -826,6 +826,7 @@ async function handleMessage(
   companyId: string,
   payload: WahaMessagePayload,
   mePushName?: string | null,
+  sourceProvider: 'waha' | 'openwa' = 'waha',
 ) {
   const m = normalizeMessage(payload, mePushName);
   if (!m) {
@@ -846,6 +847,7 @@ async function handleMessage(
   const messageRow = {
     company_id: companyId,
     chat_id: chatId,
+    source_provider: sourceProvider,
     waha_message_id: m.id,
     from_jid: m.fromJid,
     from_me: m.fromMe,
@@ -1171,9 +1173,11 @@ serve(async (req) => {
     }
 
     let envelope: WahaEnvelope;
+    let fromOpenwa = false;
     try {
       const rawBody = bodyText ? JSON.parse(bodyText) : null;
-      envelope = isOpenwaWebhookBody(rawBody)
+      fromOpenwa = isOpenwaWebhookBody(rawBody);
+      envelope = fromOpenwa
         ? openwaToWahaEnvelope(rawBody as OpenwaWebhookEnvelope)
         : (rawBody as WahaEnvelope);
     } catch {
@@ -1187,7 +1191,13 @@ serve(async (req) => {
     }
 
     if (event === 'message' || event === 'message.any') {
-      await handleMessage(admin, companyId, (envelope.payload ?? {}) as WahaMessagePayload, cfgRow.me_pushname);
+      await handleMessage(
+        admin,
+        companyId,
+        (envelope.payload ?? {}) as WahaMessagePayload,
+        cfgRow.me_pushname,
+        fromOpenwa ? 'openwa' : 'waha',
+      );
     } else if (event === 'message.ack' || event === 'message.reaction') {
       await handleAck(admin, companyId, (envelope.payload ?? {}) as WahaMessagePayload);
     } else if (

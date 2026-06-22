@@ -68,7 +68,7 @@ if (-not $SkipPrgCopy) {
 }
 
 Write-Step "ExportZ PRGs (sin compilar exe)"
-& "$RepoRoot\scripts\build-style-exportz.ps1" -SkipPrepare:$false 2>$null
+& "$RepoRoot\scripts\build-style-exportz.ps1" -SkipRepair -SkipCompile -SkipBuildExe 2>$null
 if ($LASTEXITCODE -ne 0) {
     Write-Host "  AVISO: build-style-exportz terminó con avisos (FXP bloqueado si VFP abierto). PRGs ya copiados." -ForegroundColor Yellow
 }

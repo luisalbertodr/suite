@@ -23,6 +23,7 @@ import {
 import { useDunasoftAgendaDay } from '@/hooks/useDunasoftAgendaDay';
 import { useDunasoftAppointmentMutations } from '@/hooks/useDunasoftAppointmentMutations';
 import { useDunasoftSyncStatus } from '@/hooks/useDunasoftSyncStatus';
+import { StyleSyncStatusPanel } from '@/components/StyleSyncStatusPanel';
 import { useAuth } from '@/hooks/useAuth';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { usePermissionGuard } from '@/hooks/usePermissionGuard';
@@ -325,6 +326,8 @@ export const DunasoftAgenda: React.FC = () => {
           Agenda Suite (legacy)
         </Link>
       </div>
+
+      <StyleSyncStatusPanel companyId={companyId} className="mx-1" />
 
       {isError ? (
         <div className="flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">

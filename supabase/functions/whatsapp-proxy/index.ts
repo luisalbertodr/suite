@@ -180,6 +180,7 @@ type ActionBody = {
   | { action: 'chat.search_link'; q: string; limit?: number }
   | { action: 'pictures.sync_batch'; chat_ids?: string[]; limit?: number }
   | { action: 'data.purge'; logout_waha?: boolean }
+  | { action: 'data.purge_openwa' }
 );
 
 const json = (body: unknown, status = 200) =>
@@ -1281,6 +1282,7 @@ async function syncChatMessagesFromWaha(
   const rows = data.map((m) => ({
     company_id: companyId,
     chat_id: rowChatId,
+    source_provider: 'waha',
     waha_message_id: m.id,
     from_jid: resolveIncomingFromJid(
       chatId,
@@ -2742,6 +2744,7 @@ serve(async (req) => {
           const insertRow = {
             company_id: companyId,
             chat_id: chatId,
+            source_provider: provider,
             waha_message_id: wahaId,
             from_jid: cfg.me_jid ?? null,
             from_me: true,
@@ -3227,6 +3230,15 @@ serve(async (req) => {
         }
 
         return json({ ok: true, ...purged, waha_logout_attempted: logoutWaha });
+      }
+
+      case 'data.purge_openwa': {
+        const { data: purged, error: purgeErr } = await admin.rpc(
+          'whatsapp_purge_openwa_data_internal',
+          { p_company_id: companyId },
+        );
+        if (purgeErr) throw purgeErr;
+        return json(purged ?? { ok: true });
       }
 
       default: {

@@ -27,4 +27,4 @@ echo Log: Usuarios\_suite_sync.log
 echo.
 
 REM /D fija el directorio de trabajo (critico: EMPRESA.DBF, dbf\, SuiteSync.cfg)
-start "" /D "%STYLE_HOME%" "%STYLE_HOME%Duna.exe"
+start "" /D "%STYLE_HOME%" "%STYLE_HOME%\Duna.exe"

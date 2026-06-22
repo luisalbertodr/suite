@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { createClient } from "@supabase/supabase-js";
+import WebSocket from "ws";
 import { Dbf } from "dbf-reader";
 import fs from "node:fs";
 import path from "node:path";
@@ -49,6 +50,8 @@ if (!supabaseUrl || !supabaseKey) {
   console.error("Faltan SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY en .env");
   process.exit(1);
 }
+
+(globalThis as { WebSocket?: unknown }).WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 

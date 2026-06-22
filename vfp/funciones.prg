@@ -4621,7 +4621,7 @@ FUNCTION BuscarAniversarios
  lcclientes = lcroot+"dbf\clientes"
  IF  .NOT. USED("clientes")
     llnueva = .F.
-    IF DBC()
+    IF SuiteIsDatabaseOpen()
        USE clientes IN 0 SHARED AGAIN ALIAS clientes
        llnueva = .T.
     ENDIF
