@@ -1,4 +1,4 @@
-* Kill switch v1/v2 — control_sincro.dbf (modo_activo: '1'=HTTP, '2'=cola+agente).
+* Kill switch v1/v2 — control_sincro.dbf (modo: '1'=HTTP, '2'=cola+agente). Campos <=10 chars (dbf-reader).
 
 FUNCTION SuiteSyncRoot
  LOCAL lc
@@ -9,28 +9,45 @@ FUNCTION SuiteSyncRoot
 ENDFUNC
 
 PROCEDURE SuiteEnsureControlSincro
- LOCAL lcpath, llWasOpen
+ LOCAL lcpath, llWasOpen, lcSav, lcErr
  lcpath = SuiteSyncRoot() + "control_sincro"
  llWasOpen = USED("control_sincro")
+ SET SAFETY OFF
  IF FILE(lcpath + ".dbf")
     IF  .NOT. llWasOpen
+       lcSav = ON("ERROR")
+       lcErr = ""
+       ON ERROR lcErr = MESSAGE()
        USE SHARED (lcpath) ALIAS control_sincro IN 0
+       ON ERROR &lcSav
     ENDIF
     RETURN
  ENDIF
- CREATE TABLE (lcpath) FREE (modo_activo C(1), actualizado T, notas C(80))
+ lcSav = ON("ERROR")
+ lcErr = ""
+ ON ERROR lcErr = MESSAGE()
+ CREATE TABLE (lcpath) FREE (modo C(1), actualiz T, notas C(80))
+ USE
  USE SHARED (lcpath) ALIAS control_sincro IN 0
+ ON ERROR &lcSav
+ IF  .NOT. USED("control_sincro")
+    RETURN
+ ENDIF
  SELECT control_sincro
- APPEND BLANK
- REPLACE modo_activo WITH "2", actualizado WITH DATETIME(), notas WITH "v2 cola+agente"
+ IF RECCOUNT() = 0
+    APPEND BLANK
+    REPLACE modo WITH "2", actualiz WITH DATETIME(), notas WITH "v2 cola+agente"
+ ENDIF
 ENDPROC
 
 FUNCTION SuiteSyncModoActivo
  LOCAL lcmodo, lcalias
  lcalias = SELECT()
  DO SuiteEnsureControlSincro
- SELECT control_sincro
- lcmodo = ALLTRIM(NVL(control_sincro.modo_activo, "2"))
+ IF  .NOT. USED("control_sincro")
+    RETURN "2"
+ ENDIF
+ lcmodo = ALLTRIM(NVL(control_sincro.modo, "2"))
  IF EMPTY(lcmodo)
     lcmodo = "2"
  ENDIF

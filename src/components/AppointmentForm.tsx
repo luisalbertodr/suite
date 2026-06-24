@@ -14,6 +14,7 @@ import { APPOINTMENT_CUSTOMER_SUMMARY_FIELDS } from '@/lib/appointmentCustomerSu
 import type { Appointment, AppointmentItemDraft } from '@/types/agenda';
 import { calcEndFromStart, effectiveDurationMinutes } from '@/lib/agendaAppointmentItems';
 import { AGENDA_APPOINTMENT_MODAL_Z } from '@/lib/agendaResourceColors';
+import { DOCK_CLEARANCE_BOTTOM } from '@/lib/dialogLayers';
 import { toRecursoCatalogEntries } from '@/lib/agendaRecursoMatch';
 import { appointmentItemLineTotal } from '@/lib/agendaAppointmentPricing';
 import { appointmentChargeableTotal, canChargeAppointment } from '@/lib/appointmentSales';
@@ -264,7 +265,7 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
   };
 
   return (
-    <div className={`fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center ${AGENDA_APPOINTMENT_MODAL_Z} px-3 pt-2 pb-24 sm:p-4`}>
+    <div className={`fixed inset-x-0 top-0 ${DOCK_CLEARANCE_BOTTOM} bg-black/50 flex items-start sm:items-center justify-center ${AGENDA_APPOINTMENT_MODAL_Z} px-3 pt-2 pb-24 sm:p-4`}>
       <Card className="w-full max-w-md overflow-visible">
         <CardHeader className="pb-2 pt-3 px-4">
           <div className="flex items-start gap-2">

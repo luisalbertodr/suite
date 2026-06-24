@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -9,6 +8,8 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ClinicalHistoryFormBody } from '@/components/clinical/ClinicalHistoryFormBody';
 import { AGENDA_CLINICAL_HISTORY_OVERLAY_Z } from '@/lib/agendaResourceColors';
+import { DOCK_CLEARANCE_BOTTOM } from '@/lib/dialogLayers';
+import { PanelAwareBodyPortal } from '@/components/PanelAwareBodyPortal';
 import {
   clinicalHistoryToFormValues,
   fetchClinicalHistoryByAppointment,
@@ -150,10 +151,11 @@ export const AppointmentClinicalHistoryPanel: React.FC<Props> = ({
 
   if (!open || typeof document === 'undefined') return null;
 
-  return createPortal(
+  return (
+    <PanelAwareBodyPortal open={open}>
     <div
       className={cn(
-        'fixed inset-0 flex items-start sm:items-center justify-center px-3 pt-3 pb-24 sm:p-4',
+        `fixed inset-x-0 top-0 ${DOCK_CLEARANCE_BOTTOM} flex items-start sm:items-center justify-center px-3 pt-3 pb-24 sm:p-4`,
         AGENDA_CLINICAL_HISTORY_OVERLAY_Z,
       )}
       role="dialog"
@@ -210,7 +212,7 @@ export const AppointmentClinicalHistoryPanel: React.FC<Props> = ({
           )}
         </CardContent>
       </Card>
-    </div>,
-    document.body,
+    </div>
+    </PanelAwareBodyPortal>
   );
 };

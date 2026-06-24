@@ -159,17 +159,25 @@ FUNCTION SuitePlanFieldExists
  IF  .NOT. USED(tcAlias)
     RETURN .F.
  ENDIF
- RETURN (FIELD(tcField, tcAlias) > 0)
+ * FIELD() espera numero de campo; para comprobar por NOMBRE usamos TYPE("alias.campo").
+ RETURN (TYPE(tcAlias + "." + ALLTRIM(tcField)) <> "U")
 ENDFUNC
 
 PROCEDURE SuiteEnsurePlan2009SyncVersion
  IF  .NOT. USED("plan2009")
     RETURN
  ENDIF
- SELECT plan2009
- IF  .NOT. SuitePlanFieldExists("plan2009", "sync_version")
-    ALTER TABLE plan2009 ADD COLUMN sync_version N(15, 0)
+ IF SuitePlanFieldExists("plan2009", "sync_version")
+    RETURN
  ENDIF
+ * ALTER TABLE exige acceso exclusivo; el worker corre con plan2009 compartido (coexiste con Style).
+ * Si no se puede anadir la columna (tabla compartida), el LWW usa idand como fallback. La columna
+ * sync_version debe anadirse una vez de forma exclusiva en la preparacion del cutover.
+ SELECT plan2009
+ TRY
+    ALTER TABLE plan2009 ADD COLUMN sync_version N(15, 0)
+ CATCH
+ ENDTRY
 ENDPROC
 
 FUNCTION SuiteGetPlanSyncVersion
@@ -314,8 +322,15 @@ PROCEDURE SuiteInboundApplyOne
  lcfact = SuiteGetObjBoolSi(toMsg, "facturado")
 
  ldFecha = {}
- IF  .NOT. EMPTY(ALLTRIM(SuiteGetObj(toMsg, "fecha", "")))
-    ldFecha = CTOD(LEFT(ALLTRIM(SuiteGetObj(toMsg, "fecha", "")), 10))
+ LOCAL lcFechaIso
+ lcFechaIso = LEFT(ALLTRIM(SuiteGetObj(toMsg, "fecha", "")), 10)
+ IF  .NOT. EMPTY(lcFechaIso)
+    * Suite envia ISO yyyy-mm-dd; DATE() es independiente de SET DATE (CTOD fallaba con formato americano).
+    IF LEN(lcFechaIso) >= 10 .AND. SUBSTR(lcFechaIso, 5, 1) == "-"
+       ldFecha = DATE(VAL(LEFT(lcFechaIso, 4)), VAL(SUBSTR(lcFechaIso, 6, 2)), VAL(SUBSTR(lcFechaIso, 9, 2)))
+    ELSE
+       ldFecha = CTOD(lcFechaIso)
+    ENDIF
  ENDIF
 
  IF  .NOT. USED("plan2009")
@@ -369,16 +384,16 @@ PROCEDURE SuiteInboundApplyOne
           REPLACE nomcli WITH lcnomcli, tel1cli WITH lctel1cli
           REPLACE colfon WITH lnColfon, collet WITH lnCollet
           REPLACE facturado WITH lcfact
-          IF FIELD("idand", "plan2009") > 0
+          IF SuitePlanFieldExists("plan2009", "idand")
              REPLACE idand WITH lnidand
           ENDIF
-          IF FIELD("macand", "plan2009") > 0
+          IF SuitePlanFieldExists("plan2009", "macand")
              REPLACE macand WITH lcMac
           ENDIF
-          IF FIELD("enviadoand", "plan2009") > 0
+          IF SuitePlanFieldExists("plan2009", "enviadoand")
              REPLACE enviadoand WITH .T.
           ENDIF
-          IF FIELD("enviar", "plan2009") > 0
+          IF SuitePlanFieldExists("plan2009", "enviar")
              REPLACE enviar WITH .F.
           ENDIF
           IF SuitePlanFieldExists("plan2009", "sync_version")
@@ -400,16 +415,16 @@ PROCEDURE SuiteInboundApplyOne
           REPLACE nomcli WITH lcnomcli, tel1cli WITH lctel1cli
           REPLACE colfon WITH lnColfon, collet WITH lnCollet
           REPLACE facturado WITH lcfact
-          IF FIELD("idand", "plan2009") > 0
+          IF SuitePlanFieldExists("plan2009", "idand")
              REPLACE idand WITH lnidand
           ENDIF
-          IF FIELD("macand", "plan2009") > 0
+          IF SuitePlanFieldExists("plan2009", "macand")
              REPLACE macand WITH lcMac
           ENDIF
-          IF FIELD("enviadoand", "plan2009") > 0
+          IF SuitePlanFieldExists("plan2009", "enviadoand")
              REPLACE enviadoand WITH .T.
           ENDIF
-          IF FIELD("enviar", "plan2009") > 0
+          IF SuitePlanFieldExists("plan2009", "enviar")
              REPLACE enviar WITH .F.
           ENDIF
           IF SuitePlanFieldExists("plan2009", "sync_version")
@@ -470,8 +485,18 @@ PROCEDURE SuiteInboundWorkerRun
  LOCAL lcRoot, lcInbound, lcAck, lnN, lnI, lcFile, lcJson, loMsg, lcerr, lnCycle
  LOCAL ARRAY laFiles[1]
 
+ SET SAFETY OFF
+ SET ESCAPE OFF
+ IF UPPER(ALLTRIM(GETENV("SUITE_INBOUND_HEADLESS"))) == "1" ;
+    .OR. UPPER(ALLTRIM(GETENV("SUITE_VFP_HEADLESS"))) == "1"
+    _SCREEN.Visible = .F.
+ ENDIF
+
  = SuiteLoadControlSync()
- IF TYPE("SuiteSyncModoV2Active")="U" .OR. .NOT. SuiteSyncModoV2Active()
+ IF TYPE("SuiteEnsureControlSincro") <> "U"
+    DO SuiteEnsureControlSincro
+ ENDIF
+ IF TYPE("SuiteSyncModoV2Active") <> "U" .AND. .NOT. SuiteSyncModoV2Active()
     RETURN
  ENDIF
 
@@ -523,8 +548,9 @@ PROCEDURE SuiteInboundWorkerRun
        DO SuiteInboundLog WITH "error "+lcFile+": "+lcerr
     ENDTRY
  ENDFOR
+ IF UPPER(ALLTRIM(GETENV("SUITE_INBOUND_HEADLESS"))) == "1" ;
+    .OR. UPPER(ALLTRIM(GETENV("SUITE_VFP_HEADLESS"))) == "1"
+    QUIT
+ ENDIF
 ENDPROC
-
-* Entrada para ejecución directa.
-DO SuiteInboundWorkerRun
 

@@ -30,6 +30,12 @@ export function useWhatsappAutomationSettings() {
   const query = useQuery({
     queryKey: ['whatsapp-automation-settings', companyId],
     enabled: !!companyId && !companyLoading,
+    staleTime: 5 * 60_000,
+    retry: (failureCount, error) => {
+      const msg = error instanceof Error ? error.message : String(error);
+      if (/403|42501|permission|policy/i.test(msg)) return false;
+      return failureCount < 2;
+    },
     queryFn: async () => {
       const { data, error } = await supabase
         .from('whatsapp_automation_settings')
@@ -38,6 +44,9 @@ export function useWhatsappAutomationSettings() {
         .maybeSingle();
       if (error) throw error;
       if (data) return data as WhatsappAutomationSettings;
+      const { data: isAdmin, error: adminErr } = await supabase.rpc('is_admin');
+      if (adminErr) throw adminErr;
+      if (!isAdmin) return null;
       const { data: inserted, error: insErr } = await supabase
         .from('whatsapp_automation_settings')
         .insert({ company_id: companyId! })

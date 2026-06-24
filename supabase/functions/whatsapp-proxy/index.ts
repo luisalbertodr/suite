@@ -64,6 +64,14 @@ import {
   buildOpenwaMessageUpsertRow,
 } from '../_shared/whatsappProviderOpenwa.ts';
 import { OPENWA_WEBHOOK_EVENTS } from '../_shared/whatsappProviderTypes.ts';
+import {
+  openwaMediaRequiresPublicUrl,
+  isOggOpusBase64,
+  openwaVoiceNoteFormatError,
+  normalizeOutgoingStorageMime,
+  stripMediaBase64,
+  uploadWhatsappOutgoingMedia,
+} from '../_shared/whatsappOutgoingMediaStorage.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -912,9 +920,10 @@ async function persistWhatsappMessageMedia(
   mime: string,
 ): Promise<string | null> {
   if (!buf.byteLength) return null;
-  const path = mediaStoragePath(companyId, messageId, mime);
+  const storageMime = normalizeOutgoingStorageMime(mime);
+  const path = mediaStoragePath(companyId, messageId, storageMime);
   const { error } = await admin.storage.from(WA_MEDIA_BUCKET).upload(path, buf, {
-    contentType: mime,
+    contentType: storageMime,
     upsert: true,
   });
   if (error) {
@@ -925,13 +934,55 @@ async function persistWhatsappMessageMedia(
   if (url) {
     await admin
       .from('whatsapp_messages')
-      .update({ media_url: url, media_mime_type: mime })
+      .update({ media_url: url, media_mime_type: storageMime })
       .eq('company_id', companyId)
       .eq('waha_message_id', messageId)
       .then(() => undefined)
       .catch(() => undefined);
   }
   return url;
+}
+
+function base64MediaToArrayBuffer(b64: string): ArrayBuffer {
+  const cleaned = stripMediaBase64(b64);
+  const binary = atob(cleaned);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+
+function outgoingPersistMime(
+  provider: WhatsappProvider,
+  type: SendBody['type'],
+  mime: string,
+): string {
+  if (provider === 'openwa' && (type === 'audio' || type === 'voice')) {
+    return 'audio/ogg';
+  }
+  return normalizeOutgoingStorageMime(mime);
+}
+
+async function persistOutgoingSentMedia(
+  admin: ReturnType<typeof createClient>,
+  companyId: string,
+  wahaId: string,
+  mediaBase64: string,
+  mime: string,
+  provider: WhatsappProvider,
+  type: SendBody['type'],
+): Promise<string | null> {
+  try {
+    return await persistWhatsappMessageMedia(
+      admin,
+      companyId,
+      wahaId,
+      base64MediaToArrayBuffer(mediaBase64),
+      outgoingPersistMime(provider, type, mime),
+    );
+  } catch (e) {
+    console.warn('persistOutgoingSentMedia:', e instanceof Error ? e.message : e);
+    return null;
+  }
 }
 
 function isPersistedWhatsappMediaUrl(url: string | null | undefined): boolean {
@@ -2638,6 +2689,7 @@ serve(async (req) => {
         const type = sendBody.type ?? 'text';
 
         let sendResult: { messageId: string | null; timestamp?: number; raw: unknown };
+        let outgoingMime: string | null = null;
         if (type === 'text') {
           if (!sendBody.text) return err('Falta `text`');
           sendResult = await providerSendText(providerCfg, chatId, sendBody.text, {
@@ -2651,17 +2703,47 @@ serve(async (req) => {
           type === 'voice'
         ) {
           if (!sendBody.media_base64) return err('Falta `media_base64`');
-          const mime = sendBody.mime_type ?? 'application/octet-stream';
+          outgoingMime = sendBody.mime_type ?? 'application/octet-stream';
+          const mime = outgoingMime;
+          const mediaType = type === 'document' ? 'document' : type;
+          if (
+            provider === 'openwa' &&
+            (mediaType === 'audio' || mediaType === 'voice') &&
+            /webm|mpeg|mp3|mp4|wav/i.test(mime)
+          ) {
+            return err(
+              'OpenWA solo admite notas de voz en OGG/Opus. Adjunta un archivo .ogg.',
+            );
+          }
+          if (
+            provider === 'openwa' &&
+            (mediaType === 'audio' || mediaType === 'voice') &&
+            (/ogg|opus/i.test(mime) || /\.ogg$/i.test(sendBody.filename ?? '')) &&
+            !isOggOpusBase64(sendBody.media_base64)
+          ) {
+            return err(openwaVoiceNoteFormatError());
+          }
+          const mediaInput = {
+            base64: sendBody.media_base64,
+            mime,
+            filename: sendBody.filename ?? 'file',
+            caption: sendBody.caption,
+          };
+          if (provider === 'openwa' && openwaMediaRequiresPublicUrl(mediaType)) {
+            mediaInput.url = await uploadWhatsappOutgoingMedia(
+              admin,
+              companyId,
+              sendBody.media_base64,
+              mime,
+              buildStoragePublicUrl,
+              sendBody.filename,
+            );
+          }
           sendResult = await providerSendMedia(
             providerCfg,
             chatId,
-            type === 'document' ? 'document' : type,
-            {
-              base64: sendBody.media_base64,
-              mime,
-              filename: sendBody.filename ?? 'file',
-              caption: sendBody.caption,
-            },
+            mediaType,
+            mediaInput,
           );
         } else {
           return err(`Tipo no soportado: ${type}`);
@@ -2683,6 +2765,19 @@ serve(async (req) => {
             ? new Date(res.timestamp * 1000).toISOString()
             : new Date().toISOString();
         const outgoingBody = type === 'text' ? sendBody.text ?? null : null;
+
+        let outgoingMediaUrl: string | null = null;
+        if (wahaId && sendBody.media_base64 && type !== 'text' && outgoingMime) {
+          outgoingMediaUrl = await persistOutgoingSentMedia(
+            admin,
+            companyId,
+            wahaId,
+            sendBody.media_base64,
+            outgoingMime,
+            provider,
+            type,
+          );
+        }
 
         // Detectar el JID real del destinatario que devuelve Waha. WhatsApp
         // moderno usa @lid en lugar de @c.us para muchos chats; si Waha nos
@@ -2751,7 +2846,7 @@ serve(async (req) => {
             type,
             body: outgoingBody,
             caption: type !== 'text' ? sendBody.caption ?? null : null,
-            media_url: null,
+            media_url: outgoingMediaUrl,
             media_mime_type: type !== 'text' ? sendBody.mime_type ?? null : null,
             media_filename: type !== 'text' ? sendBody.filename ?? null : null,
             quoted_message_id: sendBody.reply_to_message_id?.trim() || null,

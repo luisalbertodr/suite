@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Home, Calendar, ShoppingBag, Receipt, Users, Package, Settings, MapPin, Megaphone, MessageCircle, Phone } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -7,8 +8,9 @@ import { useMarketingUnread } from '@/hooks/useMarketingUnread';
 import { usePhoneMissedCalls } from '@/hooks/usePhoneMissedCalls';
 import { canAccessPhone } from '@/lib/phonePermissions';
 import { useNotificationSoundOnIncrease } from '@/hooks/useNotificationSoundOnIncrease';
-/** Por encima de modales de agenda (z-80–105) para poder cambiar de pestaña con formularios abiertos. */
-const DOCK_Z_CLASS = 'z-[120]';
+import { DOCK_BAR_Z } from '@/lib/dialogLayers';
+/** Por encima de modales para poder cambiar de pestaña con popups abiertos. */
+const DOCK_Z_CLASS = DOCK_BAR_Z;
 
 type DockItem = {
   label: string;
@@ -57,8 +59,8 @@ export const DockBar: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
-  const canSeeWhatsapp = hasPermission('whatsapp', 'read');
   const canSeeMarketing = hasPermission('marketing', 'read');
+  const canSeeWhatsapp = hasPermission('whatsapp', 'read') || canSeeMarketing;
   const { total: whatsappUnread } = useWhatsappUnread();
   const { total: marketingUnread } = useMarketingUnread();
   const { missedUnread } = usePhoneMissedCalls();
@@ -81,8 +83,10 @@ export const DockBar: React.FC = () => {
     return 0;
   };
 
-  return (
-    <div className={`fixed bottom-4 left-1/2 -translate-x-1/2 ${DOCK_Z_CLASS} pointer-events-auto`}>
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
+    <div className={`fixed bottom-4 left-1/2 -translate-x-1/2 ${DOCK_Z_CLASS} pointer-events-auto`} data-suite-dock-bar>
       <div className="flex items-end gap-1 px-3 py-2 bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl border border-white/20 dark:border-gray-700/50 rounded-2xl shadow-2xl shadow-black/10">
         {visibleItems.map((item) => {
           const isActive = isDockItemActive(location.pathname, item.path);
@@ -144,6 +148,7 @@ export const DockBar: React.FC = () => {
           );
         })}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };

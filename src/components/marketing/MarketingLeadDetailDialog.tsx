@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Phone, Mail, MessageCircle, Trash2, Archive, UserCheck, CalendarClock } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { usePermissions } from '@/hooks/usePermissions';
+import { openSuiteWhatsappChat } from '@/lib/openSuiteWhatsappChat';
 import { useMarketingPermissions } from '@/hooks/useMarketingPermissions';
 import {
   Dialog,
@@ -56,10 +56,8 @@ export const MarketingLeadDetailDialog: React.FC<MarketingLeadDetailDialogProps>
   const { toast } = useToast();
   const { updateLead, deleteLead, archiveLead } = useMarketingLeads(companyId);
   const navigate = useNavigate();
-  const { hasPermission } = usePermissions();
   const { canWrite: canEditMarketing, loading: marketingPermsLoading } = useMarketingPermissions();
   const saveBlocked = !marketingPermsLoading && !canEditMarketing;
-  const canUseWhatsapp = hasPermission('whatsapp', 'read');
 
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -89,7 +87,6 @@ export const MarketingLeadDetailDialog: React.FC<MarketingLeadDetailDialogProps>
 
   const phoneHref = phone ? `tel:${phone.replace(/\s+/g, '')}` : undefined;
   const emailHref = email ? `mailto:${email}` : undefined;
-  const waExternalHref = phone ? `https://wa.me/${phone.replace(/\D/g, '')}` : undefined;
   const fullLeadName = [firstName, lastName].filter(Boolean).join(' ').trim();
 
   const { atIso: resolvedApptIso, label: resolvedApptLabel } = resolveLeadAppointmentParts(lead);
@@ -106,15 +103,8 @@ export const MarketingLeadDetailDialog: React.FC<MarketingLeadDetailDialogProps>
       : resolvedApptLabel ?? '';
   const handleOpenWhatsapp = () => {
     if (!phone) return;
-    if (canUseWhatsapp) {
-      const params = new URLSearchParams();
-      params.set('phone', phone);
-      if (fullLeadName) params.set('name', fullLeadName);
-      onOpenChange(false);
-      navigate(`/whatsapp?${params.toString()}`);
-    } else if (waExternalHref) {
-      window.open(waExternalHref, '_blank', 'noreferrer');
-    }
+    onOpenChange(false);
+    openSuiteWhatsappChat(navigate, phone, fullLeadName);
   };
 
   const handleSave = async () => {
@@ -268,7 +258,7 @@ export const MarketingLeadDetailDialog: React.FC<MarketingLeadDetailDialogProps>
                   variant="outline"
                   size="icon"
                   type="button"
-                  title={canUseWhatsapp ? 'Abrir conversación de WhatsApp' : 'WhatsApp (wa.me)'}
+                  title="Abrir conversación en WhatsApp de Suite"
                   aria-label="WhatsApp"
                   onClick={handleOpenWhatsapp}
                   className="text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700 dark:hover:bg-emerald-950"

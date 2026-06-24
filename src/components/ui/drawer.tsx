@@ -2,16 +2,22 @@ import * as React from "react"
 import { Drawer as DrawerPrimitive } from "vaul"
 
 import { cn } from "@/lib/utils"
+import { usePanelAwareOpen } from "@/hooks/usePanelAwareOpen"
+import { DOCK_CLEARANCE_BOTTOM } from "@/lib/dialogLayers"
 
-const Drawer = ({
-  shouldScaleBackground = true,
-  ...props
-}: React.ComponentProps<typeof DrawerPrimitive.Root>) => (
-  <DrawerPrimitive.Root
-    shouldScaleBackground={shouldScaleBackground}
-    {...props}
-  />
-)
+type DrawerProps = React.ComponentProps<typeof DrawerPrimitive.Root>
+
+const Drawer = ({ open, onOpenChange, shouldScaleBackground = true, ...props }: DrawerProps) => {
+  const { effectiveOpen, handleOpenChange } = usePanelAwareOpen(open, onOpenChange);
+  return (
+    <DrawerPrimitive.Root
+      shouldScaleBackground={shouldScaleBackground}
+      open={effectiveOpen}
+      onOpenChange={handleOpenChange ?? onOpenChange}
+      {...props}
+    />
+  );
+}
 Drawer.displayName = "Drawer"
 
 const DrawerTrigger = DrawerPrimitive.Trigger
@@ -26,7 +32,7 @@ const DrawerOverlay = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DrawerPrimitive.Overlay
     ref={ref}
-    className={cn("fixed inset-0 z-50 bg-black/80", className)}
+    className={cn("fixed inset-x-0 top-0 z-50 bg-black/80", DOCK_CLEARANCE_BOTTOM, className)}
     {...props}
   />
 ))

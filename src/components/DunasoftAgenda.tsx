@@ -8,7 +8,6 @@ import {
   ChevronRight,
   Clock,
   AlertCircle,
-  Database,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
@@ -23,7 +22,8 @@ import {
 import { useDunasoftAgendaDay } from '@/hooks/useDunasoftAgendaDay';
 import { useDunasoftAppointmentMutations } from '@/hooks/useDunasoftAppointmentMutations';
 import { useDunasoftSyncStatus } from '@/hooks/useDunasoftSyncStatus';
-import { StyleSyncStatusPanel } from '@/components/StyleSyncStatusPanel';
+import { useStyleSyncAgentStatus } from '@/hooks/useStyleSyncAgentStatus';
+import { buildAgendaSyncBadge } from '@/lib/agendaSyncBadge';
 import { useAuth } from '@/hooks/useAuth';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { usePermissionGuard } from '@/hooks/usePermissionGuard';
@@ -36,7 +36,6 @@ import {
 } from '@/lib/agendaViewPersistence';
 import { DEFAULT_AGENDA_CENTER_HOURS } from '@/lib/agendaHours';
 import type { Appointment } from '@/types/agenda';
-import { Link } from 'react-router-dom';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -143,6 +142,12 @@ export const DunasoftAgenda: React.FC = () => {
   );
   const { createMutation, updateMutation, deleteMutation } = useDunasoftAppointmentMutations(selectedDateYmd);
   const { data: syncStatus } = useDunasoftSyncStatus(20_000);
+  const { data: styleSync } = useStyleSyncAgentStatus(companyId, 25_000);
+
+  const syncBadge = useMemo(
+    () => buildAgendaSyncBadge(syncStatus, styleSync),
+    [syncStatus, styleSync],
+  );
 
   const employees = data?.employees ?? [];
   const appointments = data?.appointments ?? [];
@@ -195,7 +200,7 @@ export const DunasoftAgenda: React.FC = () => {
               <ChevronRight className="w-3.5 h-3.5" />
             </Button>
           </div>
-          <PopoverContent className="w-auto p-0" align="center">
+          <PopoverContent className="w-auto p-0 z-[250]" align="center">
             <Calendar
               key={format(selectedDate, 'yyyy-MM')}
               mode="single"
@@ -213,6 +218,20 @@ export const DunasoftAgenda: React.FC = () => {
               toYear={2040}
               initialFocus
               className="pointer-events-auto p-2"
+              classNames={{
+                month: 'space-y-1',
+                caption: 'flex justify-center pt-0 pb-1 px-0 relative items-center',
+                caption_dropdowns: 'flex flex-row flex-nowrap items-center justify-center gap-1',
+                caption_label: 'hidden',
+                dropdown:
+                  'h-7 rounded-md border border-input bg-background px-1.5 py-0 text-xs font-medium cursor-pointer',
+                dropdown_month: 'shrink-0 max-h-7',
+                dropdown_year: 'shrink-0 max-h-7 w-[4.25rem]',
+              }}
+              labels={{
+                labelMonthDropdown: () => 'Mes',
+                labelYearDropdown: () => 'Año',
+              }}
             />
           </PopoverContent>
         </Popover>
@@ -227,6 +246,18 @@ export const DunasoftAgenda: React.FC = () => {
         >
           <Clock className="w-3.5 h-3.5 mr-1" /> Hoy
         </Button>
+        <span
+          className={`inline-flex h-7 shrink-0 items-center rounded-md border px-2 text-[11px] font-medium tabular-nums ${
+            syncBadge.tone === 'error'
+              ? 'border-destructive/40 bg-destructive/10 text-destructive'
+              : syncBadge.tone === 'pending'
+                ? 'border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300'
+                : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300'
+          }`}
+          title={syncBadge.title}
+        >
+          {syncBadge.label}
+        </span>
         <Button
           variant="ghost"
           size="sm"
@@ -238,7 +269,7 @@ export const DunasoftAgenda: React.FC = () => {
         </Button>
       </>
     ),
-    [datePickerOpen, isFetching, refetch, selectAgendaDate, selectedDate],
+    [datePickerOpen, isFetching, refetch, selectAgendaDate, selectedDate, syncBadge],
   );
 
   useRegisterTopBarContent(
@@ -306,29 +337,7 @@ export const DunasoftAgenda: React.FC = () => {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-2 px-1 text-xs text-muted-foreground">
-        <Database className="w-3.5 h-3.5 shrink-0" />
-        <span>
-          Coexistencia Suite ↔ Style: PG instantáneo + planinc + cola DBF.
-          {appointments.length > 0 ? ` ${appointments.length} citas este día.` : null}
-          {syncStatus && (syncStatus.pending_dbf > 0 || syncStatus.pending_outbox > 0) ? (
-            <span className="ml-1 text-amber-600 dark:text-amber-400">
-              · {syncStatus.pending_dbf + syncStatus.pending_outbox} pendiente(s) DBF
-            </span>
-          ) : syncStatus && syncStatus.error_dbf > 0 ? (
-            <span className="ml-1 text-destructive">· {syncStatus.error_dbf} error(es) DBF</span>
-          ) : syncStatus ? (
-            <span className="ml-1 text-emerald-600 dark:text-emerald-400">· DBF al día</span>
-          ) : null}
-        </span>
-        <Link to="/agenda-suite" className="ml-auto text-primary hover:underline">
-          Agenda Suite (legacy)
-        </Link>
-      </div>
-
-      <StyleSyncStatusPanel companyId={companyId} className="mx-1" />
-
+    <div className="flex h-[calc(100dvh-9rem)] min-h-[560px] flex-col gap-2">
       {isError ? (
         <div className="flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
           <AlertCircle className="w-4 h-4 shrink-0" />
@@ -342,7 +351,7 @@ export const DunasoftAgenda: React.FC = () => {
       {isLoading ? (
         <Skeleton className="flex-1 min-h-[24rem] w-full rounded-lg" />
       ) : (
-        <div className="flex-1 min-h-0 rounded-lg border border-border/60 overflow-hidden">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border/60 bg-card">
           <AgendaGrid
             employees={employees}
             appointments={appointments}

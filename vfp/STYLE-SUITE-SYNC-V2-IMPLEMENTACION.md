@@ -367,20 +367,24 @@ device: "//192.168.99.16/c$/Style-Dunasoft"
 
 Creada por `SuiteEnsureColaSincro` si no existe:
 
+> **Restricción crítica:** la tabla es **FREE** (no en DBC) y el agente la lee con `dbf-reader` (Node), que solo soporta el header físico DBF: **nombres de campo ≤10 caracteres** y **sin campos memo**. Por eso los campos usan nombres cortos y `servicios` es `C(254)` (no memo). `dbf-reader` devuelve las claves en MAYÚSCULAS; el agente las normaliza a minúsculas (`normalizeKeys`).
+
 | Campo | Tipo | Uso |
 |-------|------|-----|
 | `id` | N(10) | Secuencial local |
-| `tabla_afectada` | C(40) | `plan2009` |
-| `id_registro` | C(30) | `idplan` |
+| `tabla` | C(40) | `plan2009` (filtro del agente) |
+| `id_reg` | C(30) | `idplan` |
 | `accion` | C(3) | `INS` / `UPD` / `DEL` |
 | `procesado` | L | Legacy; v2 usa `last_cola_id` en Postgres |
 | `creado` | T | Timestamp encolado |
 | `codemp` … `collet` | varios | Snapshot cita |
-| `servicios` | M | JSON array `planart`: `[{"servicio":"…","hora":"…"}]` |
-| `style_modified_at` | C(20) | Epoch/modificado para RPC |
-| `version` | N(10) | Versión LWW (epoch o secuencial) |
+| `servicios` | C(254) | JSON array `planart`: `[{"servicio":"…","hora":"…"}]` (compacto, ≤254) |
+| `modif` | C(20) | Epoch/modificado para RPC (`p_style_modified_at`) |
+| `version` | N(15) | Versión LWW (epoch o secuencial) |
 
 > Migración segura: ejecutar `DO PROGS\suite_migrar_cola_sincro.prg` (o `SuiteMigrarColaSincroInline` al encolar) para `ALTER TABLE` de columnas snapshot **sin borrar** la cola. Solo borrar en test si se quiere empezar de cero.
+>
+> Nota: una cola creada con el esquema antiguo (`tabla_afectada`, `id_registro`, `style_modified_at`, `servicios M`) es incompatible con `dbf-reader`; en ese caso borrar `cola_sincro.*` para recrearla con el esquema corto.
 
 ---
 

@@ -379,18 +379,24 @@ ENDFUNC
 
 FUNCTION SuiteGetActiveMscomctlProject
  PARAMETER lcroot
- LOCAL loProj, lcwant, lcname, lcstem
+ LOCAL loProj, lcwant, lcname, lcstem, lcprojdir
  IF TYPE("_VFP.ActiveProject")#"O"
     RETURN .NULL.
  ENDIF
  loProj = _VFP.ActiveProject
  lcstem = SuiteResolveProjectStem(lcroot)
- lcwant = LOWER(FULLPATH(ADDBS(lcroot) + lcstem + ".pjx"))
+ lcroot = ADDBS(lcroot)
+ lcwant = LOWER(FULLPATH(lcroot + lcstem + ".pjx"))
  lcname = LOWER(FULLPATH(loProj.Name))
  IF lcname = lcwant
     RETURN loProj
  ENDIF
  IF UPPER(JUSTSTEM(loProj.Name)) = UPPER(lcstem)
+    RETURN loProj
+ ENDIF
+ * PM abierto en ExportZ (p. ej. proyecto recien creado con otro nombre temporal).
+ lcprojdir = LOWER(FULLPATH(JUSTPATH(loProj.Name)))
+ IF lcprojdir = LOWER(FULLPATH(lcroot))
     RETURN loProj
  ENDIF
  RETURN .NULL.
@@ -550,6 +556,32 @@ PROCEDURE SuiteRemoveProjFile
  ON ERROR &lcsav
 ENDPROC
 
+PROCEDURE SuiteExcludeProjV2Suites
+ PARAMETER toproj, tclog
+ LOCAL lni, loFile, lcStem, lnN
+ IF TYPE("toProj")#"O"
+    RETURN
+ ENDIF
+ lnN = 0
+ FOR lni = 1 TO toProj.Files.Count
+    loFile = toProj.Files(lni)
+    IF TYPE("loFile")#"O"
+       LOOP
+    ENDIF
+    lcStem = LOWER(JUSTSTEM(loFile.Name))
+    IF lcStem=="suite_cola_sync" .OR. lcStem=="suite_control_sync" .OR. lcStem=="export_build_stubs"
+       loFile.Exclude = .T.
+       lnN = lnN+1
+       IF  .NOT. EMPTY(tclog)
+          STRTOFILE("EXCLUDE: "+loFile.Name+CHR(13), tclog, .T.)
+       ENDIF
+    ENDIF
+ ENDFOR
+ IF  .NOT. EMPTY(tclog)
+    STRTOFILE("EXCLUDE v2 count="+ALLTRIM(STR(lnN))+CHR(13), tclog, .T.)
+ ENDIF
+ENDPROC
+
 PROCEDURE SuitePrepareExportFiles
  PARAMETER lcroot, tclog
  LOCAL lcconta, lctienda, lcsaldos, lcselcentros
@@ -658,7 +690,12 @@ PROCEDURE SuiteRepairMscomctlProject
 
  lcsav = ON("ERROR")
  ON ERROR STRTOFILE("ERROR open: "+MESSAGE()+CHR(13), tclog, .T.)
- loproj = SuiteOpenMscomctlProject(lcroot, tclog)
+ IF TYPE("_VFP.ActiveProject")="O" .AND. UPPER(JUSTSTEM(_VFP.ActiveProject.Name))==UPPER(SuiteResolveProjectStem(lcroot))
+    loProj = _VFP.ActiveProject
+    STRTOFILE("repair: ActiveProject PM abierto"+CHR(13), tclog, .T.)
+ ELSE
+    loProj = SuiteOpenMscomctlProject(lcroot, tclog)
+ ENDIF
  ON ERROR &lcsav
 
  IF TYPE("loProj")#"O"
@@ -713,11 +750,8 @@ PROCEDURE SuiteRepairMscomctlProject
  lnremoved = lnremoved+1
  ON ERROR &lcsav
 
- DO SuiteSafeAddProc WITH lcstubs, "export_build_stubs", tclog
- DO SuiteSafeAddProc WITH lccola, "suite_cola_sync", tclog
- IF FILE(lccontrol)
-    DO SuiteSafeAddProc WITH lccontrol, "suite_control_sync", tclog
- ENDIF
+ * v2: suite_cola_sync y control van #INCLUDE en general.prg (excluir del build suelto).
+ DO SuiteExcludeProjV2Suites WITH loProj, tclog
 
  laadd[1] = lcconta
  laadd[2] = lctienda
@@ -738,18 +772,8 @@ PROCEDURE SuiteRepairMscomctlProject
     ENDIF
  ENDFOR
 
- IF FILE(lccola) .AND.  .NOT. SuiteProjHasFile(loProj, lccola)
-    loProj.Files.Add(lccola)
-    STRTOFILE("ADD: "+lccola+CHR(13), tclog, .T.)
- ENDIF
- IF FILE(lccontrol) .AND.  .NOT. SuiteProjHasFile(loProj, lccontrol)
-    loProj.Files.Add(lccontrol)
-    STRTOFILE("ADD: "+lccontrol+CHR(13), tclog, .T.)
- ENDIF
- IF FILE(lcstubs) .AND.  .NOT. SuiteProjHasFile(loProj, lcstubs)
-    loProj.Files.Add(lcstubs)
-    STRTOFILE("ADD: "+lcstubs+CHR(13), tclog, .T.)
- ENDIF
+ * funciones.prg ya incluye v2 via #INCLUDE; no anadir PRGs sueltos al proyecto.
+ STRTOFILE("suite v2 #INCLUDE inline al inicio de general.prg"+CHR(13), tclog, .T.)
 
  LOCAL lcstem, lcolddef, lcPersistErr
  lcstem = SuiteResolveProjectStem(lcroot)

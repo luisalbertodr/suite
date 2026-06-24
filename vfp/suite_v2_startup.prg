@@ -19,6 +19,9 @@ IF FILE(lcCtrl)
    ON ERROR lcErr = MESSAGE()
    SET PROCEDURE TO (lcCtrl) ADDITIVE
    ON ERROR &lcSavErr
+   IF TYPE("SuiteEnsureControlSincro") #"U"
+      DO SuiteEnsureControlSincro
+   ENDIF
 ENDIF
 
 IF FILE(lcCola)

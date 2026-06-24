@@ -24,6 +24,9 @@ function Write-Step([string]$Msg) {
     Write-Host "=== $Msg ===" -ForegroundColor Cyan
 }
 
+function Write-Warn([string]$Msg) { Write-Host "  AVISO: $Msg" -ForegroundColor Yellow }
+
+
 function Move-ToQuarantine {
     param([string]$Path, [string]$QuarantineDir)
     if (-not (Test-Path $Path)) { return }
@@ -65,7 +68,7 @@ if (Test-Path $vcxSrc) {
     Write-Host "  AVISO: sin vcx en ExportZ" -ForegroundColor Yellow
 }
 
-Write-Step "PROGS (exe embebido)"
+Write-Step "PROGS (fallback worker; sync v2 en general.prg #INCLUDE)"
 $destProgs = Join-Path $DestRoot "PROGS"
 if (-not (Test-Path $destProgs)) {
     New-Item -ItemType Directory -Path $destProgs -Force | Out-Null
@@ -73,11 +76,29 @@ if (-not (Test-Path $destProgs)) {
 Get-ChildItem $destProgs -File | ForEach-Object {
     Move-ToQuarantine -Path $_.FullName -QuarantineDir (Join-Path $quarantine "progs_old")
 }
+$v2Prgs = @(
+    "suite_cola_sync.prg", "suite_control_sync.prg", "suite_migrar_cola_sincro.prg",
+    "suite_inbound_worker.prg", "suite_local_test_init.prg", "suite_v2_startup.prg"
+)
+foreach ($f in $v2Prgs) {
+    $src = Join-Path $VfpRepo $f
+    if (Test-Path $src) {
+        Copy-Item $src (Join-Path $destProgs $f) -Force
+        Write-Host "  OK $f" -ForegroundColor Green
+    }
+}
+# Nunca desplegar funciones.fxp / general.fxp: con PROGS en PATH, VFP los carga en lugar del
+# funciones embebido en Duna.exe (sin sync v2) y TYPE(SuiteEnqueuePlan2009) queda en U.
+foreach ($stale in @("funciones.fxp", "funciones.FXP", "general.fxp", "general.FXP")) {
+    $p = Join-Path $destProgs $stale
+    if (Test-Path $p) {
+        Move-ToQuarantine -Path $p -QuarantineDir (Join-Path $quarantine "progs_stale_fxp")
+    }
+}
+Copy-Item (Join-Path $destProgs "suite_cola_sync.prg") (Join-Path $DestRoot "suite_cola_sync.prg") -Force -ErrorAction SilentlyContinue
 if ($KeepProgsFallback) {
     Copy-Item (Join-Path $VfpRepo "suite_full_unlock.prg") (Join-Path $destProgs "suite_full_unlock.prg") -Force
     Write-Host "  fallback: suite_full_unlock.prg" -ForegroundColor DarkGray
-} else {
-    Write-Host "  PROGS vaciado (sync embebida en exe)" -ForegroundColor Green
 }
 
 Write-Step "DBF runtime desde ExportZ"
@@ -119,7 +140,10 @@ if not exist Usuarios mkdir Usuarios 2>nul
 if exist "%CD%\PROGS\suite_full_unlock.fxp" ren "%CD%\PROGS\suite_full_unlock.fxp" suite_full_unlock.fxp.bak >nul 2>&1
 if exist "%CD%\PROGS\suite_full_unlock.FXP" ren "%CD%\PROGS\suite_full_unlock.FXP" suite_full_unlock.fxp.bak >nul 2>&1
 if exist "%CD%\PROGS\funciones.fxp" ren "%CD%\PROGS\funciones.fxp" funciones.fxp.bak >nul 2>&1
+if exist "%CD%\PROGS\funciones.FXP" ren "%CD%\PROGS\funciones.FXP" funciones.fxp.bak >nul 2>&1
 if exist "%CD%\PROGS\general.fxp" ren "%CD%\PROGS\general.fxp" general.fxp.bak >nul 2>&1
+if exist "%CD%\PROGS\general.FXP" ren "%CD%\PROGS\general.FXP" general.fxp.bak >nul 2>&1
+rem sync v2 solo desde funciones embebido en Duna.exe (no FXP externos en PROGS)
 
 echo Style ExportZ test: %CD%
 echo Log: Usuarios\_suite_sync.log
@@ -132,6 +156,7 @@ Set-Content -Path (Join-Path $DestRoot "IniciarStyle.bat") -Value $bat -Encoding
 @"
 * VFP: directorio de trabajo = raiz Style
 DEFAULT=$DestRoot
+STARTUP=PROGS\suite_v2_startup.prg
 RESOURCE=OFF
 MVCOUNT=4096
 "@ | Set-Content (Join-Path $DestRoot "config.fpw") -Encoding ASCII
@@ -163,7 +188,8 @@ Duna.exe: $($fi.Length) bytes $($fi.LastWriteTime)
 Origen build: $ExportRoot
 
 Reglas:
-  - PROGS vacio (sync embebida en exe)
+  - PROGS: solo PRGs worker (sin funciones.fxp ni general.fxp)
+  - Sync v2 embebida en Duna.exe (#INCLUDE en general.prg)
   - Nunca suite_full_unlock.fxp en PROGS
   - vcx copiado desde ExportZ
 

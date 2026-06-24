@@ -6,7 +6,7 @@ import { ChevronLeft, ChevronRight, ExternalLink, FileText, Trash2, X } from 'lu
 import { Button } from '@/components/ui/button';
 import type { CustomerAttachment } from '@/lib/customerAttachments';
 import { DisplayableImage } from '@/components/cliente/DisplayableImage';
-import { cn } from '@/lib/utils';
+import { usePanelAwareVisible } from '@/hooks/usePanelAwareOpen';
 
 interface Props {
   items: CustomerAttachment[];
@@ -30,6 +30,7 @@ export const AttachmentLightbox: React.FC<Props> = ({
   onClose,
 }) => {
   const item = items[index];
+  const panelActive = usePanelAwareVisible(true);
   const hasPrev = index > 0;
   const hasNext = index < items.length - 1;
 
@@ -59,7 +60,7 @@ export const AttachmentLightbox: React.FC<Props> = ({
     };
   }, []);
 
-  if (!item || typeof document === 'undefined') return null;
+  if (!item || !panelActive || typeof document === 'undefined') return null;
 
   return createPortal(
     <div

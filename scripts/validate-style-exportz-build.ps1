@@ -32,7 +32,11 @@ foreach ($root in @($ExportRoot, $TestRoot)) {
 
 $badFxp = @(
     (Join-Path $TestRoot "PROGS\suite_full_unlock.fxp"),
-    (Join-Path $TestRoot "PROGS\suite_full_unlock.FXP")
+    (Join-Path $TestRoot "PROGS\suite_full_unlock.FXP"),
+    (Join-Path $TestRoot "PROGS\funciones.fxp"),
+    (Join-Path $TestRoot "PROGS\funciones.FXP"),
+    (Join-Path $TestRoot "PROGS\general.fxp"),
+    (Join-Path $TestRoot "PROGS\general.FXP")
 )
 foreach ($p in $badFxp) {
     Test-Check (-not (Test-Path $p)) "Sin $p"
@@ -41,8 +45,12 @@ foreach ($p in $badFxp) {
 $log = Join-Path $TestRoot "Usuarios\_suite_sync.log"
 if (Test-Path $log) {
     $content = Get-Content $log -Raw -ErrorAction SilentlyContinue
-    foreach ($code in @("[BOOT-00]", "[BOOT-04]", "[INIT-03]")) {
-        Test-Check ($content -match [regex]::Escape($code)) "Log contiene $code"
+    foreach ($code in @("[BOOT-00]", "[BOOT-04]", "[BOOT-06]", "[INIT-03]")) {
+        $found = $content -match [regex]::Escape($code)
+        if ($code -eq "[BOOT-04]" -and -not $found) {
+            $found = $content -match '\[BOOT-06\]'
+        }
+        Test-Check $found "Log contiene $code (o BOOT-06)"
     }
     if ($content -match "1732|nombre de clase") {
         Test-Check $false "Log menciona error 1732"

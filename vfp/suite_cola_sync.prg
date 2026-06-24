@@ -14,27 +14,42 @@ FUNCTION SuiteColaRoot
 ENDFUNC
 **
 PROCEDURE SuiteEnsureColaSincro
- LOCAL lcpath, lcalias, llWasOpen
+ LOCAL lcpath, lcalias, llWasOpen, llExclusive
  lcpath = SuiteColaRoot()+"cola_sincro"
  llWasOpen = USED("cola_sincro")
  IF FILE(lcpath+".dbf")
+    llExclusive = .F.
     IF  .NOT. llWasOpen
-       USE SHARED (lcpath) ALIAS cola_sincro IN 0
+       * Intentar EXCLUSIVE: la migracion de esquema (ALTER TABLE) lo exige.
+       TRY
+          USE EXCLUSIVE (lcpath) ALIAS cola_sincro IN 0
+          llExclusive = .T.
+       CATCH
+       ENDTRY
+       IF  .NOT. USED("cola_sincro")
+          USE SHARED (lcpath) ALIAS cola_sincro IN 0
+       ENDIF
     ENDIF
     DO SuiteMigrarColaSincroInline
+    IF llExclusive
+       * Reabrir compartido para no bloquear al agente Node.
+       USE IN cola_sincro
+       USE SHARED (lcpath) ALIAS cola_sincro IN 0
+    ENDIF
     RETURN
  ENDIF
+ * Campos <=10 chars y servicios C(254) (tabla FREE legible por dbf-reader Node; no memo, no nombres largos).
  CREATE TABLE (lcpath) FREE ;
-    (id N(10,0), tabla_afectada C(40), id_registro C(30), accion C(3), ;
+    (id N(10,0), tabla C(40), id_reg C(30), accion C(3), ;
      procesado L, creado T, ;
-     codemp C(15), codcli C(15), fecha D, horini C(5), horfin C(5), ;
+     codemp C(15), codcli C(15), fecha D, fechaiso C(10), horini C(5), horfin C(5), ;
      texto C(250), codrec C(15), nomcli C(80), tel1cli C(20), ;
-     facturado L, servicios M, colfon N(10,0), collet N(10,0), ;
-     style_modified_at C(20), version N(15,0))
- USE SHARED (lcpath) ALIAS cola_sincro IN 0
- SELECT cola_sincro
+     facturado L, servicios C(254), colfon N(10,0), collet N(10,0), ;
+     modif C(20), version N(15,0))
  INDEX ON procesado TAG proc
  INDEX ON id TAG idpk
+ USE
+ USE SHARED (lcpath) ALIAS cola_sincro IN 0
 ENDPROC
 **
 FUNCTION SuiteColaFieldExists
@@ -42,7 +57,8 @@ FUNCTION SuiteColaFieldExists
  IF  .NOT. USED(tcAlias)
     RETURN .F.
  ENDIF
- RETURN (FIELD(tcField, tcAlias) > 0)
+ * FIELD() espera numero de campo; para comprobar por NOMBRE usamos TYPE("alias.campo").
+ RETURN (TYPE(tcAlias + "." + ALLTRIM(tcField)) <> "U")
 ENDFUNC
 **
 PROCEDURE SuiteMigrarColaSincroInline
@@ -52,6 +68,9 @@ PROCEDURE SuiteMigrarColaSincroInline
     RETURN
  ENDIF
  SELECT cola_sincro
+ * ALTER TABLE exige acceso exclusivo; si la cola se abrio compartida, evitamos el crash.
+ * (El agente Node tolera columnas ausentes; el cutover recrea la cola con el esquema nuevo.)
+ TRY
  IF  .NOT. SuiteColaFieldExists("cola_sincro", "codemp")
     ALTER TABLE cola_sincro ADD COLUMN codemp C(15)
  ENDIF
@@ -60,6 +79,9 @@ PROCEDURE SuiteMigrarColaSincroInline
  ENDIF
  IF  .NOT. SuiteColaFieldExists("cola_sincro", "fecha")
     ALTER TABLE cola_sincro ADD COLUMN fecha D
+ ENDIF
+ IF  .NOT. SuiteColaFieldExists("cola_sincro", "fechaiso")
+    ALTER TABLE cola_sincro ADD COLUMN fechaiso C(10)
  ENDIF
  IF  .NOT. SuiteColaFieldExists("cola_sincro", "horini")
     ALTER TABLE cola_sincro ADD COLUMN horini C(5)
@@ -83,7 +105,7 @@ PROCEDURE SuiteMigrarColaSincroInline
     ALTER TABLE cola_sincro ADD COLUMN facturado L
  ENDIF
  IF  .NOT. SuiteColaFieldExists("cola_sincro", "servicios")
-    ALTER TABLE cola_sincro ADD COLUMN servicios M
+    ALTER TABLE cola_sincro ADD COLUMN servicios C(254)
  ENDIF
  IF  .NOT. SuiteColaFieldExists("cola_sincro", "colfon")
     ALTER TABLE cola_sincro ADD COLUMN colfon N(10, 0)
@@ -91,12 +113,15 @@ PROCEDURE SuiteMigrarColaSincroInline
  IF  .NOT. SuiteColaFieldExists("cola_sincro", "collet")
     ALTER TABLE cola_sincro ADD COLUMN collet N(10, 0)
  ENDIF
- IF  .NOT. SuiteColaFieldExists("cola_sincro", "style_modified_at")
-    ALTER TABLE cola_sincro ADD COLUMN style_modified_at C(20)
+ IF  .NOT. SuiteColaFieldExists("cola_sincro", "modif")
+    ALTER TABLE cola_sincro ADD COLUMN modif C(20)
  ENDIF
  IF  .NOT. SuiteColaFieldExists("cola_sincro", "version")
     ALTER TABLE cola_sincro ADD COLUMN version N(15, 0)
  ENDIF
+ CATCH
+    * Cola abierta en modo compartido: no se pudo migrar esquema. Se recreara en el cutover.
+ ENDTRY
  IF  .NOT. EMPTY(lcalias)
     SELECT (lcalias)
  ENDIF
@@ -186,10 +211,8 @@ FUNCTION SuiteBuildServiciosJson
 ENDFUNC
 **
 FUNCTION SuiteLoadControlSync
- LOCAL lcPrg
- lcPrg = SuiteColaRoot()+"PROGS\suite_control_sync.prg"
- IF FILE(lcPrg)
-    SET PROCEDURE TO (lcPrg) ADDITIVE
+ * Incluido en general.prg (#INCLUDE); no SET PROCEDURE externo en exe compilado.
+ IF TYPE("SuiteEnsureControlSincro")#"U"
     RETURN .T.
  ENDIF
  RETURN .F.
@@ -221,7 +244,7 @@ FUNCTION SuiteEnqueueCola
     lnId = cola_sincro.id
  ENDIF
  APPEND BLANK
- REPLACE id WITH lnId+1, tabla_afectada WITH tcTabla, id_registro WITH tcIdRegistro, ;
+ REPLACE id WITH lnId+1, tabla WITH tcTabla, id_reg WITH tcIdRegistro, ;
          accion WITH lcacc, procesado WITH .F., creado WITH DATETIME()
  IF  .NOT. EMPTY(lcalias)
     SELECT (lcalias)
@@ -243,7 +266,7 @@ FUNCTION SuiteColaIsV2Active
     ENDIF
     lcalias = SELECT()
     SELECT control_sincro
-    lcmodo = ALLTRIM(NVL(control_sincro.modo_activo, "2"))
+    lcmodo = ALLTRIM(NVL(control_sincro.modo, "2"))
     IF  .NOT. EMPTY(lcalias)
        SELECT (lcalias)
     ENDIF
@@ -338,6 +361,14 @@ FUNCTION SuiteEnqueuePlan2009
 
  lcServicios = SuiteBuildServiciosJson(VAL(lcId))
 
+ * Fecha tambien como cadena ISO YYYY-MM-DD: el dbf-reader del agente Node malinterpreta
+ * el campo D (mes 1-based como indice 0-based + desfase TZ). El agente usa fechaiso.
+ LOCAL lcFechaIso
+ lcFechaIso = ""
+ IF  .NOT. EMPTY(ldFecha)
+    lcFechaIso = STR(YEAR(ldFecha), 4) + "-" + PADL(ALLTRIM(STR(MONTH(ldFecha))), 2, "0") + "-" + PADL(ALLTRIM(STR(DAY(ldFecha))), 2, "0")
+ ENDIF
+
  DO SuiteEnsureColaSincro
  SELECT cola_sincro
  LOCAL lnId
@@ -347,13 +378,14 @@ FUNCTION SuiteEnqueuePlan2009
     lnId = cola_sincro.id
  ENDIF
  APPEND BLANK
- REPLACE id WITH lnId+1, tabla_afectada WITH "plan2009", id_registro WITH lcId, ;
+ REPLACE id WITH lnId+1, tabla WITH "plan2009", id_reg WITH lcId, ;
          accion WITH lcacc, procesado WITH .F., creado WITH DATETIME(), ;
          codemp WITH lcCodemp, codcli WITH lcCodcli, fecha WITH ldFecha, ;
+         fechaiso WITH lcFechaIso, ;
          horini WITH lcHorini, horfin WITH lcHorfin, texto WITH lcTexto, ;
          codrec WITH lcCodrec, nomcli WITH lcNomcli, tel1cli WITH lcTel1cli, ;
-         facturado WITH llFact, servicios WITH lcServicios, colfon WITH lnColfon, ;
-         collet WITH lnCollet, style_modified_at WITH LEFT(ALLTRIM(lcMod), 20), ;
+         facturado WITH llFact, servicios WITH LEFT(lcServicios, 254), colfon WITH lnColfon, ;
+         collet WITH lnCollet, modif WITH LEFT(ALLTRIM(lcMod), 20), ;
          version WITH lnVersion
 
  IF  .NOT. llPlanWasUsed AND USED("plan2009")
@@ -369,23 +401,4 @@ FUNCTION SuiteEnqueuePlan2009
 ENDFUNC
 
 **
-PROCEDURE Suite_SyncInit
- LOCAL lccfg, lcRoot
- lcRoot = SuiteColaRoot()
- lccfg = lcRoot+"SuiteSync.cfg"
- DO SuiteEnsureColaSincro
- = SuiteLoadControlSync()
- PUBLIC plSuiteSyncEnabled
- plSuiteSyncEnabled = .T.
- IF TYPE("SuiteBootstrapLog")#"U"
-    DO SuiteBootstrapLog WITH "[INIT-03] Style sync v2 cola activa"
- ENDIF
-ENDPROC
-
-**
-PROCEDURE Suite_SyncLog
- PARAMETER tcLine
- IF TYPE("SuiteBootstrapLog")#"U"
-    DO SuiteBootstrapLog WITH tcLine
- ENDIF
-ENDPROC
+* Suite_SyncInit / Suite_SyncLog: solo en general.prg (evita sombra si SET PROCEDURE TO suite_cola_sync).

@@ -122,9 +122,9 @@ export const useMarketingLeadNotes = (
   const query = useQuery({
     queryKey,
     enabled: Boolean(leadId && companyId),
-    staleTime: 0,
-    refetchOnMount: 'always',
-    refetchOnWindowFocus: true,
+    staleTime: 60_000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
     queryFn: async (): Promise<MarketingLeadNote[]> => {
       if (!leadId) return [];
       await waitForAuthBootstrap();

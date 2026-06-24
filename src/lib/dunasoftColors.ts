@@ -22,7 +22,7 @@ const EMPLOYEE_BG_CLASSES = [
 export function employeeTailwindColor(codemp: string, colorpf?: number | null): string {
   const hex = vfpColorToHex(colorpf);
   if (hex) {
-    return `border-2 border-border dark:border-border`;
+    return 'border-2 border-border/80 bg-muted/60 text-foreground dark:bg-muted/40';
   }
   const code = codemp.trim();
   let hash = 0;

@@ -30,7 +30,7 @@ PROCEDURE SuiteMigrarColaSincro
  ENDIF
  llWasOpen = USED("cola_sincro")
  IF  .NOT. llWasOpen
-    USE SHARED (lcpath) ALIAS cola_sincro IN 0
+    USE EXCLUSIVE (lcpath) ALIAS cola_sincro IN 0
  ENDIF
  SELECT cola_sincro
  IF  .NOT. SuiteColaFieldExists("cola_sincro", "codemp")
@@ -64,7 +64,7 @@ PROCEDURE SuiteMigrarColaSincro
     ALTER TABLE cola_sincro ADD COLUMN facturado L
  ENDIF
  IF  .NOT. SuiteColaFieldExists("cola_sincro", "servicios")
-    ALTER TABLE cola_sincro ADD COLUMN servicios M
+    ALTER TABLE cola_sincro ADD COLUMN servicios C(254)
  ENDIF
  IF  .NOT. SuiteColaFieldExists("cola_sincro", "colfon")
     ALTER TABLE cola_sincro ADD COLUMN colfon N(10, 0)
@@ -72,8 +72,8 @@ PROCEDURE SuiteMigrarColaSincro
  IF  .NOT. SuiteColaFieldExists("cola_sincro", "collet")
     ALTER TABLE cola_sincro ADD COLUMN collet N(10, 0)
  ENDIF
- IF  .NOT. SuiteColaFieldExists("cola_sincro", "style_modified_at")
-    ALTER TABLE cola_sincro ADD COLUMN style_modified_at C(20)
+ IF  .NOT. SuiteColaFieldExists("cola_sincro", "modif")
+    ALTER TABLE cola_sincro ADD COLUMN modif C(20)
  ENDIF
  IF  .NOT. SuiteColaFieldExists("cola_sincro", "version")
     ALTER TABLE cola_sincro ADD COLUMN version N(15, 0)
@@ -82,6 +82,3 @@ PROCEDURE SuiteMigrarColaSincro
     SELECT (lcalias)
  ENDIF
 ENDPROC
-
-DO SuiteMigrarColaSincro
-MESSAGEBOX("cola_sincro migrada (ALTER snapshot + version).", 64, "Suite migrar cola")

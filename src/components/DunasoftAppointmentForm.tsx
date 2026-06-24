@@ -11,6 +11,7 @@ import type { DunasoftPlanArtInput } from '@/lib/dunasoftDualWrite';
 import type { Employee } from '@/types/agenda';
 import { calcEndFromStart } from '@/lib/agendaAppointmentItems';
 import { AGENDA_APPOINTMENT_MODAL_Z } from '@/lib/agendaResourceColors';
+import { DOCK_CLEARANCE_BOTTOM } from '@/lib/dialogLayers';
 
 export type DunasoftAppointmentFormValues = {
   codemp: string;
@@ -128,7 +129,7 @@ export const DunasoftAppointmentForm: React.FC<Props> = ({
 
   return (
     <div
-      className={`fixed inset-0 flex items-center justify-center bg-black/40 p-4 ${AGENDA_APPOINTMENT_MODAL_Z}`}
+      className={`fixed inset-x-0 top-0 ${DOCK_CLEARANCE_BOTTOM} flex items-center justify-center bg-black/40 p-4 ${AGENDA_APPOINTMENT_MODAL_Z}`}
     >
       <Card className="w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-xl">
         <CardHeader className="flex flex-row items-center justify-between py-3">

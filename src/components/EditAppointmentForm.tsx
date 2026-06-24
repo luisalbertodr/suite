@@ -19,6 +19,7 @@ import type { AppointmentItemDraft } from '@/types/agenda';
 import type { Appointment as AgendaAppointment } from '@/types/agenda';
 import { calcEndFromStart, effectiveDurationMinutes, minutesBetweenHHmm } from '@/lib/agendaAppointmentItems';
 import { AGENDA_APPOINTMENT_MODAL_Z } from '@/lib/agendaResourceColors';
+import { DOCK_CLEARANCE_BOTTOM } from '@/lib/dialogLayers';
 import { toRecursoCatalogEntries } from '@/lib/agendaRecursoMatch';
 import { appointmentItemsTotal } from '@/lib/agendaAppointmentPricing';
 import { appointmentChargeableTotal, canChargeAppointment, summarizeAppointmentChargeState } from '@/lib/appointmentSales';
@@ -395,7 +396,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
   };
 
   return (
-    <div className={`fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center ${AGENDA_APPOINTMENT_MODAL_Z} px-4 pt-3 pb-28 sm:pb-24 sm:p-4`}>
+    <div className={`fixed inset-x-0 top-0 ${DOCK_CLEARANCE_BOTTOM} bg-black/50 flex items-start sm:items-center justify-center ${AGENDA_APPOINTMENT_MODAL_Z} px-4 pt-3 pb-28 sm:pb-24 sm:p-4`}>
       <Card className="w-full max-w-lg max-h-[calc(100dvh-7rem)] overflow-y-auto">
         <CardHeader className="pb-3">
           <div className="flex items-center gap-2">

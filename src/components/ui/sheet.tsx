@@ -5,6 +5,7 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 import { usePanelAwareOpen } from "@/hooks/usePanelAwareOpen"
+import { DOCK_CLEARANCE_BOTTOM, preventRadixFocusOutsideDismiss } from "@/lib/dialogLayers"
 
 type SheetProps = React.ComponentPropsWithoutRef<typeof SheetPrimitive.Root>
 
@@ -12,6 +13,7 @@ const Sheet = ({ open, onOpenChange, ...props }: SheetProps) => {
   const { effectiveOpen, handleOpenChange } = usePanelAwareOpen(open, onOpenChange);
   return (
     <SheetPrimitive.Root
+      modal={false}
       open={effectiveOpen}
       onOpenChange={handleOpenChange ?? onOpenChange}
       {...props}
@@ -31,7 +33,8 @@ const SheetOverlay = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <SheetPrimitive.Overlay
     className={cn(
-      "fixed inset-0 z-50 bg-black/80  data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+      "fixed inset-x-0 top-0 z-50 bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+      DOCK_CLEARANCE_BOTTOM,
       className
     )}
     {...props}
@@ -66,11 +69,15 @@ interface SheetContentProps
 const SheetContent = React.forwardRef<
   React.ElementRef<typeof SheetPrimitive.Content>,
   SheetContentProps
->(({ side = "right", className, children, ...props }, ref) => (
+>(({ side = "right", className, children, onFocusOutside, ...props }, ref) => (
   <SheetPortal>
     <SheetOverlay />
     <SheetPrimitive.Content
       ref={ref}
+      onFocusOutside={(event) => {
+        preventRadixFocusOutsideDismiss(event);
+        onFocusOutside?.(event);
+      }}
       className={cn(sheetVariants({ side }), className)}
       {...props}
     >

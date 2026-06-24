@@ -111,6 +111,35 @@ const slotDescriptionText = (appointment: Appointment): string | null => {
   return raw;
 };
 
+function EmployeeNamesRow({
+  employees,
+  edge,
+}: {
+  employees: Employee[];
+  edge: 'top' | 'bottom';
+}) {
+  if (employees.length === 0) return null;
+
+  return (
+    <div
+      className="grid min-h-[2.75rem] gap-0"
+      style={{ gridTemplateColumns: `${TIME_GUTTER_PX}px repeat(${employees.length}, minmax(0, 1fr))` }}
+    >
+      <div className="sticky left-0 z-40 flex items-center justify-center border-r border-border bg-muted px-3 py-2 text-center text-xs font-semibold leading-tight text-foreground shadow-[2px_0_4px_rgba(0,0,0,0.08)]">
+        {edge === 'top' ? 'Hora' : '\u00a0'}
+      </div>
+      {employees.map((employee) => (
+        <div
+          key={`${edge}-${employee.id}`}
+          className={`flex items-center justify-center border-r border-border px-2 py-2 text-center text-xs font-semibold leading-tight text-foreground ${employee.color}`}
+        >
+          <span className="line-clamp-2">{employee.name}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export const AgendaGrid: React.FC<AgendaGridProps> = ({
   employees,
   appointments,
@@ -139,6 +168,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
   }
 }) => {
   const scrollRootRef = React.useRef<HTMLDivElement>(null);
+  const headerScrollRef = React.useRef<HTMLDivElement>(null);
   const stickyHeaderRef = React.useRef<HTMLDivElement>(null);
   const lastScrollTopRef = React.useRef(0);
   const lastHandledGoTodayRef = React.useRef(0);
@@ -319,7 +349,6 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
   const scrollToAnchorTime = React.useCallback(
     (timeHhmm: string) => {
       const scrollEl = scrollRootRef.current;
-      const headerEl = stickyHeaderRef.current;
       if (!scrollEl) return;
       const [hStr, mStr] = String(timeHhmm || '').split(':');
       const h = Number(hStr);
@@ -329,8 +358,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
       const targetMin = h * 60 + m;
       const clamped = Math.max(gridStartMin, Math.min(gridEndMin, targetMin));
       const lineTopInGrid = ((clamped - gridStartMin) / slotMinutes) * cellHeight;
-      const headerH = headerEl?.offsetHeight ?? 52;
-      const anchor = headerH + lineTopInGrid - scrollEl.clientHeight * 0.35;
+      const anchor = lineTopInGrid - scrollEl.clientHeight * 0.35;
       const maxScroll = Math.max(0, scrollEl.scrollHeight - scrollEl.clientHeight);
       const top = Math.max(0, Math.min(anchor, maxScroll));
       scrollEl.scrollTop = top;
@@ -342,7 +370,6 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
   const flushScrollToStorage = React.useCallback(() => {
     if (!persistUserId || !viewDateYmd) return;
     const el = scrollRootRef.current;
-    const headerEl = stickyHeaderRef.current;
     let scrollTop: number;
     if (el) {
       scrollTop = el.scrollTop;
@@ -355,7 +382,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
     const anchorTime =
       el && scrollTop > 0
         ? anchorTimeFromScrollTop(scrollTop, {
-            headerHeight: headerEl?.offsetHeight ?? 52,
+            headerHeight: 0,
             gridStartMin,
             gridEndMin,
             slotMinutes,
@@ -410,7 +437,6 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
     if (!goToTodayRequestId || goToTodayRequestId === lastHandledGoTodayRef.current) return;
     if (!viewDateYmd || viewDateYmd !== format(new Date(), 'yyyy-MM-dd')) return;
     const scrollEl = scrollRootRef.current;
-    const headerEl = stickyHeaderRef.current;
     if (!scrollEl) return;
     lastHandledGoTodayRef.current = goToTodayRequestId;
 
@@ -418,8 +444,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
     const nowDec = d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60;
     const clamped = Math.max(gridStartMin, Math.min(gridEndMin, nowDec));
     const lineTopInGrid = ((clamped - gridStartMin) / slotMinutes) * cellHeight;
-    const headerH = headerEl?.offsetHeight ?? 52;
-    const anchor = headerH + lineTopInGrid - scrollEl.clientHeight * 0.35;
+    const anchor = lineTopInGrid - scrollEl.clientHeight * 0.35;
     const maxScroll = Math.max(0, scrollEl.scrollHeight - scrollEl.clientHeight);
     const run = () => {
       if (!scrollRootRef.current) return;
@@ -467,23 +492,35 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
     };
   }, [persistUserId, viewDateYmd, flushScrollToStorage]);
 
-  return (
-    <div ref={scrollRootRef} className="h-full overflow-auto bg-card">
-      <div className="min-w-[900px] relative">
-        {/* Header con nombres de empleados */}
-        <div ref={stickyHeaderRef} className="sticky top-0 bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/85 z-30 border-b border-border shadow-sm">
-          <div className="grid gap-0" style={{ gridTemplateColumns: `${TIME_GUTTER_PX}px repeat(${employees.length}, 1fr)` }}>
-            <div className="sticky left-0 z-40 px-3 py-1.5 bg-muted border-r border-border shadow-[2px_0_4px_rgba(0,0,0,0.08)] font-semibold text-xs text-center leading-tight">
-              Hora
-            </div>
-            {employees.map((employee) => (
-              <div key={employee.id} className={`px-2 py-1.5 border-r border-border font-semibold text-xs text-center leading-tight ${employee.color}`}>
-                {employee.name}
-              </div>
-            ))}
-          </div>
-        </div>
+  /** Sincroniza scroll horizontal del encabezado con la cuadrícula. */
+  React.useEffect(() => {
+    const body = scrollRootRef.current;
+    const header = headerScrollRef.current;
+    if (!body || !header) return;
+    const sync = () => {
+      if (header.scrollLeft !== body.scrollLeft) {
+        header.scrollLeft = body.scrollLeft;
+      }
+    };
+    body.addEventListener('scroll', sync, { passive: true });
+    sync();
+    return () => body.removeEventListener('scroll', sync);
+  }, [employees.length]);
 
+  return (
+    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-card">
+      {/* Nombres de empleadas: fuera del scroll vertical, siempre visibles */}
+      <div
+        ref={headerScrollRef}
+        className="relative z-20 min-h-[2.75rem] shrink-0 overflow-x-auto overflow-y-hidden border-b border-border bg-muted/90 shadow-sm [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+      >
+        <div ref={stickyHeaderRef} className="min-w-[900px]">
+          <EmployeeNamesRow employees={employees} edge="top" />
+        </div>
+      </div>
+
+      <div ref={scrollRootRef} className="min-h-0 overflow-auto">
+        <div className="min-w-[900px] relative">
         {/* Grid de tiempo - usando CSS Grid */}
         <div className="grid gap-0 relative" style={{ gridTemplateColumns: `${TIME_GUTTER_PX}px repeat(${employees.length}, 1fr)` }}>
           {/* Renderizar las citas como elementos posicionados absolutamente */}
@@ -797,6 +834,12 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
             );
           })}
         </div>
+
+        {/* Footer con nombres (scroll junto al resto del día) */}
+        <div className="border-t border-border bg-card">
+          <EmployeeNamesRow employees={employees} edge="bottom" />
+        </div>
+      </div>
       </div>
     </div>
   );

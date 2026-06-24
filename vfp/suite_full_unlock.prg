@@ -223,7 +223,7 @@ FUNCTION SuiteSyncV2Redirect
        ON ERROR &lcSavErr
        IF USED("_ctl_sync")
           SELECT _ctl_sync
-          llV2 = (ALLTRIM(modo_activo)=="2")
+          llV2 = (ALLTRIM(modo)=="2")
           USE IN _ctl_sync
        ENDIF
     ELSE

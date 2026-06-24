@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { ClienteDetailView } from '@/components/ClienteDetailView';
 import { useRoutePanelActive } from '@/contexts/RoutePanelContext';
 import { AGENDA_CUSTOMER_DETAIL_OVERLAY_Z } from '@/lib/agendaResourceColors';
+import { DOCK_CLEARANCE_BOTTOM } from '@/lib/dialogLayers';
 import { cn } from '@/lib/utils';
 
 import type { ClienteDetailTab } from '@/types/clienteDetail';
@@ -35,7 +36,7 @@ export const ClienteDetailOverlay: React.FC<Props> = ({
   return createPortal(
     <div
       className={cn(
-        'fixed inset-0 flex items-start justify-center px-2 pt-2 pb-24 sm:px-3 sm:pt-3 sm:pb-20',
+        `fixed inset-x-0 top-0 ${DOCK_CLEARANCE_BOTTOM} flex items-start justify-center px-2 pt-2 pb-24 sm:px-3 sm:pt-3 sm:pb-20`,
         AGENDA_CUSTOMER_DETAIL_OVERLAY_Z,
         className,
       )}

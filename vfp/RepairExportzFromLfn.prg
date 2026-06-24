@@ -1,6 +1,9 @@
 * Regenera mscomctlOk.pjx en ExportZ desde repair_project_files.txt (LFN).
 * VFP9: SET DEFAULT TO C:\Duna\ExportZ
 *        DO PROGS\RepairExportzFromLfn.prg
+*
+* IMPORTANTE: deja el Project Manager abierto (File > New > Project > mscomctlOk).
+* Si el .pjt esta corrupto, ejecuta antes: .\scripts\prepare-exportz-new-project.ps1
 LOCAL lcRoot, lcBackup, lcList, lcLog, lcStem, lcSav, loProj, lnI, lnLines, lcText, lnAdded, llSkipList, lcMsg, lnTotal
 LOCAL lcLine
 LOCAL ARRAY laList[1]
@@ -33,51 +36,34 @@ ENDIF
 
 DO SuiteActivateVfp
 
+* 1) Proyecto ya abierto en el PM (preferido tras File > New).
 loProj = SuiteGetActiveMscomctlProject(lcRoot)
 IF TYPE("loProj")#"O"
    loProj = SuiteFindMscomctlProject(lcRoot)
 ENDIF
+* 2) Abrir desde disco solo si no hay PM activo (falla si .pjt corrupto).
 IF TYPE("loProj")#"O"
    loProj = SuiteOpenMscomctlProject(lcRoot, lcLog)
 ENDIF
 
-IF TYPE("loProj")="O"
-   lcSav = ON("ERROR")
-   ON ERROR llSkipList = .F.
-   llSkipList = (loProj.Files.Count > 500)
-   ON ERROR &lcSav
-ENDIF
-
-IF TYPE("loProj")#"O" .OR. .NOT. llSkipList
-   lcMsg = "Abre o crea el proyecto en VFP:"+CHR(13)+CHR(13)
-   lcMsg = lcMsg+"1. File > New > Project > "+lcStem+CHR(13)
-   lcMsg = lcMsg+"   Carpeta: "+lcRoot+CHR(13)
-   lcMsg = lcMsg+"2. Guardar y dejar Project Manager abierto"+CHR(13)
-   lcMsg = lcMsg+"3. Vuelve a ejecutar: DO PROGS\RepairExportzFromLfn.prg"
-   IF TYPE("loProj")#"O"
-      DO SuiteNotifyUser WITH lcMsg, 48, "Repair ExportZ", lcLog
-      RETURN
-   ENDIF
-   WAIT WINDOW "Crea proyecto "+lcStem+" en "+lcRoot TIMEOUT 5
-   loProj = SuiteGetActiveMscomctlProject(lcRoot)
-   IF TYPE("loProj")#"O"
-      loProj = SuiteOpenMscomctlProject(lcRoot, lcLog)
-   ENDIF
-   IF TYPE("loProj")#"O"
-      lcSav = ON("ERROR")
-      ON ERROR llSkipList = .F.
-      llSkipList = (loProj.Files.Count > 500)
-      ON ERROR &lcSav
-   ENDIF
-ENDIF
-
 IF TYPE("loProj")#"O"
-   DO SuiteNotifyUser WITH lcMsg, 16, "Repair ExportZ", lcLog
+   lcMsg = "No hay proyecto abierto en VFP:"+CHR(13)+CHR(13)
+   lcMsg = lcMsg+"1. Cierra VFP y ejecuta: .\\scripts\\prepare-exportz-new-project.ps1"+CHR(13)
+   lcMsg = lcMsg+"2. File > New > Project > "+lcStem+CHR(13)
+   lcMsg = lcMsg+"   Carpeta: "+lcRoot+CHR(13)
+   lcMsg = lcMsg+"3. File > Save (dejar Project Manager abierto)"+CHR(13)
+   lcMsg = lcMsg+"4. DO PROGS\\RepairExportzFromLfn.prg"
+   DO SuiteNotifyUser WITH lcMsg, 48, "Repair ExportZ", lcLog
    RETURN
 ENDIF
 
+lcSav = ON("ERROR")
+ON ERROR llSkipList = .F.
+llSkipList = (loProj.Files.Count > 500)
+ON ERROR &lcSav
+
 STRTOFILE("=== RepairExportzFromLfn "+TTOC(DATETIME())+" ==="+CHR(13), lcLog, .F.)
-STRTOFILE("stem="+lcStem+" root="+lcRoot+CHR(13), lcLog, .T.)
+STRTOFILE("stem="+lcStem+" root="+lcRoot+" pm_files="+ALLTRIM(STR(loProj.Files.Count))+CHR(13), lcLog, .T.)
 
 IF .NOT. FILE(lcList)
    DO SuiteNotifyUser WITH "Falta "+lcList+CHR(13)+"Ejecuta fix-exportz-pjt.ps1 primero.", 16, "Repair ExportZ", lcLog

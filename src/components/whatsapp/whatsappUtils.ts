@@ -740,6 +740,72 @@ export async function fileToBase64(file: File): Promise<string> {
   return btoa(binary);
 }
 
+function bytesContainOpusHead(bytes: Uint8Array): boolean {
+  for (let i = 0; i <= bytes.length - 8; i++) {
+    if (
+      bytes[i] === 0x4f &&
+      bytes[i + 1] === 0x70 &&
+      bytes[i + 2] === 0x75 &&
+      bytes[i + 3] === 0x73 &&
+      bytes[i + 4] === 0x48 &&
+      bytes[i + 5] === 0x65 &&
+      bytes[i + 6] === 0x61 &&
+      bytes[i + 7] === 0x64
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Valida OGG/Opus antes de enviar nota de voz por OpenWA. */
+export async function assertWhatsappVoiceNoteFile(file: File): Promise<void> {
+  const name = file.name.toLowerCase();
+  const type = (file.type ?? '').toLowerCase();
+  const looksOgg =
+    name.endsWith('.ogg') ||
+    name.endsWith('.opus') ||
+    type.includes('ogg') ||
+    type.includes('opus');
+  if (!looksOgg) return;
+  const head = new Uint8Array(await file.slice(0, 256).arrayBuffer());
+  if (!bytesContainOpusHead(head)) {
+    throw new Error(
+      'El archivo .ogg no es Opus (nota de voz de WhatsApp). Muchos .ogg usan Vorbis y se envían como adjunto. Reenvía una nota de voz desde WhatsApp o convierte el audio a OGG/Opus.',
+    );
+  }
+}
+
+const WHATSAPP_EXT_MIME: Record<string, string> = {
+  ogg: 'audio/ogg',
+  opus: 'audio/ogg',
+  mp3: 'audio/mpeg',
+  m4a: 'audio/mp4',
+  wav: 'audio/wav',
+  webm: 'audio/webm',
+  aac: 'audio/aac',
+  pdf: 'application/pdf',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ppt: 'application/vnd.ms-powerpoint',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  txt: 'text/plain',
+  csv: 'text/csv',
+  zip: 'application/zip',
+};
+
+/** MIME para envío WA cuando el navegador no rellena file.type (p. ej. .ogg). */
+export function resolveWhatsappFileMime(filename: string, blobType?: string): string {
+  const raw = (blobType ?? '').trim().toLowerCase();
+  if (raw.includes('ogg') || raw.includes('opus')) return 'audio/ogg';
+  if (raw === 'application/ogg') return 'audio/ogg';
+  if (raw && raw !== 'application/octet-stream') return raw;
+  const ext = filename.split('.').pop()?.toLowerCase() ?? '';
+  return WHATSAPP_EXT_MIME[ext] ?? 'application/octet-stream';
+}
+
 export function mediaKindFromMime(mime: string | null | undefined):
   | 'image'
   | 'video'
@@ -749,7 +815,7 @@ export function mediaKindFromMime(mime: string | null | undefined):
   const m = (mime ?? '').toLowerCase();
   if (m.startsWith('image/')) return 'image';
   if (m.startsWith('video/')) return 'video';
-  if (m.startsWith('audio/ogg') || m.includes('opus')) return 'voice';
+  if (m.startsWith('audio/ogg') || m.includes('opus') || m === 'application/ogg') return 'voice';
   if (m.startsWith('audio/')) return 'audio';
   return 'document';
 }

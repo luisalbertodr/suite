@@ -567,7 +567,7 @@ export const Marketing: React.FC = () => {
     [topBarActions, marketingView],
   );
 
-  if (companyLoading || stagesLoading || leadsLoading || fieldsLoading) {
+  if (companyLoading || stagesLoading || fieldsLoading || (leadsLoading && leads.length === 0)) {
     return (
       <div className="flex justify-center items-center h-64">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-sky-500" />

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { MARKETING_HOST_COMPANY_ID } from '@/lib/marketingScope';
 import type { MarketingLead } from '@/hooks/useMarketingLeads';
+import { patchMarketingLeadsCache } from '@/lib/marketingLeadsCache';
 
 function unreadCountQueryKey(companyIds: string[]) {
   return ['marketing-unread-count', companyIds.slice().sort().join(',')] as const;
@@ -78,9 +79,24 @@ export function useMarketingUnread() {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'marketing_leads', filter },
-        () => {
+        (payload) => {
+          const companyId = String(
+            (payload.new as { company_id?: string } | null)?.company_id ??
+              (payload.old as { company_id?: string } | null)?.company_id ??
+              '',
+          );
+          if (companyId && scopeIds.includes(companyId)) {
+            queryClient.setQueryData<MarketingLead[]>(
+              ['marketing-leads', companyId],
+              (prev) =>
+                patchMarketingLeadsCache(prev, {
+                  eventType: payload.eventType as 'INSERT' | 'UPDATE' | 'DELETE',
+                  new: payload.new as Record<string, unknown> | null,
+                  old: payload.old as Record<string, unknown> | null,
+                }),
+            );
+          }
           queryClient.invalidateQueries({ queryKey: ['marketing-unread-count'] });
-          queryClient.invalidateQueries({ queryKey: ['marketing-leads'] });
         },
       )
       .subscribe();
@@ -110,7 +126,6 @@ export function useMarkMarketingLeadViewed() {
     },
     onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: ['marketing-unread-count'] });
-      queryClient.invalidateQueries({ queryKey: ['marketing-leads', vars.companyId] });
     },
   });
 }

@@ -14,6 +14,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { openSuiteWhatsappChat } from '@/lib/openSuiteWhatsappChat';
 import type { MarketingLead } from '@/hooks/useMarketingLeads';
 import type { MarketingFieldConfig } from '@/hooks/useMarketingFieldConfig';
 import type { CustomerLookupRow } from '@/hooks/useCustomerLookup';
@@ -25,7 +26,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { usePermissions } from '@/hooks/usePermissions';
 import {
   formatLeadFieldValue,
   getLeadFullName,
@@ -170,8 +170,6 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
   onDragEnd,
 }: MarketingLeadCardProps) {
   const navigate = useNavigate();
-  const { hasPermission } = usePermissions();
-  const canUseWhatsapp = hasPermission('whatsapp', 'read');
 
   const fullName = getLeadFullName(lead);
   const createdAtLabel = getLeadCreatedAtLabel(lead);
@@ -187,21 +185,11 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
 
   const phoneHref = lead.phone ? `tel:${lead.phone.replace(/\s+/g, '')}` : undefined;
   const emailHref = lead.email ? `mailto:${lead.email}` : undefined;
-  const waExternalHref = lead.phone
-    ? `https://wa.me/${lead.phone.replace(/\D/g, '')}`
-    : undefined;
   const handleWhatsappClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
     if (!lead.phone) return;
-    if (canUseWhatsapp) {
-      const params = new URLSearchParams();
-      params.set('phone', lead.phone);
-      if (fullName) params.set('name', fullName);
-      navigate(`/whatsapp?${params.toString()}`);
-    } else if (waExternalHref) {
-      window.open(waExternalHref, '_blank', 'noreferrer');
-    }
+    openSuiteWhatsappChat(navigate, lead.phone, fullName);
   };
   const handleMatchedCustomerClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -475,18 +463,17 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
+                    type="button"
                     variant="ghost"
                     size="icon"
                     className={`${iconBtnClass} text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700 dark:hover:bg-emerald-950`}
-                    aria-label="WhatsApp"
+                    aria-label="Abrir WhatsApp"
                     onClick={handleWhatsappClick}
                   >
                     <MessageCircle className={iconClass} />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>
-                  {canUseWhatsapp ? 'Abrir conversación de WhatsApp' : 'WhatsApp'}
-                </TooltipContent>
+                <TooltipContent>Abrir conversación en WhatsApp de Suite</TooltipContent>
               </Tooltip>
             ) : null}
             {emailHref ? (

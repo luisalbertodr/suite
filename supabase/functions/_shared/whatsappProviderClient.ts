@@ -9,6 +9,38 @@ import {
 } from './whatsappProviderTypes.ts';
 import { resolveOpenwaSessionId } from './whatsappProviderOpenwa.ts';
 
+/** OpenWA/whatsapp-web.js envía notas de voz con application/ogg; audio/ogg devuelve 500. */
+export function normalizeOpenwaOutgoingAudioMime(mime: string): string {
+  const m = (mime ?? '').trim().toLowerCase();
+  if (!m) return 'application/ogg';
+  if (m.includes('ogg') || m.includes('opus') || m === 'application/ogg') return 'application/ogg';
+  return mime;
+}
+
+/** OpenWA SendMediaMessageDto: campos planos (chatId, url|base64, mimetype), no objetos anidados. */
+function buildOpenwaSendMediaBody(
+  chatId: string,
+  media: WhatsappSendMediaInput,
+  rawBase64: string,
+  defaultMime: string,
+  opts?: { preferUrl?: boolean; forceRawBase64?: boolean; omitFilename?: boolean },
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    chatId,
+    mimetype: media.mime || defaultMime,
+  };
+  if (media.filename && !opts?.omitFilename) body.filename = media.filename;
+  if (media.caption) body.caption = media.caption;
+  const useUrl = !!media.url && opts?.preferUrl !== false && !opts?.forceRawBase64;
+  if (useUrl) {
+    body.url = media.url;
+  } else {
+    // data:...;base64, rompe atob() en whatsapp-web.js
+    body.base64 = rawBase64;
+  }
+  return body;
+}
+
 const FETCH_TIMEOUT_MS = 25_000;
 export const PROVIDER_MEDIA_TIMEOUT_MS = 55_000;
 
@@ -213,35 +245,46 @@ export async function providerSendMedia(
   const provider = normalizeWhatsappProvider(cfg.provider);
   const sessionName = cfg.session_name || 'default';
   const base64 = stripBase64Prefix(media.base64);
-  const dataUrl = media.mime ? `data:${media.mime};base64,${base64}` : base64;
 
   if (provider === 'openwa') {
     const sessionId = await resolveOpenwaSessionId(cfg);
     let path = '';
-    const body: Record<string, unknown> = { chatId };
-    if (media.caption) body.caption = media.caption;
+    let body: Record<string, unknown>;
+    const isAudio = type === 'audio' || type === 'voice';
+    const audioMime = isAudio ? normalizeOpenwaOutgoingAudioMime(media.mime) : media.mime;
 
     switch (type) {
       case 'image':
         path = `/sessions/${encodeURIComponent(sessionId)}/messages/send-image`;
-        body.image = { base64: dataUrl };
+        body = buildOpenwaSendMediaBody(chatId, media, base64, 'image/jpeg', {
+          preferUrl: !!media.url,
+        });
         break;
       case 'video':
         path = `/sessions/${encodeURIComponent(sessionId)}/messages/send-video`;
-        body.video = { base64: dataUrl };
+        body = buildOpenwaSendMediaBody(chatId, media, base64, 'video/mp4', {
+          preferUrl: !!media.url,
+        });
         break;
       case 'audio':
       case 'voice':
         path = `/sessions/${encodeURIComponent(sessionId)}/messages/send-audio`;
-        body.audio = { base64: dataUrl };
+        body = buildOpenwaSendMediaBody(
+          chatId,
+          {
+            ...media,
+            mime: audioMime,
+          },
+          base64,
+          'application/ogg',
+          { forceRawBase64: true, omitFilename: type === 'voice' || type === 'audio' },
+        );
         break;
       default:
         path = `/sessions/${encodeURIComponent(sessionId)}/messages/send-document`;
-        body.document = {
-          base64: dataUrl,
-          filename: media.filename,
-          mimetype: media.mime,
-        };
+        body = buildOpenwaSendMediaBody(chatId, media, base64, 'application/octet-stream', {
+          preferUrl: !!media.url,
+        });
         break;
     }
 

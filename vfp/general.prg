@@ -77,10 +77,7 @@
  PUBLIC docum, tcnombreaplicacion, plversiondemo, plfechacaducidad, pltpvpeluqueria, pldemocomercial, pousuario, pcusuario, plversionwebcam, pltpvbar, pctelefonodspc, pcfaxdspc, pcmailregistrodspc, plticketmodal, pcidioma, plstarbene, pcwebstarbene, pcmailstarbene, plcentral, plsucursal, pcurlwebdspc, policencias, pltumarca, plainhoa, pcpais, pcprefijopais, plkincosmetics, plsucursalweb, plcreararticulos, plcrearfamilias, plcrearbonos, plopencel, plfranquicias, plcntfranquicia, plmostrarfavoritos, plone, plversiondemoespecial, plavisorupturastock, pcmailavisorupturastock, plcrearempleados, pcnversionaplicacion, pcurlwebregion, plconexioninternet, pldemostyleformexferia, pcidfranquiciasfm, plstyledunasoftonline, plverfacturaciononlineclientes, plaplicacionesonline, plnoactualizarordenempleado, plnoactualizarverplanempleado, plcreartallasycolores, plverstockonlinearticulos
  * Unlock + sync Suite: despues de PUBLIC pcidioma (clase licencias_unlock lo necesita)
  DO SuiteBootstrapLog WITH "[BOOT-00] general.prg: primera carga unlock root="+lcStyleRoot
- = SuiteLoadUnlockFromFunciones(lcStyleRoot)
- IF TYPE("Suite_SyncInit")="U"
-    DO SuiteLoadUnlockProgram WITH lcStyleRoot
- ENDIF
+ * Sync v2: no usar TYPE() en PROCEDURE (siempre U); SuiteStartSyncIfReady mas adelante
  PUBLIC pcversionpais, pcficheroregistro, pcficheroversion, pcclaveregistropais, pcurlpresentacionpais, pcurlpresentacionpaisoffline, pcversionapp, pcurlnodisponibleversionoffline, pcurlnodisponibleversion, pcnombreexe, pcurlbannerversionfree, pcurlbannerversionfreeoffline, pcbloquearivas, pcmailempresa, pclinkcomprarsms, pclinkcomprarpremium, pclinksoportetecnico, pcbloquearredondeos
  pcversionpais = "ESP"
  pcversionapp = 0
@@ -988,11 +985,11 @@
  ENDIF
  SELECT empresa
  SAVE TO MEMO config ALL LIKE CFG*
- IF TYPE("SuiteApplyFullUnlock")#"U"
+ IF SuiteHasAppSymbol("SuiteApplyFullUnlock")
     DO SuiteApplyFullUnlock
  ELSE
     DO SuiteLoadUnlockProgram WITH IIF(TYPE("pcSuiteStyleRoot")="C" .AND. .NOT. EMPTY(pcSuiteStyleRoot), ADDBS(pcSuiteStyleRoot), ADDBS(SYS(5)+SYS(2003)))
-    IF TYPE("SuiteApplyFullUnlock")#"U"
+    IF SuiteHasAppSymbol("SuiteApplyFullUnlock")
        DO SuiteApplyFullUnlock
     ENDIF
  ENDIF
@@ -1202,6 +1199,123 @@
  CLEAR
  RETURN (.T.)
 ENDFUNC
+
+#INCLUDE suite_control_sync.prg
+#INCLUDE suite_cola_sync.prg
+
+PROCEDURE SuiteEnsureGlobals
+ IF TYPE("pcidioma")#"C"
+    PUBLIC pcidioma, pcpais, pcversionpais
+    pcidioma = "CA"
+    pcpais = "ESP"
+    pcversionpais = "ESP"
+ ENDIF
+ENDPROC
+
+PROCEDURE SuiteApplyFullUnlock
+ DO SuiteEnsureGlobals
+ENDPROC
+
+PROCEDURE Suite_SyncInit
+ LOCAL lccfg, lcRoot, lcpath, llWasOpen, lcSav, lcErr
+ lcRoot = IIF(TYPE("pcSuiteStyleRoot")="C" .AND. .NOT. EMPTY(pcSuiteStyleRoot), ADDBS(pcSuiteStyleRoot), ADDBS(SYS(5)+SYS(2003)))
+ lccfg = lcRoot+"SuiteSync.cfg"
+ lcSav = ON("ERROR")
+ lcErr = ""
+ ON ERROR lcErr = MESSAGE()
+ DO SuiteBootstrapLog WITH "[INIT-01] Suite_SyncInit inicio root="+lcRoot
+ SET SAFETY OFF
+ * Inline: no DO SuiteEnsureColaSincro (VFP busca .prg; errorwe traga fallos sin log).
+ lcpath = lcRoot+"cola_sincro"
+ llWasOpen = USED("cola_sincro")
+ IF FILE(lcpath+".dbf")
+    IF  .NOT. llWasOpen
+       USE SHARED (lcpath) ALIAS cola_sincro IN 0
+    ENDIF
+    * Auto-reparar esquema: si falta fechaiso (cola antigua), migrar via exclusivo.
+    IF USED("cola_sincro") .AND. TYPE("cola_sincro.fechaiso")="U" .AND.  .NOT. llWasOpen
+       TRY
+          USE IN cola_sincro
+          USE EXCLUSIVE (lcpath) ALIAS cola_sincro IN 0
+          IF TYPE("cola_sincro.fechaiso")="U"
+             ALTER TABLE cola_sincro ADD COLUMN fechaiso C(10)
+          ENDIF
+          USE IN cola_sincro
+       CATCH
+       ENDTRY
+       IF  .NOT. USED("cola_sincro")
+          USE SHARED (lcpath) ALIAS cola_sincro IN 0
+       ENDIF
+    ENDIF
+ ELSE
+    * CREATE TABLE abre exclusivo; crear indices, cerrar y reabrir SHARED (evita "archivo ya en uso").
+    CREATE TABLE (lcpath) FREE ;
+       (id N(10,0), tabla C(40), id_reg C(30), accion C(3), ;
+        procesado L, creado T, ;
+        codemp C(15), codcli C(15), fecha D, fechaiso C(10), horini C(5), horfin C(5), ;
+        texto C(250), codrec C(15), nomcli C(80), tel1cli C(20), ;
+        facturado L, servicios C(254), colfon N(10,0), collet N(10,0), ;
+        modif C(20), version N(15,0))
+    INDEX ON procesado TAG proc
+    INDEX ON id TAG idpk
+    USE
+    USE SHARED (lcpath) ALIAS cola_sincro IN 0
+ ENDIF
+ lcpath = lcRoot+"control_sincro"
+ llWasOpen = USED("control_sincro")
+ IF FILE(lcpath+".dbf")
+    IF  .NOT. llWasOpen
+       USE SHARED (lcpath) ALIAS control_sincro IN 0
+    ENDIF
+ ELSE
+    CREATE TABLE (lcpath) FREE (modo C(1), actualiz T, notas C(80))
+    USE
+    USE SHARED (lcpath) ALIAS control_sincro IN 0
+ ENDIF
+ IF USED("control_sincro")
+    SELECT control_sincro
+    IF RECCOUNT()=0
+       APPEND BLANK
+       REPLACE modo WITH "2", actualiz WITH DATETIME(), notas WITH "v2 cola+agente"
+    ENDIF
+ ENDIF
+ ON ERROR &lcSav
+ IF  .NOT. EMPTY(lcErr)
+    DO SuiteBootstrapLog WITH "[BOOT-07] Suite_SyncInit: "+lcErr
+    RETURN
+ ENDIF
+ PUBLIC plSuiteSyncEnabled
+ plSuiteSyncEnabled = .T.
+ DO SuiteBootstrapLog WITH "[INIT-03] Style sync v2 cola activa"
+ENDPROC
+
+PROCEDURE Suite_SyncLog
+ PARAMETER tcLine
+ DO SuiteBootstrapLog WITH tcLine
+ENDPROC
+
+FUNCTION SuiteSyncEnsureLoaded
+ RETURN SuiteHasAppSymbol("Suite_SyncInit")
+ENDFUNC
+
+PROCEDURE SuiteEnsureSyncGlobals
+ENDPROC
+
+FUNCTION SuiteHasAppSymbol
+ * TYPE() solo detecta FUNCTION. PROCEDURE embebido siempre da U.
+ * APROCINFO no disponible en este runtime (error 1001 ReFox/VFP).
+ PARAMETER tcName
+ LOCAL lc
+ IF TYPE(tcName) #"U"
+    RETURN .T.
+ ENDIF
+ lc = UPPER(ALLTRIM(tcName))
+ IF lc $ "SUITE_SYNCINIT.SUITEAPPLYFULLUNLOCK.SUITEENSUREGLOBALS.SUITEENSURESYNCGLOBALS"
+    RETURN .T.
+ ENDIF
+ RETURN .F.
+ENDFUNC
+
 **
 PROCEDURE SuiteBootstrapLog
  PARAMETER tcmsg
@@ -1215,10 +1329,28 @@ PROCEDURE SuiteBootstrapLog
  STRTOFILE(lcline, lcf, .T.)
 ENDPROC
 **
+FUNCTION SuiteLoadColaSyncRuntime
+ PARAMETER tcStyleRoot
+ LOCAL lcPrg
+ IF TYPE("SuiteEnqueuePlan2009")#"U"
+    DO SuiteBootstrapLog WITH "[BOOT-04] suite_cola_sync embebido en general OK"
+    RETURN .T.
+ ENDIF
+ IF TYPE("tcStyleRoot")="C" .AND. .NOT. EMPTY(tcStyleRoot)
+    tcStyleRoot = ADDBS(tcStyleRoot)
+ ELSE
+    tcStyleRoot = ADDBS(SYS(5)+SYS(2003))
+ ENDIF
+ lcPrg = tcStyleRoot+"PROGS\suite_cola_sync.prg"
+ DO SuiteBootstrapLog WITH "[BOOT-06E] sync v2 no en general - COMPILE PROGS\general.prg y BUILD EXE RECOMPILE"+ ;
+    IIF(FILE(lcPrg), "", " (falta "+lcPrg+")")
+ RETURN .F.
+ENDFUNC
+**
 PROCEDURE SuiteLoadUnlockProgram
  PARAMETER tcStyleRoot
  LOCAL lcSavErr, llEmbProc, lcerr
- IF TYPE("SuiteApplyFullUnlock")#"U" AND TYPE("Suite_SyncInit")#"U"
+ IF SuiteHasAppSymbol("SuiteApplyFullUnlock") AND SuiteHasAppSymbol("Suite_SyncInit")
     DO SuiteBootstrapLog WITH "[BOOT-03] unlock ya cargado (Suite_SyncInit OK)"
     RETURN
  ENDIF
@@ -1234,24 +1366,8 @@ PROCEDURE SuiteLoadUnlockProgram
  ENDIF
  * v2: cola local antes del canal HTTP legacy (suite_full_unlock).
  IF TYPE("SuiteEnqueuePlan2009")="U"
-    LOCAL lcCola, llCola
-    lcCola = tcStyleRoot+"PROGS\suite_cola_sync.prg"
-    IF  .NOT. FILE(lcCola)
-       lcCola = tcStyleRoot+"suite_cola_sync.prg"
-    ENDIF
-    IF FILE(lcCola)
-       lcerr = ""
-       ON ERROR lcerr = MESSAGE()
-       SET PROCEDURE TO (lcCola) ADDITIVE
-       llCola = (TYPE("SuiteEnqueuePlan2009")#"U")
-       ON ERROR &lcSavErr
-       IF llCola
-          DO SuiteBootstrapLog WITH "[BOOT-06] suite_cola_sync OK desde "+lcCola+" (v2 fallback)"
-          RETURN
-       ENDIF
-       IF  .NOT. EMPTY(lcerr)
-          DO SuiteBootstrapLog WITH "[BOOT-06E] "+lcCola+" "+lcerr
-       ENDIF
+    IF SuiteLoadColaSyncRuntime(tcStyleRoot)
+       RETURN
     ENDIF
  ENDIF
  * v1 legacy: solo si existe suite_full_unlock.prg en disco (no en proyecto v2).
@@ -1261,10 +1377,11 @@ PROCEDURE SuiteLoadUnlockProgram
     lcPrg = tcStyleRoot+"suite_full_unlock.prg"
  ENDIF
  IF FILE(lcPrg)
+    lcSavErr = ON("ERROR")
     lcerr = ""
     ON ERROR lcerr = MESSAGE()
     SET PROCEDURE TO (lcPrg) ADDITIVE
-    llPrg = (TYPE("Suite_SyncInit")#"U")
+    llPrg = SuiteHasAppSymbol("Suite_SyncInit")
     ON ERROR &lcSavErr
     IF llPrg
        DO SuiteBootstrapLog WITH "[BOOT-06] OK desde "+lcPrg
@@ -1278,29 +1395,27 @@ PROCEDURE SuiteLoadUnlockProgram
 ENDPROC
 **
 PROCEDURE SuiteStartSyncIfReady
- LOCAL lcRoot, lccfg
+ LOCAL lcRoot, lccfg, lcSav, lcErr
  lcRoot = IIF(TYPE("pcSuiteStyleRoot")="C" .AND. .NOT. EMPTY(pcSuiteStyleRoot), ADDBS(pcSuiteStyleRoot), ADDBS(SYS(5)+SYS(2003)))
  DO SuiteBootstrapLog WITH "[BOOT-01] SuiteStartSyncIfReady root="+lcRoot+" cwd="+SYS(5)+SYS(2003)
- IF TYPE("SuiteApplyFullUnlock")#"U"
-    DO SuiteApplyFullUnlock
+ = SuiteLoadColaSyncRuntime(lcRoot)
+ lcSav = ON("ERROR")
+ lcErr = ""
+ ON ERROR lcErr = MESSAGE()
+ DO SuiteApplyFullUnlock
+ ON ERROR &lcSav
+ IF EMPTY(lcErr)
     DO SuiteBootstrapLog WITH "[BOOT-02] SuiteApplyFullUnlock ejecutado"
  ELSE
     DO SuiteBootstrapLog WITH "[BOOT-02] SuiteApplyFullUnlock NO disponible"
  ENDIF
- IF TYPE("Suite_SyncInit")="U"
+ IF  .NOT. SuiteHasAppSymbol("Suite_SyncInit")
     IF TYPE("SuiteLoadUnlockFromFunciones")#"U"
        = SuiteLoadUnlockFromFunciones(lcRoot)
     ENDIF
-    IF TYPE("Suite_SyncInit")="U"
+    IF  .NOT. SuiteHasAppSymbol("Suite_SyncInit")
        DO SuiteLoadUnlockProgram WITH lcRoot
     ENDIF
- ENDIF
- IF TYPE("SuiteSyncEnsureLoaded")#"U"
-    = SuiteSyncEnsureLoaded()
- ENDIF
- IF TYPE("Suite_SyncInit")="U"
-    DO SuiteBootstrapLog WITH "[BOOT-07] FALLO: sync no cargada — falta suite_full_unlock en exe o PROGS\"
-    RETURN
  ENDIF
  lccfg = lcRoot+"SuiteSync.cfg"
  IF  .NOT. FILE(lccfg)
@@ -1315,8 +1430,12 @@ PROCEDURE SuiteStartSyncIfReady
     RETURN
  ENDIF
  DO SuiteBootstrapLog WITH "[BOOT-09] llamando Suite_SyncInit cfg="+lccfg
- IF TYPE("Suite_SyncInit")#"U"
-    DO Suite_SyncInit
+ lcErr = ""
+ ON ERROR lcErr = MESSAGE()
+ DO Suite_SyncInit
+ ON ERROR &lcSav
+ IF  .NOT. EMPTY(lcErr)
+    DO SuiteBootstrapLog WITH "[BOOT-07] FALLO: Suite_SyncInit "+lcErr
  ENDIF
 ENDPROC
 **
@@ -1324,10 +1443,10 @@ FUNCTION SuiteUnlockLibPath
  PARAMETER tcStyleRoot
  LOCAL lcPrg
  * Embebido en exe: no pasar nombre suelto a NEWOBJECT (provoca error 1732)
- IF TYPE("SuiteApplyFullUnlock")#"U"
+ IF SuiteHasAppSymbol("SuiteApplyFullUnlock")
     RETURN ""
  ENDIF
- IF TYPE("Suite_SyncInit")="U" AND TYPE("SuiteApplyFullUnlock")="U"
+ IF  .NOT. SuiteHasAppSymbol("Suite_SyncInit") .AND.  .NOT. SuiteHasAppSymbol("SuiteApplyFullUnlock")
     RETURN ""
  ENDIF
  lcPrg = tcStyleRoot+"PROGS\suite_full_unlock.prg"
@@ -1355,9 +1474,7 @@ FUNCTION SuiteSafeCreateObject
  lo = CREATEOBJECT(tcClass)
  ON ERROR &lcSav
  IF llFail OR VARTYPE(lo)#"O"
-    IF TYPE("SuiteBootstrapLog")#"U"
-       DO SuiteBootstrapLog WITH "[BOOT-CLS] "+tcClass+" err="+ALLTRIM(STR(ERROR()))+" "+MESSAGE()
-    ENDIF
+    DO SuiteBootstrapLog WITH "[BOOT-CLS] "+tcClass+" err="+ALLTRIM(STR(ERROR()))+" "+MESSAGE()
     lo = .NULL.
  ENDIF
  RETURN lo
@@ -1479,4 +1596,3 @@ FUNCTION SuiteEnsureDatabaseOpen
  ON ERROR &lcSavDbc
  RETURN SuiteIsDatabaseOpen()
 ENDFUNC
-**

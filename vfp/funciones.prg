@@ -988,10 +988,16 @@ ENDPROC
 **
 FUNCTION SuiteLoadUnlockFromFunciones
  PARAMETER tcStyleRoot
- LOCAL lcSavErr, lcerr, llOk
- * v2: el exe no embebe suite_full_unlock; la sincronización HTTP es legacy.
+ LOCAL llOk
+ * v2: el exe no embebe suite_full_unlock; la sincronizacion HTTP es legacy.
  IF TYPE("SuiteEnqueuePlan2009")#"U"
     RETURN .T.
+ ENDIF
+ IF TYPE("SuiteLoadColaSyncRuntime")#"U"
+    llOk = SuiteLoadColaSyncRuntime(tcStyleRoot)
+    IF llOk
+       RETURN .T.
+    ENDIF
  ENDIF
  IF TYPE("pcidioma")#"C"
     PUBLIC pcidioma, pcpais, pcversionpais
@@ -999,46 +1005,7 @@ FUNCTION SuiteLoadUnlockFromFunciones
     pcpais = "ESP"
     pcversionpais = "ESP"
  ENDIF
- llOk = .F.
- lcSavErr = ON("ERROR")
- lcerr = ""
- ON ERROR lcerr = MESSAGE()
- * Embebido en Duna.exe (sin .prg externo)
- SET PROCEDURE TO suite_cola_sync ADDITIVE
- llOk = (TYPE("SuiteEnqueuePlan2009")#"U")
- ON ERROR &lcSavErr
- IF llOk
-    IF TYPE("SuiteBootstrapLog")#"U"
-       DO SuiteBootstrapLog WITH "[BOOT-04] suite_cola_sync embebido exe OK (funciones loader)"
-    ENDIF
-    RETURN .T.
- ENDIF
- * .prg externo opcional (si no va embebido)
- LOCAL lcPrg
- lcPrg = ADDBS(tcStyleRoot)+"PROGS\suite_cola_sync.prg"
- IF  .NOT. FILE(lcPrg)
-    lcPrg = ADDBS(tcStyleRoot)+"suite_cola_sync.prg"
- ENDIF
- IF FILE(lcPrg)
-    lcerr = ""
-    ON ERROR lcerr = MESSAGE()
-    SET PROCEDURE TO (lcPrg) ADDITIVE
-    llOk = (TYPE("SuiteEnqueuePlan2009")#"U")
-    ON ERROR &lcSavErr
-    IF llOk
-       IF TYPE("SuiteBootstrapLog")#"U"
-          DO SuiteBootstrapLog WITH "[BOOT-06] suite_cola_sync OK desde "+lcPrg+" (funciones loader)"
-       ENDIF
-       RETURN .T.
-    ENDIF
-    IF TYPE("SuiteBootstrapLog")#"U"
-       DO SuiteBootstrapLog WITH "[BOOT-06E] "+lcPrg+IIF( .NOT. EMPTY(lcerr), " "+lcerr, " sin SuiteEnqueuePlan2009")
-    ENDIF
-    RETURN .F.
- ENDIF
- IF TYPE("SuiteBootstrapLog")#"U"
-    DO SuiteBootstrapLog WITH "[BOOT-07] falta PROGS\suite_cola_sync.prg en "+tcStyleRoot
- ENDIF
+ DO SuiteBootstrapLog WITH "[BOOT-07] falta PROGS\suite_cola_sync.prg en "+tcStyleRoot
  RETURN .F.
 ENDFUNC
 **

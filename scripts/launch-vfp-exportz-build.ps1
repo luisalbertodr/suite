@@ -11,7 +11,8 @@ $VfpExe = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual FoxPro 9\vfp9.exe
 
 if (-not (Test-Path $VfpExe)) { throw "VFP9 no instalado: $VfpExe" }
 
-& (Join-Path $RepoRoot "scripts\build-style-exportz.ps1") -SkipRepair -SkipCompile -Quiet
+# Solo copiar PRGs; NO lanzar VfpBuildProject headless (dialogo "Invalid path or filename").
+& (Join-Path $RepoRoot "scripts\build-style-exportz.ps1") -SkipRepair -SkipCompile -SkipBuildExe -Quiet
 
 Get-Process vfp9 -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Seconds 1
@@ -26,9 +27,10 @@ Write-Host @"
 
 2. Compilar PRGs + exe:
      SET DEFAULT TO $ExportRoot
-     DO PROGS\VfpCompilePrgs.prg
-     DO PROGS\VfpBuildProject.prg
-   O: BUILD EXE Duna.exe FROM $ProjectName RECOMPILE
+     COMPILE PROGS\funciones.prg
+     COMPILE PROGS\general.prg
+     BUILD EXE Duna.exe FROM $ProjectName RECOMPILE
+   (sync v2 va #INCLUDE en funciones.prg; no ReFox, no VfpBuildProject headless)
 
 3. Post-build:
      .\scripts\build-style-exportz.ps1 -AfterBuild -DeployTest

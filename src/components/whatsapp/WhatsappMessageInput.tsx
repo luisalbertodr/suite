@@ -21,7 +21,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
-import { fileToBase64, mediaKindFromMime, messagePreviewText } from './whatsappUtils';
+import { assertWhatsappVoiceNoteFile, fileToBase64, mediaKindFromMime, messagePreviewText, resolveWhatsappFileMime } from './whatsappUtils';
 import { useWhatsappTheme } from './WhatsappThemeContext';
 import { WHATSAPP_EMOJI_GRID } from './whatsappEmojis';
 import type { SendMessageInput, WhatsappMessageRow } from '@/hooks/useWhatsappMessages';
@@ -134,13 +134,15 @@ export const WhatsappMessageInput: React.FC<Props> = ({
       return;
     }
     try {
+      await assertWhatsappVoiceNoteFile(file);
       const base64 = await fileToBase64(file);
-      const kind = mediaKindFromMime(file.type);
+      const mime = resolveWhatsappFileMime(file.name, file.type);
+      const kind = mediaKindFromMime(mime);
       await onSend(
         buildSendPayload({
           type: kind,
           media_base64: base64,
-          mime_type: file.type || 'application/octet-stream',
+          mime_type: mime,
           filename: file.name,
           caption: text.trim() || undefined,
         }),
@@ -179,11 +181,11 @@ export const WhatsappMessageInput: React.FC<Props> = ({
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaStreamRef.current = stream;
       chunksRef.current = [];
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : MediaRecorder.isTypeSupported('audio/webm')
-          ? 'audio/webm'
-          : '';
+      const mimeType = [
+        'audio/ogg;codecs=opus',
+        'audio/webm;codecs=opus',
+        'audio/webm',
+      ].find((t) => MediaRecorder.isTypeSupported(t)) ?? '';
       const recorder = mimeType
         ? new MediaRecorder(stream, { mimeType })
         : new MediaRecorder(stream);
@@ -252,15 +254,29 @@ export const WhatsappMessageInput: React.FC<Props> = ({
     }
 
     try {
+      const ext = blob.type.includes('ogg') || blob.type.includes('opus') ? 'ogg' : 'webm';
       const base64 = await fileToBase64(
-        new File([blob], `voice-${Date.now()}.webm`, { type: blob.type }),
+        new File([blob], `voice-${Date.now()}.${ext}`, { type: blob.type }),
       );
+      if (
+        ext === 'webm' &&
+        !blob.type.includes('ogg') &&
+        !blob.type.includes('opus')
+      ) {
+        toast({
+          title: 'Formato no compatible con OpenWA',
+          description:
+            'La grabación del navegador es WebM. Adjunta un archivo .ogg o usa Firefox para grabar notas de voz.',
+          variant: 'destructive',
+        });
+        return;
+      }
       await onSend(
         buildSendPayload({
           type: 'voice',
           media_base64: base64,
-          mime_type: blob.type || 'audio/webm',
-          filename: `voice-${Date.now()}.webm`,
+          mime_type: blob.type || 'audio/ogg',
+          filename: `voice-${Date.now()}.${ext}`,
         }),
       );
       onClearReply?.();
@@ -314,6 +330,7 @@ export const WhatsappMessageInput: React.FC<Props> = ({
         <input
           ref={fileInputRef}
           type="file"
+          accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,application/*"
           aria-label="Seleccionar documento"
           title="Seleccionar documento"
           className="hidden"
@@ -326,9 +343,9 @@ export const WhatsappMessageInput: React.FC<Props> = ({
         <input
           ref={audioInputRef}
           type="file"
-          accept="audio/*"
+          accept="audio/*,.ogg,.opus,application/ogg"
           aria-label="Seleccionar audio"
-          title="Seleccionar audio"
+          title="Seleccionar audio (OGG, MP3, M4A…)"
           className="hidden"
           onChange={(e) => {
             const f = e.target.files?.[0];
@@ -392,7 +409,7 @@ export const WhatsappMessageInput: React.FC<Props> = ({
                   <FileText className="mr-2 h-4 w-4" /> Documento
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => audioInputRef.current?.click()}>
-                  <Music className="mr-2 h-4 w-4" /> Audio
+                  <Music className="mr-2 h-4 w-4" /> Audio / nota de voz (.ogg)
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

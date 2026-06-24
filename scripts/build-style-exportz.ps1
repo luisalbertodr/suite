@@ -3,7 +3,8 @@
 # Uso:
 #   .\scripts\build-style-exportz.ps1              # preparar + compilar PRGs
 #   .\scripts\build-style-exportz.ps1 -AfterBuild  # tras DO VfpBuildProject en VFP
-#   .\scripts\build-style-exportz.ps1 -DeployTest    # copia Duna.exe a Style-Suite-Test
+#   .\scripts\build-style-exportz.ps1 -AfterBuild -DeployTest -SkipRepair  # post-build (default SkipRepair)
+#   .\scripts\build-style-exportz.ps1 -SkipRepair:$false  # solo si necesitas repair PM (riesgo .pjt)
 #   .\scripts\build-style-exportz.ps1 -DeployVm
 #
 param(
@@ -11,12 +12,13 @@ param(
     [string]$TestRoot = "C:\Duna\Style-Suite-Test",
     [string]$ProjectName = "mscomctlOk",  # proyecto nativo del decompile ExportZ (NO mscomctl de Export)
     [switch]$AfterBuild,
-    [switch]$SkipRepair,
+    [switch]$SkipRepair = $true,
     [switch]$SkipCompile,
     [switch]$SkipBuildExe,
     [switch]$SkipPrepare,
     [switch]$DeployTest,
     [switch]$DeployVm,
+    [switch]$SyncOnly,
     [switch]$Quiet
 )
 
@@ -79,6 +81,25 @@ function Sync-SuitePrgs {
         Copy-Item $src (Join-Path $Progs $f) -Force
         Write-Ok "$f -> ExportZ\PROGS ($((Get-Item $src).Length) bytes)"
     }
+
+    # CRITICO: el #INCLUDE de VFP NO compila los PROCEDURE/FUNCTION de un .prg dentro del
+    # programa anfitrion (solo procesa #DEFINE). Por eso suite_cola_sync/suite_control_sync
+    # nunca quedaban embebidos (SuiteEnqueuePlan2009 ausente -> sin outbound v2).
+    # Inlinamos su contenido en la copia general.prg de PROGS (el repo mantiene los #INCLUDE
+    # como marcadores -> single source).
+    $enc = [System.Text.Encoding]::GetEncoding(1252)
+    $genSrc = Join-Path $VfpRepo "general.prg"
+    $ctrlSrc = Join-Path $VfpRepo "suite_control_sync.prg"
+    $colaSrc = Join-Path $VfpRepo "suite_cola_sync.prg"
+    $gen = [System.IO.File]::ReadAllText($genSrc, $enc)
+    if ($gen -notmatch '#INCLUDE\s+suite_cola_sync\.prg') {
+        throw "general.prg sin marcador '#INCLUDE suite_cola_sync.prg' para inline"
+    }
+    $ctrl = [System.IO.File]::ReadAllText($ctrlSrc, $enc)
+    $cola = [System.IO.File]::ReadAllText($colaSrc, $enc)
+    $gen = $gen.Replace("#INCLUDE suite_control_sync.prg", $ctrl).Replace("#INCLUDE suite_cola_sync.prg", $cola)
+    [System.IO.File]::WriteAllText((Join-Path $Progs "general.prg"), $gen, $enc)
+    Write-Ok "general.prg con suite_control_sync + suite_cola_sync INLINE (embebidos para compilar)"
 }
 
 function Remove-StaleBuildFxp {
@@ -165,11 +186,12 @@ function Show-UserBuildStep {
 
   Compilar (Ctrl+F2):
        SET DEFAULT TO $ExportRoot
-       DO PROGS\VfpCompilePrgs.prg
-       DO PROGS\VfpBuildProject.prg
+       COMPILE PROGS\general.prg
+       COMPILE PROGS\funciones.prg
+   (suite_cola_sync #INCLUDE inline al inicio de general.prg, antes del codigo ejecutable)
 
-  O en Project Manager: Build (martillo) > Win32 executable
-  O comando: BUILD EXE Duna.exe FROM $ProjectName RECOMPILE
+  Build exe:
+       BUILD EXE C:\Duna\ExportZ\Duna.exe FROM $ProjectName RECOMPILE
 
   Post-build PowerShell:
        cd C:\Users\OportoW11\Suite\suite
@@ -222,6 +244,17 @@ Write-Step "1/4 PRGs Suite desde repo"
 if (-not (Test-Path $Progs)) { New-Item -ItemType Directory -Path $Progs -Force | Out-Null }
 Sync-SuitePrgs
 Remove-LegacyUnlockFromProgs -ProgsDir $Progs
+
+if ($SyncOnly) {
+    Write-Ok "SyncOnly: fuentes repo -> $Progs copiadas (sin tocar VFP)."
+    Write-Host ""
+    Write-Host "Ahora en VFP9 IDE:" -ForegroundColor White
+    Write-Host "    SET DEFAULT TO $ExportRoot" -ForegroundColor White
+    Write-Host "    COMPILE PROGS\general.prg" -ForegroundColor White
+    Write-Host "    COMPILE PROGS\funciones.prg" -ForegroundColor White
+    Write-Host "    BUILD EXE $ExportRoot\Duna.exe FROM $ProjectName RECOMPILE" -ForegroundColor White
+    exit 0
+}
 
 if (-not $SkipPrepare) {
     Write-Step "2/4 Scripts de build"

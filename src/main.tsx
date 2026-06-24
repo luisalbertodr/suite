@@ -6,7 +6,15 @@ import { ThemeProvider } from '@/components/ThemeProvider'
 import App from './App.tsx'
 import './index.css'
 
-const queryClient = new QueryClient()
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      // Evita recargas masivas al volver de otra app (Marketing, agenda, etc.).
+      refetchOnWindowFocus: false,
+      staleTime: 60_000,
+    },
+  },
+})
 
 createRoot(document.getElementById('root')!).render(
   <QueryClientProvider client={queryClient}>

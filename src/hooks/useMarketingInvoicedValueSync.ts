@@ -57,7 +57,7 @@ export const useMarketingInvoicedValueSync = (input: {
     });
 
     if (result.moved > 0 || result.updated > 0) {
-      await queryClient.invalidateQueries({ queryKey: ['marketing-leads', companyId] });
+      await queryClient.refetchQueries({ queryKey: ['marketing-leads', companyId] });
     }
 
     return result;

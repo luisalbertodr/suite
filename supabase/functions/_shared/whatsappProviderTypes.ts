@@ -18,6 +18,8 @@ export type WhatsappSendMediaInput = {
   mime: string;
   filename: string;
   caption?: string;
+  /** URL pública (requerida por OpenWA para audio/vídeo/documento). */
+  url?: string;
 };
 
 export type WhatsappSendResult = {

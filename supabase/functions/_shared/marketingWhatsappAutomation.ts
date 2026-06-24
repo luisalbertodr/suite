@@ -13,6 +13,11 @@ import {
   providerSendText,
 } from './whatsappProviderClient.ts';
 import {
+  buildDefaultStoragePublicUrl,
+  openwaMediaRequiresPublicUrl,
+  uploadWhatsappOutgoingMedia,
+} from './whatsappOutgoingMediaStorage.ts';
+import {
   normalizeWhatsappProvider,
   resolveWhatsappCredentials,
   type WhatsappProvider,
@@ -440,11 +445,25 @@ async function sendWhatsappMedia(
 ): Promise<{ chatId: string; wahaId: string | null }> {
   const providerCfg = asProviderConfig(cfg);
   const preview = `[audio] ${media.filename}`;
-  const sent = await providerSendMedia(providerCfg, chatId, 'audio', {
+  const mediaPayload = {
     base64: media.base64,
     mime: media.mime,
     filename: media.filename,
-  });
+  };
+  if (
+    normalizeWhatsappProvider(providerCfg.provider) === 'openwa' &&
+    openwaMediaRequiresPublicUrl('audio')
+  ) {
+    mediaPayload.url = await uploadWhatsappOutgoingMedia(
+      admin,
+      companyId,
+      media.base64,
+      media.mime,
+      buildDefaultStoragePublicUrl,
+      media.filename,
+    );
+  }
+  const sent = await providerSendMedia(providerCfg, chatId, 'audio', mediaPayload);
   const wahaId = sent.messageId;
   const ts = sent.timestamp
     ? new Date(sent.timestamp * 1000).toISOString()

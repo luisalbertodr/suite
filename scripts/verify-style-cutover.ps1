@@ -27,7 +27,7 @@ $v1EmbeddedNeedles = @(
     "BINDEVENT(_SCREEN.oSuiteSyncTimer",
     "NEWOBJECT(""licencias_unlock"""
 )
-$v2ColaNeedle = "suite_cola_sync embebido exe OK"
+$v2ColaNeedle = "suite_cola_sync embebido en general"
 
 if ([string]::IsNullOrWhiteSpace($StyleRemote)) {
     if (Test-Path "Z:\Style-Dunasoft") { $StyleRemote = "Z:\Style-Dunasoft" }
@@ -63,18 +63,35 @@ $newHasV1Embed = $false
 foreach ($n in $v1EmbeddedNeedles) {
     if (Test-ExeContainsString -Path $NewExe -Needle $n) { $newHasV1Embed = $true; break }
 }
-$newHasCola = Test-ExeContainsString -Path $NewExe -Needle "SuiteEnqueuePlan2009"
+# OJO: "SuiteEnqueuePlan2009" y el texto BOOT-04 aparecen como literales en general.prg
+# (TYPE("SuiteEnqueuePlan2009"), mensaje de log) -> NO prueban embebido. El #INCLUDE de VFP
+# no compila los PROCEDURE del .prg. Comprobamos simbolos que SOLO existen en el cuerpo de
+# suite_cola_sync.prg (SuiteColaEpochNow, fechaiso) -> embebido REAL via inline en el build.
+$newHasCola = (Test-ExeContainsString -Path $NewExe -Needle "SuiteColaEpochNow") -and `
+              (Test-ExeContainsString -Path $NewExe -Needle "fechaiso")
 $newHasColaBoot = Test-ExeContainsString -Path $NewExe -Needle $v2ColaNeedle
 
 Write-Host "Nuevo exe embebe v1 HTTP (unlock timer): $newHasV1Embed" -ForegroundColor $(if ($newHasV1Embed) { "Red" } else { "Green" })
-Write-Host "Nuevo exe contiene SuiteEnqueuePlan2009: $newHasCola" -ForegroundColor $(if ($newHasCola) { "Green" } else { "Yellow" })
-Write-Host "Nuevo exe mensaje BOOT-04 cola (funciones): $newHasColaBoot" -ForegroundColor $(if ($newHasColaBoot) { "Green" } else { "Yellow" })
+Write-Host "Nuevo exe embebe cola v2 REAL (SuiteColaEpochNow+fechaiso): $newHasCola" -ForegroundColor $(if ($newHasCola) { "Green" } else { "Red" })
+Write-Host "Nuevo exe mensaje BOOT-04 cola (literal, informativo): $newHasColaBoot" -ForegroundColor DarkGray
 
 $newFi = Get-Item $NewExe
 Write-Host "Tamano nuevo: $([math]::Round($newFi.Length / 1MB, 2)) MB"
 
 if ($newHasV1Embed -and -not $SkipAbortOnUnlockFound) {
     throw "ABORTAR: el nuevo Duna.exe aun embebe sync HTTP v1. Quita suite_full_unlock del .pjx y recompila."
+}
+
+if (-not $newHasCola) {
+    throw @"
+ABORTAR: el nuevo Duna.exe NO embebe la cola v2 (faltan SuiteColaEpochNow/fechaiso).
+Causa: el #INCLUDE de VFP no compila los PROCEDURE del .prg.
+Solucion: ejecuta '.\scripts\build-style-exportz.ps1 -SyncOnly' (inlina general.prg) y RECOMPILA:
+  SET DEFAULT TO C:\Duna\ExportZ
+  COMPILE PROGS\general.prg
+  COMPILE PROGS\funciones.prg
+  BUILD EXE C:\Duna\ExportZ\Duna.exe FROM mscomctlOk RECOMPILE
+"@
 }
 
 Write-Host ""

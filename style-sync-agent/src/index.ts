@@ -55,15 +55,17 @@ if (!supabaseUrl || !supabaseKey) {
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+// Campos <=10 chars (tabla FREE legible por dbf-reader: no soporta memo ni nombres largos).
 type ColaRow = {
   id: number;
-  tabla_afectada: string;
-  id_registro: string;
+  tabla: string;
+  id_reg: string;
   accion: string;
   procesado: boolean;
   codemp?: string;
   codcli?: string;
   fecha?: Date | string | null;
+  fechaiso?: string;
   horini?: string;
   horfin?: string;
   texto?: string;
@@ -74,7 +76,7 @@ type ColaRow = {
   servicios?: string;
   colfon?: number;
   collet?: number;
-  style_modified_at?: string;
+  modif?: string;
   version?: number;
   creado?: Date | string | null;
 };
@@ -184,15 +186,27 @@ function parseHeartbeat(raw: string): { workerVersion: string | null } {
   return { workerVersion: m?.[1] ?? null };
 }
 
+function normalizeKeys(row: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of Object.keys(row)) {
+    out[k.toLowerCase()] = row[k];
+  }
+  return out;
+}
+
 async function readPendingCola(lastColaId: number): Promise<ColaRow[]> {
   return withFsRetry(
     () => {
       if (!fs.existsSync(COLA_DBF)) return [];
       const buf = fs.readFileSync(COLA_DBF);
       const dt = Dbf.read(buf as unknown as Buffer);
-      return (dt.rows as unknown as ColaRow[])
+      // dbf-reader devuelve claves en MAYUSCULAS; normalizar a minusculas.
+      const rows = (dt.rows as unknown as Record<string, unknown>[]).map(
+        (r) => normalizeKeys(r) as unknown as ColaRow,
+      );
+      return rows
         .filter((r) => r && Number(r.id) > lastColaId)
-        .filter((r) => String(r.tabla_afectada ?? "").toLowerCase() === "plan2009")
+        .filter((r) => String(r.tabla ?? "").toLowerCase() === "plan2009")
         .sort((a, b) => Number(a.id) - Number(b.id));
     },
     {
@@ -213,13 +227,16 @@ function colaCreatedMs(row: ColaRow): number | null {
 }
 
 async function processRow(row: ColaRow): Promise<void> {
-  log(`procesar plan2009 id=${row.id_registro} accion=${row.accion}`);
+  log(`procesar plan2009 id=${row.id_reg} accion=${row.accion}`);
   if (!companyId) throw new Error("Falta COMPANY_ID");
 
   const accion = String(row.accion ?? "").toUpperCase();
   const rpcAccion = accion === "DEL" ? "DELETE" : "UPDATE";
-  const fecha =
-    row.fecha instanceof Date
+  // Preferir fechaiso (cadena ISO YYYY-MM-DD escrita por VFP): dbf-reader malinterpreta el campo D.
+  const fechaIso = String(row.fechaiso ?? "").trim();
+  const fecha = /^\d{4}-\d{2}-\d{2}$/.test(fechaIso)
+    ? fechaIso
+    : row.fecha instanceof Date
       ? row.fecha.toISOString().slice(0, 10)
       : typeof row.fecha === "string"
         ? row.fecha.slice(0, 10)
@@ -228,7 +245,7 @@ async function processRow(row: ColaRow): Promise<void> {
   const { error } = await supabase.rpc("style_reservas_apply_from_style", {
     p_company_id: companyId,
     p_accion: rpcAccion,
-    p_idplan: Number(row.id_registro),
+    p_idplan: Number(row.id_reg),
     p_codemp: row.codemp ?? "",
     p_codcli: row.codcli ?? "",
     p_fecha: fecha,
@@ -242,7 +259,7 @@ async function processRow(row: ColaRow): Promise<void> {
     p_servicios: serviciosJsonToLegacy(row.servicios),
     p_colfon: Number(row.colfon ?? 0),
     p_collet: Number(row.collet ?? 0),
-    p_style_modified_at: row.style_modified_at ?? (row.version ? String(row.version) : null),
+    p_style_modified_at: row.modif ?? (row.version ? String(row.version) : null),
   });
   if (error) throw error;
   if (companyId) {

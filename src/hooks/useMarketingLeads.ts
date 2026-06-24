@@ -4,6 +4,7 @@ import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { withSupabaseTimeout } from '@/lib/marketingNotesApi';
 import { notifyMetaConversionStageChange } from '@/lib/metaConversionStageNotify';
 import { markMarketingLeadTeamViewed } from '@/hooks/useMarketingUnread';
+import { sortMarketingLeadsNewestFirst } from '@/lib/marketingLeadsCache';
 import type { Database, Json } from '@/integrations/supabase/types';
 
 export type MarketingLead = Database['public']['Tables']['marketing_leads']['Row'];
@@ -335,6 +336,7 @@ export const parseMetaLeadPayload = (raw: MetaLeadFormPayload): ParsedMetaLead[]
 };
 
 const MARKETING_LEADS_PAGE_SIZE = 1000;
+const MARKETING_LEADS_SYNC_OVERLAP_MS = 15_000;
 
 async function fetchAllMarketingLeads(companyId: string): Promise<MarketingLead[]> {
   const rows: MarketingLead[] = [];
@@ -360,6 +362,48 @@ async function fetchAllMarketingLeads(companyId: string): Promise<MarketingLead[
   return rows;
 }
 
+/** Sincroniza sólo filas tocadas desde la última carga (mucho más ligero que paginar todo). */
+async function fetchMarketingLeadsIncremental(
+  companyId: string,
+  cached: MarketingLead[],
+  syncedAtMs: number,
+): Promise<MarketingLead[]> {
+  const since = new Date(syncedAtMs - MARKETING_LEADS_SYNC_OVERLAP_MS).toISOString();
+  const { data: changed, error } = await supabase
+    .from('marketing_leads')
+    .select('*')
+    .eq('company_id', companyId)
+    .gte('updated_at', since);
+
+  if (error) throw error;
+  if (!changed?.length) return cached;
+
+  const archivedIds = new Set(
+    changed.filter((l) => l.archived_at != null).map((l) => l.id),
+  );
+  const activeChanges = new Map(
+    changed.filter((l) => l.archived_at == null).map((l) => [l.id, l]),
+  );
+
+  const merged: MarketingLead[] = [];
+  const seen = new Set<string>();
+
+  for (const lead of cached) {
+    if (archivedIds.has(lead.id)) continue;
+    const hit = activeChanges.get(lead.id);
+    merged.push(hit ?? lead);
+    seen.add(lead.id);
+  }
+
+  for (const lead of changed) {
+    if (lead.archived_at != null || seen.has(lead.id)) continue;
+    merged.push(lead);
+    seen.add(lead.id);
+  }
+
+  return sortMarketingLeadsNewestFirst(merged);
+}
+
 export const useMarketingLeads = (scopeCompanyId?: string | null) => {
   const queryClient = useQueryClient();
   const { companyId: hostCompanyId, loading: companyLoading } = useCompanyFilter();
@@ -368,11 +412,21 @@ export const useMarketingLeads = (scopeCompanyId?: string | null) => {
   const query = useQuery({
     queryKey: ['marketing-leads', companyId],
     enabled: !!companyId && !companyLoading,
-    staleTime: 30_000,
-    refetchInterval: 60_000,
-    refetchOnWindowFocus: true,
+    staleTime: 10 * 60_000,
+    gcTime: 30 * 60_000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: true,
     queryFn: async (): Promise<MarketingLead[]> => {
       if (!companyId) return [];
+      const cached = queryClient.getQueryData<MarketingLead[]>(['marketing-leads', companyId]);
+      const syncedAt = queryClient.getQueryState(['marketing-leads', companyId])?.dataUpdatedAt;
+      if (cached && cached.length > 0 && syncedAt) {
+        try {
+          return await fetchMarketingLeadsIncremental(companyId, cached, syncedAt);
+        } catch (e) {
+          console.warn('Marketing incremental sync failed, full reload:', e);
+        }
+      }
       return fetchAllMarketingLeads(companyId);
     },
   });
@@ -903,6 +957,7 @@ export const useMarketingLeads = (scopeCompanyId?: string | null) => {
   return {
     leads: query.data ?? [],
     isLoading: query.isLoading,
+    isFetching: query.isFetching,
     isError: query.isError,
     error: query.error as Error | null,
     refetch: query.refetch,
