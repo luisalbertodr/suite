@@ -989,8 +989,8 @@ ENDPROC
 FUNCTION SuiteLoadUnlockFromFunciones
  PARAMETER tcStyleRoot
  LOCAL llOk
- * v2: el exe no embebe suite_full_unlock; la sincronizacion HTTP es legacy.
- IF TYPE("SuiteEnqueuePlan2009")#"U"
+ * v2: TYPE() no detecta FUNCTION embebida; usar plSuiteSyncEnabled (set en Suite_SyncInit).
+ IF TYPE("plSuiteSyncEnabled")="L" AND plSuiteSyncEnabled
     RETURN .T.
  ENDIF
  IF TYPE("SuiteLoadColaSyncRuntime")#"U"
@@ -1047,14 +1047,14 @@ FUNCTION Actualizar
  lnantiguaversion = ""
  llactualizar = .F.
  llregistroactualizacion = .T.
- IF TYPE("SuiteEnqueuePlan2009")="U"
+ IF TYPE("plSuiteSyncEnabled")="U"
     = SuiteLoadUnlockFromFunciones(IIF(TYPE("pcSuiteStyleRoot")="C" .AND. .NOT. EMPTY(pcSuiteStyleRoot), ADDBS(pcSuiteStyleRoot), ADDBS(SYS(5)+SYS(2003))))
  ENDIF
  * Style Suite: sin comprobar/instalar actualizacion Dunasoft al arrancar
  IF TYPE("plSuiteFullUnlock")="L" AND plSuiteFullUnlock
     RETURN .T.
  ENDIF
- IF TYPE("SuiteEnqueuePlan2009")#"U"
+ IF TYPE("plSuiteSyncEnabled")="L" AND plSuiteSyncEnabled
     RETURN .T.
  ENDIF
  IF FILE(ADDBS(SYS(5)+SYS(2003))+"SuiteSync.cfg")
@@ -4292,7 +4292,7 @@ PROCEDURE Start_ServicioComunicaciones
  LOCAL lcRoot
  TRY
     lcRoot = IIF(TYPE("pcSuiteStyleRoot")="C" .AND. .NOT. EMPTY(pcSuiteStyleRoot), ADDBS(pcSuiteStyleRoot), ADDBS(SYS(5)+SYS(2003)))
-    IF TYPE("SuiteEnqueuePlan2009")="U"
+    IF TYPE("plSuiteSyncEnabled")="U"
        = SuiteLoadUnlockFromFunciones(lcRoot)
     ENDIF
  CATCH TO oerr
@@ -4363,7 +4363,7 @@ FUNCTION Reservas_Incidencia
     SELECT (lcalias)
  ENDIF
  TRY
-    IF TYPE("SuiteEnqueuePlan2009")#"U"
+    IF TYPE("plSuiteSyncEnabled")="L" AND plSuiteSyncEnabled
        LOCAL lcAcc
        lcAcc = "UPD"
        DO CASE

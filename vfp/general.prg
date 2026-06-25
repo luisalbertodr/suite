@@ -1310,7 +1310,7 @@ FUNCTION SuiteHasAppSymbol
     RETURN .T.
  ENDIF
  lc = UPPER(ALLTRIM(tcName))
- IF lc $ "SUITE_SYNCINIT.SUITEAPPLYFULLUNLOCK.SUITEENSUREGLOBALS.SUITEENSURESYNCGLOBALS"
+ IF lc $ "SUITE_SYNCINIT.SUITEAPPLYFULLUNLOCK.SUITEENSUREGLOBALS.SUITEENSURESYNCGLOBALS.SUITEENQUEUEPLAN2009"
     RETURN .T.
  ENDIF
  RETURN .F.
@@ -1332,8 +1332,8 @@ ENDPROC
 FUNCTION SuiteLoadColaSyncRuntime
  PARAMETER tcStyleRoot
  LOCAL lcPrg
- IF TYPE("SuiteEnqueuePlan2009")#"U"
-    DO SuiteBootstrapLog WITH "[BOOT-04] suite_cola_sync embebido en general OK"
+ IF TYPE("plSuiteSyncEnabled")="L" AND plSuiteSyncEnabled
+    DO SuiteBootstrapLog WITH "[BOOT-04] suite_cola_sync v2 activa (plSuiteSyncEnabled)"
     RETURN .T.
  ENDIF
  IF TYPE("tcStyleRoot")="C" .AND. .NOT. EMPTY(tcStyleRoot)

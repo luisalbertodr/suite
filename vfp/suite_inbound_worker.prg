@@ -13,6 +13,58 @@ FUNCTION SuiteInboundRoot
  RETURN lcRoot
 ENDFUNC
 
+PROCEDURE SuiteInboundEnsureWedb
+ PARAMETER tcRoot
+ LOCAL lcDbfRoot, lcSav, lcErr
+ IF EMPTY(tcRoot)
+    RETURN
+ ENDIF
+ lcDbfRoot = ADDBS(tcRoot) + "dbf\"
+ IF  .NOT. FILE(lcDbfRoot + "wedb.dbc")
+    RETURN
+ ENDIF
+ SET DEFAULT TO (ADDBS(tcRoot))
+ SET EXCLUSIVE OFF
+ IF DIRECTORY(lcDbfRoot)
+    SET PATH TO (lcDbfRoot) ADDITIVE
+ ENDIF
+ lcSav = ON("ERROR")
+ lcErr = ""
+ ON ERROR lcErr = MESSAGE()
+ IF  .NOT. DBUSED("wedb")
+    OPEN DATABASE (lcDbfRoot + "wedb") SHARED
+ ENDIF
+ ON ERROR &lcSav
+ IF  .NOT. EMPTY(lcErr)
+    DO SuiteInboundLog WITH "wedb SHARED fail: "+lcErr
+ ENDIF
+ENDPROC
+
+FUNCTION SuiteInboundOpenTable
+ PARAMETER tcTable
+ LOCAL lcRoot, lcPath, lcSav, lcErr
+ lcRoot = SuiteInboundRoot()
+ DO SuiteInboundEnsureWedb WITH lcRoot
+ IF USED(tcTable)
+    RETURN .T.
+ ENDIF
+ lcPath = lcRoot + "dbf\" + ALLTRIM(tcTable) + ".dbf"
+ lcSav = ON("ERROR")
+ lcErr = ""
+ ON ERROR lcErr = MESSAGE()
+ IF FILE(lcPath)
+    USE (lcPath) IN 0 SHARED ALIAS (tcTable)
+ ELSE
+    USE SHARED ("dbf/" + tcTable) AGAIN IN 0 ALIAS (tcTable)
+ ENDIF
+ ON ERROR &lcSav
+ IF  .NOT. EMPTY(lcErr)
+    DO SuiteInboundLog WITH "open "+tcTable+" fail: "+lcErr
+    RETURN .F.
+ ENDIF
+ RETURN USED(tcTable)
+ENDFUNC
+
 FUNCTION SuiteJsonParse
  PARAMETER tcJson
  LOCAL loSC, loObj, lcSav, llFail
@@ -78,7 +130,12 @@ FUNCTION Suite_ParseServiciosToPlanart_Local
     RETURN .T.
  ENDIF
  IF  .NOT. USED("planart")
-    USE SHARED dbf/planart AGAIN ALIAS planart IN 0
+    IF  .NOT. SuiteInboundOpenTable("planart")
+       IF  .NOT. EMPTY(lcalias)
+          SELECT (lcalias)
+       ENDIF
+       RETURN .F.
+    ENDIF
  ENDIF
  SELECT planart
  SET ORDER TO idplan
@@ -263,7 +320,7 @@ FUNCTION SuiteApplyServiciosFromPayload
           ENDTRY
           IF  .NOT. EMPTY(ALLTRIM(lccod))
              IF  .NOT. USED("planart")
-                USE SHARED dbf/planart AGAIN ALIAS planart IN 0
+                = SuiteInboundOpenTable("planart")
              ENDIF
              SELECT planart
              IF RLOCK("0", "planart")
@@ -301,8 +358,11 @@ PROCEDURE SuiteInboundApplyOne
  LOCAL lnColfon, lnCollet, lcServicios, lnQueueId, lnIncomingVer, llApply, llApplied
 
  lnidplan = SuiteGetObjNum(toMsg, "idplan", 0)
- lnidand = SuiteGetObjNum(toMsg, "idand", 0)
  lnQueueId = SuiteGetObjNum(toMsg, "queue_id", 0)
+ lnidand = SuiteGetObjNum(toMsg, "idand", 0)
+ IF lnidand <= 0 .AND. lnQueueId > 0
+    lnidand = lnQueueId
+ ENDIF
  lcMac = ALLTRIM(SuiteGetObj(toMsg, "macand", "SUITE-STYLE"))
  llDelete = (UPPER(ALLTRIM(SuiteGetObj(toMsg, "eliminar", "NO")))=="SI")
  lnIncomingVer = SuiteInboundResolveVersion(toMsg)
@@ -334,7 +394,9 @@ PROCEDURE SuiteInboundApplyOne
  ENDIF
 
  IF  .NOT. USED("plan2009")
-    USE SHARED dbf/plan2009 AGAIN ALIAS plan2009 IN 0
+    IF  .NOT. SuiteInboundOpenTable("plan2009")
+       RETURN
+    ENDIF
  ENDIF
  DO SuiteEnsurePlan2009SyncVersion
 
@@ -349,7 +411,9 @@ PROCEDURE SuiteInboundApplyOne
  ENDIF
 
  IF  .NOT. USED("planart")
-    USE SHARED dbf/planart AGAIN ALIAS planart IN 0
+    IF  .NOT. SuiteInboundOpenTable("planart")
+       RETURN
+    ENDIF
  ENDIF
 
  SELECT plan2009
@@ -501,6 +565,9 @@ PROCEDURE SuiteInboundWorkerRun
  ENDIF
 
  lcRoot = SuiteInboundRoot()
+ * Abrir wedb SHARED (misma logica que general.prg) para coexistir con Duna.exe.
+ DO SuiteInboundEnsureWedb WITH lcRoot
+
  lcInbound = lcRoot + "sync\inbound\"
  lcAck = lcRoot + "sync\inbound_ack\"
  IF  .NOT. DIRECTORY(lcRoot + "sync\")

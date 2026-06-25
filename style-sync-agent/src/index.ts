@@ -9,6 +9,7 @@ import { incrementAgentErrors, patchAgentState } from "./agentState.js";
 import { isSyncV2Active } from "./controlSync.js";
 import { writeDeadLetter } from "./deadLetter.js";
 import { isRetryableFsError, withFsRetry } from "./fsRetry.js";
+import { maybeTriggerInboundWorker } from "./inboundWorkerTrigger.js";
 import { resolveVersion, serviciosJsonToLegacy } from "./servicios.js";
 
 const require = createRequire(import.meta.url);
@@ -38,6 +39,7 @@ const INBOUND_ACK_MAX_RETRIES = Number(process.env.INBOUND_ACK_MAX_RETRIES ?? "5
 const POLL_MS = Number(process.env.POLL_MS ?? "1500");
 const INBOUND_POLL_MS = Number(process.env.INBOUND_POLL_MS ?? "3000");
 const INBOUND_BATCH = Number(process.env.INBOUND_BATCH ?? "50");
+const OUTBOUND_BATCH = Number(process.env.OUTBOUND_BATCH ?? "50");
 const HEARTBEAT_CHECK_MS = Number(process.env.HEARTBEAT_CHECK_MS ?? "60000");
 const HEARTBEAT_STALE_MS = Number(process.env.HEARTBEAT_STALE_MS ?? "300000");
 const LAG_ALERT_MS = Number(process.env.LAG_ALERT_MS ?? "30000");
@@ -261,7 +263,7 @@ async function processRow(row: ColaRow): Promise<void> {
     p_collet: Number(row.collet ?? 0),
     p_style_modified_at: row.modif ?? (row.version ? String(row.version) : null),
   });
-  if (error) throw error;
+  if (error) throw new Error(error.message ?? JSON.stringify(error));
   if (companyId) {
     const createdMs = colaCreatedMs(row);
     const lagMs = createdMs != null ? Math.max(0, Date.now() - createdMs) : undefined;
@@ -288,7 +290,7 @@ function toVfpPullShape(row: InboundQueueRow): Record<string, unknown> {
   });
   return {
     idplan: row.idplan,
-    idand: Number(p["idand"] ?? 0),
+    idand: row.id,
     macand: String(p["macand"] ?? "SUITE-STYLE"),
     codemp: String(p["codemp"] ?? ""),
     codcli: String(p["codcli"] ?? ""),
@@ -339,6 +341,7 @@ async function pollInboundToJson(): Promise<void> {
   if (error) throw error;
   const rows = (data ?? []) as InboundQueueRow[];
 
+  let wrote = 0;
   for (const row of rows) {
     const out = inboundPath(row.id);
     const exists = await withFsRetry(() => fs.existsSync(out), {
@@ -354,6 +357,18 @@ async function pollInboundToJson(): Promise<void> {
       { label: `write ${out}`, onRetry: (a, e) => logFsRetry("inbound_write", a, e) },
     );
     log(`inbound -> ${out}`);
+    wrote++;
+  }
+  if (wrote > 0) {
+    maybeTriggerInboundWorker(
+      { styleRoot: STYLE_ROOT, heartbeatPath: HEARTBEAT_PATH, inboundDir: INBOUND_DIR, log },
+      "json_written",
+    );
+  } else {
+    maybeTriggerInboundWorker(
+      { styleRoot: STYLE_ROOT, heartbeatPath: HEARTBEAT_PATH, inboundDir: INBOUND_DIR, log },
+      "poll_pending",
+    );
   }
 }
 
@@ -403,7 +418,8 @@ async function drainInboundAcks(): Promise<void> {
       continue;
     }
 
-    const { idand, idplan, macand, ok } = parseAckFile(raw);
+    const { idand: ackIdand, idplan, macand, ok } = parseAckFile(raw);
+    const idand = ackIdand > 0 ? ackIdand : queueId;
     const jsonPath = inboundPath(queueId);
     let inboundPayload: unknown = { queue_id: queueId, ack: raw };
     if (fs.existsSync(jsonPath)) {
@@ -562,7 +578,7 @@ async function tick(): Promise<void> {
       return;
     }
     const lastColaId = await getLastColaId();
-    const rows = await readPendingCola(lastColaId);
+    const rows = (await readPendingCola(lastColaId)).slice(0, OUTBOUND_BATCH);
     let maxId = lastColaId;
     for (const row of rows) {
       const colaId = Number(row.id);
