@@ -13,6 +13,7 @@ import { ClienteInbodyTab } from './cliente/ClienteInbodyTab';
 import { ClienteAdjuntosTab } from './cliente/ClienteAdjuntosTab';
 import { ClienteHistorialClinicoTab } from './cliente/ClienteHistorialClinicoTab';
 import { ClienteCuestionariosTab } from './cliente/ClienteCuestionariosTab';
+import { StyleSyncConflictBanner } from './cliente/StyleSyncConflictBanner';
 import type { ClienteDetailTab } from '@/types/clienteDetail';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
@@ -101,6 +102,11 @@ export const ClienteDetailView: React.FC<Props> = ({
 
   return (
     <div className={cn(compact ? 'space-y-3' : 'max-w-5xl mx-auto space-y-6')}>
+      <StyleSyncConflictBanner
+        customerId={customerId}
+        conflictAt={mergedCustomer?.style_sync_conflict_at}
+        conflictFields={mergedCustomer?.style_sync_conflict_fields as { field: string; style?: string; suite?: string }[] | null}
+      />
       {compact ? (
         <ClienteDetailCompactBar
           customer={mergedCustomer}

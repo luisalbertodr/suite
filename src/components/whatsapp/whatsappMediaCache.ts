@@ -1,6 +1,8 @@
 /** Cache en memoria de blobs/object URLs de media WhatsApp (evita re-descargas al scroll). */
 const blobPromises = new Map<string, Promise<Blob>>();
 const objectUrls = new Map<string, string>();
+/** Media que ya devolvió 410 / no disponible en OpenWA (no reintentar en la sesión). */
+const unavailableKeys = new Set<string>();
 
 /** Máximo de descargas simultáneas al proxy (evita 502 por saturación/timeouts). */
 const MAX_CONCURRENT_DOWNLOADS = 1;
@@ -34,10 +36,23 @@ export function getCachedWhatsappMediaUrl(key: string): string | null {
   return objectUrls.get(key) ?? null;
 }
 
+export function isWhatsappMediaUnavailable(key: string | null | undefined): boolean {
+  return !!key && unavailableKeys.has(key);
+}
+
+export function markWhatsappMediaUnavailable(key: string): void {
+  unavailableKeys.add(key);
+  blobPromises.delete(key);
+}
+
 export async function loadWhatsappMediaCached(
   key: string,
   loader: () => Promise<Blob>,
 ): Promise<string> {
+  if (unavailableKeys.has(key)) {
+    throw new Error('Media no disponible');
+  }
+
   const cachedUrl = objectUrls.get(key);
   if (cachedUrl) return cachedUrl;
 
@@ -64,11 +79,16 @@ export async function loadWhatsappMediaCached(
     return url;
   } catch (e) {
     blobPromises.delete(key);
+    const msg = e instanceof Error ? e.message : '';
+    if (/expirad|410|gone|no disponible/i.test(msg)) {
+      unavailableKeys.add(key);
+    }
     throw e;
   }
 }
 
 export function invalidateWhatsappMediaCache(key: string): void {
+  unavailableKeys.delete(key);
   blobPromises.delete(key);
   const url = objectUrls.get(key);
   if (url) URL.revokeObjectURL(url);

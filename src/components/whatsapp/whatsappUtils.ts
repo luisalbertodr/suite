@@ -27,6 +27,16 @@ export interface MetaLeadInfo {
   source: string | null;
   externalCreatedAt: string | null;
   stripeDepositPaidAt: string | null;
+  metaFormId?: string | null;
+  hasCampaignAudio?: boolean;
+  campaignAudioFilename?: string | null;
+}
+
+export function isMetaMarketingLead(meta: MetaLeadInfo | null | undefined): boolean {
+  if (!meta) return false;
+  const s = (meta.source ?? '').trim().toLowerCase();
+  if (s === 'meta' || s === 'facebook' || s === 'instagram') return true;
+  return !!(meta.campaign?.trim() || meta.formName?.trim());
 }
 
 export function formatMetaLeadLabel(meta: MetaLeadInfo): string {
@@ -564,6 +574,12 @@ export type WhatsappMessageTypeSource = {
 /** Tipo efectivo para UI (stickers mal tipados en sync antiguo o WAHA). */
 export function resolveWhatsappMessageType(m: WhatsappMessageTypeSource): string {
   const rawType = (m.type ?? 'text').toLowerCase();
+  if (rawType === 'undefined' || rawType === 'null' || rawType === 'unknown') {
+    const mime = m.media_mime_type?.toLowerCase() ?? '';
+    if (mime.includes('ogg') || mime.includes('opus')) return 'voice';
+    if (mime.startsWith('audio/')) return 'audio';
+    return 'text';
+  }
   if (rawType === 'sticker' || rawType === 'stickermessage') return 'sticker';
   if (hasStickerInWahaMessageRaw(m.raw)) return 'sticker';
   if (m.body?.trim() === '[sticker]') return 'sticker';
@@ -868,6 +884,7 @@ export function messagePreviewText(m: MessagePreviewSource): string {
   if (type === 'audio' || type === 'voice' || type === 'ptt') return '🎤 Audio';
   if (type === 'sticker') return '🎭 Sticker';
   if (type === 'document') return m.media_filename?.trim() || '📎 Documento';
+  if (!type || type === 'undefined' || type === 'null') return '🎤 Audio';
   return `[${type}]`;
 }
 

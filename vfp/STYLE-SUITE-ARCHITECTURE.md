@@ -166,6 +166,58 @@ El agente convierte a texto legacy para el RPC Postgres (`codart+hora` por líne
 
 ---
 
+## Canal ampliado (maestros + transacciones)
+
+A partir del plan de integración Style ↔ Suite, el canal v2 se extiende más allá de las citas
+(`plan2009`) para cubrir clientes, artículos, bonos, ventas, facturas y cierres de caja. La
+infraestructura es **transversal** y reutiliza la misma cola, agente y worker.
+
+### Componentes transversales
+
+| Componente | Rol |
+|-----------|-----|
+| `dunasoft.style_sync_entity_map` | Mapeo idempotente `style_key` ↔ `suite_id` por entidad + `sync_version` (LWW) |
+| `dunasoft.style_sync_cursor` | High-water mark por tabla de `cola_sincro` (`enabled=false` ⇒ tabla ignorada) |
+| `dunasoft.style_sync_outbox` | Cola Suite→Style genérica para payloads grandes (bonos, facturas) |
+| `style-sync-agent/src/entitySync.ts` | Motor genérico (router por `tabla`, lee DBF origen, llama RPC) |
+| `style-sync-agent/src/handlers.ts` | Registro declarativo de entidades → RPC |
+
+### Flujo Style → Suite (maestros)
+
+1. VFP encola en `cola_sincro` solo `(tabla, id_reg, accion)` vía `SuiteEnqueueCola`.
+2. El agente lee el **registro completo** del DBF origen (`clientes.dbf`, `articulos.dbf`, …),
+   evitando el límite de 254 chars de la cola.
+3. Llama al RPC `dunasoft.style_<entidad>_apply_from_style`, que upserta en `public.*` y
+   actualiza `style_sync_entity_map`.
+4. Avanza `style_sync_cursor.last_id` (por tabla) solo tras éxito.
+
+### Flujo Suite → Style
+
+1. Trigger en `public.*` → `dunasoft.enqueue_style_entity` → fila en `style_sync_outbox`.
+2. El agente escribe `sync/inbound/e<id>.json` con `entity_type`.
+3. El worker VFP enruta por `entity_type` y aplica al DBF correspondiente, genera `e<id>.ok`.
+4. El agente confirma con `dunasoft.style_entity_ack` (fija `style_key` si Style asignó código).
+
+### Reglas de conflicto (doble operación)
+
+| Entidad | Style → Suite | Suite → Style | Notas |
+|---------|---------------|---------------|-------|
+| Clientes | Upsert por `codcli`/`legacy_codcli` | Alta/edición en `clientes.dbf` | LWW por `sync_version` |
+| Artículos | Style gana precio/stock | Solo altas Suite con `legacy_codart` | No sobrescribir catálogo POS |
+| Bonos | Style gana saldo/consumo | Notifica consumo manual | Mapeo `legacy_codboncli` |
+| Ventas TPV | `albcab`→`sales` si no hay mapeo | `TPV-*`→`albcab` | Nunca doble facturación |
+| Facturas | `faccab`→`invoices` por `(serie,numfac,codcli)` | Solo tickets Suite sin par | Idempotencia estricta |
+| Cierres | `ciecab`→sesión por `numcie` | Opcional | Validar totales vs ventas del día |
+
+### Activación incremental
+
+Una entidad solo se sincroniza cuando existe su fila en `style_sync_cursor` con `enabled=true`.
+Esto permite probar fase a fase sin tocar el canal de citas. Estado y lag por entidad se exponen
+en `public.style_sync_agent_status` (`entity_cursors`). La auditoría previa de baseline está en
+`public.style_sync_baseline_audit`.
+
+---
+
 ## Documentos relacionados
 
 - [STYLE-SUITE-DEPLOY.md](STYLE-SUITE-DEPLOY.md)

@@ -8,6 +8,7 @@ import { WhatsappMessageInput } from './WhatsappMessageInput';
 import { WhatsappForwardDialog } from './WhatsappForwardDialog';
 import { WhatsappLinkPopover } from './WhatsappLinkPopover';
 import { WhatsappSendDepositLinkButton } from './WhatsappSendDepositLinkButton';
+import { WhatsappSendCampaignAudioButton } from './WhatsappSendCampaignAudioButton';
 import { WhatsappConfirmDepositPaidButton } from './WhatsappConfirmDepositPaidButton';
 import {
   AlertDialog,
@@ -53,6 +54,7 @@ import { useWhatsappTheme } from './WhatsappThemeContext';
 import { WhatsappChatProvider } from './WhatsappChatContext';
 import type { WhatsappChatRow } from '@/hooks/useWhatsappChats';
 import { useWhatsappMediaPrefetch } from '@/hooks/useWhatsappMediaPrefetch';
+import { useRoutePanelActive } from '@/contexts/RoutePanelContext';
 
 interface Props {
   chats: WhatsappChatRow[];
@@ -62,6 +64,8 @@ interface Props {
   isLinkedCustomer?: boolean;
   leadName?: string;
   leadMeta?: MetaLeadInfo;
+  /** Lead CRM vinculado (puede venir del chat o del deep link desde Marketing). */
+  marketingLeadId?: string | null;
   leadNameById?: Record<string, string>;
   phoneLabelByChatId?: Record<string, string>;
   onMarkRead?: (chatId: string) => void;
@@ -77,6 +81,7 @@ export const WhatsappChatView: React.FC<Props> = ({
   isLinkedCustomer,
   leadName,
   leadMeta,
+  marketingLeadId,
   leadNameById = {},
   phoneLabelByChatId = {},
   onMarkRead,
@@ -237,10 +242,16 @@ export const WhatsappChatView: React.FC<Props> = ({
   const crmContactName = isTestWaChat
     ? (leadName ?? null)
     : (customerName ?? leadName ?? null);
+  const effectiveMarketingLeadId = marketingLeadId ?? chat.marketing_lead_id;
   const showDepositActions =
     !isGroup &&
     !isSystemChatJid(chat.chat_id) &&
-    (!isTestWaChat || chat.marketing_lead_id);
+    (!isTestWaChat || effectiveMarketingLeadId);
+  const showCampaignAudio =
+    !isGroup &&
+    !isSystemChatJid(chat.chat_id) &&
+    !!effectiveMarketingLeadId &&
+    (leadMeta ? !!leadMeta.hasCampaignAudio : true);
 
   const relatedPhoneChatIds = useMemo(() => {
     const ids: string[] = [];
@@ -288,8 +299,10 @@ export const WhatsappChatView: React.FC<Props> = ({
     [isGroup, messages],
   );
 
+  const panelActive = useRoutePanelActive();
+
   const { loading: prefetchLoading, ready: prefetchReady, getPrefetchMedia } =
-    useWhatsappMediaPrefetch(chat.chat_id, relatedChatIds, messages);
+    useWhatsappMediaPrefetch(chat.chat_id, relatedChatIds, messages, { enabled: panelActive });
 
   const isCustomer = isLinkedCustomer ?? !!effectiveCustomerId;
 
@@ -300,6 +313,7 @@ export const WhatsappChatView: React.FC<Props> = ({
       scrollRootRef={scrollRef}
       prefetchLoading={prefetchLoading}
       prefetchReady={prefetchReady}
+      panelActive={panelActive}
       getPrefetchMedia={getPrefetchMedia}
     >
     <div className="relative z-[1] flex h-full min-h-0 flex-col overflow-hidden">
@@ -389,12 +403,22 @@ export const WhatsappChatView: React.FC<Props> = ({
           </div>
         </div>
         <div className="flex items-center gap-1">
+          {showCampaignAudio ? (
+            <WhatsappSendCampaignAudioButton
+              chatId={chat.chat_id}
+              chatDisplayName={crmContactName ?? displayName}
+              marketingLeadId={effectiveMarketingLeadId}
+              customerId={effectiveCustomerId}
+              leadMeta={leadMeta}
+              onSent={() => refreshFromWaha.mutate('recent')}
+            />
+          ) : null}
           {!isGroup && !isSystemChatJid(chat.chat_id) && showDepositActions ? (
             <>
               <WhatsappSendDepositLinkButton
                 chatId={chat.chat_id}
                 chatDisplayName={crmContactName ?? displayName}
-                marketingLeadId={chat.marketing_lead_id}
+                marketingLeadId={effectiveMarketingLeadId}
                 customerId={effectiveCustomerId}
                 depositPaid={!!leadMeta?.stripeDepositPaidAt}
                 onSendText={async (text) => {
@@ -404,7 +428,7 @@ export const WhatsappChatView: React.FC<Props> = ({
               <WhatsappConfirmDepositPaidButton
                 chatId={chat.chat_id}
                 chatDisplayName={crmContactName ?? displayName}
-                marketingLeadId={chat.marketing_lead_id}
+                marketingLeadId={effectiveMarketingLeadId}
                 customerId={effectiveCustomerId}
                 depositPaid={!!leadMeta?.stripeDepositPaidAt}
               />

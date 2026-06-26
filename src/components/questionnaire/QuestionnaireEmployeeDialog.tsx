@@ -28,10 +28,14 @@ import { supabase } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { consentDocumentPublicUrl } from '@/lib/consentimientoStorage';
-import { Loader2, ExternalLink } from 'lucide-react';
+import { Loader2, ExternalLink, PencilLine } from 'lucide-react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
+import { QuestionnaireAmendmentDialog } from '@/components/questionnaire/QuestionnaireAmendmentDialog';
+import { PersonalDataChangesAlert } from '@/components/questionnaire/PersonalDataChangesAlert';
+import { getClinicalProfileAmendments } from '@/lib/questionnaireApi';
+import { getPersonalDataChangesFromAnswers } from '@/lib/questionnairePersonalData';
 
 /** Por encima del DockBar (z-[120]) y margen inferior para no tapar la barra. */
 const QUESTIONNAIRE_DIALOG_LAYER = 'z-[125]';
@@ -50,6 +54,7 @@ export function QuestionnaireEmployeeDialog({ questionnaireId, open, onOpenChang
   const [returnNote, setReturnNote] = useState('');
   const [technical, setTechnical] = useState<Record<string, unknown>>({});
   const [busy, setBusy] = useState(false);
+  const [amendmentOpen, setAmendmentOpen] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { data: questionnaire, refetch } = useQuery({
@@ -79,10 +84,14 @@ export function QuestionnaireEmployeeDialog({ questionnaireId, open, onOpenChang
   });
 
   useEffect(() => {
-    if (questionnaire?.technical_data) {
-      setTechnical(questionnaire.technical_data as Record<string, unknown>);
-    }
-  }, [questionnaire?.id, questionnaire?.technical_data]);
+    if (!questionnaire) return;
+    const td = (questionnaire.technical_data ?? {}) as Record<string, unknown>;
+    const fromCustomer = customer?.first_session_date?.slice(0, 10);
+    setTechnical({
+      ...td,
+      first_session_date: (td.first_session_date as string) || fromCustomer || '',
+    });
+  }, [questionnaire?.id, questionnaire?.technical_data, customer?.first_session_date]);
 
   useEffect(() => {
     if (!questionnaire || questionnaire.status !== 'technical_editing') return;
@@ -99,7 +108,12 @@ export function QuestionnaireEmployeeDialog({ questionnaireId, open, onOpenChang
 
   const answers = (questionnaire.answers ?? {}) as Record<string, unknown>;
   const visitMode = getVisitModeFromAnswers(answers);
+  const personalDataChanges = getPersonalDataChangesFromAnswers(answers);
   const pdfUrl = consentDocumentPublicUrl(questionnaire.documento_pdf_url);
+  const amendments = getClinicalProfileAmendments(customer?.clinical_profile ?? null);
+  const canAmend =
+    questionnaire.status === 'completed' ||
+    Boolean(customer?.clinical_profile && Object.keys(customer.clinical_profile).length > 0);
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['customer-questionnaires', questionnaire.customer_id] });
@@ -112,7 +126,7 @@ export function QuestionnaireEmployeeDialog({ questionnaireId, open, onOpenChang
     setBusy(true);
     try {
       await returnQuestionnaireToPatient(questionnaire.id, returnNote);
-      toast({ title: 'Devuelto a la clienta para corrección' });
+      toast({ title: 'Devuelto al cliente para corrección' });
       invalidate();
       await refetch();
       setReturnNote('');
@@ -163,8 +177,16 @@ export function QuestionnaireEmployeeDialog({ questionnaireId, open, onOpenChang
     }
   };
 
+  const showPersonalDataBanner =
+    personalDataChanges.length > 0 &&
+    (questionnaire.status === 'patient_submitted' || questionnaire.status === 'technical_editing');
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+      {showPersonalDataBanner ? (
+        <PersonalDataChangesAlert changes={personalDataChanges} />
+      ) : null}
+      <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         overlayClassName={QUESTIONNAIRE_DIALOG_LAYER}
         className={cn(
@@ -192,13 +214,13 @@ export function QuestionnaireEmployeeDialog({ questionnaireId, open, onOpenChang
         <div className="flex-1 min-h-0 overflow-y-auto px-6">
           {questionnaire.status === 'patient_editing' && (
             <p className="text-sm text-muted-foreground py-4">
-              La clienta está rellenando el cuestionario en la tablet.
+              El cliente está rellenando el cuestionario en la tablet.
             </p>
           )}
 
           {(questionnaire.status === 'patient_submitted' || questionnaire.status === 'technical_editing' || questionnaire.status === 'completed') && (
             <div className="space-y-4 py-2">
-              <h3 className="font-medium text-sm">Respuestas de la clienta</h3>
+              <h3 className="font-medium text-sm">Respuestas del cliente</h3>
               {FACIAL_CORPORAL_PATIENT_SECTIONS.map((section) => (
                 <div key={section.id}>
                   <p className="text-xs font-semibold text-sky-700 mb-1">{section.title}</p>
@@ -232,7 +254,7 @@ export function QuestionnaireEmployeeDialog({ questionnaireId, open, onOpenChang
 
           {questionnaire.status === 'technical_editing' && (
             <div className="space-y-4 border-t pt-4 pb-4">
-              <h3 className="font-medium">Datos técnicos (empleada)</h3>
+              <h3 className="font-medium">Datos técnicos (empleado/a)</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {FACIAL_CORPORAL_EMPLOYEE_SECTIONS.flatMap((s) => s.fields).map((field) => (
                   <QuestionnaireFieldInput
@@ -247,25 +269,36 @@ export function QuestionnaireEmployeeDialog({ questionnaireId, open, onOpenChang
           )}
 
           {questionnaire.status === 'completed' && pdfUrl ? (
-            <div className="py-4">
+            <div className="py-4 flex flex-wrap gap-2 items-center">
               <Button variant="outline" size="sm" asChild>
                 <a href={pdfUrl} target="_blank" rel="noreferrer">
                   <ExternalLink className="w-4 h-4 mr-1" /> Ver PDF
                 </a>
               </Button>
+              {amendments.length > 0 ? (
+                <span className="text-xs text-muted-foreground">
+                  {amendments.length} modificación(es) registrada(s)
+                </span>
+              ) : null}
             </div>
           ) : null}
         </div>
 
         <DialogFooter className="px-6 py-4 border-t shrink-0 flex-wrap gap-2">
+          {canAmend ? (
+            <Button variant="outline" onClick={() => setAmendmentOpen(true)} disabled={busy}>
+              <PencilLine className="w-4 h-4 mr-1" />
+              Añadir modificación
+            </Button>
+          ) : null}
           {questionnaire.status === 'patient_submitted' && (
             <>
               <div className="w-full sm:w-auto flex-1 min-w-[200px] space-y-1">
-                <Label className="text-xs">Nota si devuelve a clienta (opcional)</Label>
+                <Label className="text-xs">Nota si devuelve al cliente (opcional)</Label>
                 <Textarea value={returnNote} onChange={(e) => setReturnNote(e.target.value)} rows={2} />
               </div>
               <Button variant="outline" onClick={() => void handleReturn()} disabled={busy}>
-                Devolver a clienta
+                Devolver al cliente
               </Button>
               <Button onClick={() => void handleStartTechnical()} disabled={busy}>
                 Confirmar y pasar a datos técnicos
@@ -280,6 +313,15 @@ export function QuestionnaireEmployeeDialog({ questionnaireId, open, onOpenChang
           <Button variant="ghost" onClick={() => onOpenChange(false)}>Cerrar</Button>
         </DialogFooter>
       </DialogContent>
+
+      <QuestionnaireAmendmentDialog
+        customerId={questionnaire.customer_id}
+        customerName={customer?.name}
+        open={amendmentOpen}
+        onOpenChange={setAmendmentOpen}
+        employeeId={employeeId}
+      />
     </Dialog>
+    </>
   );
 }

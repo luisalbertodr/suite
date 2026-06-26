@@ -1,9 +1,40 @@
-* Arranque v2: carga cola sync desde PROGS antes del bootstrap embebido (sin ReFox).
-LOCAL lcRoot, lcCola, lcCtrl, lcSavErr, lcErr
+* Arranque v2 (config.fpw STARTUP): agente Node + watcher inbound antes del bootstrap embebido.
+LOCAL lcRoot, lcCola, lcCtrl, lcBoot, lcAlert, lcSavErr, lcErr
 
 lcRoot = ADDBS(SYS(5) + SYS(2003))
+
+* PROGS\funciones.prg tiene el hook Reservas_Incidencia -> SuiteEnqueuePlan2009 (v2).
+* Debe cargarse antes del bootstrap embebido; si no, el exe antiguo no encola en cola_sincro.
+IF FILE(lcRoot + "PROGS\funciones.prg")
+   SET PROCEDURE TO (lcRoot + "PROGS\funciones.prg") ADDITIVE
+ENDIF
+
+lcLicense = lcRoot + "PROGS\suite_apply_license_unlock.prg"
+IF FILE(lcLicense)
+   SET PROCEDURE TO (lcLicense) ADDITIVE
+ENDIF
+
 IF TYPE("SuiteBootstrapLog")="U" AND FILE(lcRoot + "PROGS\general.prg")
    SET PROCEDURE TO (lcRoot + "PROGS\general.prg") ADDITIVE
+ENDIF
+
+* Agente Node (RUN /N) siempre al abrir Duna.exe con STARTUP.
+lcBoot = lcRoot + "PROGS\suite_boot_sync.prg"
+IF FILE(lcBoot)
+   SET PROCEDURE TO (lcBoot) ADDITIVE
+   IF TYPE("SuiteBootExternalSync") #"U"
+      DO SuiteBootExternalSync
+   ENDIF
+ENDIF
+
+lcAlert = lcRoot + "PROGS\suite_sync_pending_alert.prg"
+IF FILE(lcAlert)
+   SET PROCEDURE TO (lcAlert) ADDITIVE
+   IF TYPE("plSuiteSyncEnabled")="L" AND plSuiteSyncEnabled
+      IF TYPE("SuiteSyncPendingWatcherStart") #"U"
+         DO SuiteSyncPendingWatcherStart
+      ENDIF
+   ENDIF
 ENDIF
 
 IF TYPE("SuiteEnqueuePlan2009")#"U"
@@ -33,10 +64,9 @@ IF FILE(lcCola)
       IF TYPE("SuiteBootstrapLog")#"U"
          DO SuiteBootstrapLog WITH "[BOOT-06] suite_cola_sync desde STARTUP (v2 PROGS)"
       ENDIF
-      RETURN
+   ELSE
+      IF TYPE("SuiteBootstrapLog")#"U"
+         DO SuiteBootstrapLog WITH "[BOOT-06E] STARTUP v2 sin SuiteEnqueuePlan2009 "+lcErr
+      ENDIF
    ENDIF
-ENDIF
-
-IF TYPE("SuiteBootstrapLog")#"U"
-   DO SuiteBootstrapLog WITH "[BOOT-06E] STARTUP v2 sin SuiteEnqueuePlan2009 "+lcErr
 ENDIF

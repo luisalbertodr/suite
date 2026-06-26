@@ -359,7 +359,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
         appointmentId: appointment.id,
       });
       openQuestionnaireKiosk(q.id);
-      toast({ title: 'Cuestionario abierto en tablet (modo clienta)' });
+      toast({ title: 'Cuestionario abierto en tablet (modo cliente)' });
     } catch (e) {
       toast({
         title: e instanceof Error ? e.message : 'Error al abrir cuestionario',

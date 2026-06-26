@@ -69,19 +69,24 @@ export type MetaFormAutomation = {
 
 export type InitialWhatsappSendKind = 'text' | 'audio' | 'audio_link';
 
+/** Tipo de bienvenida automática al lead (solo texto; el audio es manual desde el chat). */
 export function resolveInitialWhatsappSendKind(
   form: MetaFormAutomation,
 ): InitialWhatsappSendKind | null {
   if (!form.whatsapp_automation_enabled) return null;
-  if (form.whatsapp_initial_audio_enabled && form.whatsapp_initial_audio_path?.trim()) {
-    return 'audio';
-  }
   if (form.whatsapp_initial_message?.trim()) return 'text';
   return null;
 }
 
 export function formHasInitialWhatsappContent(form: MetaFormAutomation): boolean {
   return resolveInitialWhatsappSendKind(form) !== null;
+}
+
+export function metaFormHasCampaignAudio(form: MetaFormAutomation | null): boolean {
+  return !!(
+    form?.whatsapp_initial_audio_enabled &&
+    form.whatsapp_initial_audio_path?.trim()
+  );
 }
 
 export type MarketingLeadAutomationRow = {
@@ -689,19 +694,23 @@ export async function sendInitialAutomationForLead(
 
   const sendKind = resolveInitialWhatsappSendKind(form);
   if (!sendKind) {
+    const onlyManualAudio =
+      metaFormHasCampaignAudio(form) && !form.whatsapp_initial_message?.trim();
     await admin
       .from('marketing_leads')
       .update({
         wa_automation_status: 'skipped',
-        wa_automation_error: form.whatsapp_initial_audio_enabled
-          ? 'Falta archivo de audio en la configuración del formulario'
+        wa_automation_error: onlyManualAudio
+          ? 'Bienvenida automática desactivada (solo audio manual en chat)'
           : 'Falta mensaje inicial en la configuración del formulario',
       })
       .eq('id', leadId);
     return {
-      ok: false,
+      ok: onlyManualAudio,
       status: 'skipped',
-      error: form.whatsapp_initial_audio_enabled ? 'Falta audio inicial' : 'Falta mensaje inicial',
+      error: onlyManualAudio
+        ? undefined
+        : 'Falta mensaje inicial',
     };
   }
 
@@ -1175,4 +1184,172 @@ export async function runMarketingLeadRemindersForCompany(
   }
 
   return { sent, skipped, errors };
+}
+
+function isMetaSourceLead(source: string | null | undefined): boolean {
+  const s = (source ?? '').trim().toLowerCase();
+  return s === 'meta' || s === 'facebook' || s === 'instagram';
+}
+
+/** Formulario Meta con audio de campaña para un lead (por meta_form_id o nombre de campaña). */
+export async function resolveMetaFormForCampaignLead(
+  admin: SupabaseClient,
+  companyId: string,
+  lead: {
+    meta_form_id: string | null;
+    campaign?: string | null;
+    form_name?: string | null;
+    source?: string | null;
+  },
+): Promise<MetaFormAutomation | null> {
+  if (lead.meta_form_id) {
+    const byId = await loadMetaFormAutomation(admin, lead.meta_form_id);
+    if (byId) return byId;
+  }
+  const campaign = lead.campaign?.trim();
+  const formName = lead.form_name?.trim();
+  if (!campaign && !formName) return null;
+
+  const { data: forms, error } = await admin
+    .from('meta_forms')
+    .select(
+      'id, form_id, form_name, whatsapp_automation_enabled, whatsapp_initial_message, whatsapp_initial_audio_enabled, whatsapp_initial_audio_path, whatsapp_initial_audio_filename, whatsapp_initial_audio_mime, whatsapp_reply_1_message, whatsapp_reply_2_message, whatsapp_reply_invalid_message, whatsapp_reminder_message, whatsapp_reminder_delay_hours, whatsapp_reminder_enabled, stripe_deposit_enabled, stripe_deposit_amount_cents',
+    )
+    .eq('company_id', companyId);
+  if (error) throw error;
+  const rows = (forms ?? []) as MetaFormAutomation[];
+  const norm = (s: string) => s.trim().toLowerCase();
+  if (campaign) {
+    const c = norm(campaign);
+    const hit = rows.find((f) => {
+      const fn = f.form_name?.trim();
+      if (!fn) return false;
+      const n = norm(fn);
+      return n === c || n.includes(c) || c.includes(n);
+    });
+    if (hit) return hit;
+  }
+  if (formName) {
+    const f = norm(formName);
+    const hit = rows.find((x) => x.form_name && norm(x.form_name) === f);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/** Envío manual del audio de campaña desde el chat de WhatsApp. */
+export async function sendManualCampaignAudioForChat(
+  admin: SupabaseClient,
+  companyId: string,
+  chatId: string,
+  opts: {
+    marketing_lead_id?: string | null;
+    customer_id?: string | null;
+    chat_display_name?: string | null;
+  },
+): Promise<{
+  ok: boolean;
+  campaign_label?: string;
+  filename?: string;
+  sent_kind?: InitialWhatsappSendKind;
+  error?: string;
+}> {
+  const { resolveMarketingLeadForWhatsappChat } = await import('./stripeDeposit.ts');
+  const { lead } = await resolveMarketingLeadForWhatsappChat(
+    admin,
+    companyId,
+    chatId.trim(),
+    opts.marketing_lead_id ?? null,
+    opts.chat_display_name ?? null,
+    opts.customer_id ?? null,
+  );
+
+  if (!isMetaSourceLead(lead.source) && !lead.meta_form_id && !lead.campaign?.trim()) {
+    return { ok: false, error: 'Este contacto no es un lead de Meta' };
+  }
+
+  const form = await resolveMetaFormForCampaignLead(admin, companyId, lead);
+  if (!metaFormHasCampaignAudio(form)) {
+    const label = lead.campaign?.trim() || lead.form_name?.trim() || 'esta campaña';
+    return {
+      ok: false,
+      error: `No hay audio configurado para «${label}». Súbelo en Configuración → WhatsApp → Audios campaña.`,
+    };
+  }
+
+  const cfg = await loadWhatsappConfig(admin, companyId);
+  if (!cfg?.enabled || !cfg.base_url) {
+    return { ok: false, error: 'WhatsApp no configurado o deshabilitado' };
+  }
+  if ((cfg.last_status ?? '').toUpperCase() !== 'WORKING') {
+    return {
+      ok: false,
+      error: `Sesión WhatsApp no conectada (${cfg.last_status ?? 'desconocido'})`,
+    };
+  }
+
+  const contactName = leadDisplayName(lead);
+  const providerCfg = asProviderConfig(cfg);
+  const audioPath = form!.whatsapp_initial_audio_path!.trim();
+  const filename = form!.whatsapp_initial_audio_filename?.trim() || 'bienvenida.ogg';
+  const bytes = await loadStorageFileBytes(admin, audioPath);
+  const base64 = bytesToBase64(bytes);
+  const mime = normalizeWhatsappAudioMime(
+    form!.whatsapp_initial_audio_mime?.trim() || 'audio/ogg',
+    filename,
+  );
+
+  try {
+    let actualSentKind: InitialWhatsappSendKind = 'audio';
+    const settings = await loadAutomationSettings(admin, companyId);
+    const intendedPhone = lead.phone ?? chatId;
+    const { chatPhone } = resolveRecipientPhone(intendedPhone, settings);
+
+    try {
+      await sendWhatsappMedia(admin, cfg, companyId, chatId.trim(), { base64, mime, filename });
+      await logAutomationSend(admin, {
+        company_id: companyId,
+        automation_type: 'meta_initial_audio',
+        reference_id: `${lead.id}:manual_audio`,
+        intended_phone: intendedPhone,
+        sent_to_phone: chatPhone,
+        message_preview: `[audio] ${filename}`,
+        success: true,
+      });
+    } catch (e) {
+      if (!isWahaPlusOnlyMediaError(e, providerCfg.provider)) throw e;
+      const signedUrl = await createStorageSignedUrl(admin, WA_AUDIO_STORAGE_BUCKET, audioPath);
+      const intro =
+        form!.whatsapp_initial_message?.trim() ||
+        '🎧 Te dejamos un mensaje de bienvenida. Pulsa el enlace para escucharlo:';
+      const body = `${intro}\n\n${signedUrl}`;
+      const wrapped = wrapMessageForTestMode(body, settings, contactName);
+      await sendWhatsappText(admin, cfg, companyId, chatId.trim(), wrapped);
+      await logAutomationSend(admin, {
+        company_id: companyId,
+        automation_type: 'meta_initial_audio',
+        reference_id: `${lead.id}:manual_audio_link`,
+        intended_phone: intendedPhone,
+        sent_to_phone: chatPhone,
+        message_preview: `[audio enlace] ${filename}`,
+        success: true,
+      });
+      actualSentKind = 'audio_link';
+    }
+
+    await linkChatToLead(admin, companyId, chatId.trim(), lead.id, contactName);
+
+    const campaignLabel =
+      lead.campaign?.trim() || form!.form_name?.trim() || lead.form_name?.trim() || 'campaña';
+
+    return {
+      ok: true,
+      campaign_label: campaignLabel,
+      filename,
+      sent_kind: actualSentKind,
+    };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Error al enviar audio';
+    return { ok: false, error: msg };
+  }
 }

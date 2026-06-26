@@ -58,6 +58,13 @@ export type WhatsappProxyAction = {
   | { action: 'chat.mark_read'; chat_id: string }
   | { action: 'chat.ensure'; chat_id: string; name?: string | null }
   | {
+      action: 'marketing.send_campaign_audio';
+      chat_id: string;
+      marketing_lead_id?: string | null;
+      customer_id?: string | null;
+      chat_display_name?: string | null;
+    }
+  | {
       action: 'chat.set_link';
       chat_id: string;
       customer_id?: string | null;
@@ -180,11 +187,15 @@ export async function downloadWhatsappMedia(input: {
     } catch {
       // ignore
     }
-    const expired = res.status === 410 || /expirad|gone/i.test(msg);
-    if (!expired) {
+    const expired = res.status === 410 || /expirad|gone|no disponible/i.test(msg);
+    const openwaHistoryNoise =
+      res.status === 502 && /internal server error|history\?/i.test(msg);
+    if (!expired && !openwaHistoryNoise) {
       console.warn(`[whatsapp-proxy] media.download → ${res.status}:`, msg);
     }
-    throw new Error(expired ? 'Media expirada' : msg || `HTTP ${res.status}`);
+    throw new Error(
+      expired || openwaHistoryNoise ? 'Media no disponible' : msg || `HTTP ${res.status}`,
+    );
   }
   return res.blob();
 }

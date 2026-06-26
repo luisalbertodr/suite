@@ -1,3 +1,6 @@
+/** z-index de banners de aviso (parte superior, por debajo del dock). */
+export const SUITE_TOP_BANNER_Z = 'z-[280]';
+
 /** z-index del DockBar: por encima de modales y popovers para poder cambiar de pestaña. */
 export const DOCK_BAR_Z = 'z-[300]';
 

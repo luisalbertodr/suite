@@ -300,6 +300,62 @@ export const DunasoftAgenda: React.FC = () => {
     setDetailOpen(true);
   }, []);
 
+  const handleAppointmentMove = useCallback(
+    (appointmentId: string, newEmployeeId: string, newTime: string) => {
+      if (!requirePermissionOrToast('agenda', 'update')) return;
+      const apt = appointments.find((a) => a.id === appointmentId);
+      if (!apt) return;
+      if (apt.paymentStatus === 'paid' || apt.paymentStatus === 'invoiced') {
+        toast({
+          title: 'Cita cobrada',
+          description: 'No se puede mover una cita con ticket cobrado.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const [startH, startM] = apt.startTime.split(':').map(Number);
+      const [endH, endM] = apt.endTime.split(':').map(Number);
+      const duration = endH * 60 + endM - (startH * 60 + startM);
+      const [newH, newM] = newTime.split(':').map(Number);
+      const newEndMin = newH * 60 + newM + duration;
+      const newEndTime = `${Math.floor(newEndMin / 60)
+        .toString()
+        .padStart(2, '0')}:${(newEndMin % 60).toString().padStart(2, '0')}`;
+
+      const deltaMin = newH * 60 + newM - (startH * 60 + startM);
+      const planart =
+        apt.timeSegments?.map((s) => {
+          const [sh, sm] = s.startTime.split(':').map(Number);
+          const shifted = sh * 60 + sm + deltaMin;
+          const hora = `${Math.floor(shifted / 60)
+            .toString()
+            .padStart(2, '0')}:${(shifted % 60).toString().padStart(2, '0')}`;
+          return {
+            codart: s.label.split(' - ')[0]?.trim() ?? s.label,
+            hora,
+          };
+        }) ?? [];
+
+      updateMutation.mutate({
+        idplan: appointmentId,
+        payload: {
+          codemp: newEmployeeId,
+          codcli: apt.legacyClientCode ?? '',
+          nomcli: apt.clientName,
+          tel1cli: apt.clientPhone ?? '',
+          fecha: apt.date,
+          horini: newTime,
+          horfin: newEndTime,
+          texto: apt.description,
+          customer_id: apt.customerId,
+          ...(planart.length ? { planart } : {}),
+        },
+      });
+    },
+    [appointments, requirePermissionOrToast, toast, updateMutation],
+  );
+
   const closeForm = () => {
     setFormMode(null);
     setFormSlot(null);
@@ -357,6 +413,7 @@ export const DunasoftAgenda: React.FC = () => {
             appointments={appointments}
             onSlotClick={handleSlotClick}
             onAppointmentClick={handleAppointmentClick}
+            onAppointmentMove={handleAppointmentMove}
             persistUserId={user?.id}
             viewDateYmd={selectedDateYmd}
             goToTodayRequestId={goToTodayRequestId}
@@ -436,7 +493,7 @@ export const DunasoftAgenda: React.FC = () => {
             });
             setDetailOpen(false);
             openQuestionnaireKiosk(q.id);
-            toast({ title: 'Cuestionario abierto en tablet (modo clienta)' });
+            toast({ title: 'Cuestionario abierto en tablet (modo cliente)' });
           } catch (e) {
             toast({
               title: e instanceof Error ? e.message : 'Error',

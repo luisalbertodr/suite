@@ -19,6 +19,14 @@ function escapeHtml(text: string): string {
 
 function formatFieldValue(field: QuestionnaireField, value: unknown): string {
   if (value == null || value === '') return '—';
+  if (field.type === 'date' && value) {
+    const s = String(value).slice(0, 10);
+    try {
+      return escapeHtml(format(new Date(s), 'dd/MM/yyyy', { locale: es }));
+    } catch {
+      return escapeHtml(s);
+    }
+  }
   if (field.type === 'boolean') return value === true ? 'Sí' : 'No';
   if (field.type === 'multi' && Array.isArray(value)) {
     return value.length ? value.map((v) => escapeHtml(String(v))).join(', ') : '—';

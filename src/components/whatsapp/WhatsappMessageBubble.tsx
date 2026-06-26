@@ -38,7 +38,9 @@ import { downloadWhatsappMedia } from '@/hooks/useWhatsappConfig';
 import {
   getCachedWhatsappMediaUrl,
   invalidateWhatsappMediaCache,
+  isWhatsappMediaUnavailable,
   loadWhatsappMediaCached,
+  markWhatsappMediaUnavailable,
   whatsappMediaCacheKey,
 } from './whatsappMediaCache';
 import { useWhatsappChatContext } from './WhatsappChatContext';
@@ -184,7 +186,7 @@ function MediaPlaceholder({
 function isInScrollViewport(
   node: HTMLElement,
   root: HTMLElement | null,
-  marginPx = 240,
+  marginPx = 80,
 ): boolean {
   const n = node.getBoundingClientRect();
   if (!root) {
@@ -201,6 +203,7 @@ function MediaContent({ message }: { message: WhatsappMessageRow }) {
     scrollRootRef,
     prefetchLoading,
     prefetchReady,
+    panelActive,
     getPrefetchMedia,
   } = useWhatsappChatContext();
   const type = resolveWhatsappMessageType(message);
@@ -259,7 +262,7 @@ function MediaContent({ message }: { message: WhatsappMessageRow }) {
           obs.disconnect();
         }
       },
-      { root, rootMargin: '240px 0px' },
+      { root, rootMargin: '80px 0px' },
     );
     obs.observe(node);
     return () => obs.disconnect();
@@ -282,8 +285,13 @@ function MediaContent({ message }: { message: WhatsappMessageRow }) {
   }, [storedUrl, isStorageUrl, objectUrl, prefetched]);
 
   React.useEffect(() => {
-    if (!visible || !canDownload || !cacheKey || objectUrl || prefetched) return;
+    if (!panelActive || !visible || !canDownload || !cacheKey || objectUrl || prefetched) return;
     if (isStorageUrl && storedUrl) return;
+    if (isWhatsappMediaUnavailable(cacheKey)) {
+      setLoadFailed(true);
+      setExpiredMedia(true);
+      return;
+    }
     if (embedded) {
       let cancelled = false;
       (async () => {
@@ -323,7 +331,9 @@ function MediaContent({ message }: { message: WhatsappMessageRow }) {
         if (!cancelled) {
           const msg = e instanceof Error ? e.message : '';
           setLoadFailed(true);
-          setExpiredMedia(/expirad|410|gone/i.test(msg));
+          const expired = /expirad|410|gone|no disponible/i.test(msg);
+          setExpiredMedia(expired);
+          if (expired && cacheKey) markWhatsappMediaUnavailable(cacheKey);
         }
       }
     };
@@ -333,6 +343,7 @@ function MediaContent({ message }: { message: WhatsappMessageRow }) {
       cancelled = true;
     };
   }, [
+    panelActive,
     visible,
     canDownload,
     cacheKey,

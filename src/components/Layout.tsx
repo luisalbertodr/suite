@@ -8,6 +8,8 @@ import { useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
 import { useMarketingUnread } from '@/hooks/useMarketingUnread';
 import { useNotificationSoundOnIncrease } from '@/hooks/useNotificationSoundOnIncrease';
 import { unlockNotificationAudio } from '@/lib/notificationSounds';
+import { DockKeepAliveProvider } from '@/contexts/DockKeepAliveContext';
+import { SuiteTopBannerProvider } from '@/contexts/SuiteTopBannerContext';
 import { TopBarContentProvider } from './TopBarContentContext';
 
 interface LayoutProps {
@@ -24,16 +26,20 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   }, []);
 
   return (
-    <TopBarContentProvider>
-      <div className="min-h-screen bg-background">
-        <Screensaver />
-        <TopBar />
-        <main className="pt-14 pb-24 px-4 sm:px-6">
-          {children}
-        </main>
-        <DockBar />
-        <Toaster />
-      </div>
-    </TopBarContentProvider>
+    <DockKeepAliveProvider>
+      <SuiteTopBannerProvider>
+        <TopBarContentProvider>
+          <div className="min-h-screen bg-background">
+            <Screensaver />
+            <TopBar />
+            <main className="pt-14 pb-24 px-4 sm:px-6">
+              {children}
+            </main>
+            <DockBar />
+            <Toaster />
+          </div>
+        </TopBarContentProvider>
+      </SuiteTopBannerProvider>
+    </DockKeepAliveProvider>
   );
 };

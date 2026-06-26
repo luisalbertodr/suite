@@ -250,9 +250,13 @@ FUNCTION SuiteSyncV2Redirect
  ENDIF
  DO SuiteEnsureSyncGlobals
  plSuiteSyncEnabled = .T.
- plSuiteFullUnlock = .F.
  IF TYPE("SuiteBootstrapLog")#"U"
     DO SuiteBootstrapLog WITH "[BOOT-06] v2 redirect suite_full_unlock ("+tcPhase+")"
+ ENDIF
+ IF UPPER(ALLTRIM(tcPhase))=="UNLOCK"
+    IF TYPE("SuiteApplyLicenseFlags")#"U"
+       DO SuiteApplyLicenseFlags
+    ENDIF
  ENDIF
  IF UPPER(ALLTRIM(tcPhase))=="INIT"
     IF TYPE("Suite_SyncLog")#"U"
@@ -273,64 +277,13 @@ PROCEDURE SuiteShutdown
  CLEAR EVENTS
 ENDPROC
 **
+#INCLUDE suite_apply_license_unlock.prg
+
 PROCEDURE SuiteApplyFullUnlock
  IF SuiteSyncV2Redirect("unlock")
     RETURN
  ENDIF
- DO SuiteEnsureSyncGlobals
- DO SuiteEnsureGlobals
- plSuiteFullUnlock = .T.
- plversiondemo = .F.
- plversiondemoespecial = .T.
- plfechacaducidad = DATE() + 36500
- plrenting = .F.
- cfgbloqueadodspc = .F.
- cfgnumeroavisosusuariodspc = 0
- cfgintentosactualizacionwebok = 0
- pcversionapp = 0
- pclicenciasredfree = 999
- cfglicenciasred = 999
- pcempleadosactivosfree = 999
- plconexioninternet = .F.
- pcurlwebdspc = "http://127.0.0.1/"
- pcurlwebregion = "http://127.0.0.1/"
- plstarbene = .T.
- plstyledunasoftonline = .F.
- plsucursalweb = .F.
- plaplicacionesonline = .F.
- IF TYPE("tcnombreaplicacion") = "C"
-    tcnombreaplicacion = "Lipout"
- ENDIF
- IF TYPE("_SCREEN") = "O"
-    _SCREEN.caption = "Lipout"
- ENDIF
- plcreararticulos = .T.
- plcrearfamilias = .T.
- plcrearbonos = .T.
- plcrearempleados = .T.
- plcreartallasycolores = .T.
- plverfacturaciononlineclientes = .T.
- plverstockonlinearticulos = .T.
- cfgenviarresumenonline = .F.
- * Preservar seguridad/menus/aniversarios de EMPRESA (RESTORE config) si ya estaban activos
- IF TYPE("cfgseguridad")="L" AND cfgseguridad
-    * mantener .T.
- ELSE
-    cfgseguridad = .F.
- ENDIF
- IF TYPE("cfgnomostrarpantallassinpermiso")#"L"
-    cfgnomostrarpantallassinpermiso = .F.
- ENDIF
- IF TYPE("cfgavisaraniversarios")#"L"
-    cfgavisaraniversarios = .T.
- ENDIF
- cfglicenciaandroid = .F.
- cfglicenciacentralreservas = .F.
- cfgcontabilidad = .T.
- cfgcontabilidaddunasoft = .T.
- IF TYPE("policencias") = "O"
-    policencias.nlicenciasmaximas = 999
- ENDIF
+ DO SuiteApplyLicenseFlags
 ENDPROC
 **
 PROCEDURE start_serviciocomunicaciones
@@ -368,8 +321,12 @@ ENDPROC
 **
 PROCEDURE SuiteEnsureUnlockPrgLoaded
  * VFP prefiere .fxp sobre .prg; el FXP no registra DEFINE CLASS.
- LOCAL lcRoot, lcPrg
+ LOCAL lcRoot, lcPrg, lcLic
  lcRoot = SuiteStyleRoot()
+ lcLic = lcRoot+"PROGS\suite_apply_license_unlock.prg"
+ IF FILE(lcLic)
+    SET PROCEDURE TO (lcLic) ADDITIVE
+ ENDIF
  lcPrg = lcRoot+"PROGS\suite_full_unlock.prg"
  IF  .NOT. FILE(lcPrg)
     lcPrg = lcRoot+"suite_full_unlock.prg"

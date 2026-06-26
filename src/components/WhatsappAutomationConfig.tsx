@@ -18,6 +18,7 @@ import {
   CalendarClock,
   Clock,
   FlaskConical,
+  Megaphone,
   Phone,
   Send,
 } from 'lucide-react';
@@ -35,6 +36,8 @@ import {
   useWhatsappAutomationLog,
   useWhatsappAutomationSettings,
 } from '@/hooks/useWhatsappAutomationSettings';
+import { useMetaConfig } from '@/hooks/useMetaConfig';
+import { MetaFormWhatsappAudioField } from '@/components/meta/MetaFormWhatsappAudioField';
 
 const APPOINTMENT_VARS = [
   { key: 'nombre', description: 'Nombre del cliente' },
@@ -51,6 +54,7 @@ export const WhatsappAutomationConfig: React.FC = () => {
   const { toast } = useToast();
   const { data: settings, isLoading, save, sendTest } = useWhatsappAutomationSettings();
   const { data: log } = useWhatsappAutomationLog(15);
+  const { forms, isLoading: metaFormsLoading, updateForm } = useMetaConfig();
 
   const [testMode, setTestMode] = useState(true);
   const [testPhone, setTestPhone] = useState('667435503');
@@ -134,8 +138,9 @@ export const WhatsappAutomationConfig: React.FC = () => {
     <div className="space-y-6">
       <p className="text-sm text-muted-foreground rounded-lg border bg-muted/30 px-3 py-2">
         Los textos de <strong>leads Meta</strong> (bienvenida, recordatorio 3 h, señal Stripe) están
-        en <strong>Meta / Leads</strong>. Aquí defines el <strong>horario de envío</strong> común,
-        recordatorios de agenda, alertas de centralita e historial.
+        en <strong>Meta / Leads</strong>. En la pestaña <strong>Audios campaña</strong> subes audios
+        para envío manual desde el chat. Aquí defines el <strong>horario de envío</strong> común,
+        centralita e historial.
       </p>
 
       <Card>
@@ -230,6 +235,10 @@ export const WhatsappAutomationConfig: React.FC = () => {
             <CalendarClock className="h-3.5 w-3.5" />
             Citas
           </TabsTrigger>
+          <TabsTrigger value="campanas" className="gap-1.5">
+            <Megaphone className="h-3.5 w-3.5" />
+            Audios campaña
+          </TabsTrigger>
           <TabsTrigger value="telefono" className="gap-1.5">
             <Phone className="h-3.5 w-3.5" />
             Teléfono
@@ -313,6 +322,44 @@ export const WhatsappAutomationConfig: React.FC = () => {
                   </Button>
                 </div>
               </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="campanas" className="mt-4 space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Audio por campaña (Meta)</CardTitle>
+              <CardDescription>
+                Sube el audio de cada formulario/campaña para enviarlo manualmente con el botón
+                <strong> Audio campaña</strong> en el chat. No se envía solo al entrar el lead.
+                Usa OGG/Opus para nota de voz nativa.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {metaFormsLoading ? (
+                <p className="text-sm text-muted-foreground">Cargando formularios…</p>
+              ) : (forms ?? []).length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No hay formularios Meta. Configúralos en Meta / Leads.
+                </p>
+              ) : (
+                (forms ?? []).map((form) => (
+                  <div key={form.id} className="rounded-lg border p-3 space-y-2">
+                    <p className="text-sm font-medium">
+                      {form.form_name?.trim() || form.form_id}
+                    </p>
+                    <MetaFormWhatsappAudioField
+                      form={form}
+                      companyId={form.company_id}
+                      updateForm={updateForm}
+                      onToast={toast}
+                      checkboxLabel="Audio de campaña disponible"
+                      checkboxHint="Solo envío manual desde el chat WhatsApp (botón Audio campaña)."
+                    />
+                  </div>
+                ))
+              )}
             </CardContent>
           </Card>
         </TabsContent>

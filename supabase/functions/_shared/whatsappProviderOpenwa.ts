@@ -3,7 +3,8 @@ import {
   mapOpenwaStatusToInternal,
   type WhatsappProviderConfig,
 } from './whatsappProviderTypes.ts';
-import { PROVIDER_MEDIA_TIMEOUT_MS, providerJson } from './whatsappProviderClient.ts';
+import { PROVIDER_MEDIA_TIMEOUT_MS, providerJson, WhatsappProviderError } from './whatsappProviderClient.ts';
+import { sanitizeWhatsappMessageType } from './whatsappMessageType.ts';
 
 export type OpenwaMediaMeta = {
   media_url: string | null;
@@ -329,18 +330,32 @@ function defaultMimeForOpenwaType(type: string): string | null {
   }
 }
 
+function sanitizeMediaFilename(
+  filename: string | null | undefined,
+  type: string,
+): string | null {
+  const name = filename?.trim();
+  if (name && name !== 'undefined' && name !== 'null') return name;
+  const t = type.toLowerCase();
+  if (t === 'audio' || t === 'voice' || t === 'ptt') return 'voice.ogg';
+  return null;
+}
+
 export function openwaExtractMediaMeta(msg: Record<string, unknown>): OpenwaMediaMeta {
+  const type = String(msg.type ?? 'text').toLowerCase();
   const media = msg.media;
   if (media && typeof media === 'object') {
     const m = media as Record<string, unknown>;
     return {
       media_url: typeof m.url === 'string' ? m.url : null,
       media_mime_type: typeof m.mimetype === 'string' ? m.mimetype : null,
-      media_filename: typeof m.filename === 'string' ? m.filename : null,
+      media_filename: sanitizeMediaFilename(
+        typeof m.filename === 'string' ? m.filename : null,
+        type,
+      ),
       media_size: typeof m.size === 'number' ? m.size : null,
     };
   }
-  const type = String(msg.type ?? 'text').toLowerCase();
   const isMediaType = ['image', 'video', 'sticker', 'audio', 'document', 'ptt', 'voice'].includes(
     type,
   );
@@ -349,7 +364,10 @@ export function openwaExtractMediaMeta(msg: Record<string, unknown>): OpenwaMedi
     media_mime_type:
       (typeof msg.mimetype === 'string' ? msg.mimetype : null) ??
       (isMediaType ? defaultMimeForOpenwaType(type) : null),
-    media_filename: typeof msg.filename === 'string' ? msg.filename : null,
+    media_filename: sanitizeMediaFilename(
+      typeof msg.filename === 'string' ? msg.filename : null,
+      type,
+    ),
     media_size: typeof msg.filesize === 'number' ? msg.filesize : null,
   };
 }
@@ -429,10 +447,19 @@ async function openwaFetchChatHistory(
     includeMedia: includeMedia ? 'true' : 'false',
   });
   const path = `${openwaSessionPath(cfg, sessionId)}/messages/${encChat}/history?${q.toString()}`;
-  const data = await providerJson<
-    Array<Record<string, unknown>> | { messages?: Array<Record<string, unknown>> }
-  >(cfg, path, {}, PROVIDER_MEDIA_TIMEOUT_MS);
-  return Array.isArray(data) ? data : data.messages ?? [];
+  try {
+    const data = await providerJson<
+      Array<Record<string, unknown>> | { messages?: Array<Record<string, unknown>> }
+    >(cfg, path, {}, PROVIDER_MEDIA_TIMEOUT_MS);
+    return Array.isArray(data) ? data : data.messages ?? [];
+  } catch (e) {
+    if (!includeMedia) throw e;
+    const isServerError = e instanceof WhatsappProviderError && e.status >= 500;
+    if (!isServerError) throw e;
+    // OpenWA a veces devuelve 500 con includeMedia=true (p. ej. chats @lid).
+    const lite = await openwaFetchChatHistory(cfg, sessionId, chatId, limit, false);
+    return lite;
+  }
 }
 
 /** Descarga media probando el chat id del mensaje (@lid) y como mucho un alternativo. */
@@ -577,6 +604,10 @@ export function buildOpenwaMessageUpsertRow(
     String((m.id as { _serialized?: string })?._serialized ?? '');
   const tsNum = Number(m.timestamp ?? raw.timestamp ?? 0);
   const media = openwaExtractMediaMeta(raw);
+  const msgType = sanitizeWhatsappMessageType(raw.type ?? m.type, {
+    mime: media.media_mime_type,
+    filename: media.media_filename,
+  });
   return {
     company_id: companyId,
     chat_id: chatId,
@@ -584,7 +615,7 @@ export function buildOpenwaMessageUpsertRow(
     waha_message_id: id,
     from_jid: String(raw.from ?? m.from ?? chatId),
     from_me: openwaMessageFromMe(raw),
-    type: String(raw.type ?? m.type ?? 'text'),
+    type: msgType,
     body: typeof raw.body === 'string' ? raw.body : (typeof m.body === 'string' ? m.body : null),
     caption: typeof m.caption === 'string' ? m.caption : null,
     media_url: media.media_url,

@@ -27,7 +27,7 @@ if ($IntervalSec -lt 60) {
     $IntervalSec = 60
 }
 
-$worker = Join-Path $StyleRoot "PROGS\suite_inbound_worker.prg"
+$worker = Join-Path $StyleRoot "PROGS\suite_inbound_worker_sync.prg"
 if (-not (Test-Path $worker)) {
     Copy-Item (Join-Path $RepoRoot "vfp\suite_inbound_worker.prg") $worker -Force
 } else {
@@ -43,7 +43,7 @@ _SCREEN.Visible = .F.
 PUBLIC pcSuiteStyleRoot
 pcSuiteStyleRoot = "$StyleRoot\"
 SET DEFAULT TO (pcSuiteStyleRoot)
-SET PROCEDURE TO (pcSuiteStyleRoot + "PROGS\suite_inbound_worker.prg") ADDITIVE
+SET PROCEDURE TO (pcSuiteStyleRoot + "PROGS\suite_inbound_worker_sync.prg") ADDITIVE
 DO SuiteInboundWorkerRun
 QUIT
 "@

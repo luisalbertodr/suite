@@ -4,6 +4,7 @@ import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { ChevronLeft, ChevronRight, ExternalLink, FileText, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import type { CustomerAttachment } from '@/lib/customerAttachments';
 import { DisplayableImage } from '@/components/cliente/DisplayableImage';
 import { usePanelAwareVisible } from '@/hooks/usePanelAwareOpen';

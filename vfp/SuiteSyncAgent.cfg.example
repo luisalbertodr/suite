@@ -1,0 +1,3 @@
+# Ruta del agente Node style-sync-agent (repo o copia local).
+# Copiar a SuiteSyncAgent.cfg en la raiz de Style.
+AGENT_DIR=C:\Users\OportoW11\Suite\suite\style-sync-agent

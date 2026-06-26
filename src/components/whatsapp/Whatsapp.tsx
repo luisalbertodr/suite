@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { MessageCircle, Settings as SettingsIcon } from 'lucide-react';
 
@@ -8,7 +9,7 @@ import { Button } from '@/components/ui/button';
 
 import { useWhatsappConfig } from '@/hooks/useWhatsappConfig';
 
-import { useWhatsappChats } from '@/hooks/useWhatsappChats';
+import { useWhatsappChats, fetchWhatsappChatById } from '@/hooks/useWhatsappChats';
 
 import { useWhatsappChatLink } from '@/hooks/useWhatsappChatLink';
 
@@ -19,6 +20,13 @@ import { useWhatsappCustomerMatch } from '@/hooks/useWhatsappCustomerMatch';
 import { useWhatsappAutoRelink } from '@/hooks/useWhatsappAutoRelink';
 
 import { useToast } from '@/hooks/use-toast';
+
+import { useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
+import {
+  fetchWhatsappChatIdForLead,
+  fetchWhatsappChatIdByPhone,
+  findLoadedChatForDeepLink,
+} from '@/lib/openSuiteWhatsappChat';
 
 import { WhatsappChatList } from './WhatsappChatList';
 
@@ -61,7 +69,36 @@ function normalizePhoneToJid(
   if (defaultCountryCode && s.length <= 9) s = `${defaultCountryCode}${s}`;
 
   return `${s}@c.us`;
+}
 
+function buildStubWhatsappChat(
+  companyId: string,
+  chatId: string,
+  name: string | null,
+  leadId: string | null,
+): WhatsappChatRow {
+  const now = new Date().toISOString();
+  return {
+    id: `stub-${chatId}`,
+    company_id: companyId,
+    chat_id: chatId,
+    name,
+    marketing_lead_id: leadId,
+    is_group: /@g\.us$/i.test(chatId),
+    archived: false,
+    pinned: false,
+    unread_count: 0,
+    last_message_from_me: false,
+    created_at: now,
+    updated_at: now,
+    customer_id: null,
+    last_message_at: null,
+    last_message_preview: null,
+    profile_picture_url: null,
+    history_synced_at: null,
+    oldest_message_at: null,
+    raw: null,
+  };
 }
 
 
@@ -84,9 +121,33 @@ export const Whatsapp: React.FC = () => {
 
   const { chats, refreshAllFromWaha, refreshFromWaha, markRead } = useWhatsappChats();
 
-  const { ensureChat } = useWhatsappChatLink();
+  const queryClient = useQueryClient();
 
-  const { customerNameById, leadNameById, leadMetaById } = useWhatsappLinkLookup(chats);
+  const { ensureChat, setLink } = useWhatsappChatLink();
+
+  const { companyId } = useWhatsappCompanyId();
+
+  const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+
+  /** Lead de Marketing al abrir desde tarjeta (hasta que el chat tenga marketing_lead_id en BD). */
+  const [sessionLeadId, setSessionLeadId] = useState<string | null>(null);
+  const [sessionLeadName, setSessionLeadName] = useState<string | null>(null);
+
+  const chatsRef = useRef(chats);
+  chatsRef.current = chats;
+
+  const effectiveLeadId = useMemo(() => {
+    const fromChat = chats.find(
+      (c) =>
+        selectedChatId &&
+        (c.chat_id === selectedChatId || jidsSameContact(c.chat_id, selectedChatId)),
+    )?.marketing_lead_id;
+    return fromChat ?? sessionLeadId;
+  }, [chats, selectedChatId, sessionLeadId]);
+
+  const { customerNameById, leadNameById, leadMetaById } = useWhatsappLinkLookup(chats, {
+    extraLeadIds: effectiveLeadId ? [effectiveLeadId] : [],
+  });
 
   const { customerIdByChatId, customerNameByChatId, phoneLabelByChatId } =
 
@@ -112,8 +173,6 @@ export const Whatsapp: React.FC = () => {
 
   };
 
-  const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
-
   const [newChatOpen, setNewChatOpen] = useState(false);
 
   const [createCustomerChat, setCreateCustomerChat] = useState<WhatsappChatRow | null>(null);
@@ -122,7 +181,13 @@ export const Whatsapp: React.FC = () => {
 
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const phoneParamProcessed = useRef<string | null>(null);
+  const deepLinkHandled = useRef<string | null>(null);
+  const deepLinkProcessing = useRef<string | null>(null);
+
+  const pendingPhone = searchParams.get('phone');
+  const pendingLeadId = searchParams.get('lead_id');
+  const pendingChatId = searchParams.get('chat_id');
+  const pendingDeepLink = !!(pendingPhone || pendingLeadId || pendingChatId);
 
   const webhookFixAttempted = useRef(false);
 
@@ -224,55 +289,250 @@ export const Whatsapp: React.FC = () => {
 
   useEffect(() => {
 
-    if (!config?.session_name) return;
+    const chatIdParam = searchParams.get('chat_id');
 
     const phone = searchParams.get('phone');
 
-    if (!phone) return;
-
-    const key = `${phone}|${searchParams.get('name') ?? ''}`;
-
-    if (phoneParamProcessed.current === key) return;
-
-    phoneParamProcessed.current = key;
-
-    const jid = normalizePhoneToJid(phone, config?.default_country_code);
-
-    if (!jid) return;
+    const leadId = searchParams.get('lead_id');
 
     const name = searchParams.get('name');
 
-    ensureChat.mutate(
+    if (!chatIdParam && !phone && !leadId) {
 
-      { chat_id: jid, name: name || null },
+      deepLinkHandled.current = null;
 
-      {
+      deepLinkProcessing.current = null;
 
-        onSuccess: (res) => {
+      return;
 
-          const finalJid = res.chat_id ?? jid;
+    }
 
-          setSelectedChatId(finalJid);
+    const key = `${chatIdParam ?? ''}|${phone ?? ''}|${leadId ?? ''}|${name ?? ''}|${searchParams.get('t') ?? ''}`;
 
-          const next = new URLSearchParams(searchParams);
+    if (deepLinkHandled.current === key) return;
 
-          next.delete('phone');
+    if (leadId) setSessionLeadId(leadId);
 
-          next.delete('name');
+    if (name) setSessionLeadName(name);
 
-          setSearchParams(next, { replace: true });
+    const countryCode = config?.default_country_code ?? '34';
 
-        },
+    const phoneJid = phone ? normalizePhoneToJid(phone, countryCode) : null;
 
-      },
+    const quickSelectId = chatIdParam ?? phoneJid;
 
+    if (quickSelectId) setSelectedChatId(quickSelectId);
+
+    if (!companyId) return;
+
+    if (deepLinkProcessing.current === key) return;
+
+    deepLinkProcessing.current = key;
+
+    const finalize = () => {
+
+      deepLinkHandled.current = key;
+
+      deepLinkProcessing.current = null;
+
+      const next = new URLSearchParams(searchParams);
+
+      next.delete('phone');
+
+      next.delete('name');
+
+      next.delete('lead_id');
+
+      next.delete('chat_id');
+
+      next.delete('t');
+
+      setSearchParams(next, { replace: true });
+
+    };
+
+    void (async () => {
+
+      try {
+
+        const currentChats = chatsRef.current;
+
+        let targetChatId =
+          chatIdParam ||
+          findLoadedChatForDeepLink(currentChats, {
+            phoneDigits: phone,
+            leadId,
+            phoneJid,
+            chatId: chatIdParam,
+            jidsSameContact,
+          });
+
+        if (!targetChatId && leadId) {
+
+          try {
+
+            targetChatId = await fetchWhatsappChatIdForLead(companyId, leadId);
+
+          } catch {
+
+            /* seguir */
+
+          }
+
+        }
+
+        if (!targetChatId && phone) {
+
+          try {
+
+            targetChatId = await fetchWhatsappChatIdByPhone(companyId, phone);
+
+          } catch {
+
+            /* seguir */
+
+          }
+
+        }
+
+        if (!targetChatId && phoneJid) targetChatId = phoneJid;
+
+        if (!targetChatId) {
+
+          toast({
+
+            title: 'No se pudo abrir el chat',
+
+            description: 'Falta teléfono o identificador de conversación.',
+
+            variant: 'destructive',
+
+          });
+
+          deepLinkHandled.current = null;
+
+          deepLinkProcessing.current = null;
+
+          return;
+
+        }
+
+        setSelectedChatId(targetChatId);
+
+        const res = await ensureChat.mutateAsync({
+
+          chat_id: targetChatId,
+
+          name: name || null,
+
+          marketing_lead_id: leadId,
+
+        });
+
+        const finalJid = res.chat_id ?? targetChatId;
+
+        if (finalJid !== targetChatId) setSelectedChatId(finalJid);
+
+        await queryClient.fetchQuery({
+
+          queryKey: ['whatsapp-chat-one', companyId, finalJid],
+
+          queryFn: () => fetchWhatsappChatById(companyId, finalJid),
+
+        });
+
+        if (leadId) {
+
+          const linked = chatsRef.current.find((c) => c.chat_id === finalJid);
+
+          if (linked?.marketing_lead_id !== leadId) {
+
+            await setLink.mutateAsync({ chat_id: finalJid, marketing_lead_id: leadId });
+
+          }
+
+        }
+
+        await queryClient.invalidateQueries({ queryKey: ['whatsapp-chats', companyId] });
+
+        finalize();
+
+      } catch (e) {
+
+        deepLinkHandled.current = null;
+
+        deepLinkProcessing.current = null;
+
+        toast({
+
+          title: 'Error al abrir conversación',
+
+          description: e instanceof Error ? e.message : 'Inténtalo de nuevo.',
+
+          variant: 'destructive',
+
+        });
+
+      }
+
+    })();
+
+  }, [
+
+    searchParams,
+
+    config?.default_country_code,
+
+    companyId,
+
+    ensureChat,
+
+    setLink,
+
+    setSearchParams,
+
+    queryClient,
+
+    toast,
+
+  ]);
+
+
+
+  const selectedInList = useMemo(() => {
+    if (!selectedChatId) return false;
+    return chats.some(
+      (c) => c.chat_id === selectedChatId || jidsSameContact(c.chat_id, selectedChatId),
     );
+  }, [chats, selectedChatId]);
 
-  }, [searchParams, config?.session_name, config?.default_country_code]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { data: fetchedSelectedChat, isLoading: loadingSelectedChat } = useQuery({
+    queryKey: ['whatsapp-chat-one', companyId, selectedChatId],
+    enabled: !!companyId && !!selectedChatId && !selectedInList,
+    queryFn: () => fetchWhatsappChatById(companyId!, selectedChatId!),
+    staleTime: 30_000,
+  });
 
-
+  const displayChats = useMemo(() => {
+    let list: WhatsappChatRow[];
+    if (!fetchedSelectedChat || selectedInList) {
+      list = chats;
+    } else if (chats.some((c) => c.chat_id === fetchedSelectedChat.chat_id)) {
+      list = chats;
+    } else {
+      list = [fetchedSelectedChat, ...chats];
+    }
+    if (!effectiveLeadId || !selectedChatId) return list;
+    return list.map((c) => {
+      if (c.marketing_lead_id) return c;
+      if (c.chat_id !== selectedChatId && !jidsSameContact(c.chat_id, selectedChatId)) return c;
+      return { ...c, marketing_lead_id: effectiveLeadId };
+    });
+  }, [chats, fetchedSelectedChat, selectedInList, effectiveLeadId, selectedChatId]);
 
   useEffect(() => {
+
+    if (pendingDeepLink) return;
 
     if (selectedChatId) return;
 
@@ -280,7 +540,7 @@ export const Whatsapp: React.FC = () => {
 
     setSelectedChatId(chats[0].chat_id);
 
-  }, [chats, selectedChatId]);
+  }, [chats, selectedChatId, pendingDeepLink]);
 
 
 
@@ -292,9 +552,7 @@ export const Whatsapp: React.FC = () => {
 
     if (chats.some((c) => c.chat_id === selectedChatId)) return;
 
-    const successor =
-
-      chats.find((c) => jidsSameContact(c.chat_id, selectedChatId)) ?? chats[0];
+    const successor = chats.find((c) => jidsSameContact(c.chat_id, selectedChatId));
 
     if (successor) setSelectedChatId(successor.chat_id);
 
@@ -304,9 +562,24 @@ export const Whatsapp: React.FC = () => {
 
   const selectedChat = useMemo(
 
-    () => chats.find((c) => c.chat_id === selectedChatId) ?? null,
+    () => {
+      if (!selectedChatId) return null;
+      const found = displayChats.find(
+        (c) => c.chat_id === selectedChatId || jidsSameContact(c.chat_id, selectedChatId),
+      );
+      if (found) return found;
+      if (companyId && (sessionLeadId || sessionLeadName)) {
+        return buildStubWhatsappChat(
+          companyId,
+          selectedChatId,
+          sessionLeadName,
+          sessionLeadId,
+        );
+      }
+      return null;
+    },
 
-    [chats, selectedChatId],
+    [displayChats, selectedChatId, companyId, sessionLeadId, sessionLeadName],
 
   );
 
@@ -432,11 +705,18 @@ export const Whatsapp: React.FC = () => {
 
           <WhatsappChatList
 
-            chats={chats}
+            chats={displayChats}
 
             selectedChatId={selectedChatId}
 
-            onSelect={(id) => setSelectedChatId(id)}
+            onSelect={(id) => {
+              setSelectedChatId(id);
+              const picked = displayChats.find((c) => c.chat_id === id);
+              if (!picked?.marketing_lead_id) {
+                setSessionLeadId(null);
+                setSessionLeadName(null);
+              }
+            }}
 
             onRefresh={() => {
 
@@ -528,7 +808,7 @@ export const Whatsapp: React.FC = () => {
 
             <WhatsappChatView
 
-              chats={chats}
+              chats={displayChats}
 
               chat={selectedChat}
 
@@ -538,25 +818,11 @@ export const Whatsapp: React.FC = () => {
 
               isLinkedCustomer={!!resolveCustomerId(selectedChat)}
 
-              leadName={
+              leadName={effectiveLeadId ? leadNameById[effectiveLeadId] : undefined}
 
-                selectedChat.marketing_lead_id
+              leadMeta={effectiveLeadId ? leadMetaById[effectiveLeadId] : undefined}
 
-                  ? leadNameById[selectedChat.marketing_lead_id]
-
-                  : undefined
-
-              }
-
-              leadMeta={
-
-                selectedChat.marketing_lead_id
-
-                  ? leadMetaById[selectedChat.marketing_lead_id]
-
-                  : undefined
-
-              }
+              marketingLeadId={effectiveLeadId}
 
               leadNameById={leadNameById}
 
@@ -577,6 +843,14 @@ export const Whatsapp: React.FC = () => {
               }
 
             />
+
+          ) : selectedChatId && (loadingSelectedChat || ensureChat.isPending) ? (
+
+            <div className="flex h-full items-center justify-center">
+
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500" />
+
+            </div>
 
           ) : (
 

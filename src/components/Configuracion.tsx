@@ -31,6 +31,7 @@ import { TpvSettingsConfig } from './TpvSettingsConfig';
 import { StripeConfigPanel } from './StripeConfig';
 import { ServidoresMonitorPanel } from './ServidoresMonitorPanel';
 import { ConsentimientoPlantillasConfig } from './consentimiento/ConsentimientoPlantillasConfig';
+import { TabletUnlockConfig } from '@/components/tablet/TabletUnlockConfig';
 import { useWorkCenter } from '@/hooks/useWorkCenter';
 
 const VALID_TABS = [
@@ -233,6 +234,7 @@ export const Configuracion: React.FC = () => {
 
         <TabsContent value="empresa" className="space-y-4">
           <Empresas />
+          <TabletUnlockConfig />
           <ConsentimientoPlantillasConfig />
         </TabsContent>
 

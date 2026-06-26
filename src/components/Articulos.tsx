@@ -21,13 +21,16 @@ import { useArticles } from '@/hooks/useArticles';
 import { useArticleVariations } from '@/hooks/useArticleVariations';
 import { useFamilies } from '@/hooks/useFamilies';
 import { supabase } from '@/lib/supabase';
+import { chunkArray } from '@/lib/chunkArray';
+import { useRoutePanelActive } from '@/contexts/RoutePanelContext';
 import { ArticleForm } from './ArticleForm';
 import { FamilyManager } from './FamilyManager';
 import { BonusDefinitionsManager } from './BonusDefinitionsManager';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useRegisterTopBarContent } from '@/components/TopBarContentContext';
 export const Articulos: React.FC = () => {
-  const { articles, loading, deleteArticle, refetch } = useArticles();
+  const panelActive = useRoutePanelActive();
+  const { articles, loading, deleteArticle, refetch } = useArticles({ enabled: panelActive });
   const { families } = useFamilies();
   const [searchTerm, setSearchTerm] = useState('');
   const [familyFilter, setFamilyFilter] = useState<string | null>(null);
@@ -59,21 +62,22 @@ export const Articulos: React.FC = () => {
   );
 
   const { data: recentlyUsedInactiveArticleIds = new Set<string>() } = useQuery({
-    queryKey: ['obsolete-article-recent-usage', inactiveArticleIds.join('|'), cutoffOneYearAgo],
-    enabled: inactiveArticleIds.length > 0,
+    queryKey: ['obsolete-article-recent-usage', inactiveArticleIds.length, cutoffOneYearAgo],
+    enabled: panelActive && inactiveArticleIds.length > 0,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('appointment_items')
-        .select('article_id, agenda_appointments!inner(start_time)')
-        .in('article_id', inactiveArticleIds)
-        .gte('agenda_appointments.start_time', cutoffOneYearAgo);
-
-      if (error) throw error;
-      return new Set(
-        (data ?? [])
-          .map((row) => row.article_id)
-          .filter((id): id is string => !!id),
-      );
+      const used = new Set<string>();
+      for (const batch of chunkArray(inactiveArticleIds, 40)) {
+        const { data, error } = await supabase
+          .from('appointment_items')
+          .select('article_id, agenda_appointments!inner(start_time)')
+          .in('article_id', batch)
+          .gte('agenda_appointments.start_time', cutoffOneYearAgo);
+        if (error) throw error;
+        for (const row of data ?? []) {
+          if (row.article_id) used.add(row.article_id);
+        }
+      }
+      return used;
     },
   });
 

@@ -44,13 +44,21 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   context: ConsentimientoSignContext;
   onSigned?: () => void;
+  variant?: 'dialog' | 'kiosk';
 };
 
 type Step = 'select' | 'read' | 'sign';
 
 const LIBRE_VALUE = '__libre__';
 
-export function ConsentimientoSignDialog({ open, onOpenChange, context, onSigned }: Props) {
+export function ConsentimientoSignDialog({
+  open,
+  onOpenChange,
+  context,
+  onSigned,
+  variant = 'dialog',
+}: Props) {
+  const isKiosk = variant === 'kiosk';
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const signatureRef = useRef<SignaturePadHandle>(null);
@@ -313,9 +321,15 @@ export function ConsentimientoSignDialog({ open, onOpenChange, context, onSigned
         }
       }
 
-      toast({ title: 'Consentimiento firmado y guardado' });
-      handleClose(false);
-      onSigned?.();
+      if (!isKiosk) {
+        toast({ title: 'Consentimiento firmado y guardado' });
+      }
+      if (isKiosk) {
+        onSigned?.();
+      } else {
+        handleClose(false);
+        onSigned?.();
+      }
     },
     onError: (e: Error) => {
       toast({ title: e.message || 'Error al firmar', variant: 'destructive' });
@@ -338,17 +352,11 @@ export function ConsentimientoSignDialog({ open, onOpenChange, context, onSigned
     !!draftMeta.titulo &&
     !!draftMeta.contenido.trim();
 
-  return (
-    <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-2xl max-h-[92vh] flex flex-col p-0 gap-0">
-        <DialogHeader className="px-6 pt-6 pb-2 shrink-0">
-          <DialogTitle className="flex items-center gap-2">
-            <FileSignature className="w-5 h-5" />
-            {step === 'sign' ? 'Firma del cliente' : 'Consentimiento informado'}
-          </DialogTitle>
-        </DialogHeader>
+  const title =
+    step === 'sign' ? 'Firma del cliente' : 'Consentimiento informado';
 
-        <div className="flex-1 min-h-0 px-6 pb-2">
+  const body = (
+    <div className={cn('flex-1 min-h-0', isKiosk ? 'pb-2' : 'px-6 pb-2')}>
           {step === 'select' && !context.consentId ? (
             <div className="space-y-4">
               {suggestedPlantillas.length > 0 ? (
@@ -476,12 +484,16 @@ export function ConsentimientoSignDialog({ open, onOpenChange, context, onSigned
               <SignaturePad ref={signatureRef} height={200} />
             </div>
           ) : null}
-        </div>
+    </div>
+  );
 
-        <DialogFooter className="px-6 py-4 border-t shrink-0 gap-2 sm:gap-2">
+  const footerButtons = (
+    <>
           {step === 'select' && !context.consentId ? (
             <>
-              <Button variant="outline" onClick={() => handleClose(false)}>Cancelar</Button>
+              {!isKiosk ? (
+                <Button variant="outline" onClick={() => handleClose(false)}>Cancelar</Button>
+              ) : null}
               <Button disabled={!canGoRead} onClick={() => setStep('read')}>
                 Continuar <ChevronRight className="w-4 h-4 ml-1" />
               </Button>
@@ -489,14 +501,14 @@ export function ConsentimientoSignDialog({ open, onOpenChange, context, onSigned
           ) : null}
           {step === 'read' ? (
             <>
-              {!context.consentId ? (
+              {!isKiosk && !context.consentId ? (
                 <Button variant="outline" onClick={() => setStep('select')}>
                   <ChevronLeft className="w-4 h-4 mr-1" /> Atrás
                 </Button>
-              ) : (
+              ) : !isKiosk ? (
                 <Button variant="outline" onClick={() => handleClose(false)}>Cancelar</Button>
-              )}
-              <Button disabled={!accepted || !draftMeta} onClick={() => setStep('sign')}>
+              ) : null}
+              <Button disabled={!accepted || !draftMeta} onClick={() => setStep('sign')} className={isKiosk ? 'ml-auto' : undefined}>
                 Firmar <ChevronRight className="w-4 h-4 ml-1" />
               </Button>
             </>
@@ -506,7 +518,7 @@ export function ConsentimientoSignDialog({ open, onOpenChange, context, onSigned
               <Button variant="outline" onClick={() => setStep('read')}>
                 <ChevronLeft className="w-4 h-4 mr-1" /> Atrás
               </Button>
-              <Button onClick={() => signMutation.mutate()} disabled={signMutation.isPending}>
+              <Button onClick={() => signMutation.mutate()} disabled={signMutation.isPending} className={isKiosk ? 'ml-auto' : undefined}>
                 {signMutation.isPending ? (
                   <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> Guardando…</>
                 ) : (
@@ -515,6 +527,46 @@ export function ConsentimientoSignDialog({ open, onOpenChange, context, onSigned
               </Button>
             </>
           ) : null}
+    </>
+  );
+
+  const footer = (
+    <div
+      className={cn(
+        'shrink-0 gap-2 sm:gap-2 flex flex-wrap',
+        isKiosk ? 'pt-4 border-t' : 'px-6 py-4 border-t',
+      )}
+    >
+      {footerButtons}
+    </div>
+  );
+
+  if (isKiosk) {
+    if (!open) return null;
+    return (
+      <div className="space-y-4">
+        <h2 className="text-lg font-semibold flex items-center gap-2 text-sky-800">
+          <FileSignature className="w-5 h-5" />
+          {title}
+        </h2>
+        {body}
+        {footer}
+      </div>
+    );
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogContent className="max-w-2xl max-h-[92vh] flex flex-col p-0 gap-0">
+        <DialogHeader className="px-6 pt-6 pb-2 shrink-0">
+          <DialogTitle className="flex items-center gap-2">
+            <FileSignature className="w-5 h-5" />
+            {title}
+          </DialogTitle>
+        </DialogHeader>
+        {body}
+        <DialogFooter className="px-6 py-4 border-t shrink-0 gap-2 sm:gap-2">
+          {footerButtons}
         </DialogFooter>
       </DialogContent>
     </Dialog>

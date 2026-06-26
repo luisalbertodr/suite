@@ -69,7 +69,11 @@ Copy-Item $ExportExe (Join-Path $StyleRemote "Duna2.exe") -Force
 
 $StyleRuntime = Join-Path $ExportRoot "STYLE-RUNTIME"
 if (Test-Path $StyleRuntime) {
-    foreach ($f in @("IniciarStyle.bat", "ensure-style-dbc.ps1", "activar_suite_sync.prg", "SuiteSync.cfg.example", "DiagnosticarSuiteSync.ps1", "TestStyleSync.ps1")) {
+    foreach ($f in @(
+        "IniciarStyle.bat", "RecuperarSyncInbound.bat", "ensure-style-sync.ps1",
+        "SuiteSyncAgent.cfg.example", "ensure-style-dbc.ps1",
+        "activar_suite_sync.prg", "SuiteSync.cfg.example", "DiagnosticarSuiteSync.ps1", "TestStyleSync.ps1"
+    )) {
         $src = Join-Path $StyleRuntime $f
         if (Test-Path $src) {
             Copy-Item $src (Join-Path $StyleRemote $f) -Force

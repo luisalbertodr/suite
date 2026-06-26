@@ -189,7 +189,30 @@ PROCEDURE SuiteInboundLog
  STRTOFILE(TTOC(DATETIME()) + " " + ALLTRIM(tcMsg) + CHR(13), lcLog, .T.)
 ENDPROC
 
-#DEFINE WORKER_VERSION "1.1.0"
+#DEFINE WORKER_VERSION "1.1.1"
+
+FUNCTION SuiteInboundFileAgeSec
+ PARAMETER tcFile
+ LOCAL la[1], lnN, ltMod, ltNow, ldD, lnT, lcT
+ lnN = ADIR(la, tcFile)
+ IF lnN < 1
+    RETURN 0
+ ENDIF
+ ltNow = DATETIME()
+ ldD = la(1, 3)
+ lnT = la(1, 4)
+ DO CASE
+    CASE VARTYPE(ldD) = "D" .AND. VARTYPE(lnT) = "C" .AND. !EMPTY(lnT)
+       ltMod = DATETIME(ldD, lnT)
+    CASE VARTYPE(ldD) = "D" .AND. VARTYPE(lnT) = "N"
+       ltMod = ldD + (lnT / 86400)
+    CASE VARTYPE(ldD) = "T"
+       ltMod = ldD
+    OTHERWISE
+       RETURN 0
+ ENDCASE
+ RETURN MAX(0, INT((ltNow - ltMod) * 86400))
+ENDFUNC
 
 PROCEDURE SuiteInboundHeartbeat
  LOCAL lcHb, lcSync
@@ -210,6 +233,18 @@ FUNCTION SuiteLoadControlSync
  ENDIF
  RETURN .F.
 ENDFUNC
+
+PROCEDURE SuiteLoadEntityInbound
+ * Carga el dispatcher de entidades (clientes, articulos, ...) si no esta ya compilado.
+ LOCAL lcPrg
+ IF TYPE("SuiteEntityApplyOne") <> "U"
+    RETURN
+ ENDIF
+ lcPrg = SuiteInboundRoot()+"PROGS\suite_entity_inbound.prg"
+ IF FILE(lcPrg)
+    SET PROCEDURE TO (lcPrg) ADDITIVE
+ ENDIF
+ENDPROC
 
 FUNCTION SuitePlanFieldExists
  PARAMETER tcAlias, tcField
@@ -523,6 +558,7 @@ ENDPROC
 PROCEDURE SuiteInboundRecycleFailed
  LOCAL lcFailed, lcInbound, lnN, lnI, lcFile, lcDest, lnAgeSec
  LOCAL ARRAY laFiles[1]
+ TRY
  lcFailed = SuiteInboundRoot() + "sync\archive\failed\"
  lcInbound = SuiteInboundRoot() + "sync\inbound\"
  IF  .NOT. DIRECTORY(lcFailed)
@@ -531,7 +567,7 @@ PROCEDURE SuiteInboundRecycleFailed
  lnN = ADIR(laFiles, lcFailed + "*.json")
  FOR lnI = 1 TO lnN
     lcFile = lcFailed + laFiles(lnI, 1)
-    lnAgeSec = (DATETIME() - FDATETIME(lcFile)) * 86400
+    lnAgeSec = SuiteInboundFileAgeSec(lcFile)
     IF lnAgeSec < 3600
        LOOP
     ENDIF
@@ -543,6 +579,9 @@ PROCEDURE SuiteInboundRecycleFailed
     CATCH
     ENDTRY
  ENDFOR
+ CATCH TO oRecycle
+    DO SuiteInboundLog WITH "recycle omitido: "+ALLTRIM(oRecycle.Message)
+ ENDTRY
 ENDPROC
 
 PROCEDURE SuiteInboundWorkerRun
@@ -557,6 +596,7 @@ PROCEDURE SuiteInboundWorkerRun
  ENDIF
 
  = SuiteLoadControlSync()
+ DO SuiteLoadEntityInbound
  IF TYPE("SuiteEnsureControlSincro") <> "U"
     DO SuiteEnsureControlSincro
  ENDIF
@@ -608,8 +648,14 @@ PROCEDURE SuiteInboundWorkerRun
        LOOP
     ENDIF
     lcerr = ""
+    LOCAL lcEType
+    lcEType = LOWER(ALLTRIM(SuiteGetObj(loMsg, "entity_type", "")))
     TRY
-       DO SuiteInboundApplyOne WITH loMsg, lcFile, lcAck
+       IF  .NOT. EMPTY(lcEType) .AND. lcEType <> "plan2009"
+          DO SuiteEntityApplyOne WITH loMsg, lcFile, lcAck
+       ELSE
+          DO SuiteInboundApplyOne WITH loMsg, lcFile, lcAck
+       ENDIF
     CATCH TO oerr
        lcerr = ALLTRIM(oerr.message)
        DO SuiteInboundLog WITH "error "+lcFile+": "+lcerr

@@ -73,7 +73,7 @@ export const useNotifications = () => {
 
   const markAsRead = useMutation({
     mutationFn: async (id: string) => {
-      if (id.startsWith('questionnaire-pending:')) return;
+      if (id.startsWith('questionnaire-pending:') || id.startsWith('questionnaire-personal-changes:')) return;
       const { error } = await supabase
         .from('notifications')
         .update({ read: true })

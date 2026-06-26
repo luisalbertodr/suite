@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,10 @@ import type { Employee } from '@/types/agenda';
 import { calcEndFromStart } from '@/lib/agendaAppointmentItems';
 import { AGENDA_APPOINTMENT_MODAL_Z } from '@/lib/agendaResourceColors';
 import { DOCK_CLEARANCE_BOTTOM } from '@/lib/dialogLayers';
+import {
+  AppointmentClientePicker,
+  type AppointmentClientPick,
+} from '@/components/forms/AppointmentClientePicker';
 
 export type DunasoftAppointmentFormValues = {
   codemp: string;
@@ -23,6 +27,7 @@ export type DunasoftAppointmentFormValues = {
   horfin: string;
   texto: string;
   planart: DunasoftPlanArtInput[];
+  customer_id?: string | null;
 };
 
 type Props = {
@@ -52,34 +57,37 @@ export const DunasoftAppointmentForm: React.FC<Props> = ({
 }) => {
   const employee = employees.find((e) => e.id === employeeId);
 
+  const [clientPick, setClientPick] = useState<AppointmentClientPick | null>(() => {
+    const name = (initial?.nomcli ?? '').trim();
+    if (!name) return null;
+    return { kind: 'manual', name };
+  });
   const [codcli, setCodcli] = useState(initial?.codcli ?? '');
   const [nomcli, setNomcli] = useState(initial?.nomcli ?? '');
   const [tel1cli, setTel1cli] = useState(initial?.tel1cli ?? '');
+  const [customerId, setCustomerId] = useState<string | null>(null);
   const [fecha, setFecha] = useState(initial?.fecha ?? defaultDate);
   const [horini, setHorini] = useState(initial?.horini ?? startTime);
   const [horfin, setHorfin] = useState(initial?.horfin ?? calcEndFromStart(startTime, 45));
   const [texto, setTexto] = useState(initial?.texto ?? '');
-  const [clientQuery, setClientQuery] = useState('');
   const [planart, setPlanart] = useState<DunasoftPlanArtInput[]>(
     initial?.planart?.length
       ? initial.planart
       : [{ codart: '', hora: startTime }],
   );
 
-  const { data: clientOptions = [] } = useQuery({
-    queryKey: ['dunasoft-clientes-search', clientQuery],
-    enabled: clientQuery.trim().length >= 2,
-    queryFn: async () => {
-      const q = clientQuery.trim();
-      const res = await dunasoftSupabase
-        .from('clientes')
-        .select('codcli,nomcli,tel1cli')
-        .or(`nomcli.ilike.%${q}%,codcli.ilike.%${q}%,tel1cli.ilike.%${q}%`)
-        .limit(12);
-      if (res.error) throw res.error;
-      return res.data ?? [];
-    },
-  });
+  useEffect(() => {
+    if (!clientPick) return;
+    if (clientPick.kind === 'manual') {
+      setNomcli(clientPick.name);
+      setCustomerId(null);
+      return;
+    }
+    setNomcli(clientPick.displayName);
+    setCodcli(String(clientPick.legacyCodcli ?? '').trim());
+    setTel1cli(String(clientPick.phone ?? '').trim());
+    setCustomerId(clientPick.customerId);
+  }, [clientPick]);
 
   const { data: articulos = [] } = useQuery({
     queryKey: ['dunasoft-articulos-agenda'],
@@ -109,7 +117,7 @@ export const DunasoftAppointmentForm: React.FC<Props> = ({
     if (!nomcli.trim() && !codcli.trim()) return;
     onSave({
       codemp: employeeId,
-      codcli: codcli.trim(),
+      codcli: codcli.trim() || '0',
       nomcli: nomcli.trim() || codcli.trim(),
       tel1cli: tel1cli.trim(),
       fecha,
@@ -117,14 +125,8 @@ export const DunasoftAppointmentForm: React.FC<Props> = ({
       horfin,
       texto: texto.trim(),
       planart: planart.filter((p) => p.codart.trim()),
+      customer_id: customerId,
     });
-  };
-
-  const pickClient = (row: { codcli?: string; nomcli?: string; tel1cli?: string }) => {
-    setCodcli(String(row.codcli ?? '').trim());
-    setNomcli(String(row.nomcli ?? '').trim());
-    setTel1cli(String(row.tel1cli ?? '').trim());
-    setClientQuery('');
   };
 
   return (
@@ -148,28 +150,13 @@ export const DunasoftAppointmentForm: React.FC<Props> = ({
             </div>
 
             <div className="space-y-1">
-              <Label htmlFor="ds-client-q">Buscar cliente Dunasoft</Label>
-              <Input
-                id="ds-client-q"
-                value={clientQuery}
-                onChange={(e) => setClientQuery(e.target.value)}
-                placeholder="Nombre, código o teléfono…"
+              <Label>Cliente</Label>
+              <AppointmentClientePicker
+                lazySearch
+                value={clientPick}
+                onChange={setClientPick}
+                disabled={saving}
               />
-              {clientOptions.length > 0 && clientQuery ? (
-                <ul className="max-h-32 overflow-y-auto rounded border border-border text-sm">
-                  {clientOptions.map((c) => (
-                    <li key={String(c.codcli)}>
-                      <button
-                        type="button"
-                        className="w-full px-2 py-1.5 text-left hover:bg-muted"
-                        onClick={() => pickClient(c)}
-                      >
-                        {c.nomcli} <span className="text-muted-foreground">({c.codcli})</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
             </div>
 
             <div className="grid grid-cols-2 gap-2">

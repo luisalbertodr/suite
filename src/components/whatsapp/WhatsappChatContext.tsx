@@ -7,6 +7,7 @@ type WhatsappChatContextValue = {
   scrollRootRef: React.RefObject<HTMLElement | null>;
   prefetchLoading: boolean;
   prefetchReady: boolean;
+  panelActive: boolean;
   getPrefetchMedia: (messageId: string | null | undefined) => PrefetchedMedia | null;
 };
 
@@ -16,6 +17,7 @@ const WhatsappChatContext = createContext<WhatsappChatContextValue>({
   scrollRootRef: { current: null },
   prefetchLoading: false,
   prefetchReady: true,
+  panelActive: true,
   getPrefetchMedia: () => null,
 });
 
@@ -25,6 +27,7 @@ export function WhatsappChatProvider({
   scrollRootRef,
   prefetchLoading,
   prefetchReady,
+  panelActive,
   getPrefetchMedia,
   children,
 }: WhatsappChatContextValue & { children: React.ReactNode }) {
@@ -36,6 +39,7 @@ export function WhatsappChatProvider({
         scrollRootRef,
         prefetchLoading,
         prefetchReady,
+        panelActive,
         getPrefetchMedia,
       }}
     >

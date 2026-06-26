@@ -8,6 +8,8 @@ import { useMarketingUnread } from '@/hooks/useMarketingUnread';
 import { usePhoneMissedCalls } from '@/hooks/usePhoneMissedCalls';
 import { canAccessPhone } from '@/lib/phonePermissions';
 import { useNotificationSoundOnIncrease } from '@/hooks/useNotificationSoundOnIncrease';
+import { usePrefetchDockPanel } from '@/contexts/DockKeepAliveContext';
+import { matchDockRoute } from '@/lib/dockRoutes';
 import { DOCK_BAR_Z } from '@/lib/dialogLayers';
 /** Por encima de modales para poder cambiar de pestaña con popups abiertos. */
 const DOCK_Z_CLASS = DOCK_BAR_Z;
@@ -64,6 +66,7 @@ export const DockBar: React.FC = () => {
   const { total: whatsappUnread } = useWhatsappUnread();
   const { total: marketingUnread } = useMarketingUnread();
   const { missedUnread } = usePhoneMissedCalls();
+  const prefetchDockPanel = usePrefetchDockPanel();
   useNotificationSoundOnIncrease(whatsappUnread, 'whatsapp', { enabled: canSeeWhatsapp });
 
   const visibleItems = dockItems.filter((item) => {
@@ -91,7 +94,12 @@ export const DockBar: React.FC = () => {
         {visibleItems.map((item) => {
           const isActive = isDockItemActive(location.pathname, item.path);
 
+          const dockKey = matchDockRoute(item.path);
+
           const goTo = () => {
+            if (document.activeElement instanceof HTMLElement) {
+              document.activeElement.blur();
+            }
             if (!isActive) navigate(item.path);
           };
 
@@ -102,6 +110,9 @@ export const DockBar: React.FC = () => {
               title={item.label}
               aria-label={item.label}
               aria-current={isActive ? 'page' : undefined}
+              onPointerEnter={() => {
+                if (dockKey) prefetchDockPanel(dockKey);
+              }}
               onPointerDown={(e) => {
                 // Navegar en pointerdown evita perder el clic si un input (TPV, WhatsApp…) tiene el foco.
                 e.preventDefault();

@@ -963,11 +963,7 @@
  IF cfgyear<>YEAR(DATE())
     _messagebox(traducir(pcidioma, "El ejercicio ACTIVO no corresponde al A"+CHR(209)+"O actual."), 64, traducir(pcidioma, "Atencion"))
  ENDIF
- IF TYPE("SuiteShutdown")#"U"
-    ON SHUTDOWN DO SuiteShutdown
- ELSE
-    ON SHUTDOWN CLEAR EVENTS
- ENDIF
+ ON SHUTDOWN DO SuiteOnShutdown
  IF FILE("Demo.txt")
     * Demo.txt ignorado (Suite unlock)
  ENDIF
@@ -1202,6 +1198,7 @@ ENDFUNC
 
 #INCLUDE suite_control_sync.prg
 #INCLUDE suite_cola_sync.prg
+#INCLUDE suite_apply_license_unlock.prg
 
 PROCEDURE SuiteEnsureGlobals
  IF TYPE("pcidioma")#"C"
@@ -1213,7 +1210,7 @@ PROCEDURE SuiteEnsureGlobals
 ENDPROC
 
 PROCEDURE SuiteApplyFullUnlock
- DO SuiteEnsureGlobals
+ DO SuiteApplyLicenseFlags
 ENDPROC
 
 PROCEDURE Suite_SyncInit
@@ -1437,6 +1434,91 @@ PROCEDURE SuiteStartSyncIfReady
  IF  .NOT. EMPTY(lcErr)
     DO SuiteBootstrapLog WITH "[BOOT-07] FALLO: Suite_SyncInit "+lcErr
  ENDIF
+ DO SuiteBootExternalSyncIfReady WITH lcRoot
+ENDPROC
+**
+PROCEDURE SuiteBootExternalSyncIfReady
+ PARAMETER tcStyleRoot
+ LOCAL lcBootPrg, lcSav, lcErr
+ IF TYPE("tcStyleRoot")="C" AND .NOT. EMPTY(tcStyleRoot)
+    tcStyleRoot = ADDBS(tcStyleRoot)
+ ELSE
+    tcStyleRoot = ADDBS(SYS(5)+SYS(2003))
+ ENDIF
+ lcBootPrg = tcStyleRoot+"PROGS\suite_boot_sync.prg"
+ IF .NOT. FILE(lcBootPrg)
+    lcBootPrg = tcStyleRoot+"suite_boot_sync.prg"
+ ENDIF
+ IF .NOT. FILE(lcBootPrg)
+    RETURN
+ ENDIF
+ lcSav = ON("ERROR")
+ lcErr = ""
+ ON ERROR lcErr = MESSAGE()
+ SET PROCEDURE TO (lcBootPrg) ADDITIVE
+ IF TYPE("SuiteBootExternalSync")#"U"
+    DO SuiteBootExternalSync
+ ENDIF
+ ON ERROR &lcSav
+ IF .NOT. EMPTY(lcErr)
+    DO SuiteBootstrapLog WITH "[BOOT-SYNC] "+lcErr
+ ENDIF
+ DO SuiteSyncPendingWatcherStartIfReady WITH tcStyleRoot
+ENDPROC
+**
+PROCEDURE SuiteSyncPendingWatcherStartIfReady
+ PARAMETER tcStyleRoot
+ LOCAL lcPrg, lcSav, lcErr
+ IF TYPE("plSuiteSyncEnabled")#"L" OR .NOT. plSuiteSyncEnabled
+    RETURN
+ ENDIF
+ IF TYPE("tcStyleRoot")="C" AND .NOT. EMPTY(tcStyleRoot)
+    tcStyleRoot = ADDBS(tcStyleRoot)
+ ELSE
+    tcStyleRoot = ADDBS(SYS(5)+SYS(2003))
+ ENDIF
+ lcPrg = tcStyleRoot+"PROGS\suite_sync_pending_alert.prg"
+ IF .NOT. FILE(lcPrg)
+    lcPrg = tcStyleRoot+"suite_sync_pending_alert.prg"
+ ENDIF
+ IF .NOT. FILE(lcPrg)
+    RETURN
+ ENDIF
+ lcSav = ON("ERROR")
+ lcErr = ""
+ ON ERROR lcErr = MESSAGE()
+ SET PROCEDURE TO (lcPrg) ADDITIVE
+ IF TYPE("SuiteSyncPendingWatcherStart")#"U"
+    DO SuiteSyncPendingWatcherStart
+ ENDIF
+ ON ERROR &lcSav
+ENDPROC
+**
+PROCEDURE SuiteOnShutdown
+ TRY
+    LOCAL lcRoot, lcShutPrg
+    lcRoot = IIF(TYPE("pcSuiteStyleRoot")="C" AND .NOT. EMPTY(pcSuiteStyleRoot), ADDBS(pcSuiteStyleRoot), ADDBS(SYS(5)+SYS(2003)))
+    lcShutPrg = lcRoot+"PROGS\suite_shutdown_sync.prg"
+    IF .NOT. FILE(lcShutPrg)
+       lcShutPrg = lcRoot+"suite_shutdown_sync.prg"
+    ENDIF
+    IF FILE(lcShutPrg)
+       SET PROCEDURE TO (lcShutPrg) ADDITIVE
+       IF TYPE("SuiteShutdownInboundDrain")#"U"
+          DO SuiteShutdownInboundDrain
+       ENDIF
+    ENDIF
+ CATCH
+ ENDTRY
+ TRY
+    IF TYPE("SuiteShutdown")#"U"
+       DO SuiteShutdown
+    ELSE
+       CLEAR EVENTS
+    ENDIF
+ CATCH
+    CLEAR EVENTS
+ ENDTRY
 ENDPROC
 **
 FUNCTION SuiteUnlockLibPath

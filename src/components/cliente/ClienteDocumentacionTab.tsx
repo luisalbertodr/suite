@@ -3,13 +3,14 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
-import { FileCheck, FileSignature, Eye, Plus } from 'lucide-react';
+import { FileCheck, FileSignature, Eye, Plus, Tablet } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { format } from 'date-fns';
 import { ConsentimientoSignDialog } from '@/components/consentimiento/ConsentimientoSignDialog';
 import { ConsentimientoViewerDialog } from '@/components/consentimiento/ConsentimientoViewerDialog';
 import type { Consentimiento, ConsentimientoCustomer } from '@/lib/consentimientoTypes';
+import { openConsentKiosk } from '@/lib/consentimientoKiosk';
 
 interface Props {
   customerId: string;
@@ -108,9 +109,14 @@ export const ClienteDocumentacionTab: React.FC<Props> = ({ customerId, customer 
                           <Eye className="w-4 h-4 mr-1" /> Ver
                         </Button>
                       ) : (
-                        <Button size="sm" onClick={() => openPendingSign(c.id)}>
-                          <FileSignature className="w-4 h-4 mr-1" /> Firmar
-                        </Button>
+                        <>
+                          <Button variant="outline" size="sm" onClick={() => openConsentKiosk(c.id)}>
+                            <Tablet className="w-4 h-4 mr-1" /> Tablet
+                          </Button>
+                          <Button size="sm" onClick={() => openPendingSign(c.id)}>
+                            <FileSignature className="w-4 h-4 mr-1" /> Firmar
+                          </Button>
+                        </>
                       )}
                     </div>
                   </div>

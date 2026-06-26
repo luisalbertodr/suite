@@ -56,17 +56,36 @@ if (-not (Test-Path $duna)) {
 $quarantine = Join-Path $DestRoot ("_suite_quarantine\" + (Get-Date -Format "yyyyMMdd-HHmmss"))
 New-Item -ItemType Directory -Path $quarantine -Force | Out-Null
 
-Write-Step "vcx desde ExportZ"
-$vcxSrc = Join-Path $ExportRoot "vcx"
+Write-Step "vcx runtime (solo arranque; sin VCX decompilados de agenda/planificador)"
 $vcxDst = Join-Path $DestRoot "vcx"
-if (Test-Path $vcxSrc) {
-    if (-not (Test-Path $vcxDst)) { New-Item -ItemType Directory -Path $vcxDst -Force | Out-Null }
-    Copy-Item (Join-Path $vcxSrc "*") $vcxDst -Recurse -Force
-    $cnt = (Get-ChildItem $vcxDst -File).Count
-    Write-Host "  OK $cnt archivos en vcx\" -ForegroundColor Green
-} else {
-    Write-Host "  AVISO: sin vcx en ExportZ" -ForegroundColor Yellow
+$runtimeVcx = @(
+    "licencias.vcx", "licencias.vct",
+    "seguridad.vcx", "seguridad.vct",
+    "screen_nueva.vcx", "screen_nueva.vct",
+    "tickets_nuevo.vcx", "tickets_nuevo.vct"
+)
+$vcxSources = @($ExportRoot, $SourceRoot) | Where-Object { Test-Path $_ }
+if (-not (Test-Path $vcxDst)) { New-Item -ItemType Directory -Path $vcxDst -Force | Out-Null }
+foreach ($srcRoot in $vcxSources) {
+    $vcxSrc = Join-Path $srcRoot "vcx"
+    if (-not (Test-Path $vcxSrc)) { continue }
+    foreach ($name in $runtimeVcx) {
+        $src = Join-Path $vcxSrc $name
+        if (Test-Path $src) {
+            Copy-Item $src (Join-Path $vcxDst $name) -Force
+        }
+    }
 }
+# VCX decompilados rompen drag-drop en Style: solo runtime (como Z:\)
+$vcxQuarantine = Join-Path $quarantine "vcx_decompiled"
+$runtimeVcxSet = [System.Collections.Generic.HashSet[string]]::new([string[]]$runtimeVcx)
+Get-ChildItem $vcxDst -File -ErrorAction SilentlyContinue | ForEach-Object {
+    if (-not $runtimeVcxSet.Contains($_.Name)) {
+        Move-ToQuarantine -Path $_.FullName -QuarantineDir $vcxQuarantine
+    }
+}
+$cnt = (Get-ChildItem $vcxDst -File -ErrorAction SilentlyContinue).Count
+Write-Host "  OK $cnt archivos en vcx\ (runtime)" -ForegroundColor Green
 
 Write-Step "PROGS (fallback worker; sync v2 en general.prg #INCLUDE)"
 $destProgs = Join-Path $DestRoot "PROGS"
@@ -74,11 +93,18 @@ if (-not (Test-Path $destProgs)) {
     New-Item -ItemType Directory -Path $destProgs -Force | Out-Null
 }
 Get-ChildItem $destProgs -File | ForEach-Object {
-    Move-ToQuarantine -Path $_.FullName -QuarantineDir (Join-Path $quarantine "progs_old")
+    $keep = @(
+        "_inbound_once.prg", "run_inbound_worker.bat", "run_inbound_worker_hidden.vbs",
+        "suite_inbound_worker_sync.prg"
+    ) -contains $_.Name
+    if (-not $keep) {
+        Move-ToQuarantine -Path $_.FullName -QuarantineDir (Join-Path $quarantine "progs_old")
+    }
 }
 $v2Prgs = @(
     "suite_cola_sync.prg", "suite_control_sync.prg", "suite_migrar_cola_sincro.prg",
-    "suite_inbound_worker.prg", "suite_local_test_init.prg", "suite_v2_startup.prg"
+    "suite_inbound_worker.prg", "suite_local_test_init.prg", "suite_v2_startup.prg",
+    "suite_apply_license_unlock.prg", "funciones.prg"
 )
 foreach ($f in $v2Prgs) {
     $src = Join-Path $VfpRepo $f
@@ -115,43 +141,8 @@ if (-not (Test-Path (Join-Path $DestRoot "_menus.dbf"))) {
 
 Write-Step "Scripts de arranque"
 Copy-Item (Join-Path $RepoRoot "scripts\ensure-style-dbc.ps1") (Join-Path $DestRoot "ensure-style-dbc.ps1") -Force
-
-$bat = @"
-@echo off
-setlocal
-set "STYLE_HOME=%~dp0"
-cd /d "%STYLE_HOME%"
-set "STYLE_HOME=%CD%"
-
-if exist "%~dp0ensure-style-dbc.ps1" (
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0ensure-style-dbc.ps1" -StyleRoot "%CD%" -RemoveWedbRootOnly 2>nul
-)
-
-if not exist "%CD%\Duna.exe" (
-  echo ERROR: falta Duna.exe - build-style-exportz.ps1 -AfterBuild -DeployTest
-  pause & exit /b 1
-)
-if not exist SuiteSync.cfg (
-  echo ERROR: falta SuiteSync.cfg
-  pause & exit /b 1
-)
-if not exist Usuarios mkdir Usuarios 2>nul
-
-if exist "%CD%\PROGS\suite_full_unlock.fxp" ren "%CD%\PROGS\suite_full_unlock.fxp" suite_full_unlock.fxp.bak >nul 2>&1
-if exist "%CD%\PROGS\suite_full_unlock.FXP" ren "%CD%\PROGS\suite_full_unlock.FXP" suite_full_unlock.fxp.bak >nul 2>&1
-if exist "%CD%\PROGS\funciones.fxp" ren "%CD%\PROGS\funciones.fxp" funciones.fxp.bak >nul 2>&1
-if exist "%CD%\PROGS\funciones.FXP" ren "%CD%\PROGS\funciones.FXP" funciones.fxp.bak >nul 2>&1
-if exist "%CD%\PROGS\general.fxp" ren "%CD%\PROGS\general.fxp" general.fxp.bak >nul 2>&1
-if exist "%CD%\PROGS\general.FXP" ren "%CD%\PROGS\general.FXP" general.fxp.bak >nul 2>&1
-rem sync v2 solo desde funciones embebido en Duna.exe (no FXP externos en PROGS)
-
-echo Style ExportZ test: %CD%
-echo Log: Usuarios\_suite_sync.log
-echo.
-
-start "" /D "%STYLE_HOME%" "%STYLE_HOME%\Duna.exe"
-"@
-Set-Content -Path (Join-Path $DestRoot "IniciarStyle.bat") -Value $bat -Encoding ASCII
+Copy-Item (Join-Path $VfpRepo "IniciarStyle.bat") (Join-Path $DestRoot "IniciarStyle.bat") -Force
+Write-Host "  OK IniciarStyle.bat (vfp/IniciarStyle.bat)" -ForegroundColor Green
 
 @"
 * VFP: directorio de trabajo = raiz Style
@@ -177,6 +168,9 @@ if (-not $SkipEmpresaCopy -and (Test-Path $SourceRoot)) {
     Write-Step "Config empresa desde Z"
     & (Join-Path $RepoRoot "scripts\sync-style-config-from-z.ps1") -SourceRoot $SourceRoot -DestRoot $DestRoot
 }
+
+Write-Step "Runtime sync v2"
+& (Join-Path $RepoRoot "scripts\deploy-style-sync-runtime.ps1") -StyleRoot $DestRoot -AgentDir (Join-Path $RepoRoot "style-sync-agent")
 
 $fi = Get-Item $duna
 $leeme = @"

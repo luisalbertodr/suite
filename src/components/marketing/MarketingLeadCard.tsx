@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { openSuiteWhatsappChat } from '@/lib/openSuiteWhatsappChat';
+import { useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
 import type { MarketingLead } from '@/hooks/useMarketingLeads';
 import type { MarketingFieldConfig } from '@/hooks/useMarketingFieldConfig';
 import type { CustomerLookupRow } from '@/hooks/useCustomerLookup';
@@ -170,6 +171,7 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
   onDragEnd,
 }: MarketingLeadCardProps) {
   const navigate = useNavigate();
+  const { companyId } = useWhatsappCompanyId();
 
   const fullName = getLeadFullName(lead);
   const createdAtLabel = getLeadCreatedAtLabel(lead);
@@ -189,7 +191,7 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
     e.stopPropagation();
     e.preventDefault();
     if (!lead.phone) return;
-    openSuiteWhatsappChat(navigate, lead.phone, fullName);
+    void openSuiteWhatsappChat(navigate, companyId, lead.phone, fullName, lead.id);
   };
   const handleMatchedCustomerClick = (e: React.MouseEvent) => {
     e.stopPropagation();

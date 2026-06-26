@@ -17,8 +17,22 @@ export type WhatsappChatRow = Database['public']['Tables']['whatsapp_chats']['Ro
 const BG_SYNC_INTERVAL_MS = 8000;
 const WAHA_CHATS_REFRESH_MS = 60_000;
 /** Evita traer `raw` (JSONB pesado) en cada refresco de lista. */
-const CHAT_LIST_COLUMNS =
+export const WHATSAPP_CHAT_LIST_COLUMNS =
   'id,company_id,chat_id,name,is_group,profile_picture_url,last_message_preview,last_message_at,last_message_from_me,unread_count,pinned,archived,history_synced_at,oldest_message_at,customer_id,marketing_lead_id,created_at,updated_at';
+
+export async function fetchWhatsappChatById(
+  companyId: string,
+  chatId: string,
+): Promise<WhatsappChatRow | null> {
+  const { data, error } = await supabase
+    .from('whatsapp_chats')
+    .select(WHATSAPP_CHAT_LIST_COLUMNS)
+    .eq('company_id', companyId)
+    .eq('chat_id', chatId)
+    .maybeSingle();
+  if (error) throw error;
+  return data ?? null;
+}
 
 export const useWhatsappChats = () => {
   const queryClient = useQueryClient();
@@ -34,7 +48,7 @@ export const useWhatsappChats = () => {
       if (!companyId) return [];
       const { data, error } = await supabase
         .from('whatsapp_chats')
-        .select(CHAT_LIST_COLUMNS)
+        .select(WHATSAPP_CHAT_LIST_COLUMNS)
         .eq('company_id', companyId)
         .eq('archived', false)
         .order('last_message_at', { ascending: false, nullsFirst: false })

@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { ClipboardList, Loader2, Monitor } from 'lucide-react';
+import { ClipboardList, Loader2, Monitor, PencilLine } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { format } from 'date-fns';
@@ -15,6 +15,7 @@ import {
 } from '@/lib/questionnaireApi';
 import { QUESTIONNAIRE_STATUS_LABELS } from '@/lib/questionnaireTypes';
 import { QuestionnaireEmployeeDialog } from '@/components/questionnaire/QuestionnaireEmployeeDialog';
+import { QuestionnaireAmendmentDialog } from '@/components/questionnaire/QuestionnaireAmendmentDialog';
 
 interface Props {
   customerId: string;
@@ -33,6 +34,7 @@ export const ClienteCuestionariosTab: React.FC<Props> = ({
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [manageId, setManageId] = useState<string | null>(initialManageQuestionnaireId ?? null);
+  const [amendmentOpen, setAmendmentOpen] = useState(false);
 
   useEffect(() => {
     if (initialManageQuestionnaireId) {
@@ -64,7 +66,7 @@ export const ClienteCuestionariosTab: React.FC<Props> = ({
       openQuestionnaireKiosk(q.id);
       toast({
         title: 'Cuestionario abierto en tablet',
-        description: 'Entregue la tablet a la clienta. Esta pantalla no muestra el menú de Suite.',
+        description: 'Entregue la tablet al cliente. Esta pantalla no muestra el menú de Suite.',
       });
     },
     onError: (e: Error) => toast({ title: e.message, variant: 'destructive' }),
@@ -81,31 +83,39 @@ export const ClienteCuestionariosTab: React.FC<Props> = ({
           <ClipboardList className="w-5 h-5" />
           Cuestionario facial-corporal
         </h3>
-        <Button
-          size="sm"
-          onClick={() => startMutation.mutate()}
-          disabled={startMutation.isPending}
-        >
+        <div className="flex flex-wrap gap-2">
+          {hasBaseline ? (
+            <Button size="sm" variant="outline" onClick={() => setAmendmentOpen(true)}>
+              <PencilLine className="w-4 h-4 mr-1" />
+              Modificar cuestionario
+            </Button>
+          ) : null}
+          <Button
+            size="sm"
+            onClick={() => startMutation.mutate()}
+            disabled={startMutation.isPending}
+          >
           {startMutation.isPending ? (
             <Loader2 className="w-4 h-4 mr-1 animate-spin" />
           ) : (
             <Monitor className="w-4 h-4 mr-1" />
           )}
           {hasBaseline ? 'Confirmación en tablet' : 'Cuestionario completo en tablet'}
-        </Button>
+          </Button>
+        </div>
       </div>
 
       <p className="text-sm text-muted-foreground">
         {hasBaseline
-          ? 'La clienta ya tiene cuestionario inicial. Solo confirmará el motivo de hoy y si ha cambiado algo en su salud.'
-          : 'Primera visita: cuestionario completo válido para cualquier tratamiento posterior. La clienta rellena sin supervisión en una ventana sin menú.'}
+          ? 'El cliente ya tiene cuestionario inicial. Solo confirmará el motivo de hoy y si ha cambiado algo en su salud.'
+          : 'Primera visita: cuestionario completo válido para cualquier tratamiento posterior. El cliente rellena sin supervisión en una ventana sin menú.'}
       </p>
 
       {isLoading ? (
         <div className="text-center py-8 text-muted-foreground">Cargando…</div>
       ) : !list.length ? (
         <div className="text-center py-8 text-muted-foreground border border-dashed rounded-lg">
-          Sin cuestionarios. Pulse «Abrir en tablet» al llegar la clienta.
+          Sin cuestionarios. Pulse «Abrir en tablet» al llegar el cliente.
         </div>
       ) : (
         <div className="space-y-2">
@@ -139,6 +149,13 @@ export const ClienteCuestionariosTab: React.FC<Props> = ({
         questionnaireId={manageId}
         open={!!manageId}
         onOpenChange={(o) => !o && setManageId(null)}
+        employeeId={employeeId}
+      />
+
+      <QuestionnaireAmendmentDialog
+        customerId={customerId}
+        open={amendmentOpen}
+        onOpenChange={setAmendmentOpen}
         employeeId={employeeId}
       />
     </div>

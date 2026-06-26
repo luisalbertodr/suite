@@ -53,7 +53,7 @@ function KioskContent() {
 
   if (isLoading || !questionnaireId) {
     return (
-      <QuestionnaireKioskShell>
+      <QuestionnaireKioskShell locked={false}>
         <Skeleton className="h-12 w-full mb-4" />
         <Skeleton className="h-64 w-full" />
       </QuestionnaireKioskShell>
@@ -62,15 +62,17 @@ function KioskContent() {
 
   if (!questionnaire) {
     return (
-      <QuestionnaireKioskShell>
+      <QuestionnaireKioskShell locked={false}>
         <p className="text-center text-muted-foreground py-20">Cuestionario no encontrado.</p>
       </QuestionnaireKioskShell>
     );
   }
 
-  if (questionnaire.status !== 'patient_editing') {
+  const locked = questionnaire.status !== 'patient_editing';
+
+  if (locked) {
     return (
-      <QuestionnaireKioskShell>
+      <QuestionnaireKioskShell companyId={questionnaire.company_id} locked>
         <QuestionnairePatientWaitScreen
           customerName={customer?.name}
           status={questionnaire.status}
@@ -82,14 +84,14 @@ function KioskContent() {
 
   if (!customer) {
     return (
-      <QuestionnaireKioskShell>
+      <QuestionnaireKioskShell companyId={questionnaire.company_id} locked={false}>
         <Skeleton className="h-64 w-full" />
       </QuestionnaireKioskShell>
     );
   }
 
   return (
-    <QuestionnaireKioskShell>
+    <QuestionnaireKioskShell companyId={questionnaire.company_id} locked={false}>
       <QuestionnairePatientForm
         questionnaireId={questionnaire.id}
         companyId={questionnaire.company_id}

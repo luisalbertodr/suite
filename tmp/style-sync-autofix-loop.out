@@ -1,0 +1,206 @@
+[2026-06-25 04:32:05] === style-sync-autofix-loop (max 20 rondas) ===
+[2026-06-25 04:32:05] Aplicando migraciA3n resolve_dunasoft_codusu...
+Subiendo 20260625120000_fix_resolve_dunasoft_codusu.sql ...
+Aplicando en supabase-db ...
+MigraciA3n 20260625120000_fix_resolve_dunasoft_codusu aplicada.
+[2026-06-25 04:32:22] --- Ronda 1 ---
+Error en la invocación del método porque [System.Management.Automation.ErrorRecord] no contiene ningún método llamado 
+'Trim'.
+En C:\Users\OportoW11\Suite\suite\scripts\style-sync-autofix-loop.ps1: 88 Carácter: 12
++     return [int]($r.Trim())
++            ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : MethodNotFound
+ 
+[2026-06-25 04:32:31] codusu=True outbound=True inbound_pending=
+[2026-06-25 04:33:32] --- Ronda 2 ---
+Error en la invocación del método porque [System.Management.Automation.ErrorRecord] no contiene ningún método llamado 
+'Trim'.
+En C:\Users\OportoW11\Suite\suite\scripts\style-sync-autofix-loop.ps1: 88 Carácter: 12
++     return [int]($r.Trim())
++            ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : MethodNotFound
+ 
+[2026-06-25 04:33:43] codusu=True outbound=True inbound_pending=
+[2026-06-25 04:34:46] --- Ronda 3 ---
+Error en la invocación del método porque [System.Management.Automation.ErrorRecord] no contiene ningún método llamado 
+'Trim'.
+En C:\Users\OportoW11\Suite\suite\scripts\style-sync-autofix-loop.ps1: 88 Carácter: 12
++     return [int]($r.Trim())
++            ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : MethodNotFound
+ 
+[2026-06-25 04:34:56] codusu=True outbound=True inbound_pending=
+[2026-06-25 04:35:57] --- Ronda 4 ---
+Error en la invocación del método porque [System.Management.Automation.ErrorRecord] no contiene ningún método llamado 
+'Trim'.
+En C:\Users\OportoW11\Suite\suite\scripts\style-sync-autofix-loop.ps1: 88 Carácter: 12
++     return [int]($r.Trim())
++            ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : MethodNotFound
+ 
+[2026-06-25 04:36:05] codusu=True outbound=True inbound_pending=
+[2026-06-25 04:37:05] --- Ronda 5 ---
+Error en la invocación del método porque [System.Management.Automation.ErrorRecord] no contiene ningún método llamado 
+'Trim'.
+En C:\Users\OportoW11\Suite\suite\scripts\style-sync-autofix-loop.ps1: 88 Carácter: 12
++     return [int]($r.Trim())
++            ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : MethodNotFound
+ 
+[2026-06-25 04:37:16] codusu=True outbound=True inbound_pending=
+[2026-06-25 04:38:17] --- Ronda 6 ---
+Error en la invocación del método porque [System.Management.Automation.ErrorRecord] no contiene ningún método llamado 
+'Trim'.
+En C:\Users\OportoW11\Suite\suite\scripts\style-sync-autofix-loop.ps1: 88 Carácter: 12
++     return [int]($r.Trim())
++            ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : MethodNotFound
+ 
+[2026-06-25 04:38:25] codusu=True outbound=True inbound_pending=
+[2026-06-25 04:39:26] --- Ronda 7 ---
+Error en la invocación del método porque [System.Management.Automation.ErrorRecord] no contiene ningún método llamado 
+'Trim'.
+En C:\Users\OportoW11\Suite\suite\scripts\style-sync-autofix-loop.ps1: 88 Carácter: 12
++     return [int]($r.Trim())
++            ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : MethodNotFound
+ 
+[2026-06-25 04:39:33] codusu=True outbound=True inbound_pending=
+[2026-06-25 04:40:34] --- Ronda 8 ---
+Error en la invocación del método porque [System.Management.Automation.ErrorRecord] no contiene ningún método llamado 
+'Trim'.
+En C:\Users\OportoW11\Suite\suite\scripts\style-sync-autofix-loop.ps1: 88 Carácter: 12
++     return [int]($r.Trim())
++            ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : MethodNotFound
+ 
+[2026-06-25 04:40:41] codusu=True outbound=True inbound_pending=
+[2026-06-25 04:41:42] --- Ronda 9 ---
+Error en la invocación del método porque [System.Management.Automation.ErrorRecord] no contiene ningún método llamado 
+'Trim'.
+En C:\Users\OportoW11\Suite\suite\scripts\style-sync-autofix-loop.ps1: 88 Carácter: 12
++     return [int]($r.Trim())
++            ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : MethodNotFound
+ 
+[2026-06-25 04:41:47] codusu=True outbound=True inbound_pending=
+[2026-06-25 04:42:48] --- Ronda 10 ---
+Error en la invocación del método porque [System.Management.Automation.ErrorRecord] no contiene ningún método llamado 
+'Trim'.
+En C:\Users\OportoW11\Suite\suite\scripts\style-sync-autofix-loop.ps1: 88 Carácter: 12
++     return [int]($r.Trim())
++            ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : MethodNotFound
+ 
+[2026-06-25 04:42:53] codusu=True outbound=True inbound_pending=
+[2026-06-25 04:43:53] --- Ronda 11 ---
+Error en la invocación del método porque [System.Management.Automation.ErrorRecord] no contiene ningún método llamado 
+'Trim'.
+En C:\Users\OportoW11\Suite\suite\scripts\style-sync-autofix-loop.ps1: 88 Carácter: 12
++     return [int]($r.Trim())
++            ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : MethodNotFound
+ 
+[2026-06-25 04:43:56] codusu=True outbound=True inbound_pending=
+[2026-06-25 04:44:57] --- Ronda 12 ---
+Error en la invocación del método porque [System.Management.Automation.ErrorRecord] no contiene ningún método llamado 
+'Trim'.
+En C:\Users\OportoW11\Suite\suite\scripts\style-sync-autofix-loop.ps1: 88 Carácter: 12
++     return [int]($r.Trim())
++            ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : MethodNotFound
+ 
+[2026-06-25 04:45:00] codusu=True outbound=True inbound_pending=
+[2026-06-25 04:46:00] --- Ronda 13 ---
+Error en la invocación del método porque [System.Management.Automation.ErrorRecord] no contiene ningún método llamado 
+'Trim'.
+En C:\Users\OportoW11\Suite\suite\scripts\style-sync-autofix-loop.ps1: 88 Carácter: 12
++     return [int]($r.Trim())
++            ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : MethodNotFound
+ 
+[2026-06-25 04:46:04] codusu=True outbound=True inbound_pending=
+[2026-06-25 04:47:05] --- Ronda 14 ---
+Error en la invocación del método porque [System.Management.Automation.ErrorRecord] no contiene ningún método llamado 
+'Trim'.
+En C:\Users\OportoW11\Suite\suite\scripts\style-sync-autofix-loop.ps1: 88 Carácter: 12
++     return [int]($r.Trim())
++            ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : MethodNotFound
+ 
+[2026-06-25 04:47:09] codusu=True outbound=True inbound_pending=
+[2026-06-25 04:48:09] --- Ronda 15 ---
+Error en la invocación del método porque [System.Management.Automation.ErrorRecord] no contiene ningún método llamado 
+'Trim'.
+En C:\Users\OportoW11\Suite\suite\scripts\style-sync-autofix-loop.ps1: 88 Carácter: 12
++     return [int]($r.Trim())
++            ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : MethodNotFound
+ 
+[2026-06-25 04:48:14] codusu=True outbound=True inbound_pending=
+[2026-06-25 04:49:15] --- Ronda 16 ---
+Error en la invocación del método porque [System.Management.Automation.ErrorRecord] no contiene ningún método llamado 
+'Trim'.
+En C:\Users\OportoW11\Suite\suite\scripts\style-sync-autofix-loop.ps1: 88 Carácter: 12
++     return [int]($r.Trim())
++            ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : MethodNotFound
+ 
+[2026-06-25 04:49:20] codusu=True outbound=True inbound_pending=
+[2026-06-25 04:50:21] --- Ronda 17 ---
+Error en la invocación del método porque [System.Management.Automation.ErrorRecord] no contiene ningún método llamado 
+'Trim'.
+En C:\Users\OportoW11\Suite\suite\scripts\style-sync-autofix-loop.ps1: 88 Carácter: 12
++     return [int]($r.Trim())
++            ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : MethodNotFound
+ 
+[2026-06-25 04:50:25] codusu=True outbound=True inbound_pending=
+[2026-06-25 04:51:25] --- Ronda 18 ---
+Error en la invocación del método porque [System.Management.Automation.ErrorRecord] no contiene ningún método llamado 
+'Trim'.
+En C:\Users\OportoW11\Suite\suite\scripts\style-sync-autofix-loop.ps1: 88 Carácter: 12
++     return [int]($r.Trim())
++            ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : MethodNotFound
+ 
+[2026-06-25 04:51:30] codusu=True outbound=True inbound_pending=
+[2026-06-25 04:52:31] --- Ronda 19 ---
+Error en la invocación del método porque [System.Management.Automation.ErrorRecord] no contiene ningún método llamado 
+'Trim'.
+En C:\Users\OportoW11\Suite\suite\scripts\style-sync-autofix-loop.ps1: 88 Carácter: 12
++     return [int]($r.Trim())
++            ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : MethodNotFound
+ 
+[2026-06-25 04:52:35] codusu=True outbound=True inbound_pending=
+[2026-06-25 04:53:37] --- Ronda 20 ---
+Error en la invocación del método porque [System.Management.Automation.ErrorRecord] no contiene ningún método llamado 
+'Trim'.
+En C:\Users\OportoW11\Suite\suite\scripts\style-sync-autofix-loop.ps1: 88 Carácter: 12
++     return [int]($r.Trim())
++            ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : MethodNotFound
+ 
+[2026-06-25 04:53:41] codusu=True outbound=True inbound_pending=
+[2026-06-25 04:54:42] AVISO: algunas comprobaciones siguen fallando tras 20 rondas. Ver C:\Users\OportoW11\Suite\suite\tmp\style-sync-autofix.log

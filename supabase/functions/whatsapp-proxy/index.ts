@@ -72,6 +72,7 @@ import {
   stripMediaBase64,
   uploadWhatsappOutgoingMedia,
 } from '../_shared/whatsappOutgoingMediaStorage.ts';
+import { whatsappMediaPreviewLabel } from '../_shared/whatsappMessageType.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -178,7 +179,14 @@ type ActionBody = {
   | { action: 'media.download'; url?: string; chat_id?: string; message_id?: string; alt_chat_ids?: string[] }
   | { action: 'messages.prefetch_media'; chat_id: string; limit?: number; alt_chat_ids?: string[] }
   | { action: 'chat.mark_read'; chat_id: string }
-  | { action: 'chat.ensure'; chat_id: string; name?: string | null }
+  | { action: 'chat.ensure'; chat_id: string; name?: string | null; marketing_lead_id?: string | null }
+  | {
+      action: 'marketing.send_campaign_audio';
+      chat_id: string;
+      marketing_lead_id?: string | null;
+      customer_id?: string | null;
+      chat_display_name?: string | null;
+    }
   | {
       action: 'chat.set_link';
       chat_id: string;
@@ -200,6 +208,23 @@ const json = (body: unknown, status = 200) =>
 const err = (message: string, status = 400) => json({ error: message }, status);
 
 function mapWhatsappProviderFailure(message: string, status: number): Response {
+  const lower = message.toLowerCase();
+  if (/detached frame/i.test(message)) {
+    return err(
+      'OpenWA perdió la conexión con WhatsApp Web. Ve a Configuración → WhatsApp, detén la sesión e iníciala de nuevo.',
+      422,
+    );
+  }
+  if (
+    status >= 500 &&
+    (/send-audio|send-image|send-video|send-document|internal server error/i.test(lower))
+  ) {
+    return err(
+      'OpenWA no pudo enviar el archivo (fallo del motor WhatsApp Web, habitual con whatsapp-web.js 1.34.7). ' +
+        'Detén e inicia la sesión en Configuración → WhatsApp. Si sigue fallando, avisa al administrador (scripts/fix-openwa-media.ps1).',
+      502,
+    );
+  }
   const sessionNotReady =
     status === 422 &&
     (/session status/i.test(message) ||
@@ -2848,7 +2873,10 @@ serve(async (req) => {
             caption: type !== 'text' ? sendBody.caption ?? null : null,
             media_url: outgoingMediaUrl,
             media_mime_type: type !== 'text' ? sendBody.mime_type ?? null : null,
-            media_filename: type !== 'text' ? sendBody.filename ?? null : null,
+            media_filename: type !== 'text'
+              ? (sendBody.filename?.trim() ||
+                ((type === 'audio' || type === 'voice') ? 'voice.ogg' : 'file'))
+              : null,
             quoted_message_id: sendBody.reply_to_message_id?.trim() || null,
             ack: 0,
             timestamp: ts,
@@ -2897,7 +2925,7 @@ serve(async (req) => {
             last_message_preview:
               type === 'text'
                 ? sendBody.text?.slice(0, 200) ?? null
-                : `[${type}]`,
+                : whatsappMediaPreviewLabel(type),
             last_message_at: ts,
             last_message_from_me: true,
           },
@@ -3160,7 +3188,10 @@ serve(async (req) => {
               message_id: body.message_id?.slice(0, 48),
             });
             const expired = /expirad/i.test(msg);
-            const status = expired ? 410 : 502;
+            const openwaHistoryBroken =
+              provider === 'openwa' &&
+              (/internal server error/i.test(msg) || /history\?/i.test(msg));
+            const status = expired || openwaHistoryBroken ? 410 : 502;
             if (provider === 'openwa' || !body.url || isExternalCdnMediaUrl(body.url)) {
               return err(msg, status);
             }
@@ -3217,10 +3248,15 @@ serve(async (req) => {
         // pasan uno mejor; si no existe, lo creamos vacío.
         const { data: existing } = await admin
           .from('whatsapp_chats')
-          .select('id, name')
+          .select('id, name, marketing_lead_id')
           .eq('company_id', companyId)
           .eq('chat_id', chatId)
           .maybeSingle();
+
+        const leadId =
+          typeof body.marketing_lead_id === 'string' && body.marketing_lead_id.trim()
+            ? body.marketing_lead_id.trim()
+            : null;
 
         if (!existing) {
           await admin.from('whatsapp_chats').insert({
@@ -3228,12 +3264,15 @@ serve(async (req) => {
             chat_id: chatId,
             name: body.name ?? null,
             is_group: isGroup,
+            marketing_lead_id: leadId,
           });
-        } else if (body.name && !existing.name) {
-          await admin
-            .from('whatsapp_chats')
-            .update({ name: body.name })
-            .eq('id', existing.id);
+        } else {
+          const patch: Record<string, unknown> = {};
+          if (body.name && !existing.name) patch.name = body.name;
+          if (leadId && !existing.marketing_lead_id) patch.marketing_lead_id = leadId;
+          if (Object.keys(patch).length > 0) {
+            await admin.from('whatsapp_chats').update(patch).eq('id', existing.id);
+          }
         }
 
         // Lanzamos auto-vinculación por si era nuevo (no rompe si falla)
@@ -3247,6 +3286,29 @@ serve(async (req) => {
         }
 
         return json({ ok: true, chat_id: chatId });
+      }
+
+      case 'marketing.send_campaign_audio': {
+        if (!body.chat_id?.trim()) return err('Falta chat_id');
+        try {
+          const { sendManualCampaignAudioForChat } = await import(
+            '../_shared/marketingWhatsappAutomation.ts'
+          );
+          const result = await sendManualCampaignAudioForChat(
+            admin,
+            companyId,
+            body.chat_id.trim(),
+            {
+              marketing_lead_id: body.marketing_lead_id ?? null,
+              customer_id: body.customer_id ?? null,
+              chat_display_name: body.chat_display_name ?? null,
+            },
+          );
+          if (!result.ok) return err(result.error ?? 'No se pudo enviar el audio', 400);
+          return json({ ok: true, ...result });
+        } catch (e) {
+          return err(e instanceof Error ? e.message : 'No se pudo enviar el audio', 500);
+        }
       }
 
       case 'chat.set_link': {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invokeWhatsappProxy } from '@/hooks/useWhatsappConfig';
 import { useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
+import { useRoutePanelActive } from '@/contexts/RoutePanelContext';
 import { isLidJid, resolveSupabasePublicStorageUrl } from '@/components/whatsapp/whatsappUtils';
 import type { WhatsappMessageRow } from '@/hooks/useWhatsappMessages';
 
@@ -44,7 +45,10 @@ export function useWhatsappMediaPrefetch(
   chatId: string,
   relatedChatIds: string[] = [],
   messages: WhatsappMessageRow[] = [],
+  options?: { enabled?: boolean },
 ) {
+  const panelActive = useRoutePanelActive();
+  const enabled = options?.enabled !== false && panelActive;
   const { companyId } = useWhatsappCompanyId();
   const storeRef = useRef(new Map<string, PrefetchedMedia>());
   const [loading, setLoading] = useState(false);
@@ -62,7 +66,7 @@ export function useWhatsappMediaPrefetch(
   );
 
   useEffect(() => {
-    if (!companyId || !chatId) {
+    if (!enabled || !companyId || !chatId) {
       storeRef.current.clear();
       setReady(true);
       setLoading(false);
@@ -125,7 +129,7 @@ export function useWhatsappMediaPrefetch(
     return () => {
       cancelled = true;
     };
-  }, [chatId, companyId, relatedKey, messagesSeedKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [chatId, companyId, relatedKey, messagesSeedKey, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const getPrefetchMedia = useCallback(
     (messageId: string | null | undefined): PrefetchedMedia | null => {

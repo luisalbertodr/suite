@@ -14,7 +14,7 @@ export const CLINICAL_QUESTIONNAIRE_OPTIONS: ClinicalQuestionnaireOption[] = [
     id: 'facial_corporal_2026',
     formKey: FACIAL_CORPORAL_FORM_KEY,
     label: 'Cuestionario facial-corporal 2026',
-    description: 'Tablet para la clienta. Revisión y datos técnicos en recepción.',
+    description: 'Tablet para el cliente. Revisión y datos técnicos en recepción.',
     keywords:
       'facial,corporal,cuestionario,primera visita,anamnesis,ficha,consulta inicial,evaluacion,evaluación',
   },

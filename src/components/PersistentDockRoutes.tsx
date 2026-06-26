@@ -1,7 +1,40 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
+import { useDockKeepAlive } from '@/contexts/DockKeepAliveContext';
 import { RoutePanelProvider } from '@/contexts/RoutePanelContext';
 import { DOCK_ROUTE_DEFS, matchDockRoute } from '@/lib/dockRoutes';
+
+function DockPanel({
+  active,
+  panelKey,
+  children,
+}: {
+  active: boolean;
+  panelKey: string;
+  children: React.ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.inert = !active;
+    if (!active && el.contains(document.activeElement)) {
+      (document.activeElement as HTMLElement)?.blur();
+    }
+  }, [active]);
+
+  return (
+    <div
+      ref={ref}
+      className={active ? undefined : 'hidden'}
+      data-dock-panel={panelKey}
+      data-dock-active={active ? 'true' : 'false'}
+    >
+      {children}
+    </div>
+  );
+}
 
 /**
  * Mantiene montadas las pestañas del dock ya visitadas para conservar estado y popups abiertos.
@@ -9,17 +42,23 @@ import { DOCK_ROUTE_DEFS, matchDockRoute } from '@/lib/dockRoutes';
 export const PersistentDockRoutes: React.FC = () => {
   const { pathname } = useLocation();
   const activeKey = matchDockRoute(pathname);
-  const [mountedKeys, setMountedKeys] = useState<Set<string>>(() => new Set());
+  const { mountedKeys, mountPanel } = useDockKeepAlive();
 
   useEffect(() => {
-    if (activeKey) {
-      setMountedKeys((prev) => {
-        if (prev.has(activeKey)) return prev;
-        const next = new Set(prev);
-        next.add(activeKey);
-        return next;
-      });
-    }
+    if (activeKey) mountPanel(activeKey);
+  }, [activeKey, mountPanel]);
+
+  useEffect(() => {
+    if (!activeKey) return;
+    const inactive = document.querySelectorAll<HTMLElement>(
+      '[data-dock-panel][data-dock-active="false"]',
+    );
+    const activeEl = document.activeElement;
+    inactive.forEach((panel) => {
+      if (activeEl && panel.contains(activeEl)) {
+        (activeEl as HTMLElement).blur();
+      }
+    });
   }, [activeKey]);
 
   if (!activeKey) return null;
@@ -31,13 +70,9 @@ export const PersistentDockRoutes: React.FC = () => {
         const active = key === activeKey;
         return (
           <RoutePanelProvider key={key} active={active}>
-            <div
-              className={active ? undefined : 'hidden'}
-              aria-hidden={active ? 'false' : 'true'}
-              data-dock-panel={key}
-            >
+            <DockPanel active={active} panelKey={key}>
               <Page />
-            </div>
+            </DockPanel>
           </RoutePanelProvider>
         );
       })}

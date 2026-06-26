@@ -4364,17 +4364,46 @@ FUNCTION Reservas_Incidencia
  ENDIF
  TRY
     IF TYPE("plSuiteSyncEnabled")="L" AND plSuiteSyncEnabled
-       LOCAL lcAcc
+       LOCAL lcAcc, lcsCodemp, lcsCodcli, ldsFecha, lcsHorini, lcsHorfin, lcsTexto
+       LOCAL lcsCodrec, lcsNomcli, lcsTel1cli
        lcAcc = "UPD"
        DO CASE
           CASE UPPER(ALLTRIM(tctipinc))=="BORRAR"
              lcAcc = "DEL"
+             lcsCodemp = pccodemp
+             lcsCodcli = pccodcli
+             ldsFecha = pdfecha
+             lcsHorini = pchorini
+             lcsHorfin = pchorfin
+             lcsTexto = pctexto
+             lcsCodrec = pccodrec
+             lcsNomcli = pcnomcli
+             lcsTel1cli = pctel1cli
           CASE UPPER(ALLTRIM(tctipinc))=="CREAR"
              lcAcc = "INS"
+             lcsCodemp = pccodempnew
+             lcsCodcli = pccodclinew
+             ldsFecha = pdfechanew
+             lcsHorini = pchorininew
+             lcsHorfin = pchorfinnew
+             lcsTexto = pctextonew
+             lcsCodrec = pccodrecnew
+             lcsNomcli = pcnomclinew
+             lcsTel1cli = pctel1clinew
           OTHERWISE
              lcAcc = "UPD"
+             lcsCodemp = pccodempnew
+             lcsCodcli = pccodclinew
+             ldsFecha = pdfechanew
+             lcsHorini = pchorininew
+             lcsHorfin = pchorfinnew
+             lcsTexto = pctextonew
+             lcsCodrec = pccodrecnew
+             lcsNomcli = pcnomclinew
+             lcsTel1cli = pctel1clinew
        ENDCASE
-       = SuiteEnqueuePlan2009(tnidplan, lcAcc)
+       = SuiteEnqueuePlan2009(tnidplan, lcAcc, lcsCodemp, lcsCodcli, ldsFecha, lcsHorini, lcsHorfin, ;
+             lcsTexto, lcsCodrec, lcsNomcli, lcsTel1cli)
     ELSE
        * Fallback legacy (si existe suite_full_unlock en runtime).
        IF TYPE("SuiteSyncEnsureLoaded")#"U"

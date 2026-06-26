@@ -26,7 +26,13 @@ import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { useWorkCenter } from '@/hooks/useWorkCenter';
 
 export type AppointmentClientPick =
-  | { kind: 'customer'; customerId: string; displayName: string }
+  | {
+      kind: 'customer';
+      customerId: string;
+      displayName: string;
+      legacyCodcli?: string | null;
+      phone?: string | null;
+    }
   | { kind: 'manual'; name: string };
 
 type Props = {
@@ -121,6 +127,8 @@ export const AppointmentClientePicker: React.FC<Props> = ({
                         kind: 'customer',
                         customerId: customer.id,
                         displayName: customer.name,
+                        legacyCodcli: customer.legacy_codcli,
+                        phone: customer.phone_mobile ?? customer.phone ?? customer.phone_home,
                       });
                       setOpen(false);
                       setSearch('');

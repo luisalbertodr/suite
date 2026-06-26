@@ -20,6 +20,10 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { processAutomationReply } from '../_shared/marketingWhatsappAutomation.ts';
 import { mapOpenwaStatusToInternal } from '../_shared/whatsappProviderTypes.ts';
+import {
+  sanitizeWhatsappMessageType,
+  whatsappMediaPreviewLabel,
+} from '../_shared/whatsappMessageType.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -735,7 +739,10 @@ function normalizeMessage(
       chatId: remoteJid,
       fromJid,
       fromMe: !!key!.fromMe,
-      type: c.type,
+      type: sanitizeWhatsappMessageType(c.type, {
+      mime: c.mediaMime,
+      filename: c.mediaFilename,
+    }),
       body: c.body ?? (typeof payload.body === 'string' ? payload.body : null),
       caption: c.caption,
       mediaUrl: c.mediaUrl ?? (typeof payload.media?.url === 'string' ? payload.media.url : null),
@@ -765,8 +772,10 @@ function normalizeMessage(
     ? new Date(payload.timestamp * 1000).toISOString()
     : new Date().toISOString();
   const bodyOrPreview = (() => {
-    if (payload.body && payload.body.trim()) return payload.body;
-    if (payload.caption && payload.caption.trim()) return payload.caption;
+    const b = payload.body?.trim();
+    if (b && b !== 'undefined' && b !== 'null') return b;
+    const c = payload.caption?.trim();
+    if (c && c !== 'undefined' && c !== 'null') return c;
     return null;
   })();
   const isGroupChat = /@g\.us$/i.test(chatId);
@@ -782,7 +791,14 @@ function normalizeMessage(
     chatId,
     fromJid,
     fromMe: !!payload.fromMe,
-    type: (payload.type ?? 'text').toLowerCase(),
+    type: sanitizeWhatsappMessageType(payload.type ?? 'text', {
+      mime:
+        payload.media?.mimetype ??
+        (typeof (payload as Record<string, unknown>).mimetype === 'string'
+          ? ((payload as Record<string, unknown>).mimetype as string)
+          : null),
+      filename: payload.media?.filename ?? null,
+    }),
     body: bodyOrPreview,
     caption: payload.caption ?? null,
     mediaUrl: payload.media?.url ?? null,
@@ -814,11 +830,16 @@ function groupPreviewSender(m: NormalizedMessage): string | null {
 }
 
 function previewFor(m: NormalizedMessage): string | null {
-  if (m.body && m.body.trim()) return m.body;
-  if (m.caption && m.caption.trim()) return m.caption;
-  const t = m.type.toLowerCase();
-  if (!t || t === 'chat' || t === 'text') return null;
-  return `[${t}]`;
+  const body = m.body?.trim();
+  if (body && body !== 'undefined' && body !== 'null') return body;
+  const caption = m.caption?.trim();
+  if (caption && caption !== 'undefined' && caption !== 'null') return caption;
+  const t = sanitizeWhatsappMessageType(m.type, {
+    mime: m.mediaMime,
+    filename: m.mediaFilename,
+  });
+  if (t === 'text' || t === 'chat') return null;
+  return whatsappMediaPreviewLabel(t);
 }
 
 async function handleMessage(

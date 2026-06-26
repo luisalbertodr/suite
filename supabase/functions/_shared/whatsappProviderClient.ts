@@ -9,6 +9,8 @@ import {
 } from './whatsappProviderTypes.ts';
 import { resolveOpenwaSessionId } from './whatsappProviderOpenwa.ts';
 
+const OPENWA_VOICE_FILENAME = 'voice.ogg';
+
 /** OpenWA/whatsapp-web.js envía notas de voz con application/ogg; audio/ogg devuelve 500. */
 export function normalizeOpenwaOutgoingAudioMime(mime: string): string {
   const m = (mime ?? '').trim().toLowerCase();
@@ -23,13 +25,13 @@ function buildOpenwaSendMediaBody(
   media: WhatsappSendMediaInput,
   rawBase64: string,
   defaultMime: string,
-  opts?: { preferUrl?: boolean; forceRawBase64?: boolean; omitFilename?: boolean },
+  opts?: { preferUrl?: boolean; forceRawBase64?: boolean },
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
     chatId,
     mimetype: media.mime || defaultMime,
   };
-  if (media.filename && !opts?.omitFilename) body.filename = media.filename;
+  if (media.filename) body.filename = media.filename;
   if (media.caption) body.caption = media.caption;
   const useUrl = !!media.url && opts?.preferUrl !== false && !opts?.forceRawBase64;
   if (useUrl) {
@@ -274,10 +276,11 @@ export async function providerSendMedia(
           {
             ...media,
             mime: audioMime,
+            filename: media.filename?.trim() || OPENWA_VOICE_FILENAME,
           },
           base64,
           'application/ogg',
-          { forceRawBase64: true, omitFilename: type === 'voice' || type === 'audio' },
+          { forceRawBase64: true },
         );
         break;
       default:

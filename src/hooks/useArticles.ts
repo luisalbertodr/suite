@@ -61,7 +61,8 @@ export interface ArticleFormData {
   billing_company_id?: string | null;
 }
 
-export const useArticles = () => {
+export const useArticles = (options?: { enabled?: boolean }) => {
+  const enabled = options?.enabled !== false;
   const [articles, setArticles] = useState<Article[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -75,16 +76,13 @@ export const useArticles = () => {
   const catalogCompanyId = catalogHostCompanyId ?? companyId;
   const billingScopeId = companyId;
 
-  console.log('useArticles: companyId', companyId, 'catalogCompanyId', catalogCompanyId, 'companyLoading', companyLoading);
-
   const fetchArticles = async () => {
+    if (!enabled) return;
     if (companyLoading || wcLoading) {
-      console.log('useArticles: Company still loading, waiting...');
       return;
     }
 
     if (!catalogCompanyId) {
-      console.log('useArticles: No catalog company ID available');
       setArticles([]);
       setLoading(false);
       return;
@@ -92,7 +90,6 @@ export const useArticles = () => {
 
     try {
       setLoading(true);
-      console.log('useArticles: Fetching articles for catalog:', catalogCompanyId, 'billing scope:', billingScopeId);
       
       const { data, error } = await supabase
         .from('articles')
@@ -126,7 +123,6 @@ export const useArticles = () => {
         );
       }
       
-      console.log('useArticles: Articles fetched:', typedData.length);
       setArticles(typedData);
       setError(null);
     } catch (err) {
@@ -308,16 +304,12 @@ export const useArticles = () => {
   };
 
   useEffect(() => {
-    console.log('useArticles: useEffect triggered, companyId:', companyId, 'catalogCompanyId:', catalogCompanyId, 'companyLoading:', companyLoading, 'wcLoading:', wcLoading);
+    if (!enabled) {
+      setLoading(false);
+      return;
+    }
     fetchArticles();
-  }, [catalogCompanyId, billingScopeId, companyLoading, wcLoading, isMultiEntity]);
-
-  console.log('useArticles: Current state:', {
-    articlesCount: articles.length,
-    loading: companyLoading || wcLoading || loading,
-    error,
-    companyId
-  });
+  }, [catalogCompanyId, billingScopeId, companyLoading, wcLoading, isMultiEntity, enabled]);
 
   return {
     articles,

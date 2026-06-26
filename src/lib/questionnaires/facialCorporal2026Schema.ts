@@ -20,7 +20,11 @@ function yn(key: string, label: string, extra?: Partial<QuestionnaireField>): Qu
   return { key, label, type: 'boolean', ...extra };
 }
 
-/** Secciones rellenadas por la clienta en tablet. */
+function dt(key: string, label: string, extra?: Partial<QuestionnaireField>): QuestionnaireField {
+  return { key, label, type: 'date', ...extra };
+}
+
+/** Secciones rellenadas por el cliente en tablet. */
 export const FACIAL_CORPORAL_PATIENT_SECTIONS: QuestionnaireSection[] = [
   {
     id: 'visita_actual',
@@ -180,6 +184,7 @@ export const FACIAL_CORPORAL_EMPLOYEE_SECTIONS: QuestionnaireSection[] = [
     title: 'Datos técnicos de la piel',
     role: 'employee',
     fields: [
+      dt('first_session_date', 'Fecha 1ª sesión'),
       ta('alteracion_estetica', 'Alteración estética a mejorar', { required: true }),
       t('tiempo_instauracion', 'Desde cuándo la padece (tiempo de instauración)'),
       sg('fototipo', 'Fototipo', ['I', 'II', 'III', 'IV', 'V', 'VI']),
@@ -238,6 +243,7 @@ export const FACIAL_CORPORAL_EMPLOYEE_SECTIONS: QuestionnaireSection[] = [
         'Estimulación hormonal',
         'Estimulación lumínica',
         'Genéticos',
+        'Otros factores (medicación, alimentos, cosméticos)',
       ]),
       ta('factores_hiperpigmentacion_otros', 'Otros factores (medicación, alimentos, cosméticos…)'),
       t('luz_wood', 'Luz de Wood (melasma epidérmico / dérmico / mixto)'),
@@ -273,12 +279,6 @@ const PROFILE_SECTION_MAP: Record<string, keyof ClinicalProfileBuckets> = {
   cuidado_piel: 'habitos',
   contraindicaciones: 'contraindicaciones',
   depilacion_laser: 'depilacion',
-};
-
-type ClinicalProfileBuckets = {
-  habitos: Record<string, unknown>;
-  contraindicaciones: Record<string, unknown>;
-  depilacion: Record<string, unknown>;
 };
 
 export function patientSectionsForVisitMode(mode: QuestionnaireVisitMode): QuestionnaireSection[] {

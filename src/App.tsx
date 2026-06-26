@@ -6,6 +6,7 @@ import { Layout } from './components/Layout';
 import { SuiteMainContent } from '@/components/SuiteMainContent';
 import DepositPaymentPage from '@/pages/DepositPaymentPage';
 import QuestionnaireKioskPage from '@/pages/QuestionnaireKioskPage';
+import ConsentKioskPage from '@/pages/ConsentKioskPage';
 import SuperuserPage from '@/pages/SuperuserPage';
 import SuperuserManagementPage from '@/pages/SuperuserManagementPage';
 
@@ -26,6 +27,7 @@ function App() {
         <Route path="/pago/:token/exito" element={<DepositPaymentPage />} />
         <Route path="/pago/:token" element={<DepositPaymentPage />} />
         <Route path="/cuestionario/:questionnaireId/paciente" element={<QuestionnaireKioskPage />} />
+        <Route path="/consentimiento/:consentId/paciente" element={<ConsentKioskPage />} />
         <Route path="/superuser" element={<SuperuserPage />} />
         <Route
           path="/superuser-management"

@@ -33,7 +33,7 @@ export type QuestionnaireSection = {
   fields: QuestionnaireField[];
   /** Si se omite, la sección aplica a initial y follow_up. */
   visitModes?: QuestionnaireVisitMode[];
-  /** En follow_up los campos se muestran informativos salvo que la clienta indique cambios. */
+  /** En follow_up los campos se muestran informativos salvo que el cliente indique cambios. */
   readOnlyInFollowUp?: boolean;
 };
 
@@ -42,6 +42,18 @@ export type QuestionnaireVisitMode = 'initial' | 'follow_up';
 export const VISIT_MODE_ANSWER_KEY = '__visit_mode';
 
 export type ClinicalProfile = Record<string, unknown>;
+
+/** Entrada en el historial de cambios del perfil clínico / cuestionario. */
+export type ClinicalProfileAmendment = {
+  id: string;
+  /** Fecha en que se aplicó el cambio (YYYY-MM-DD). */
+  amended_at: string;
+  note: string;
+  /** Campos que cambiaron respecto al perfil anterior. */
+  fields?: Record<string, unknown>;
+  created_at: string;
+  created_by?: string | null;
+};
 
 export type CustomerQuestionnaire = {
   id: string;
@@ -84,9 +96,9 @@ export type QuestionnaireCustomerRow = {
 };
 
 export const QUESTIONNAIRE_STATUS_LABELS: Record<QuestionnaireStatus, string> = {
-  patient_editing: 'Rellenando (clienta)',
+  patient_editing: 'Rellenando (cliente)',
   patient_submitted: 'Enviado — pendiente revisión',
-  technical_editing: 'Datos técnicos (empleada)',
+  technical_editing: 'Datos técnicos (empleado/a)',
   completed: 'Completado',
 };
 
@@ -96,4 +108,4 @@ export const LOPD_DECLARATION_TEXT = `Con el presente afirmo, que he contestado 
 Si hay alguna variación o cambio en mi estado, informaré inmediatamente al centro.
 Declaro que el tratamiento que se me aplicará es por riesgo propio.
 
-En cumplimiento de lo establecido en la Ley Orgánica 03/2018, de 6 de Diciembre del 2018 de Protección de Datos y garantía de Derechos Digitales (LOPDGDD) le informamos que los datos personales que facilite quedarán incorporados y serán tratados en los ficheros de LIPOOUT, con el fin de informarle sobre nuevos servicios, productos y/o promociones. Asimismo el cliente presta su consentimiento a LIPOOUT para que, por cualquier medio de comunicación, incluido el correo electrónico o equivalente, le envíe comunicaciones comerciales o promocionales relativas a sus productos y servicios. El cliente podrá ejercer en cualquier momento su derecho de acceso, rectificación, cancelación y oposición de sus datos, y revocar la autorización concedida para que LIPOOUT envíe por vía electrónica ofertas o comunicaciones publicitarias y promocionales, notificándolo mediante correo electrónico a info@lipoout.com o por correo postal a LIPOOUT - Rda. de Outeiro, 219 - Bajo 15007 - A Coruña.`;
+En cumplimiento de lo establecido en la Ley Orgánica 03/2018, de 6 de Diciembre de 2018, de Protección de Datos y garantía de Derechos Digitales (LOPDGDD) le informamos que los datos personales que facilite quedarán incorporados y serán tratados en los ficheros de LIPOOUT, con el fin de informarle sobre nuevos servicios, productos y/o promociones. Asimismo el cliente presta su consentimiento a LIPOOUT para que, por cualquier medio de comunicación, incluido el correo electrónico o equivalente, le envíe comunicaciones comerciales o promocionales relativas a sus productos y servicios. El cliente podrá ejercer en cualquier momento su derecho de acceso, rectificación, cancelación y oposición de sus datos, y revocar la autorización concedida para que LIPOOUT envíe por vía electrónica ofertas o comunicaciones publicitarias y promocionales, notificándolo mediante correo electrónico a info@lipoout.com o por correo postal a LIPOOUT - Rda. de Outeiro, 219 - Bajo 15007 - A Coruña, mediante solicitud escrita y firmada que contenga los siguientes datos: nombre, apellidos, domicilio a efectos de notificaciones, fotocopia del DNI o pasaporte, y petición en que se concreta la solicitud. A efectos informativos, se designa como responsable del fichero a María del Mar Lamas Pernas, con domicilio en la dirección antes indicada.`;

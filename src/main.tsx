@@ -12,6 +12,7 @@ const queryClient = new QueryClient({
       // Evita recargas masivas al volver de otra app (Marketing, agenda, etc.).
       refetchOnWindowFocus: false,
       staleTime: 60_000,
+      gcTime: 15 * 60_000,
     },
   },
 })

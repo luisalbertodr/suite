@@ -279,10 +279,12 @@ FUNCTION SuiteColaIsV2Active
 ENDFUNC
 **
 FUNCTION SuiteEnqueuePlan2009
- PARAMETER tnIdPlan, tcAccion
+ * Params 3-12: snapshot opcional desde Reservas_Incidencia (fallback si SEEK en plan2009 falla).
+ PARAMETER tnIdPlan, tcAccion, tcSnapCodemp, tcSnapCodcli, tdSnapFecha, tcSnapHorini, tcSnapHorfin, ;
+           tcSnapTexto, tcSnapCodrec, tcSnapNomcli, tcSnapTel1cli
  LOCAL lcalias, llPlanWasUsed, llPlanArtWasUsed, lcServicios, lcId, lcacc
  LOCAL lcCodemp, lcCodcli, ldFecha, lcHorini, lcHorfin, lcTexto, lcCodrec, lcNomcli, lcTel1cli
- LOCAL llFact, lnColfon, lnCollet, lcMod, lnVersion
+ LOCAL llFact, lnColfon, lnCollet, lcMod, lnVersion, llFound
 
  IF  .NOT. SuiteColaIsV2Active()
     RETURN .F.
@@ -342,7 +344,11 @@ FUNCTION SuiteEnqueuePlan2009
  IF USED("plan2009")
     SELECT plan2009
     SET ORDER TO idplan
-    IF SEEK(VAL(lcId))
+    llFound = SEEK(tnIdPlan, "plan2009", "idplan")
+    IF  .NOT. llFound
+       llFound = SEEK(VAL(lcId), "plan2009", "idplan")
+    ENDIF
+    IF llFound
        lcCodemp = ALLTRIM(NVL(plan2009.codemp, ""))
        lcCodcli = ALLTRIM(NVL(plan2009.codcli, ""))
        ldFecha = plan2009.fecha
@@ -357,6 +363,35 @@ FUNCTION SuiteEnqueuePlan2009
        lnCollet = IIF(TYPE("plan2009.collet")="N", plan2009.collet, 0)
        lcMod = TRANSFORM(lnVersion)
     ENDIF
+ ENDIF
+
+ * Fallback: datos que ya trae Reservas_Incidencia (evita cola con snapshot vacio).
+ IF PCOUNT() >= 3 .AND. TYPE("tcSnapCodemp")="C" .AND. EMPTY(lcCodemp)
+    lcCodemp = ALLTRIM(NVL(tcSnapCodemp, ""))
+ ENDIF
+ IF PCOUNT() >= 4 .AND. TYPE("tcSnapCodcli")="C" .AND. EMPTY(lcCodcli)
+    lcCodcli = ALLTRIM(NVL(tcSnapCodcli, ""))
+ ENDIF
+ IF PCOUNT() >= 5 .AND. TYPE("tdSnapFecha")="D" .AND. EMPTY(ldFecha)
+    ldFecha = tdSnapFecha
+ ENDIF
+ IF PCOUNT() >= 6 .AND. TYPE("tcSnapHorini")="C" .AND. EMPTY(lcHorini)
+    lcHorini = ALLTRIM(NVL(tcSnapHorini, ""))
+ ENDIF
+ IF PCOUNT() >= 7 .AND. TYPE("tcSnapHorfin")="C" .AND. EMPTY(lcHorfin)
+    lcHorfin = ALLTRIM(NVL(tcSnapHorfin, ""))
+ ENDIF
+ IF PCOUNT() >= 8 .AND. TYPE("tcSnapTexto")="C" .AND. EMPTY(lcTexto)
+    lcTexto = LEFT(ALLTRIM(NVL(tcSnapTexto, "")), 250)
+ ENDIF
+ IF PCOUNT() >= 9 .AND. TYPE("tcSnapCodrec")="C" .AND. EMPTY(lcCodrec)
+    lcCodrec = ALLTRIM(NVL(tcSnapCodrec, ""))
+ ENDIF
+ IF PCOUNT() >= 10 .AND. TYPE("tcSnapNomcli")="C" .AND. EMPTY(lcNomcli)
+    lcNomcli = ALLTRIM(NVL(tcSnapNomcli, ""))
+ ENDIF
+ IF PCOUNT() >= 11 .AND. TYPE("tcSnapTel1cli")="C" .AND. EMPTY(lcTel1cli)
+    lcTel1cli = ALLTRIM(NVL(tcSnapTel1cli, ""))
  ENDIF
 
  lcServicios = SuiteBuildServiciosJson(VAL(lcId))

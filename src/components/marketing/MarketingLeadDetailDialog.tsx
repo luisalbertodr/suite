@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Phone, Mail, MessageCircle, Trash2, Archive, UserCheck, CalendarClock } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { openSuiteWhatsappChat } from '@/lib/openSuiteWhatsappChat';
+import { useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
 import { useMarketingPermissions } from '@/hooks/useMarketingPermissions';
 import {
   Dialog,
@@ -56,6 +57,7 @@ export const MarketingLeadDetailDialog: React.FC<MarketingLeadDetailDialogProps>
   const { toast } = useToast();
   const { updateLead, deleteLead, archiveLead } = useMarketingLeads(companyId);
   const navigate = useNavigate();
+  const { companyId: whatsappCompanyId } = useWhatsappCompanyId();
   const { canWrite: canEditMarketing, loading: marketingPermsLoading } = useMarketingPermissions();
   const saveBlocked = !marketingPermsLoading && !canEditMarketing;
 
@@ -104,7 +106,7 @@ export const MarketingLeadDetailDialog: React.FC<MarketingLeadDetailDialogProps>
   const handleOpenWhatsapp = () => {
     if (!phone) return;
     onOpenChange(false);
-    openSuiteWhatsappChat(navigate, phone, fullLeadName);
+    void openSuiteWhatsappChat(navigate, whatsappCompanyId, phone, fullLeadName, lead.id);
   };
 
   const handleSave = async () => {

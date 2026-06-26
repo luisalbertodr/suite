@@ -1,43 +1,58 @@
 @echo off
 setlocal EnableDelayedExpansion
-REM Arranque Style. Exe NUEVO: abre dbf\wedb solo (general.prg). Exe VIEJO (.bak): enlaces legacy.
+REM Arranque Style. Siempre usa la carpeta de este .bat (test, Z:, VM).
+REM Sync v2: agente Node + drenaje inbound antes de Duna (wedb libre).
 
-cd /d C:\Style-Dunasoft
-if defined STYLE_HOME cd /d "%STYLE_HOME%"
-if exist Z:\Style-Dunasoft\SuiteSync.cfg cd /d Z:\Style-Dunasoft
+cd /d "%~dp0"
+set "STYLE_HOME=%CD%"
 
-set "DBCSCRIPT=%~dp0ensure-style-dbc.ps1"
+set "SYNCSCRIPT=%STYLE_HOME%\ensure-style-sync.ps1"
+if not exist "%SYNCSCRIPT%" set "SYNCSCRIPT=%STYLE_HOME%\PROGS\ensure-style-sync.ps1"
+if exist "%SYNCSCRIPT%" (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%SYNCSCRIPT%" -StyleRoot "%STYLE_HOME%" -EnsureAgent -DrainInboundBeforeStart
+) else (
+  echo AVISO: falta ensure-style-sync.ps1 - agente Node no se arrancara automaticamente
+)
+
+set "DBCSCRIPT=%STYLE_HOME%\ensure-style-dbc.ps1"
 if "%STYLE_LEGACY%"=="1" (
   if exist "%DBCSCRIPT%" (
-    powershell -NoProfile -ExecutionPolicy Bypass -File "%DBCSCRIPT%" -StyleRoot "%CD%" -LegacyTableLinks
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%DBCSCRIPT%" -StyleRoot "%STYLE_HOME%" -LegacyTableLinks
   ) else (
     call :link_wedb_root
   )
 )
 
-set "EXE="
-if exist "%CD%\Duna2.exe" set "EXE=%CD%\Duna2.exe"
-if not defined EXE if exist "%CD%\Duna.exe" set "EXE=%CD%\Duna.exe"
-if not defined EXE if exist "%CD%\mscomctl.exe" set "EXE=%CD%\mscomctl.exe"
+if exist "%STYLE_HOME%\PROGS\suite_full_unlock.fxp" ren "%STYLE_HOME%\PROGS\suite_full_unlock.fxp" suite_full_unlock.fxp.bak >nul 2>&1
+if exist "%STYLE_HOME%\PROGS\suite_full_unlock.FXP" ren "%STYLE_HOME%\PROGS\suite_full_unlock.FXP" suite_full_unlock.fxp.bak >nul 2>&1
+rem NO renombrar funciones.fxp: PROGS\funciones.prg (hook cola v2) debe prevalecer via STARTUP
+if exist "%STYLE_HOME%\PROGS\general.fxp" ren "%STYLE_HOME%\PROGS\general.fxp" general.fxp.bak >nul 2>&1
+if exist "%STYLE_HOME%\PROGS\general.FXP" ren "%STYLE_HOME%\PROGS\general.FXP" general.fxp.bak >nul 2>&1
 
-if not exist "%CD%\SuiteSync.cfg" (
-  echo ERROR: falta SuiteSync.cfg en %CD%
+set "EXE="
+if exist "%STYLE_HOME%\Duna2.exe" set "EXE=%STYLE_HOME%\Duna2.exe"
+if not defined EXE if exist "%STYLE_HOME%\Duna.exe" set "EXE=%STYLE_HOME%\Duna.exe"
+if not defined EXE if exist "%STYLE_HOME%\mscomctl.exe" set "EXE=%STYLE_HOME%\mscomctl.exe"
+
+if not exist "%STYLE_HOME%\SuiteSync.cfg" (
+  echo ERROR: falta SuiteSync.cfg en %STYLE_HOME%
   pause
   exit /b 1
 )
 
 if not defined EXE (
-  echo ERROR: falta Duna2.exe / Duna.exe en %CD%
+  echo ERROR: falta Duna.exe / Duna2.exe en %STYLE_HOME%
   pause
   exit /b 1
 )
 
 for %%F in ("%EXE%") do echo Arrancando: %%~fF  %%~zF bytes  %%~tF
-echo Log sync: %CD%\Usuarios\_suite_sync.log
+echo Style: %STYLE_HOME%
+echo Log sync: %STYLE_HOME%\Usuarios\_suite_sync_boot.log
 if "%STYLE_LEGACY%"=="1" echo Modo STYLE_LEGACY=1 ^(enlaces raiz para exe.bak^)
 echo.
 
-start "" "%EXE%"
+start "" /D "%STYLE_HOME%" "%EXE%"
 exit /b 0
 
 :link_wedb_root

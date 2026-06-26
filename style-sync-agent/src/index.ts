@@ -11,6 +11,15 @@ import { writeDeadLetter } from "./deadLetter.js";
 import { isRetryableFsError, withFsRetry } from "./fsRetry.js";
 import { maybeTriggerInboundWorker } from "./inboundWorkerTrigger.js";
 import { resolveVersion, serviciosJsonToLegacy } from "./servicios.js";
+import {
+  drainOutboxAcks,
+  pollOutboxToInbound,
+  processEntitiesFromStyle,
+  type EntityEngineDeps,
+} from "./entitySync.js";
+import { ENTITY_HANDLERS } from "./handlers.js";
+import { pollDbfEntityChanges } from "./dbfPoll.js";
+import { pollPlan2009FromDbf } from "./plan2009Poll.js";
 
 const require = createRequire(import.meta.url);
 const { version: pkgVersion } = require("../package.json") as { version: string };
@@ -43,6 +52,8 @@ const OUTBOUND_BATCH = Number(process.env.OUTBOUND_BATCH ?? "50");
 const HEARTBEAT_CHECK_MS = Number(process.env.HEARTBEAT_CHECK_MS ?? "60000");
 const HEARTBEAT_STALE_MS = Number(process.env.HEARTBEAT_STALE_MS ?? "300000");
 const LAG_ALERT_MS = Number(process.env.LAG_ALERT_MS ?? "30000");
+const ENTITY_BATCH = Number(process.env.ENTITY_BATCH ?? "50");
+const ENTITY_POLL_MS = Number(process.env.ENTITY_POLL_MS ?? "2500");
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -608,6 +619,12 @@ async function tick(): Promise<void> {
         agent_version: AGENT_VERSION,
       });
     }
+    if (companyId) {
+      await pollPlan2009FromDbf(
+        { supabase, companyId, styleRoot: STYLE_ROOT, log },
+        OUTBOUND_BATCH,
+      );
+    }
   } catch (err) {
     if (isRetryableFsError(err)) {
       log(`tick omitido (CIFS/DBF): ${err instanceof Error ? err.message : String(err)}`);
@@ -617,8 +634,55 @@ async function tick(): Promise<void> {
   }
 }
 
+function entityDeps(): EntityEngineDeps | null {
+  if (!companyId) return null;
+  return {
+    supabase,
+    companyId,
+    styleRoot: STYLE_ROOT,
+    colaPath: COLA_DBF,
+    inboundDir: INBOUND_DIR,
+    inboundAckDir: INBOUND_ACK_DIR,
+    log,
+  };
+}
+
+/** Style → Suite para maestros y transacciones (clientes, artículos, ...). */
+async function entityTick(): Promise<void> {
+  const deps = entityDeps();
+  if (!deps || ENTITY_HANDLERS.length === 0) return;
+  const v2 = await isSyncV2Active(STYLE_ROOT);
+  if (!v2) return;
+  await processEntitiesFromStyle(deps, ENTITY_HANDLERS, ENTITY_BATCH);
+  await pollDbfEntityChanges(deps, ENTITY_HANDLERS, ENTITY_BATCH);
+}
+
+/** Suite → Style genérico: outbox → JSON inbound + drenaje de ACKs `e<id>.ok`. */
+async function entityOutboundTick(): Promise<void> {
+  const deps = entityDeps();
+  if (!deps || ENTITY_HANDLERS.length === 0) return;
+  const v2 = await isSyncV2Active(STYLE_ROOT);
+  if (!v2) return;
+  await withFsRetry(
+    () => {
+      ensureDirSync(INBOUND_DIR);
+      ensureDirSync(INBOUND_ACK_DIR);
+    },
+    { label: "ensure entity dirs" },
+  );
+  const wrote = await pollOutboxToInbound(deps, ENTITY_HANDLERS, INBOUND_BATCH);
+  if (wrote > 0) {
+    maybeTriggerInboundWorker(
+      { styleRoot: STYLE_ROOT, heartbeatPath: HEARTBEAT_PATH, inboundDir: INBOUND_DIR, log },
+      "json_written",
+    );
+  }
+  await drainOutboxAcks(deps);
+}
+
 async function main() {
   log(`Style sync agent v${AGENT_VERSION} — root=${STYLE_ROOT} poll=${POLL_MS}ms`);
+  log(`Entidades activas: ${ENTITY_HANDLERS.map((h) => h.tabla).join(", ") || "(ninguna)"}`);
   log(`Inbound: ${INBOUND_DIR} | ack: ${INBOUND_ACK_DIR} | archive: ${ARCHIVE_DIR}`);
   log(`Dead-letter: ${DEADLETTER_DIR} | heartbeat: ${HEARTBEAT_PATH}`);
 
@@ -645,6 +709,16 @@ async function main() {
       log(`stale purge error: ${e instanceof Error ? e.message : String(e)}`),
     );
   }, 60 * 60 * 1000);
+
+  setInterval(() => {
+    void entityTick().catch((e) => log(`entity tick error: ${e instanceof Error ? e.message : String(e)}`));
+  }, ENTITY_POLL_MS);
+
+  setInterval(() => {
+    void entityOutboundTick().catch((e) =>
+      log(`entity outbound error: ${e instanceof Error ? e.message : String(e)}`),
+    );
+  }, ENTITY_POLL_MS);
 
   await tick();
   await checkInboundWorkerHeartbeat();

@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell, Check, CheckCheck, Info, AlertTriangle, CheckCircle, CreditCard, ClipboardList } from 'lucide-react';
+import { Bell, Check, CheckCheck, Info, AlertTriangle, CheckCircle, CreditCard, ClipboardList, RefreshCw } from 'lucide-react';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useNotificationSoundOnIncrease } from '@/hooks/useNotificationSoundOnIncrease';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -15,6 +15,8 @@ const typeIcons: Record<string, React.ReactNode> = {
   phone_missed_call: <AlertTriangle className="h-4 w-4 text-rose-500" />,
   stripe_deposit_paid: <CreditCard className="h-4 w-4 text-emerald-500" />,
   questionnaire_pending: <ClipboardList className="h-4 w-4 text-sky-500" />,
+  questionnaire_personal_data_changed: <AlertTriangle className="h-4 w-4 text-amber-500" />,
+  style_sync_conflict: <RefreshCw className="h-4 w-4 text-amber-500" />,
   success: <CheckCircle className="h-4 w-4 text-emerald-500" />,
 };
 
@@ -32,7 +34,8 @@ export const NotificationBell: React.FC = () => {
   }) => {
     if (!n.read) markAsRead.mutate(n.id);
     const customerId =
-      n.type === 'phone_missed_call' && typeof n.metadata?.customer_id === 'string'
+      (n.type === 'phone_missed_call' || n.type === 'style_sync_conflict') &&
+      typeof n.metadata?.customer_id === 'string'
         ? n.metadata.customer_id
         : null;
     if (customerId) {

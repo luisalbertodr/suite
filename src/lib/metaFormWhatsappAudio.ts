@@ -73,6 +73,7 @@ export async function removeMetaFormWhatsappAudio(path: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
+/** Bienvenida automática: solo texto. El audio de campaña se envía manualmente desde el chat. */
 export function resolveFormInitialSendKind(form: {
   whatsapp_automation_enabled?: boolean | null;
   whatsapp_initial_audio_enabled?: boolean | null;
@@ -80,11 +81,18 @@ export function resolveFormInitialSendKind(form: {
   whatsapp_initial_message?: string | null;
 }): 'audio' | 'text' | null {
   if (!form.whatsapp_automation_enabled) return null;
-  if (form.whatsapp_initial_audio_enabled && form.whatsapp_initial_audio_path?.trim()) {
-    return 'audio';
-  }
   if (form.whatsapp_initial_message?.trim()) return 'text';
   return null;
+}
+
+export function formHasCampaignAudioConfigured(form: {
+  whatsapp_initial_audio_enabled?: boolean | null;
+  whatsapp_initial_audio_path?: string | null;
+}): boolean {
+  return !!(
+    form.whatsapp_initial_audio_enabled &&
+    form.whatsapp_initial_audio_path?.trim()
+  );
 }
 
 export function sendKindLabel(kind: 'audio' | 'audio_link' | 'text' | null | undefined): string {

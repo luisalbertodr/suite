@@ -12,11 +12,18 @@ import {
   FACIAL_CORPORAL_FORM_KEY,
   VISIT_MODE_ANSWER_KEY,
   type ClinicalProfile,
+  type ClinicalProfileAmendment,
   type CustomerQuestionnaire,
   type QuestionnaireCustomerRow,
   type QuestionnaireVisitMode,
 } from '@/lib/questionnaireTypes';
 import { ageFromBirthDate } from '@/lib/patientAge';
+import {
+  buildPersonalDataSnapshot,
+  detectPersonalDataChanges,
+  PERSONAL_DATA_CHANGES_KEY,
+  PERSONAL_DATA_SNAPSHOT_KEY,
+} from '@/lib/questionnairePersonalData';
 
 const SELECT_Q = '*';
 
@@ -195,6 +202,7 @@ export async function createQuestionnaire(params: {
     [VISIT_MODE_ANSWER_KEY]: visitMode,
     ...(customer ? buildInitialAnswersFromCustomer(customer) : {}),
     ...(visitMode === 'follow_up' ? { confirma_datos_vigentes: true } : {}),
+    ...(customer ? { [PERSONAL_DATA_SNAPSHOT_KEY]: buildPersonalDataSnapshot(customer) } : {}),
   };
 
   const { data, error } = await supabase
@@ -254,10 +262,26 @@ export async function submitPatientQuestionnaire(params: {
     .eq('id', params.customerId);
   if (cErr) throw cErr;
 
+  const { data: existing, error: fetchErr } = await supabase
+    .from('customer_questionnaires')
+    .select('answers')
+    .eq('id', params.questionnaireId)
+    .maybeSingle();
+  if (fetchErr) throw fetchErr;
+
+  const priorAnswers = (existing?.answers ?? {}) as Record<string, unknown>;
+  const snapshot = priorAnswers[PERSONAL_DATA_SNAPSHOT_KEY] as Record<string, string> | undefined;
+  const personalChanges = detectPersonalDataChanges(snapshot, params.customerPatch);
+  const mergedAnswers = {
+    ...params.answers,
+    [PERSONAL_DATA_SNAPSHOT_KEY]: snapshot ?? priorAnswers[PERSONAL_DATA_SNAPSHOT_KEY],
+    [PERSONAL_DATA_CHANGES_KEY]: personalChanges,
+  };
+
   const { error } = await supabase
     .from('customer_questionnaires')
     .update({
-      answers: params.answers,
+      answers: mergedAnswers,
       status: 'patient_submitted',
       firma_url: firmaPath,
       patient_submitted_at: new Date().toISOString(),
@@ -319,6 +343,18 @@ export async function saveTechnicalData(
   if (error) throw error;
 }
 
+export function resolveFirstSessionDate(
+  technicalData: Record<string, unknown>,
+  customer: QuestionnaireCustomerRow,
+  completionAt: Date = new Date(),
+): string {
+  const fromTechnical = String(technicalData.first_session_date ?? '').slice(0, 10);
+  if (fromTechnical) return fromTechnical;
+  const fromCustomer = customer.first_session_date?.slice(0, 10);
+  if (fromCustomer) return fromCustomer;
+  return completionAt.toISOString().slice(0, 10);
+}
+
 export async function completeQuestionnaire(params: {
   questionnaire: CustomerQuestionnaire;
   customer: QuestionnaireCustomerRow;
@@ -326,7 +362,12 @@ export async function completeQuestionnaire(params: {
   technicalData: Record<string, unknown>;
   employeeId?: string | null;
 }): Promise<void> {
-  const { questionnaire, customer, companyName, technicalData } = params;
+  const { questionnaire, customer, companyName } = params;
+  let { technicalData } = params;
+  const completionAt = new Date();
+  const firstSessionDate = resolveFirstSessionDate(technicalData, customer, completionAt);
+  technicalData = { ...technicalData, first_session_date: firstSessionDate };
+
   const signatureDataUrl = questionnaire.firma_url
     ? await loadSignatureAsDataUrl(questionnaire.firma_url)
     : null;
@@ -367,18 +408,20 @@ export async function completeQuestionnaire(params: {
       profile = {
         ...profileKeysFromAnswers({ ...buildInitialAnswersFromCustomer(customer), ...answers }),
         motivo_consulta: existing.motivo_consulta ?? profile.motivo_consulta,
+        amendments: getClinicalProfileAmendments(existing),
       };
     }
+  } else {
+    const existing = (customer.clinical_profile ?? {}) as ClinicalProfile;
+    profile.amendments = getClinicalProfileAmendments(existing);
   }
 
   const customerUpdate: Record<string, unknown> = {
     clinical_profile: profile,
     occupation: answers.occupation ?? customer.occupation,
     height_cm: answers.height_cm ?? customer.height_cm,
+    first_session_date: firstSessionDate,
   };
-  if (!customer.first_session_date) {
-    customerUpdate.first_session_date = new Date().toISOString().slice(0, 10);
-  }
 
   const { error: profErr } = await supabase
     .from('customers')
@@ -455,6 +498,76 @@ export function validateTechnicalSections(technical: Record<string, unknown>): s
 export function patientDisplayAge(customer: QuestionnaireCustomerRow): string {
   const age = ageFromBirthDate(customer.birth_date);
   return age != null ? String(age) : '';
+}
+
+export function flattenClinicalProfileToAnswers(profile: ClinicalProfile | null | undefined): Record<string, unknown> {
+  const p = profile ?? {};
+  const habitos = (p.habitos ?? {}) as Record<string, unknown>;
+  const contraindicaciones = (p.contraindicaciones ?? {}) as Record<string, unknown>;
+  const depilacion = (p.depilacion ?? {}) as Record<string, unknown>;
+  return {
+    motivo_consulta: p.motivo_consulta ?? '',
+    tratamientos_previos: p.tratamientos_previos ?? '',
+    situacion_personal: p.situacion_personal ?? '',
+    ...habitos,
+    ...contraindicaciones,
+    ...depilacion,
+  };
+}
+
+export function getClinicalProfileAmendments(
+  profile: ClinicalProfile | null | undefined,
+): ClinicalProfileAmendment[] {
+  const raw = profile?.amendments;
+  if (!Array.isArray(raw)) return [];
+  return raw as ClinicalProfileAmendment[];
+}
+
+export async function saveClinicalProfileAmendment(params: {
+  customerId: string;
+  amendedAt: string;
+  note: string;
+  fields: Record<string, unknown>;
+  employeeId?: string | null;
+}): Promise<ClinicalProfileAmendment> {
+  const note = params.note.trim();
+  if (!note) throw new Error('Indique el motivo o descripción de la modificación');
+
+  const customer = await fetchQuestionnaireCustomer(params.customerId);
+  if (!customer) throw new Error('Cliente no encontrado');
+
+  const existingProfile = (customer.clinical_profile ?? {}) as ClinicalProfile;
+  const previousAnswers = flattenClinicalProfileToAnswers(existingProfile);
+  const mergedAnswers = { ...previousAnswers, ...params.fields };
+
+  const changed: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(params.fields)) {
+    const prev = previousAnswers[key];
+    if (JSON.stringify(prev) !== JSON.stringify(value)) {
+      if (value != null && value !== '' && !(typeof value === 'boolean' && value === false)) {
+        changed[key] = value;
+      }
+    }
+  }
+
+  const newProfile = profileKeysFromAnswers(mergedAnswers);
+  const amendment: ClinicalProfileAmendment = {
+    id: crypto.randomUUID(),
+    amended_at: params.amendedAt,
+    note,
+    fields: Object.keys(changed).length ? changed : undefined,
+    created_at: new Date().toISOString(),
+    created_by: params.employeeId ?? null,
+  };
+  newProfile.amendments = [...getClinicalProfileAmendments(existingProfile), amendment];
+
+  const { error } = await supabase
+    .from('customers')
+    .update({ clinical_profile: newProfile })
+    .eq('id', params.customerId);
+  if (error) throw error;
+
+  return amendment;
 }
 
 export const VISIT_MODE_LABELS: Record<QuestionnaireVisitMode, string> = {
