@@ -100,6 +100,15 @@ export function openwaMediaRequiresPublicUrl(
   return type === 'video' || type === 'document';
 }
 
+/** WAHA entrega notas de voz de forma fiable vía URL + convert; base64 del navegador suele quedar PENDING. */
+export function wahaVoiceRequiresPublicUrl(
+  provider: string | null | undefined,
+  type: 'image' | 'video' | 'audio' | 'document' | 'voice',
+): boolean {
+  if ((provider ?? '').toLowerCase() !== 'waha') return false;
+  return type === 'voice';
+}
+
 export function normalizeOutgoingStorageMime(mime: string): string {
   const m = (mime ?? '').trim().toLowerCase();
   if (m.includes('ogg') || m.includes('opus') || m === 'application/ogg') return 'audio/ogg';

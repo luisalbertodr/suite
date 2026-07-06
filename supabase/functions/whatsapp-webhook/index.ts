@@ -387,13 +387,14 @@ function chatIdFromSerializedId(id: string): string | null {
 
 function resolveCanonicalChatId(
   remoteJid: string,
-  _key?: WahaMessagePayload['key'] | null,
+  key?: WahaMessagePayload['key'] | null,
   isGroup = false,
 ): string {
   if (isGroup) return remoteJid;
-  // Waha NOWEB usa @lid como chat_id principal; alinear con send y chats.list.
-  if (isLidJid(remoteJid)) return remoteJid;
+  const alt = key?.remoteJidAlt;
+  if (alt && isPhoneJid(alt)) return normalizeWhatsappJid(alt);
   if (isPhoneJid(remoteJid)) return normalizeWhatsappJid(remoteJid);
+  if (isLidJid(remoteJid)) return remoteJid;
   return remoteJid;
 }
 
@@ -528,8 +529,10 @@ async function resolveChatIdForStorage(
   if (isGroup) return canonical;
 
   const altPhone = key?.remoteJidAlt;
-  if (isLidJid(canonical) && altPhone && isPhoneJid(altPhone)) {
-    await migrateChatIfNeeded(admin, companyId, canonical, normalizeWhatsappJid(altPhone));
+  if (isLidJid(remoteJid) && altPhone && isPhoneJid(altPhone)) {
+    const phoneJid = normalizeWhatsappJid(altPhone);
+    await migrateChatIfNeeded(admin, companyId, phoneJid, remoteJid);
+    canonical = phoneJid;
   }
 
   const { data: siblings } = await admin
@@ -539,18 +542,22 @@ async function resolveChatIdForStorage(
     .neq('chat_id', canonical)
     .limit(500);
   for (const row of siblings ?? []) {
-    if (jidsSameContact(row.chat_id, canonical)) {
+    if (!jidsSameContact(row.chat_id, canonical)) continue;
+    const phoneJid = isPhoneJid(canonical)
+      ? canonical
+      : isPhoneJid(row.chat_id)
+        ? row.chat_id
+        : null;
+    const lidJid = isLidJid(canonical)
+      ? canonical
+      : isLidJid(row.chat_id)
+        ? row.chat_id
+        : null;
+    if (phoneJid && lidJid && phoneJid !== lidJid) {
+      await migrateChatIfNeeded(admin, companyId, phoneJid, lidJid);
+      canonical = phoneJid;
+    } else if (row.chat_id !== canonical) {
       await migrateChatIfNeeded(admin, companyId, canonical, row.chat_id);
-      continue;
-    }
-    if (
-      isPhoneJid(canonical) &&
-      isLidJid(row.chat_id) &&
-      altPhone &&
-      jidsSameContact(normalizeWhatsappJid(altPhone), canonical)
-    ) {
-      await migrateChatIfNeeded(admin, companyId, row.chat_id, canonical);
-      canonical = row.chat_id;
     }
   }
 

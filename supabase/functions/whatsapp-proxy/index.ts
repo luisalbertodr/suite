@@ -65,6 +65,7 @@ import {
 import { OPENWA_WEBHOOK_EVENTS } from '../_shared/whatsappProviderTypes.ts';
 import {
   openwaMediaRequiresPublicUrl,
+  wahaVoiceRequiresPublicUrl,
   isOggOpusBase64,
   openwaVoiceNoteFormatError,
   normalizeOutgoingStorageMime,
@@ -530,13 +531,74 @@ function jidsSameContact(a: string, b: string): boolean {
   return !!(da && db && da === db);
 }
 
+/** Teléfono en nombre de chat LID, p.ej. "+34 667 43 55 03". */
+function extractPhoneDigitsFromDisplayName(name: string | null | undefined): string | null {
+  if (!name?.trim()) return null;
+  const digits = name.replace(/[^0-9]/g, '');
+  return digits.length >= 9 ? digits : null;
+}
+
+/**
+ * Envío saliente: preferir @c.us frente a @lid cuando el contacto tiene ambos.
+ * Las notas de voz a @lid suelen quedar PENDING y no llegan al destinatario.
+ */
+async function resolveOutboundSendChatId(
+  admin: ReturnType<typeof createClient>,
+  companyId: string,
+  chatId: string,
+  defaultCountryCode: string | null,
+): Promise<string> {
+  if (isGroupJid(chatId) || !isLidJid(chatId)) {
+    return normalizeChatId(chatId, defaultCountryCode);
+  }
+
+  const { data: current } = await admin
+    .from('whatsapp_chats')
+    .select('customer_id, marketing_lead_id, name, raw')
+    .eq('company_id', companyId)
+    .eq('chat_id', chatId)
+    .maybeSingle();
+
+  const nameDigits = extractPhoneDigitsFromDisplayName(current?.name ?? null);
+  if (nameDigits) {
+    return normalizeChatId(nameDigits, defaultCountryCode);
+  }
+
+  const rawKey = extractMessageKey(current?.raw);
+  for (const alt of [rawKey?.remoteJidAlt, rawKey?.participantAlt]) {
+    if (alt && isPhoneJid(alt)) return normalizeWhatsappJid(alt);
+  }
+
+  const linkCol = current?.customer_id
+    ? 'customer_id'
+    : current?.marketing_lead_id
+      ? 'marketing_lead_id'
+      : null;
+  if (linkCol) {
+    const linkId = current?.customer_id ?? current?.marketing_lead_id;
+    const { data: siblings } = await admin
+      .from('whatsapp_chats')
+      .select('chat_id')
+      .eq('company_id', companyId)
+      .eq(linkCol, linkId!);
+    for (const s of siblings ?? []) {
+      if (isPhoneJid(s.chat_id)) return normalizeWhatsappJid(s.chat_id);
+    }
+  }
+
+  return chatId;
+}
+
 function resolveCanonicalChatId(
   remoteJid: string,
+  key?: { remoteJidAlt?: string } | null,
   isGroup = false,
 ): string {
   if (isGroup) return remoteJid;
-  if (isLidJid(remoteJid)) return remoteJid;
+  const alt = key?.remoteJidAlt;
+  if (alt && isPhoneJid(alt)) return normalizeWhatsappJid(alt);
   if (isPhoneJid(remoteJid)) return normalizeWhatsappJid(remoteJid);
+  if (isLidJid(remoteJid)) return remoteJid;
   return remoteJid;
 }
 
@@ -632,12 +694,14 @@ async function resolveChatIdForStorage(
   key?: { remoteJidAlt?: string } | null,
   isGroup = false,
 ): Promise<string> {
-  let canonical = resolveCanonicalChatId(remoteJid, isGroup);
+  let canonical = resolveCanonicalChatId(remoteJid, key, isGroup);
   if (isGroup) return canonical;
 
   const altPhone = key?.remoteJidAlt;
-  if (isLidJid(canonical) && altPhone && isPhoneJid(altPhone)) {
-    await migrateChatIfNeeded(admin, companyId, canonical, normalizeWhatsappJid(altPhone));
+  if (isLidJid(remoteJid) && altPhone && isPhoneJid(altPhone)) {
+    const phoneJid = normalizeWhatsappJid(altPhone);
+    await migrateChatIfNeeded(admin, companyId, phoneJid, remoteJid);
+    canonical = phoneJid;
   }
 
   const { data: siblings } = await admin
@@ -647,18 +711,22 @@ async function resolveChatIdForStorage(
     .neq('chat_id', canonical)
     .limit(500);
   for (const row of siblings ?? []) {
-    if (jidsSameContact(row.chat_id, canonical)) {
+    if (!jidsSameContact(row.chat_id, canonical)) continue;
+    const phoneJid = isPhoneJid(canonical)
+      ? canonical
+      : isPhoneJid(row.chat_id)
+        ? row.chat_id
+        : null;
+    const lidJid = isLidJid(canonical)
+      ? canonical
+      : isLidJid(row.chat_id)
+        ? row.chat_id
+        : null;
+    if (phoneJid && lidJid && phoneJid !== lidJid) {
+      await migrateChatIfNeeded(admin, companyId, phoneJid, lidJid);
+      canonical = phoneJid;
+    } else if (row.chat_id !== canonical) {
       await migrateChatIfNeeded(admin, companyId, canonical, row.chat_id);
-      continue;
-    }
-    if (
-      isPhoneJid(canonical) &&
-      isLidJid(row.chat_id) &&
-      altPhone &&
-      jidsSameContact(normalizeWhatsappJid(altPhone), canonical)
-    ) {
-      await migrateChatIfNeeded(admin, companyId, row.chat_id, canonical);
-      canonical = row.chat_id;
     }
   }
 
@@ -2791,13 +2859,24 @@ serve(async (req) => {
         // chatId final puede cambiar tras enviar (WhatsApp usa @lid en muchos
         // chats modernos). Lo iremos ajustando si Waha lo expone.
         let chatId = requestedChatId;
+        const sendChatId = await resolveOutboundSendChatId(
+          admin,
+          companyId,
+          requestedChatId,
+          cfg.default_country_code,
+        );
+        if (sendChatId !== requestedChatId) {
+          console.log(
+            `messages.send: ${requestedChatId} → ${sendChatId} (JID teléfono para entrega)`,
+          );
+        }
         const type = sendBody.type ?? 'text';
 
         let sendResult: { messageId: string | null; timestamp?: number; raw: unknown };
         let outgoingMime: string | null = null;
         if (type === 'text') {
           if (!sendBody.text) return err('Falta `text`');
-          sendResult = await providerSendText(providerCfg, chatId, sendBody.text, {
+          sendResult = await providerSendText(providerCfg, sendChatId, sendBody.text, {
             replyToMessageId: sendBody.reply_to_message_id?.trim(),
           });
         } else if (
@@ -2834,7 +2913,10 @@ serve(async (req) => {
             filename: sendBody.filename ?? 'file',
             caption: sendBody.caption,
           };
-          if (provider === 'openwa' && openwaMediaRequiresPublicUrl(mediaType)) {
+          if (
+            (provider === 'openwa' && openwaMediaRequiresPublicUrl(mediaType)) ||
+            wahaVoiceRequiresPublicUrl(provider, mediaType)
+          ) {
             mediaInput.url = await uploadWhatsappOutgoingMedia(
               admin,
               companyId,
@@ -2846,7 +2928,7 @@ serve(async (req) => {
           }
           sendResult = await providerSendMedia(
             providerCfg,
-            chatId,
+            sendChatId,
             mediaType,
             mediaInput,
           );
@@ -3419,6 +3501,38 @@ serve(async (req) => {
           updates.marketing_lead_id = body.marketing_lead_id ?? null;
         if (Object.keys(updates).length === 0) {
           return err('Nada que actualizar');
+        }
+        if (updates.customer_id) {
+          const linkChatId = normalizeChatId(body.chat_id, cfg.default_country_code);
+          const { data: chatRow } = await admin
+            .from('whatsapp_chats')
+            .select('name, chat_id')
+            .eq('company_id', companyId)
+            .eq('chat_id', linkChatId)
+            .maybeSingle();
+          const { data: custRow } = await admin
+            .from('customers')
+            .select('name, phone')
+            .eq('company_id', companyId)
+            .eq('id', updates.customer_id as string)
+            .maybeSingle();
+          const chatDigits =
+            extractPhoneDigitsFromDisplayName(chatRow?.name ?? null) ??
+            extractPhoneDigits(chatRow?.chat_id ?? linkChatId);
+          const custDigits = custRow?.phone
+            ? custRow.phone.replace(/[^0-9]/g, '')
+            : null;
+          if (
+            chatDigits &&
+            custDigits &&
+            chatDigits.length >= 9 &&
+            custDigits.length >= 8 &&
+            chatDigits.slice(-9) !== custDigits.slice(-9)
+          ) {
+            return err(
+              `El teléfono del chat (${chatRow?.name ?? linkChatId}) no coincide con el cliente (${custRow?.name ?? 'sin nombre'}, ${custRow?.phone ?? '—'}).`,
+            );
+          }
         }
         const { error: upErr } = await admin
           .from('whatsapp_chats')

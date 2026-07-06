@@ -114,12 +114,14 @@ export const Clientes: React.FC = () => {
     onError: () => toast({ title: 'Error al eliminar', variant: 'destructive' }),
   });
 
+  const openNewCustomerForm = () => {
+    setSelectedCustomer(null);
+    setView('form');
+  };
+
   const topBarActions = useMemo(() => (
     <Button
-      onClick={() => {
-        setSelectedCustomer(null);
-        setView('form');
-      }}
+      onClick={openNewCustomerForm}
       className="h-7 bg-sky-500 px-2 text-xs text-white hover:bg-sky-600"
     >
       <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo Cliente
@@ -192,19 +194,29 @@ export const Clientes: React.FC = () => {
     <div className="space-y-6">
       <Card>
         <CardHeader className="pb-4">
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <CardTitle className="flex items-center gap-2 text-base">
               <Users className="w-4 h-4" /> Lista de Clientes
             </CardTitle>
-            <div className="relative w-full max-w-sm">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground w-4 h-4" />
-              <Input
-                placeholder={`Buscar (mín. ${CUSTOMER_SEARCH_MIN_CHARS} letras o números)…`}
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-9 h-9"
-                autoFocus
-              />
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+              <Button
+                type="button"
+                onClick={openNewCustomerForm}
+                className="h-9 shrink-0 bg-sky-500 text-white hover:bg-sky-600"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Nuevo Cliente
+              </Button>
+              <div className="relative w-full sm:w-72">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground w-4 h-4" />
+                <Input
+                  placeholder={`Buscar (mín. ${CUSTOMER_SEARCH_MIN_CHARS} letras o números)…`}
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-9 h-9"
+                  autoFocus
+                />
+              </div>
             </div>
           </div>
         </CardHeader>
@@ -218,6 +230,14 @@ export const Clientes: React.FC = () => {
               <p className="text-xs text-muted-foreground mt-1">
                 Nombre, DNI, teléfono, email o código legacy.
               </p>
+              <Button
+                type="button"
+                onClick={openNewCustomerForm}
+                className="mt-6 bg-sky-500 text-white hover:bg-sky-600"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Nuevo Cliente
+              </Button>
             </div>
           ) : isLoading ? (
             <div className="flex justify-center py-8">

@@ -10,6 +10,7 @@ import {
 import { resolveOpenwaSessionId } from './whatsappProviderOpenwa.ts';
 
 const OPENWA_VOICE_FILENAME = 'voice.ogg';
+const WAHA_VOICE_MIME = 'audio/ogg; codecs=opus';
 
 /** OpenWA/whatsapp-web.js envía notas de voz con application/ogg; audio/ogg devuelve 500. */
 export function normalizeOpenwaOutgoingAudioMime(mime: string): string {
@@ -309,19 +310,26 @@ export async function providerSendMedia(
   else if (type === 'video') endpoint = '/api/sendVideo';
   else if (type === 'voice') endpoint = '/api/sendVoice';
 
+  const file: Record<string, unknown> = {
+    mimetype: type === 'voice' ? WAHA_VOICE_MIME : media.mime,
+    filename: media.filename,
+  };
+  if (media.url && type === 'voice') {
+    file.url = media.url;
+  } else {
+    file.data = base64;
+  }
+
   const payload: Record<string, unknown> = {
     session: sessionName,
     chatId,
-    file: {
-      mimetype: media.mime,
-      filename: media.filename,
-      data: base64,
-    },
+    file,
   };
   if (media.caption) payload.caption = media.caption;
   if (type === 'voice') {
-    const lowerMime = media.mime.toLowerCase();
-    payload.convert = !(lowerMime.includes('ogg') || lowerMime.includes('opus'));
+    // Re-encode siempre: OGG del MediaRecorder del navegador puede tener OpusHead pero
+    // no cumplir el formato PTT de WhatsApp y quedar en PENDING sin llegar al móvil.
+    payload.convert = true;
   }
 
   const res = await providerJson<Record<string, unknown>>(cfg, endpoint, {
