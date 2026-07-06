@@ -136,10 +136,9 @@ export const DunasoftAgenda: React.FC = () => {
     saveAgendaViewPersisted(user.id, mergePersistedLastDate(prev, selectedDateYmd));
   }, [user?.id, selectedDateYmd]);
 
-  const { data, isLoading, isError, error, refetch, isFetching } = useDunasoftAgendaDay(
-    selectedDateYmd,
-    companyId,
-  );
+  const { data, isLoading, isError, error, refetch, isFetching, isDayLoading, isDayRefreshing } =
+    useDunasoftAgendaDay(selectedDateYmd, companyId);
+  const showInitialSkeleton = isLoading && !data;
   const { createMutation, updateMutation, deleteMutation } = useDunasoftAppointmentMutations(selectedDateYmd);
   const { data: syncStatus } = useDunasoftSyncStatus(20_000);
   const { data: styleSync } = useStyleSyncAgentStatus(companyId, 25_000);
@@ -404,10 +403,14 @@ export const DunasoftAgenda: React.FC = () => {
         </div>
       ) : null}
 
-      {isLoading ? (
+      {showInitialSkeleton ? (
         <Skeleton className="flex-1 min-h-[24rem] w-full rounded-lg" />
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border/60 bg-card">
+        <div
+          className={`flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border/60 bg-card transition-opacity duration-150 ${
+            isDayLoading || isDayRefreshing ? 'opacity-60 pointer-events-none' : ''
+          }`}
+        >
           <AgendaGrid
             employees={employees}
             appointments={appointments}

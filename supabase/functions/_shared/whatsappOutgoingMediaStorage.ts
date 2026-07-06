@@ -40,9 +40,11 @@ function base64ToBytes(b64: string): Uint8Array {
 }
 
 /** WhatsApp PTT exige OGG/Opus (OpusHead). OGG/Vorbis se envía como adjunto. */
+const OPUS_HEAD_SCAN_BYTES = 4096;
+
 export function isOggOpusBase64(b64: string): boolean {
   try {
-    const bytes = base64ToBytes(b64).slice(0, 256);
+    const bytes = base64ToBytes(b64).slice(0, OPUS_HEAD_SCAN_BYTES);
     for (let i = 0; i <= bytes.length - 8; i++) {
       if (
         bytes[i] === 0x4f &&

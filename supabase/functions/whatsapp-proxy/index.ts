@@ -51,7 +51,6 @@ import {
   openwaCollectRecentMedia,
   openwaGetQr,
   openwaGetSession,
-  openwaListChats,
   openwaListChatMessages,
   openwaListWebhooks,
   openwaLogoutSession,
@@ -1045,6 +1044,80 @@ async function listDbStoredMediaForChat(
   return items;
 }
 
+function classifyMediaDownloadFailure(msg: string, provider: WhatsappProvider): number {
+  if (
+    /expirad|gone|no disponible|no devolvió media|not found|\(404\)|unavailable|too old|message not found/i.test(
+      msg,
+    )
+  ) {
+    return 410;
+  }
+  if (
+    provider === 'openwa' &&
+    (/internal server error/i.test(msg) || /history\?/i.test(msg))
+  ) {
+    return 410;
+  }
+  return 502;
+}
+
+async function prefetchWahaMediaToStorage(
+  admin: ReturnType<typeof createClient>,
+  cfg: WhatsappConfig,
+  companyId: string,
+  sessionName: string,
+  chatId: string,
+  limit: number,
+): Promise<Array<{ message_id: string; url: string; mime: string }>> {
+  const safeLimit = Math.min(Math.max(limit, 3), 8);
+  const items = await listDbStoredMediaForChat(admin, companyId, chatId, safeLimit);
+  if (items.length >= 3) return items;
+
+  const { data: candidates } = await admin
+    .from('whatsapp_messages')
+    .select('waha_message_id, media_url, media_mime_type, type')
+    .eq('company_id', companyId)
+    .eq('chat_id', chatId)
+    .not('waha_message_id', 'is', null)
+    .in('type', ['image', 'sticker'])
+    .order('timestamp', { ascending: false })
+    .limit(12);
+
+  const skipIds = new Set(items.map((i) => i.message_id));
+  let attempts = 0;
+  for (const row of candidates ?? []) {
+    if (attempts >= 2 || items.length >= safeLimit) break;
+    const messageId = row.waha_message_id as string | null;
+    if (!messageId || skipIds.has(messageId)) continue;
+    const mediaUrl = row.media_url as string | null;
+    if (isPersistedWhatsappMediaUrl(mediaUrl)) continue;
+    if (mediaUrl && isExternalCdnMediaUrl(mediaUrl)) continue;
+    if (!mediaUrl && !row.media_mime_type) continue;
+    try {
+      const result =
+        mediaUrl && !isPersistedWhatsappMediaUrl(mediaUrl)
+          ? await fetchWahaMediaBytes(cfg, mediaUrl)
+          : await downloadMediaViaMessage(cfg, sessionName, chatId, messageId);
+      const mime = result.contentType ?? (row.media_mime_type as string) ?? 'image/jpeg';
+      const url = await persistWhatsappMessageMedia(
+        admin,
+        companyId,
+        messageId,
+        result.buf,
+        mime,
+      );
+      if (url) {
+        items.push({ message_id: messageId, url, mime });
+        skipIds.add(messageId);
+      }
+      attempts += 1;
+    } catch {
+      // Media antigua o no disponible en WAHA
+    }
+  }
+  return items;
+}
+
 async function prefetchOpenwaMediaToStorage(
   admin: ReturnType<typeof createClient>,
   companyId: string,
@@ -1524,11 +1597,14 @@ async function syncFullChatHistoryFromProvider(
     return { count: 0, offset: startOffset, has_more: false, synced: true };
   }
 
+  const historyPages =
+    normalizeWhatsappProvider(cfg.provider) === 'openwa' ? 1 : maxPages;
+
   let total = 0;
   let offset = Math.max(startOffset, 0);
   let hasMore = false;
 
-  for (let page = 0; page < maxPages && page < WAHA_HISTORY_MAX_PAGES; page++) {
+  for (let page = 0; page < historyPages && page < WAHA_HISTORY_MAX_PAGES; page++) {
     const count = await syncChatMessagesFromProvider(
       admin,
       cfg,
@@ -1547,7 +1623,7 @@ async function syncFullChatHistoryFromProvider(
     }
     offset += WAHA_HISTORY_PAGE_SIZE;
     hasMore = true;
-    if (page + 1 >= maxPages) break;
+    if (page + 1 >= historyPages) break;
   }
 
   const synced = !hasMore;
@@ -2389,13 +2465,21 @@ serve(async (req) => {
         let data: Array<Record<string, unknown>> = [];
 
         if (provider === 'openwa') {
-          try {
-            data = await openwaListChats(providerCfg, limit, offset);
-          } catch (e) {
-            const msg = e instanceof Error ? e.message : 'Error listando chats OpenWA';
-            console.warn('chats.list openwa non-fatal failure:', e);
-            return json({ ok: true, count: 0, warning: msg });
-          }
+          // getChats() vía Puppeteer tarda >120s y tumba OpenWA (ProtocolError).
+          // Los chats llegan por webhook y están en whatsapp_chats.
+          const { count, error: countErr } = await admin
+            .from('whatsapp_chats')
+            .select('id', { count: 'exact', head: true })
+            .eq('company_id', companyId)
+            .eq('archived', false);
+          if (countErr) throw countErr;
+          return json({
+            ok: true,
+            count: count ?? 0,
+            source: 'database',
+            warning:
+              'OpenWA: lista desde BD (getChats deshabilitado; use webhooks para chats nuevos)',
+          });
         } else {
           try {
             data = await fetchWahaChatsOverview(cfg, sessionName, limit, offset);
@@ -2597,14 +2681,10 @@ serve(async (req) => {
         const messageOffset = Math.max(Number(body.message_offset ?? 0), 0);
         const refreshChats = body.refresh_chats !== false;
 
-        if (refreshChats && messageOffset === 0) {
+        if (refreshChats && messageOffset === 0 && provider !== 'openwa') {
           try {
             let chatData: Array<Record<string, unknown>> = [];
-            if (provider === 'openwa') {
-              chatData = await openwaListChats(providerCfg, 150, 0);
-            } else {
-              chatData = await fetchWahaChatsOverview(cfg, sessionName, 150, 0);
-            }
+            chatData = await fetchWahaChatsOverview(cfg, sessionName, 150, 0);
             if (chatData.length > 0) {
               const rows = chatData.map((c) => ({
                 company_id: companyId,
@@ -3108,6 +3188,27 @@ serve(async (req) => {
         if (!chatId) return err('Falta chat_id');
         const limit = Math.min(Math.max(Number(body.limit ?? 6), 3), 8);
         if (provider !== 'openwa') {
+          const altIds = body.alt_chat_ids ?? [];
+          const candidates = [chatId, ...altIds].filter(
+            (id, i, arr) => !!id && arr.indexOf(id) === i,
+          ).slice(0, 2);
+          for (const cid of candidates) {
+            try {
+              const items = await prefetchWahaMediaToStorage(
+                admin,
+                cfg,
+                companyId,
+                sessionName,
+                cid,
+                limit,
+              );
+              if (items.length > 0) {
+                return json({ ok: true, chat_id: cid, items });
+              }
+            } catch (e) {
+              console.warn('prefetch_media waha failed for', cid, e);
+            }
+          }
           return json({ ok: true, items: [], chat_id: chatId });
         }
         const altIds = body.alt_chat_ids ?? [];
@@ -3168,7 +3269,7 @@ serve(async (req) => {
                     body.message_id,
                   );
 
-            if (provider === 'openwa' && body.message_id) {
+            if (body.message_id) {
               const mime = result.contentType ?? 'application/octet-stream';
               await persistWhatsappMessageMedia(
                 admin,
@@ -3187,13 +3288,12 @@ serve(async (req) => {
               chat_id: body.chat_id,
               message_id: body.message_id?.slice(0, 48),
             });
-            const expired = /expirad/i.test(msg);
-            const openwaHistoryBroken =
-              provider === 'openwa' &&
-              (/internal server error/i.test(msg) || /history\?/i.test(msg));
-            const status = expired || openwaHistoryBroken ? 410 : 502;
+            const status = classifyMediaDownloadFailure(msg, provider);
             if (provider === 'openwa' || !body.url || isExternalCdnMediaUrl(body.url)) {
-              return err(msg, status);
+              return err(
+                status === 410 ? 'Media no disponible (expirada o sin URL en el proveedor)' : msg,
+                status,
+              );
             }
           }
         }

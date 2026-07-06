@@ -131,6 +131,8 @@ export async function invokeWhatsappProxy<T = unknown>(
           : `HTTP ${res.status}`) || `HTTP ${res.status}`;
     const quiet =
       payload.action === 'messages.prefetch_media' ||
+      payload.action === 'media.download' ||
+      payload.action === 'chats.list' ||
       res.status === 410 ||
       res.status === 502 ||
       res.status === 504;
@@ -187,7 +189,9 @@ export async function downloadWhatsappMedia(input: {
     } catch {
       // ignore
     }
-    const expired = res.status === 410 || /expirad|gone|no disponible/i.test(msg);
+    const expired =
+      res.status === 410 ||
+      /expirad|gone|no disponible|no devolvió|not found/i.test(msg);
     const openwaHistoryNoise =
       res.status === 502 && /internal server error|history\?/i.test(msg);
     if (!expired && !openwaHistoryNoise) {

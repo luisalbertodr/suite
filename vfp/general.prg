@@ -1198,6 +1198,7 @@ ENDFUNC
 
 #INCLUDE suite_control_sync.prg
 #INCLUDE suite_cola_sync.prg
+#INCLUDE suite_entity_sync.prg
 #INCLUDE suite_apply_license_unlock.prg
 
 PROCEDURE SuiteEnsureGlobals
@@ -1457,7 +1458,7 @@ PROCEDURE SuiteBootExternalSyncIfReady
  ON ERROR lcErr = MESSAGE()
  SET PROCEDURE TO (lcBootPrg) ADDITIVE
  IF TYPE("SuiteBootExternalSync")#"U"
-    DO SuiteBootExternalSync
+    DO ("SuiteBootExternalSync")
  ENDIF
  ON ERROR &lcSav
  IF .NOT. EMPTY(lcErr)
@@ -1489,7 +1490,7 @@ PROCEDURE SuiteSyncPendingWatcherStartIfReady
  ON ERROR lcErr = MESSAGE()
  SET PROCEDURE TO (lcPrg) ADDITIVE
  IF TYPE("SuiteSyncPendingWatcherStart")#"U"
-    DO SuiteSyncPendingWatcherStart
+    DO ("SuiteSyncPendingWatcherStart")
  ENDIF
  ON ERROR &lcSav
 ENDPROC
@@ -1505,7 +1506,7 @@ PROCEDURE SuiteOnShutdown
     IF FILE(lcShutPrg)
        SET PROCEDURE TO (lcShutPrg) ADDITIVE
        IF TYPE("SuiteShutdownInboundDrain")#"U"
-          DO SuiteShutdownInboundDrain
+          DO ("SuiteShutdownInboundDrain")
        ENDIF
     ENDIF
  CATCH

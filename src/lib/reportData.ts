@@ -15,6 +15,7 @@ import {
 } from '@/lib/invoiceLineCatalogMatch';
 import { fetchCatalogCustomers } from '@/lib/customerSearch';
 import { fetchSalesWithoutInvoiceRows } from '@/lib/salesRevenue';
+import { MEDICINA_COMPANY_ID } from '@/lib/workCenterBilling';
 
 export type ReportFilters = {
   fechaDesde?: Date;
@@ -381,14 +382,48 @@ async function fetchFacturasPorCobrar(scope: Scope, filters: ReportFilters) {
 }
 
 async function fetchFacturacionMensual(scope: Scope, filters: ReportFilters) {
+  const from = dateFrom(filters);
+  const to = dateTo(filters);
+  const hubOnly =
+    scope.billingCompanyIds.length === 1 &&
+    scope.billingCompanyIds[0] === MEDICINA_COMPANY_ID &&
+    (!filters.cliente || filters.cliente === 'todos');
+
+  if (hubOnly) {
+    const startYear = from ? parseInt(from.slice(0, 4), 10) : new Date().getFullYear();
+    const endYear = to ? parseInt(to.slice(0, 4), 10) : startYear;
+    const monthly: Record<string, { totalFacturado: number; numFacturas: number }> = {};
+
+    for (let year = startYear; year <= endYear; year++) {
+      const { data, error } = await supabase.rpc('dashboard_billing_monthly', {
+        p_company_id: MEDICINA_COMPANY_ID,
+        p_year: year,
+      });
+      if (error) throw error;
+      for (const row of data ?? []) {
+        const monthKey = `${year}-${String(row.month_num).padStart(2, '0')}`;
+        if (from && monthKey < from.slice(0, 7)) continue;
+        if (to && monthKey > to.slice(0, 7)) continue;
+        const mes = format(new Date(year, row.month_num - 1, 1), 'MMMM yyyy', { locale: es });
+        if (!monthly[mes]) monthly[mes] = { totalFacturado: 0, numFacturas: 0 };
+        monthly[mes].totalFacturado += Number(row.total ?? 0);
+      }
+    }
+
+    return Object.entries(monthly).map(([mes, d]) => ({
+      mes,
+      totalFacturado: d.totalFacturado,
+      numFacturas: d.numFacturas,
+      variacion: '—',
+    }));
+  }
+
   let query = supabase
     .from('invoices')
-    .select('issue_date, total_amount, customers:customer_id (name)')
+    .select('issue_date, total_amount, status, customers:customer_id (name)')
     .order('issue_date', { ascending: false });
   query = applyCompanyScope(query, scope);
   if (filters.cliente && filters.cliente !== 'todos') query = query.eq('customer_id', filters.cliente);
-  const from = dateFrom(filters);
-  const to = dateTo(filters);
   if (from) query = query.gte('issue_date', from);
   if (to) query = query.lte('issue_date', to);
   const { data, error } = await query;
@@ -396,6 +431,8 @@ async function fetchFacturacionMensual(scope: Scope, filters: ReportFilters) {
 
   const monthly: Record<string, { totalFacturado: number; numFacturas: number; numTickets: number }> = {};
   for (const inv of data ?? []) {
+    const status = String((inv as any).status ?? '').toLowerCase();
+    if (['cancelled', 'void', 'anulada'].includes(status)) continue;
     const mes = format(new Date((inv as any).issue_date), 'MMMM yyyy', { locale: es });
     if (!monthly[mes]) monthly[mes] = { totalFacturado: 0, numFacturas: 0, numTickets: 0 };
     monthly[mes].totalFacturado += Number((inv as any).total_amount);

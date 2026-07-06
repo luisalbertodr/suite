@@ -8,6 +8,7 @@ import { createRequire } from "node:module";
 import { incrementAgentErrors, patchAgentState } from "./agentState.js";
 import { isSyncV2Active } from "./controlSync.js";
 import { writeDeadLetter } from "./deadLetter.js";
+import { dbfDateFromJsDate } from "./dbfSource.js";
 import { isRetryableFsError, withFsRetry } from "./fsRetry.js";
 import { maybeTriggerInboundWorker } from "./inboundWorkerTrigger.js";
 import { resolveVersion, serviciosJsonToLegacy } from "./servicios.js";
@@ -19,7 +20,22 @@ import {
 } from "./entitySync.js";
 import { ENTITY_HANDLERS } from "./handlers.js";
 import { pollDbfEntityChanges } from "./dbfPoll.js";
-import { pollPlan2009FromDbf } from "./plan2009Poll.js";
+import { pollPlan2009FromDbf, pollPlan2009Lightweight } from "./plan2009Poll.js";
+import { logDeferHeavyPoll, shouldDeferHeavyPoll } from "./styleSession.js";
+import {
+  dbfBool,
+  dbfDateIso,
+  dbfStr,
+  loadDbfIndexed,
+  lookupDbfRow,
+  type DbfRow,
+} from "./dbfSource.js";
+import {
+  normalizePlanKey,
+  rowFingerprint,
+  upsertFingerprints,
+  type PollDeps,
+} from "./plan2009Poll.js";
 
 const require = createRequire(import.meta.url);
 const { version: pkgVersion } = require("../package.json") as { version: string };
@@ -54,6 +70,11 @@ const HEARTBEAT_STALE_MS = Number(process.env.HEARTBEAT_STALE_MS ?? "300000");
 const LAG_ALERT_MS = Number(process.env.LAG_ALERT_MS ?? "30000");
 const ENTITY_BATCH = Number(process.env.ENTITY_BATCH ?? "50");
 const ENTITY_POLL_MS = Number(process.env.ENTITY_POLL_MS ?? "2500");
+const PLAN2009_POLL_MS = Number(process.env.PLAN2009_POLL_MS ?? "2500");
+const PLAN2009_BATCH = Number(process.env.PLAN2009_BATCH ?? "100");
+
+let plan2009IndexCache: Map<string, DbfRow> | null = null;
+let plan2009IndexCacheMtime = 0;
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -239,42 +260,134 @@ function colaCreatedMs(row: ColaRow): number | null {
   return null;
 }
 
+async function getPlan2009Index(): Promise<Map<string, DbfRow>> {
+  const planPath = path.join(STYLE_ROOT, "dbf", "plan2009.dbf");
+  const altPath = path.join(STYLE_ROOT, "plan2009.dbf");
+  const p = fs.existsSync(planPath) ? planPath : fs.existsSync(altPath) ? altPath : null;
+  const mtime = p ? fs.statSync(p).mtimeMs : 0;
+  if (plan2009IndexCache && mtime === plan2009IndexCacheMtime) return plan2009IndexCache;
+  plan2009IndexCache = await loadDbfIndexed(STYLE_ROOT, "plan2009", "idplan");
+  plan2009IndexCacheMtime = mtime;
+  return plan2009IndexCache;
+}
+
+function dbfFieldOrCola(dbfVal: string, colaVal: string): string {
+  const d = dbfVal.trim();
+  if (d) return d;
+  return String(colaVal ?? "").trim();
+}
+
+async function enrichColaRowFromDbf(row: ColaRow): Promise<{
+  row: ColaRow;
+  dbfRow: DbfRow | null;
+  serviciosJson: string;
+}> {
+  const idReg = String(row.id_reg ?? "").trim();
+  if (!idReg) return { row, dbfRow: null, serviciosJson: "[]" };
+  const index = await getPlan2009Index();
+  const dbfRow = lookupDbfRow(index, "plan2009", idReg);
+  if (!dbfRow) return { row, dbfRow: null, serviciosJson: String(row.servicios ?? "").trim() || "[]" };
+
+  const fechaIso = String(row.fechaiso ?? "").trim();
+  const fechaFromDbf = dbfDateIso(dbfRow, "fecha");
+  const serviciosFromDbf = await (async () => {
+    const norm = idReg.replace(/^0+/, "") || "0";
+    const { loadDbfFilteredRows } = await import("./dbfSource.js");
+    const arts = await loadDbfFilteredRows(STYLE_ROOT, "planart", () => true);
+    const items = arts
+      .filter((r) => String(r.idplan ?? "").trim().replace(/^0+/, "") === norm)
+      .map((r) => ({ servicio: dbfStr(r, "codart"), hora: dbfStr(r, "hora") }));
+    if (items.length) return JSON.stringify(items);
+    const fromCola = String(row.servicios ?? "").trim();
+    return fromCola || "[]";
+  })();
+
+  const enriched: ColaRow = {
+    ...row,
+    codemp: dbfFieldOrCola(dbfStr(dbfRow, "codemp"), String(row.codemp ?? "")),
+    codcli: dbfFieldOrCola(dbfStr(dbfRow, "codcli"), String(row.codcli ?? "")),
+    fechaiso: fechaFromDbf ?? (/^\d{4}-\d{2}-\d{2}$/.test(fechaIso) ? fechaIso : ""),
+    horini: dbfFieldOrCola(dbfStr(dbfRow, "horini"), String(row.horini ?? "")),
+    horfin: dbfFieldOrCola(dbfStr(dbfRow, "horfin"), String(row.horfin ?? "")),
+    texto: dbfFieldOrCola(dbfStr(dbfRow, "texto"), String(row.texto ?? "")),
+    codrec: dbfFieldOrCola(dbfStr(dbfRow, "codrec"), String(row.codrec ?? "")),
+    nomcli: dbfFieldOrCola(dbfStr(dbfRow, "nomcli"), String(row.nomcli ?? "")),
+    tel1cli: dbfFieldOrCola(dbfStr(dbfRow, "tel1cli"), String(row.tel1cli ?? "")),
+    facturado: dbfBool(dbfRow, "facturado") || Boolean(row.facturado),
+    servicios: serviciosFromDbf,
+    colfon: Number(dbfStr(dbfRow, "colfon") || 0) || Number(row.colfon ?? 0),
+    collet: Number(dbfStr(dbfRow, "collet") || 0) || Number(row.collet ?? 0),
+  };
+  return { row: enriched, dbfRow, serviciosJson: serviciosFromDbf };
+}
+
+async function updatePlan2009FingerprintAfterCola(
+  idReg: string,
+  dbfRow: DbfRow | null,
+  serviciosJson: string,
+  accion: string,
+): Promise<void> {
+  if (!companyId) return;
+  const deps: PollDeps = { supabase, companyId, styleRoot: STYLE_ROOT, log };
+  const key = normalizePlanKey(idReg);
+  const rpcAccion = accion.toUpperCase();
+  if (rpcAccion === "DEL") {
+    await supabase
+      .schema("dunasoft")
+      .from("style_sync_dbf_fingerprint")
+      .delete()
+      .eq("company_id", companyId)
+      .eq("tabla", "plan2009")
+      .eq("style_key", key);
+    return;
+  }
+  if (!dbfRow) return;
+  const fp = rowFingerprint(dbfRow, serviciosJson || "[]");
+  await upsertFingerprints(deps, [{ style_key: key, fingerprint: fp }]);
+}
+
 async function processRow(row: ColaRow): Promise<void> {
-  log(`procesar plan2009 id=${row.id_reg} accion=${row.accion}`);
+  const { row: enriched, dbfRow, serviciosJson } = await enrichColaRowFromDbf(row);
+  log(`procesar plan2009 id=${enriched.id_reg} accion=${enriched.accion}`);
   if (!companyId) throw new Error("Falta COMPANY_ID");
 
-  const accion = String(row.accion ?? "").toUpperCase();
+  const accion = String(enriched.accion ?? "").toUpperCase();
   const rpcAccion = accion === "DEL" ? "DELETE" : "UPDATE";
-  // Preferir fechaiso (cadena ISO YYYY-MM-DD escrita por VFP): dbf-reader malinterpreta el campo D.
-  const fechaIso = String(row.fechaiso ?? "").trim();
+  const fechaIso = String(enriched.fechaiso ?? "").trim();
   const fecha = /^\d{4}-\d{2}-\d{2}$/.test(fechaIso)
     ? fechaIso
-    : row.fecha instanceof Date
-      ? row.fecha.toISOString().slice(0, 10)
-      : typeof row.fecha === "string"
-        ? row.fecha.slice(0, 10)
+    : enriched.fecha instanceof Date
+      ? dbfDateFromJsDate(enriched.fecha)
+      : typeof enriched.fecha === "string"
+        ? enriched.fecha.slice(0, 10)
         : null;
 
   const { error } = await supabase.rpc("style_reservas_apply_from_style", {
     p_company_id: companyId,
     p_accion: rpcAccion,
-    p_idplan: Number(row.id_reg),
-    p_codemp: row.codemp ?? "",
-    p_codcli: row.codcli ?? "",
+    p_idplan: Number(enriched.id_reg),
+    p_codemp: enriched.codemp ?? "",
+    p_codcli: enriched.codcli ?? "",
     p_fecha: fecha,
-    p_horini: row.horini ?? "",
-    p_horfin: row.horfin ?? "",
-    p_texto: row.texto ?? "",
-    p_codrec: row.codrec ?? "",
-    p_nomcli: row.nomcli ?? "",
-    p_tel1cli: row.tel1cli ?? "",
-    p_facturado: Boolean(row.facturado),
-    p_servicios: serviciosJsonToLegacy(row.servicios),
-    p_colfon: Number(row.colfon ?? 0),
-    p_collet: Number(row.collet ?? 0),
-    p_style_modified_at: row.modif ?? (row.version ? String(row.version) : null),
+    p_horini: enriched.horini ?? "",
+    p_horfin: enriched.horfin ?? "",
+    p_texto: enriched.texto ?? "",
+    p_codrec: enriched.codrec ?? "",
+    p_nomcli: enriched.nomcli ?? "",
+    p_tel1cli: enriched.tel1cli ?? "",
+    p_facturado: Boolean(enriched.facturado),
+    p_servicios: serviciosJsonToLegacy(enriched.servicios),
+    p_colfon: Number(enriched.colfon ?? 0),
+    p_collet: Number(enriched.collet ?? 0),
+    p_style_modified_at: enriched.modif ?? (enriched.version ? String(enriched.version) : null),
   });
   if (error) throw new Error(error.message ?? JSON.stringify(error));
+  await updatePlan2009FingerprintAfterCola(
+    String(enriched.id_reg),
+    dbfRow,
+    serviciosJson,
+    accion,
+  );
   if (companyId) {
     const createdMs = colaCreatedMs(row);
     const lagMs = createdMs != null ? Math.max(0, Date.now() - createdMs) : undefined;
@@ -581,6 +694,38 @@ async function checkInboundWorkerHeartbeat(): Promise<void> {
   });
 }
 
+async function plan2009PollTick(): Promise<void> {
+  if (!companyId) return;
+  if (shouldDeferHeavyPoll(STYLE_ROOT)) {
+    logDeferHeavyPoll(log);
+    try {
+      await pollPlan2009Lightweight(
+        { supabase, companyId, styleRoot: STYLE_ROOT, log },
+        PLAN2009_BATCH,
+      );
+    } catch (err) {
+      if (isRetryableFsError(err)) {
+        log(`plan2009 poll ligero omitido (CIFS/DBF): ${err instanceof Error ? err.message : String(err)}`);
+        return;
+      }
+      throw err;
+    }
+    return;
+  }
+  try {
+    await pollPlan2009FromDbf(
+      { supabase, companyId, styleRoot: STYLE_ROOT, log },
+      PLAN2009_BATCH,
+    );
+  } catch (err) {
+    if (isRetryableFsError(err)) {
+      log(`plan2009 poll omitido (CIFS/DBF): ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+    throw err;
+  }
+}
+
 async function tick(): Promise<void> {
   try {
     const v2 = await isSyncV2Active(STYLE_ROOT);
@@ -619,12 +764,6 @@ async function tick(): Promise<void> {
         agent_version: AGENT_VERSION,
       });
     }
-    if (companyId) {
-      await pollPlan2009FromDbf(
-        { supabase, companyId, styleRoot: STYLE_ROOT, log },
-        OUTBOUND_BATCH,
-      );
-    }
   } catch (err) {
     if (isRetryableFsError(err)) {
       log(`tick omitido (CIFS/DBF): ${err instanceof Error ? err.message : String(err)}`);
@@ -653,6 +792,10 @@ async function entityTick(): Promise<void> {
   if (!deps || ENTITY_HANDLERS.length === 0) return;
   const v2 = await isSyncV2Active(STYLE_ROOT);
   if (!v2) return;
+  if (shouldDeferHeavyPoll(STYLE_ROOT)) {
+    logDeferHeavyPoll(log);
+    return;
+  }
   await processEntitiesFromStyle(deps, ENTITY_HANDLERS, ENTITY_BATCH);
   await pollDbfEntityChanges(deps, ENTITY_HANDLERS, ENTITY_BATCH);
 }
@@ -720,7 +863,14 @@ async function main() {
     );
   }, ENTITY_POLL_MS);
 
+  setInterval(() => {
+    void plan2009PollTick().catch((e) =>
+      log(`plan2009 poll error: ${e instanceof Error ? e.message : String(e)}`),
+    );
+  }, PLAN2009_POLL_MS);
+
   await tick();
+  await plan2009PollTick();
   await checkInboundWorkerHeartbeat();
 }
 

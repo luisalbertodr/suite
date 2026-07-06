@@ -61,52 +61,63 @@ export async function fetchCustomerAppointmentInvoiceIds(
   const unique = [...new Set(customerIds.filter(Boolean))];
   if (!unique.length) return new Set();
 
-  const appointmentIds = new Set<string>();
+  const invoiceIds = new Set<string>();
+  const saleSelects = ['invoice_id, customer_id', 'invoice_id'] as const;
+
   for (let i = 0; i < unique.length; i += INVOICE_CHUNK) {
-    const slice = unique.slice(i, i + INVOICE_CHUNK);
-    const { data, error } = await supabase
+    const customerSlice = unique.slice(i, i + INVOICE_CHUNK);
+
+    for (const select of saleSelects) {
+      const res = await supabase
+        .from('sales')
+        .select(select)
+        .eq('company_id', companyId)
+        .eq('status', 'completed')
+        .not('appointment_id', 'is', null)
+        .not('invoice_id', 'is', null)
+        .in('customer_id', customerSlice);
+
+      if (res.error && isSchemaColumnError(res.error)) continue;
+      if (res.error) throw res.error;
+
+      for (const row of res.data ?? []) {
+        const invoiceId = (row as { invoice_id?: string | null }).invoice_id;
+        if (invoiceId) invoiceIds.add(invoiceId);
+      }
+      break;
+    }
+
+    // Ventas legacy sin customer_id: enlazar por cita del cliente.
+    const { data: appts, error: aptErr } = await supabase
       .from('agenda_appointments')
       .select('id')
       .eq('company_id', companyId)
-      .in('customer_id', slice);
-    if (error) throw error;
-    for (const row of data ?? []) {
-      if (row.id) appointmentIds.add(row.id);
-    }
-  }
+      .in('customer_id', customerSlice);
+    if (aptErr) throw aptErr;
 
-  const invoiceIds = new Set<string>();
-  const saleSelects = [
-    'appointment_id, invoice_id, status, customer_id',
-    'appointment_id, invoice_id, status',
-  ] as const;
+    const appointmentIds = (appts ?? []).map((r) => r.id).filter(Boolean);
+    for (let j = 0; j < appointmentIds.length; j += INVOICE_CHUNK) {
+      const aptSlice = appointmentIds.slice(j, j + INVOICE_CHUNK);
+      for (const select of saleSelects) {
+        const aptRes = await supabase
+          .from('sales')
+          .select(`${select}, appointment_id`)
+          .eq('company_id', companyId)
+          .eq('status', 'completed')
+          .not('invoice_id', 'is', null)
+          .in('appointment_id', aptSlice)
+          .is('customer_id', null);
 
-  for (const select of saleSelects) {
-    let res = await supabase
-      .from('sales')
-      .select(select)
-      .eq('company_id', companyId)
-      .eq('status', 'completed')
-      .not('appointment_id', 'is', null)
-      .not('invoice_id', 'is', null);
+        if (aptRes.error && isSchemaColumnError(aptRes.error)) continue;
+        if (aptRes.error) throw aptRes.error;
 
-    if (res.error && isSchemaColumnError(res.error)) continue;
-    if (res.error) throw res.error;
-
-    for (const row of res.data ?? []) {
-      const appointmentId = (row as { appointment_id?: string | null }).appointment_id;
-      const invoiceId = (row as { invoice_id?: string | null }).invoice_id;
-      const saleCustomerId = (row as { customer_id?: string | null }).customer_id;
-      if (!appointmentId || !invoiceId) continue;
-      if (saleCustomerId && unique.includes(saleCustomerId)) {
-        invoiceIds.add(invoiceId);
-        continue;
-      }
-      if (appointmentIds.has(appointmentId)) {
-        invoiceIds.add(invoiceId);
+        for (const row of aptRes.data ?? []) {
+          const invoiceId = (row as { invoice_id?: string | null }).invoice_id;
+          if (invoiceId) invoiceIds.add(invoiceId);
+        }
+        break;
       }
     }
-    if ((res.data ?? []).length > 0) break;
   }
 
   return invoiceIds;

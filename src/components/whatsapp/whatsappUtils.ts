@@ -695,6 +695,21 @@ export function extractMediaUrlFromWahaMessageRaw(raw: unknown): string | null {
   return tryMsg(root.message) ?? tryMsg((root._data as Record<string, unknown> | undefined)?.message);
 }
 
+/** Hay URL embebida o en Storage para pedir media al proveedor (sin solo message id). */
+export function hasWhatsappProviderMediaHint(message: {
+  media_url?: string | null;
+  raw?: unknown;
+}): boolean {
+  const stored = message.media_url?.includes('/storage/v1/object/public/whatsapp-media/');
+  if (stored) return true;
+  if (extractEmbeddedMediaBase64(message.raw)) return true;
+  const rawUrl = extractMediaUrlFromWahaMessageRaw(message.raw);
+  if (rawUrl && !isExternalWhatsappCdnUrl(rawUrl)) return true;
+  const direct = message.media_url?.trim();
+  if (direct && !isExternalWhatsappCdnUrl(direct)) return true;
+  return false;
+}
+
 export function extractBodyFromWahaMessageRaw(raw: unknown): string | null {
   if (!raw || typeof raw !== 'object') return null;
   const root = raw as Record<string, unknown>;
@@ -774,17 +789,26 @@ function bytesContainOpusHead(bytes: Uint8Array): boolean {
   return false;
 }
 
-/** Valida OGG/Opus antes de enviar nota de voz por OpenWA. */
-export async function assertWhatsappVoiceNoteFile(file: File): Promise<void> {
-  const name = file.name.toLowerCase();
-  const type = (file.type ?? '').toLowerCase();
-  const looksOgg =
+/** Archivo adjunto que debe enviarse como nota de voz (OGG/Opus), no como documento. */
+export function isWhatsappOggAttachment(filename: string, mime?: string | null): boolean {
+  const name = filename.toLowerCase();
+  const type = (mime ?? '').toLowerCase();
+  return (
     name.endsWith('.ogg') ||
     name.endsWith('.opus') ||
     type.includes('ogg') ||
-    type.includes('opus');
-  if (!looksOgg) return;
-  const head = new Uint8Array(await file.slice(0, 256).arrayBuffer());
+    type.includes('opus')
+  );
+}
+
+const OPUS_HEAD_SCAN_BYTES = 4096;
+
+/** Valida OGG/Opus antes de enviar nota de voz por OpenWA. */
+export async function assertWhatsappVoiceNoteFile(file: File): Promise<void> {
+  if (!isWhatsappOggAttachment(file.name, file.type)) return;
+  const head = new Uint8Array(
+    await file.slice(0, OPUS_HEAD_SCAN_BYTES).arrayBuffer(),
+  );
   if (!bytesContainOpusHead(head)) {
     throw new Error(
       'El archivo .ogg no es Opus (nota de voz de WhatsApp). Muchos .ogg usan Vorbis y se envían como adjunto. Reenvía una nota de voz desde WhatsApp o convierte el audio a OGG/Opus.',

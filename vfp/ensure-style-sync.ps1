@@ -66,9 +66,8 @@ function Ensure-StyleSyncAgentFiles {
         @"
 @echo off
 cd /d "$AgentDirPath"
-for /f "tokens=2" %%i in ('tasklist /FI "IMAGENAME eq node.exe" /FO LIST ^| findstr /I "PID:"') do (
-  powershell -NoProfile -Command "if((Get-CimInstance Win32_Process -Filter 'ProcessId=%%i').CommandLine -match 'dist[/\\]index\.js'){exit 0}" && exit /b 0
-)
+powershell -NoProfile -Command "`$p=Get-CimInstance Win32_Process -Filter \"name='node.exe'\" -EA SilentlyContinue | Where-Object { `$_.CommandLine -match 'dist[/\\]index\.js' } | Select-Object -First 1; if(`$p){exit 0}else{exit 1}"
+if %ERRORLEVEL%==0 exit /b 0
 start /B node dist/index.js >> agent-run.log 2>&1
 "@ | Set-Content -Path $runner -Encoding ASCII
     }
@@ -94,8 +93,13 @@ function Start-StyleSyncAgent {
     Ensure-StyleSyncAgentFiles -AgentDirPath $AgentDirPath -Root $Root
     $vbs = Join-Path $Root "run_style_sync_agent_hidden.vbs"
     Start-Process wscript.exe -ArgumentList "`"$vbs`"" -WindowStyle Hidden
-    Start-Sleep -Seconds 2
+    Start-Sleep -Seconds 4
     $ok = [bool](Test-StyleSyncAgentRunning)
+    if (-not $ok) {
+        Start-Process -FilePath "node" -ArgumentList "dist/index.js" -WorkingDirectory $AgentDirPath -WindowStyle Hidden | Out-Null
+        Start-Sleep -Seconds 2
+        $ok = [bool](Test-StyleSyncAgentRunning)
+    }
     Write-SyncLog $(if ($ok) { "agente Node iniciado" } else { "AVISO: agente Node no arranco" })
     return $ok
 }

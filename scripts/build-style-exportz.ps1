@@ -91,15 +91,26 @@ function Sync-SuitePrgs {
     $genSrc = Join-Path $VfpRepo "general.prg"
     $ctrlSrc = Join-Path $VfpRepo "suite_control_sync.prg"
     $colaSrc = Join-Path $VfpRepo "suite_cola_sync.prg"
+    $entitySrc = Join-Path $VfpRepo "suite_entity_sync.prg"
+    $licenseSrc = Join-Path $VfpRepo "suite_apply_license_unlock.prg"
     $gen = [System.IO.File]::ReadAllText($genSrc, $enc)
     if ($gen -notmatch '#INCLUDE\s+suite_cola_sync\.prg') {
         throw "general.prg sin marcador '#INCLUDE suite_cola_sync.prg' para inline"
     }
+    if ($gen -notmatch '#INCLUDE\s+suite_entity_sync\.prg') {
+        throw "general.prg sin marcador '#INCLUDE suite_entity_sync.prg' para inline"
+    }
+    if ($gen -notmatch '#INCLUDE\s+suite_apply_license_unlock\.prg') {
+        throw "general.prg sin marcador '#INCLUDE suite_apply_license_unlock.prg' para inline"
+    }
+    if (-not (Test-Path $licenseSrc)) { throw "Falta $licenseSrc" }
     $ctrl = [System.IO.File]::ReadAllText($ctrlSrc, $enc)
     $cola = [System.IO.File]::ReadAllText($colaSrc, $enc)
-    $gen = $gen.Replace("#INCLUDE suite_control_sync.prg", $ctrl).Replace("#INCLUDE suite_cola_sync.prg", $cola)
+    $entity = [System.IO.File]::ReadAllText($entitySrc, $enc)
+    $license = [System.IO.File]::ReadAllText($licenseSrc, $enc)
+    $gen = $gen.Replace("#INCLUDE suite_control_sync.prg", $ctrl).Replace("#INCLUDE suite_cola_sync.prg", $cola).Replace("#INCLUDE suite_entity_sync.prg", $entity).Replace("#INCLUDE suite_apply_license_unlock.prg", $license)
     [System.IO.File]::WriteAllText((Join-Path $Progs "general.prg"), $gen, $enc)
-    Write-Ok "general.prg con suite_control_sync + suite_cola_sync INLINE (embebidos para compilar)"
+    Write-Ok "general.prg con suite_control_sync + suite_cola_sync + suite_entity_sync + suite_apply_license_unlock INLINE (embebidos para compilar)"
 }
 
 function Remove-StaleBuildFxp {

@@ -3,7 +3,7 @@ import path from "node:path";
 import { Dbf } from "dbf-reader";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { withFsRetry } from "./fsRetry.js";
-import { loadDbfIndexed, normalizeStyleKey, type DbfRow } from "./dbfSource.js";
+import { loadDbfIndexed, lookupDbfRow, normalizeStyleKey, type DbfRow } from "./dbfSource.js";
 
 /**
  * Motor genérico Style ↔ Suite para maestros y transacciones (clientes, artículos,
@@ -171,7 +171,9 @@ export async function processEntitiesFromStyle(
     let lastLagMs: number | null = null;
     try {
       for (const row of rows) {
-        const src = srcIndex ? srcIndex.get(normalizeStyleKey(row.id_reg)) ?? null : null;
+        const src = srcIndex
+          ? lookupDbfRow(srcIndex, handler.source!.table, row.id_reg)
+          : null;
         const args = await Promise.resolve(handler.buildArgs(deps.companyId, row, src, deps));
         let hadConflict = false;
         if (args) {

@@ -7,7 +7,7 @@ import type { PostgrestError } from '@supabase/supabase-js';
 
 import { countCatalogCustomers } from '@/lib/customerSearch';
 import { isSchemaColumnError } from '@/lib/appointmentSales';
-import { fetchDashboardBilling, monthKey } from '@/lib/salesRevenue';
+import { fetchDashboardBilling, fetchYearBillingComparison, monthKey, type YearBillingRow } from '@/lib/salesRevenue';
 
 const isMissingRelation = (error: PostgrestError | null) =>
   Boolean(
@@ -17,12 +17,14 @@ const isMissingRelation = (error: PostgrestError | null) =>
         (error.message || '').toLowerCase().includes('does not exist'))
   );
 
-export const useDashboardData = () => {
+export const useDashboardData = (compareYears?: number[]) => {
   const { companyId, loading: companyLoading } = useCompanyFilter();
   const { operationalCompanyId, loading: wcLoading } = useWorkCenter();
   const opCompanyId = operationalCompanyId ?? companyId;
 
   const today = format(new Date(), 'yyyy-MM-dd');
+  const nowYear = new Date().getFullYear();
+  const years = compareYears?.length ? compareYears : [nowYear, nowYear - 1];
 
   const { data: main, isLoading: mainLoading } = useQuery({
     queryKey: ['dashboard-main', companyId, opCompanyId],
@@ -88,6 +90,16 @@ export const useDashboardData = () => {
     refetchInterval: 5 * 60 * 1000,
   });
 
+  const { data: yearBilling, isLoading: yearBillingLoading } = useQuery({
+    queryKey: ['dashboard-year-billing', companyId, years],
+    queryFn: async () => {
+      if (!companyId) return [] as YearBillingRow[];
+      return fetchYearBillingComparison(companyId, years);
+    },
+    enabled: !!companyId && !companyLoading,
+    staleTime: 5 * 60 * 1000,
+  });
+
   const { data: recentActivity, isLoading: activityLoading } = useQuery({
     queryKey: ['dashboard-recent-activity', companyId, opCompanyId],
     queryFn: async () => {
@@ -143,8 +155,10 @@ export const useDashboardData = () => {
   return {
     stats: main?.stats,
     chartData: main?.chartData,
+    yearBilling,
+    compareYears: years,
     recentActivity,
-    isLoading: mainLoading || activityLoading || companyLoading || wcLoading,
+    isLoading: mainLoading || activityLoading || yearBillingLoading || companyLoading || wcLoading,
   };
 };
 

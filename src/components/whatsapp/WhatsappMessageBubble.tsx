@@ -21,6 +21,7 @@ import {
   extractPushNameFromRaw,
   extractReplyToFromRaw,
   formatGroupSenderLabel,
+  hasWhatsappProviderMediaHint,
   isExternalWhatsappCdnUrl,
   messagePreviewText,
   lookupGroupSenderLabel,
@@ -228,8 +229,11 @@ function MediaContent({ message }: { message: WhatsappMessageRow }) {
     () => extractEmbeddedMediaBase64(message.raw),
     [message.raw],
   );
+  const providerMediaHint = hasWhatsappProviderMediaHint(message);
   const canDownload =
-    !!embedded || !!wahaDirectUrl || !!(mediaMessageId && downloadChatId);
+    !!embedded ||
+    !!wahaDirectUrl ||
+    (!!(mediaMessageId && downloadChatId) && providerMediaHint);
 
   const prefetched = mediaMessageId ? getPrefetchMedia(mediaMessageId) : null;
 
@@ -290,6 +294,12 @@ function MediaContent({ message }: { message: WhatsappMessageRow }) {
     if (isWhatsappMediaUnavailable(cacheKey)) {
       setLoadFailed(true);
       setExpiredMedia(true);
+      return;
+    }
+    if (!providerMediaHint && !embedded && !wahaDirectUrl) {
+      setLoadFailed(true);
+      setExpiredMedia(true);
+      if (cacheKey) markWhatsappMediaUnavailable(cacheKey);
       return;
     }
     if (embedded) {
@@ -357,6 +367,7 @@ function MediaContent({ message }: { message: WhatsappMessageRow }) {
     message.chat_id,
     activeChatId,
     relatedChatIds,
+    providerMediaHint,
     objectUrl,
     isStorageUrl,
     storedUrl,

@@ -3,8 +3,10 @@ import fs from "node:fs";
 import {
   dbfStr,
   loadDbfIndexed,
+  lookupDbfRow,
   normalizeStyleKey,
   resolveDbfPath,
+  styleRowKey,
   type DbfRow,
 } from "./dbfSource.js";
 import type { EntityEngineDeps, EntityHandler } from "./entitySync.js";
@@ -164,14 +166,14 @@ export async function pollDbfEntityChanges(
 
     for (const [key, row] of index) {
       const fp = rowFingerprint(row, fields);
-      allEntries.push({ style_key: key, fingerprint: fp });
+      const mapKey = normalizeStyleKey(key.includes("/") ? key.split("/").pop() ?? key : key);
+      allEntries.push({ style_key: mapKey, fingerprint: fp });
       if (!seeded) {
-        if (!mappedKeys.has(key)) changed.push({ key, row, fp });
+        if (!mappedKeys.has(mapKey)) changed.push({ key: mapKey, row, fp });
         continue;
       }
-      // Tras baseline: cambio de huella O registro aún sin entity_map (backfill pendiente).
-      if (known.get(key) !== fp || !mappedKeys.has(key)) {
-        changed.push({ key, row, fp });
+      if (known.get(mapKey) !== fp || !mappedKeys.has(mapKey)) {
+        changed.push({ key: mapKey, row, fp });
       }
     }
 
@@ -181,7 +183,7 @@ export async function pollDbfEntityChanges(
           `dbf-poll ${tabla}: baseline pendiente, ${changed.length} sin mapear (lote ${Math.min(batch, changed.length)})`,
         );
         for (const item of changed.slice(0, batch)) {
-          const rawKey = dbfStr(item.row, handler.source.keyField) || item.key;
+          const rawKey = styleRowKey(handler.source.table, item.row) || item.key;
           try {
             await applyHandlerRow(deps, handler, rawKey, item.row);
             await upsertFingerprints(deps, tabla, [{ style_key: item.key, fingerprint: item.fp }]);
@@ -203,7 +205,7 @@ export async function pollDbfEntityChanges(
 
     deps.log(`dbf-poll ${tabla}: ${changed.length} cambio(s) detectado(s)`);
     for (const item of changed.slice(0, batch)) {
-      const rawKey = dbfStr(item.row, handler.source.keyField) || item.key;
+      const rawKey = dbfStr(item.row, handler.source.keyField) || styleRowKey(handler.source.table, item.row) || item.key;
       try {
         await applyHandlerRow(deps, handler, rawKey, item.row);
         await upsertFingerprints(deps, tabla, [{ style_key: item.key, fingerprint: item.fp }]);

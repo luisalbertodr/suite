@@ -80,7 +80,7 @@ export async function loadWhatsappMediaCached(
   } catch (e) {
     blobPromises.delete(key);
     const msg = e instanceof Error ? e.message : '';
-    if (/expirad|410|gone|no disponible/i.test(msg)) {
+    if (/expirad|410|gone|no disponible|no devolvió|not found/i.test(msg)) {
       unavailableKeys.add(key);
     }
     throw e;

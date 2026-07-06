@@ -65,20 +65,50 @@ foreach ($f in $progs) {
 }
 Copy-Item (Join-Path $Vfp "suite_inbound_worker.prg") (Join-Path $progDest "suite_inbound_worker_sync.prg") -Force
 
-$oncePrg = Join-Path $progDest "_inbound_once.prg"
+# FXP obsoletos pueden ejecutar codigo viejo (p. ej. _inbound_once sin DO ... IN).
+Get-ChildItem $progDest -Filter "_inbound_once.FXP" -ErrorAction SilentlyContinue | Remove-Item -Force
+Get-ChildItem $progDest -Filter "suite_inbound_worker_sync.FXP" -ErrorAction SilentlyContinue | Remove-Item -Force
+
+$oncePrg = Join-Path $StyleRoot "PROGS\_inbound_once.prg"
 $vfpExe = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual FoxPro 9\vfp9.exe"
-@"
-* Wrapper scheduler: cwd + SAFETY OFF + cierra VFP.
+$onceSrc = Join-Path $Vfp "_inbound_once.prg"
+if (Test-Path $onceSrc) {
+    $once = Get-Content $onceSrc -Raw -Encoding UTF8
+    $once = $once -replace 'C:\\Duna\\Style-Suite-Test\\', ($StyleRoot.TrimEnd('\') + '\')
+} else {
+    $once = @"
+* Wrapper scheduler: cwd + SAFETY OFF + cierra VFP sin dialogos de error.
+LOCAL lcWorker
 SET SAFETY OFF
 SET ESCAPE OFF
+SET NOTIFY OFF
+ON ERROR DO InboundOnceError
 _SCREEN.Visible = .F.
 PUBLIC pcSuiteStyleRoot
 pcSuiteStyleRoot = "$StyleRoot\"
 SET DEFAULT TO (pcSuiteStyleRoot)
-SET PROCEDURE TO (pcSuiteStyleRoot + "PROGS\suite_inbound_worker_sync.prg") ADDITIVE
+lcWorker = pcSuiteStyleRoot + "PROGS\suite_inbound_worker_sync.prg"
+IF .NOT. FILE(lcWorker)
+   STRTOFILE(TTOC(DATETIME()) + " missing " + lcWorker + CHR(13), pcSuiteStyleRoot + "sync\inbound_worker.log", .T.)
+   QUIT
+ENDIF
+SET PROCEDURE TO (lcWorker) ADDITIVE
+IF TYPE("SuiteInboundWorkerRun") = "U"
+   STRTOFILE(TTOC(DATETIME()) + " SuiteInboundWorkerRun not loaded" + CHR(13), pcSuiteStyleRoot + "sync\inbound_worker.log", .T.)
+   QUIT
+ENDIF
 DO SuiteInboundWorkerRun
 QUIT
-"@ | Set-Content -Path $oncePrg -Encoding ASCII
+PROCEDURE InboundOnceError
+ LOCAL lcMsg
+ lcMsg = ALLTRIM(MESSAGE())
+ STRTOFILE(TTOC(DATETIME()) + " _inbound_once error: " + lcMsg + CHR(13), pcSuiteStyleRoot + "sync\inbound_worker.log", .T.)
+ CLEAR TYPE "ON ERROR"
+ QUIT
+ENDPROC
+"@
+}
+Set-Content -Path $oncePrg -Value $once -Encoding ASCII
 Write-Host "  OK PROGS\_inbound_once.prg" -ForegroundColor Green
 if (Test-Path $vfpExe) {
     $runner = Join-Path $StyleRoot "run_inbound_worker.bat"

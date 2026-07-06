@@ -13,6 +13,23 @@ FUNCTION SuiteEntityFieldExists
  RETURN (TYPE(tcAlias + "." + ALLTRIM(tcField)) <> "U")
 ENDFUNC
 **
+FUNCTION SuiteEntityIvaStyleCode
+ * Style ivaart: codigo 0-3 (no porcentaje 21/10/4).
+ PARAMETER tnPct
+ LOCAL ln
+ ln = VAL(ALLTRIM(STR(tnPct)))
+ DO CASE
+ CASE ln >= 15
+    RETURN 1
+ CASE ln >= 8
+    RETURN 2
+ CASE ln >= 3
+    RETURN 3
+ OTHERWISE
+    RETURN 0
+ ENDCASE
+ENDFUNC
+**
 PROCEDURE SuiteEntityWriteAck
  PARAMETER tnOutboxId, tcStyleKey, llOk, tcErr, tcAckDir
  LOCAL lcAck
@@ -153,7 +170,7 @@ FUNCTION SuiteEntityApplyArticulo
  lnPvpa = VAL(ALLTRIM(SuiteGetObj(toMsg, "pvpa", "0")))
  lnCoste = VAL(ALLTRIM(SuiteGetObj(toMsg, "coste", "0")))
  lnStock = VAL(ALLTRIM(SuiteGetObj(toMsg, "stock", "0")))
- lnIva = VAL(ALLTRIM(SuiteGetObj(toMsg, "iva", "21")))
+ lnIva = SuiteEntityIvaStyleCode(VAL(ALLTRIM(SuiteGetObj(toMsg, "iva", "21"))))
  llObs = (UPPER(ALLTRIM(SuiteGetObj(toMsg, "obsoleto", "NO"))) == "SI")
 
  SELECT articulos
@@ -192,6 +209,157 @@ FUNCTION SuiteEntityApplyArticulo
  RETURN lcCodart
 ENDFUNC
 **
+FUNCTION SuiteEntityApplyLineasAlblin
+ * Aplica lineas JSON (array) del payload inbound a alblin.dbf.
+ PARAMETER tnNumalb, toMsg
+ LOCAL lcJson, loArr, lnI, lnCnt, lcCodart, lcDes, lnCant, lnPrecio, lnTotal
+ IF tnNumalb <= 0
+    RETURN
+ ENDIF
+ IF  .NOT. SuiteInboundOpenTable("alblin")
+    RETURN
+ ENDIF
+ lcJson = ALLTRIM(SuiteGetObj(toMsg, "lineas", ""))
+ IF EMPTY(lcJson) .OR. LEFT(ALLTRIM(lcJson), 1) <> "["
+    RETURN
+ ENDIF
+ loArr = SuiteJsonParse(lcJson)
+ IF TYPE("loArr") <> "O"
+    RETURN
+ ENDIF
+ lnCnt = 0
+ TRY
+    lnCnt = EVALUATE("loArr.length")
+ CATCH
+    lnCnt = 0
+ ENDTRY
+ FOR lnI = 0 TO lnCnt - 1
+    LOCAL loLn
+    loLn = .NULL.
+    TRY
+       loLn = EVALUATE("loArr[" + ALLTRIM(STR(lnI)) + "]")
+    CATCH
+       LOOP
+    ENDTRY
+    IF TYPE("loLn") <> "O"
+       LOOP
+    ENDIF
+    lcCodart = ALLTRIM(SuiteGetObj(loLn, "codart", ""))
+    lcDes = ALLTRIM(SuiteGetObj(loLn, "desart", ""))
+    lnCant = SuiteGetObjNum(loLn, "cantidad", 1)
+    IF lnCant = 0
+       lnCant = SuiteGetObjNum(loLn, "cant", 1)
+    ENDIF
+    lnPrecio = SuiteGetObjNum(loLn, "precio", 0)
+    lnTotal = SuiteGetObjNum(loLn, "total", 0)
+    IF lnTotal = 0
+       lnTotal = SuiteGetObjNum(loLn, "subtot", lnCant * lnPrecio)
+    ENDIF
+    SELECT alblin
+    IF RLOCK("0", "alblin")
+       APPEND BLANK
+       IF SuiteEntityFieldExists("alblin", "numalb")
+          REPLACE numalb WITH tnNumalb
+       ENDIF
+       IF SuiteEntityFieldExists("alblin", "codart")
+          REPLACE codart WITH lcCodart
+       ENDIF
+       IF SuiteEntityFieldExists("alblin", "desart")
+          REPLACE desart WITH lcDes
+       ENDIF
+       IF SuiteEntityFieldExists("alblin", "cant")
+          REPLACE cant WITH lnCant
+       ENDIF
+       IF SuiteEntityFieldExists("alblin", "cantidad")
+          REPLACE cantidad WITH lnCant
+       ENDIF
+       IF SuiteEntityFieldExists("alblin", "preven")
+          REPLACE preven WITH lnPrecio
+       ENDIF
+       IF SuiteEntityFieldExists("alblin", "precio")
+          REPLACE precio WITH lnPrecio
+       ENDIF
+       IF SuiteEntityFieldExists("alblin", "subtot")
+          REPLACE subtot WITH lnTotal
+       ENDIF
+       IF SuiteEntityFieldExists("alblin", "total")
+          REPLACE total WITH lnTotal
+       ENDIF
+       UNLOCK IN alblin
+    ENDIF
+ ENDFOR
+ENDFUNC
+**
+FUNCTION SuiteEntityApplyLineasFaclin
+ * Aplica lineas JSON (array) del payload inbound a faclin.dbf.
+ PARAMETER tnNumfac, toMsg
+ LOCAL lcJson, loArr, lnI, lnCnt, lcCodart, lcDes, lnCant, lnPrecio, lnSubtot, lnIvaPct
+ IF tnNumfac <= 0
+    RETURN
+ ENDIF
+ IF  .NOT. SuiteInboundOpenTable("faclin")
+    RETURN
+ ENDIF
+ lcJson = ALLTRIM(SuiteGetObj(toMsg, "lineas", ""))
+ IF EMPTY(lcJson) .OR. LEFT(ALLTRIM(lcJson), 1) <> "["
+    RETURN
+ ENDIF
+ loArr = SuiteJsonParse(lcJson)
+ IF TYPE("loArr") <> "O"
+    RETURN
+ ENDIF
+ lnCnt = 0
+ TRY
+    lnCnt = EVALUATE("loArr.length")
+ CATCH
+    lnCnt = 0
+ ENDTRY
+ FOR lnI = 0 TO lnCnt - 1
+    LOCAL loLn
+    loLn = .NULL.
+    TRY
+       loLn = EVALUATE("loArr[" + ALLTRIM(STR(lnI)) + "]")
+    CATCH
+       LOOP
+    ENDTRY
+    IF TYPE("loLn") <> "O"
+       LOOP
+    ENDIF
+    lcCodart = ALLTRIM(SuiteGetObj(loLn, "codart", ""))
+    lcDes = ALLTRIM(SuiteGetObj(loLn, "desart", ""))
+    lnCant = SuiteGetObjNum(loLn, "cantidad", 1)
+    lnPrecio = SuiteGetObjNum(loLn, "precio", 0)
+    lnSubtot = SuiteGetObjNum(loLn, "subtot", lnCant * lnPrecio)
+    lnIvaPct = SuiteGetObjNum(loLn, "taniva", 21)
+    SELECT faclin
+    IF RLOCK("0", "faclin")
+       APPEND BLANK
+       IF SuiteEntityFieldExists("faclin", "numfac")
+          REPLACE numfac WITH tnNumfac
+       ENDIF
+       IF SuiteEntityFieldExists("faclin", "codart")
+          REPLACE codart WITH lcCodart
+       ENDIF
+       IF SuiteEntityFieldExists("faclin", "desart")
+          REPLACE desart WITH lcDes
+       ENDIF
+       IF SuiteEntityFieldExists("faclin", "cant")
+          REPLACE cant WITH lnCant
+       ENDIF
+       IF SuiteEntityFieldExists("faclin", "preven")
+          REPLACE preven WITH lnPrecio
+       ENDIF
+       IF SuiteEntityFieldExists("faclin", "subtot")
+          REPLACE subtot WITH lnSubtot
+       ENDIF
+       IF SuiteEntityFieldExists("faclin", "taniva")
+          REPLACE taniva WITH lnIvaPct
+       ENDIF
+       UNLOCK IN faclin
+    ENDIF
+ ENDFOR
+ENDFUNC
+**
 FUNCTION SuiteEntityApplyBono
  * Suite -> Style: actualiza saldo/consumo de un bono de cliente.
  PARAMETER toMsg
@@ -210,7 +378,19 @@ FUNCTION SuiteEntityApplyBono
  SELECT bonoscli
  LOCATE FOR ALLTRIM(codboncli) == lcCodboncli
  IF  .NOT. FOUND()
-    RETURN ""
+    IF RLOCK("0", "bonoscli")
+       APPEND BLANK
+       REPLACE codboncli WITH lcCodboncli
+       IF SuiteEntityFieldExists("bonoscli", "codcli")
+          REPLACE codcli WITH ALLTRIM(SuiteGetObj(toMsg, "codcli", ""))
+       ENDIF
+       IF SuiteEntityFieldExists("bonoscli", "desbon")
+          REPLACE desbon WITH ALLTRIM(SuiteGetObj(toMsg, "desbon", ""))
+       ENDIF
+       UNLOCK IN bonoscli
+    ELSE
+       RETURN ""
+    ENDIF
  ENDIF
  IF RLOCK("bonoscli")
     IF SuiteEntityFieldExists("bonoscli", "sesiones")
@@ -287,11 +467,12 @@ FUNCTION SuiteEntityApplyVenta
     ENDIF
     UNLOCK IN albcab
  ENDIF
+ = SuiteEntityApplyLineasAlblin(lnNumalb, toMsg)
  RETURN ALLTRIM(STR(lnNumalb))
 ENDFUNC
 **
 FUNCTION SuiteEntityApplyFactura
- * Suite -> Style: alta de factura en faccab (cabecera). Lineas faclin en iteracion posterior.
+ * Suite -> Style: alta de factura en faccab (cabecera + faclin).
  PARAMETER toMsg
  LOCAL lcCodcli, lnBase, lnIva, lnTotal, ldFecha, lcFechaIso, lnNumfac
  IF  .NOT. SuiteInboundOpenTable("faccab")
@@ -334,6 +515,7 @@ FUNCTION SuiteEntityApplyFactura
     ENDIF
     UNLOCK IN faccab
  ENDIF
+ = SuiteEntityApplyLineasFaclin(lnNumfac, toMsg)
  RETURN ALLTRIM(STR(lnNumfac))
 ENDFUNC
 **

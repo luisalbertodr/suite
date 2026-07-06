@@ -23,9 +23,9 @@ $runner = Join-Path $StyleRoot "run_style_sync_agent.bat"
 $bat = @"
 @echo off
 cd /d "$AgentDir"
-powershell -NoProfile -Command "if(Get-CimInstance Win32_Process -Filter \"name='node.exe'\" -EA SilentlyContinue | Where-Object { `$_.CommandLine -match 'dist[/\\]index\.js' }){exit 0}"
+powershell -NoProfile -Command "`$p=Get-CimInstance Win32_Process -Filter \"name='node.exe'\" -EA SilentlyContinue | Where-Object { `$_.CommandLine -match 'dist[/\\]index\.js' } | Select-Object -First 1; if(`$p){exit 0}else{exit 1}"
 if %ERRORLEVEL%==0 exit /b 0
-start /B node dist/index.js >> agent-run.log 2>&1
+start /B node --max-old-space-size=8192 dist/index.js >> agent-run.log 2>&1
 "@
 Set-Content -Path $runner -Value $bat -Encoding ASCII
 

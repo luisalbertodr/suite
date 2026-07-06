@@ -1887,6 +1887,10 @@ FUNCTION Cambia_Codigo_Cliente
  IF  .NOT. llsmsabierta
     USE IN sms
  ENDIF
+ TRY
+    = SuiteAfterEntitySave("clientes", tccodigonuevo, "UPD")
+ CATCH
+ ENDTRY
  RETURN (llcambiado)
 ENDFUNC
 **
@@ -2585,6 +2589,10 @@ FUNCTION Cambia_Codigo_Articulo
  IF  .NOT. llnumserabierta
     USE IN numser
  ENDIF
+ TRY
+    = SuiteAfterEntitySave("articulos", tccodigonuevo, "UPD")
+ CATCH
+ ENDTRY
  RETURN (llcambiado)
 ENDFUNC
 **
@@ -4363,7 +4371,12 @@ FUNCTION Reservas_Incidencia
     SELECT (lcalias)
  ENDIF
  TRY
-    IF TYPE("plSuiteSyncEnabled")="L" AND plSuiteSyncEnabled
+    LOCAL llUseV2
+    llUseV2 = (TYPE("SuiteEnqueuePlan2009")#"U")
+    IF llUseV2 .AND. TYPE("SuiteColaIsV2Active")#"U"
+       llUseV2 = SuiteColaIsV2Active()
+    ENDIF
+    IF llUseV2
        LOCAL lcAcc, lcsCodemp, lcsCodcli, ldsFecha, lcsHorini, lcsHorfin, lcsTexto
        LOCAL lcsCodrec, lcsNomcli, lcsTel1cli
        lcAcc = "UPD"
@@ -4404,8 +4417,14 @@ FUNCTION Reservas_Incidencia
        ENDCASE
        = SuiteEnqueuePlan2009(tnidplan, lcAcc, lcsCodemp, lcsCodcli, ldsFecha, lcsHorini, lcsHorfin, ;
              lcsTexto, lcsCodrec, lcsNomcli, lcsTel1cli)
+       IF TYPE("Suite_SyncLog")#"U"
+          DO Suite_SyncLog WITH "[ENQ-OK] plan2009 id="+ALLTRIM(STR(tnidplan))+" acc="+lcAcc
+       ENDIF
     ELSE
-       * Fallback legacy (si existe suite_full_unlock en runtime).
+       IF TYPE("Suite_SyncLog")#"U"
+          DO Suite_SyncLog WITH "[ENQ-SKIP] v2 inactivo id="+ALLTRIM(STR(tnidplan))+" tipo="+ALLTRIM(tctipinc)
+       ENDIF
+       * Fallback legacy HTTP (solo si v2 no activo y suite_full_unlock presente).
        IF TYPE("SuiteSyncEnsureLoaded")#"U"
           = SuiteSyncEnsureLoaded()
        ENDIF
@@ -4432,7 +4451,10 @@ FUNCTION Reservas_Incidencia
           ENDCASE
        ENDIF
     ENDIF
- CATCH
+ CATCH TO oEnqErr
+    IF TYPE("Suite_SyncLog")#"U"
+       DO Suite_SyncLog WITH "[ENQ-ERR] id="+ALLTRIM(STR(tnidplan))+" "+IIF(TYPE("oEnqErr")="O", oEnqErr.message, "?")
+    ENDIF
  ENDTRY
  RETURN .T.
 ENDFUNC
@@ -7588,6 +7610,12 @@ FUNCTION CrearBono
        ENDIF
     ENDIF
  ENDIF
+ TRY
+    IF USED("bonoscli")
+       = SuiteAfterEntitySave("bonoscli", bonoscli.codboncli, "UPD")
+    ENDIF
+ CATCH
+ ENDTRY
  RETURN .T.
 ENDFUNC
 **

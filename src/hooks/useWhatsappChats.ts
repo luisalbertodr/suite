@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
-import { invokeWhatsappProxy } from '@/hooks/useWhatsappConfig';
+import { invokeWhatsappProxy, useWhatsappConfig } from '@/hooks/useWhatsappConfig';
 import {
   isSystemChatJid,
   isGroupJid,
@@ -15,7 +15,7 @@ import type { Database } from '@/integrations/supabase/types';
 export type WhatsappChatRow = Database['public']['Tables']['whatsapp_chats']['Row'];
 
 const BG_SYNC_INTERVAL_MS = 8000;
-const WAHA_CHATS_REFRESH_MS = 60_000;
+const WAHA_CHATS_REFRESH_MS = 120_000;
 /** Evita traer `raw` (JSONB pesado) en cada refresco de lista. */
 export const WHATSAPP_CHAT_LIST_COLUMNS =
   'id,company_id,chat_id,name,is_group,profile_picture_url,last_message_preview,last_message_at,last_message_from_me,unread_count,pinned,archived,history_synced_at,oldest_message_at,customer_id,marketing_lead_id,created_at,updated_at';
@@ -37,6 +37,8 @@ export async function fetchWhatsappChatById(
 export const useWhatsappChats = () => {
   const queryClient = useQueryClient();
   const { companyId, loading: companyLoading } = useWhatsappCompanyId();
+  const { config } = useWhatsappConfig();
+  const isOpenwa = config?.provider === 'openwa';
 
   const chatsQuery = useQuery({
     queryKey: ['whatsapp-chats', companyId],
@@ -131,16 +133,16 @@ export const useWhatsappChats = () => {
   const refreshFromWahaRef = useRef(refreshFromWaha);
   refreshFromWahaRef.current = refreshFromWaha;
 
-  // Fallback: refresco periódico desde WAHA (no re-ejecutar al cambiar la ref del mutation).
+  // Refresco periódico desde proveedor (WAHA). OpenWA usa BD + webhooks (getChats bloquea Puppeteer).
   useEffect(() => {
-    if (!companyId) return;
+    if (!companyId || isOpenwa) return;
     const tick = () => {
       if (refreshFromWahaRef.current.isPending) return;
       refreshFromWahaRef.current.mutate(undefined, { onError: () => undefined });
     };
     const timer = window.setInterval(tick, WAHA_CHATS_REFRESH_MS);
     return () => window.clearInterval(timer);
-  }, [companyId]);
+  }, [companyId, isOpenwa]);
 
   const syncHistoryFromWaha = useMutation({
     mutationFn: async () => {
@@ -234,7 +236,7 @@ export const useWhatsappChats = () => {
   );
 
   useEffect(() => {
-    if (!companyId) return;
+    if (!companyId || isOpenwa) return;
 
     const runNext = () => {
       if (bgBusyRef.current) return;
@@ -293,6 +295,7 @@ export const useWhatsappChats = () => {
     return () => clearInterval(timer);
   }, [
     companyId,
+    isOpenwa,
     unsyncedCount,
     missingGroupNameChatIds.join('|'),
     missingPictureChatIds.join('|'),

@@ -3,7 +3,7 @@ import {
   mapOpenwaStatusToInternal,
   type WhatsappProviderConfig,
 } from './whatsappProviderTypes.ts';
-import { PROVIDER_MEDIA_TIMEOUT_MS, providerJson, WhatsappProviderError } from './whatsappProviderClient.ts';
+import { OPENWA_CHATS_TIMEOUT_MS, PROVIDER_MEDIA_TIMEOUT_MS, providerJson, WhatsappProviderError } from './whatsappProviderClient.ts';
 import { sanitizeWhatsappMessageType } from './whatsappMessageType.ts';
 
 export type OpenwaMediaMeta = {
@@ -274,7 +274,7 @@ export async function openwaListChats(
   });
   const data = await providerJson<
     Array<Record<string, unknown>> | { chats?: Array<Record<string, unknown>> }
-  >(cfg, `${openwaSessionPath(cfg, sessionId)}/chats?${q.toString()}`);
+  >(cfg, `${openwaSessionPath(cfg, sessionId)}/chats?${q.toString()}`, {}, OPENWA_CHATS_TIMEOUT_MS);
   if (Array.isArray(data)) return data;
   if (Array.isArray(data.chats)) return data.chats;
   return [];

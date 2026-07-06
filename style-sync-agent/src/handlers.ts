@@ -5,6 +5,7 @@ import {
   dbfStr,
   loadDbfFilteredRows,
   normalizeStyleKey,
+  styleRowKey,
   type DbfRow,
 } from "./dbfSource.js";
 import type { EntityEngineDeps, EntityHandler } from "./entitySync.js";
@@ -47,18 +48,15 @@ async function alblinJson(deps: EntityEngineDeps | undefined, numalb: string): P
   );
 }
 
-async function faclinJson(
-  deps: EntityEngineDeps | undefined,
-  numfac: string,
-  serie: string,
-  ejefac?: string,
-): Promise<string> {
+async function faclinJson(deps: EntityEngineDeps | undefined, src: DbfRow): Promise<string> {
   if (!deps) return "[]";
+  const ejefac = dbfStr(src, "ejefac");
+  const serfac = dbfStr(src, "serfac") || dbfStr(src, "serie");
+  const numfac = dbfStr(src, "numfac");
   const lines = await loadDbfFilteredRows(deps.styleRoot, "faclin", (row) => {
-    if (!lineMatchesKey(row, "numfac", numfac)) return false;
-    if (serie && dbfStr(row, "serfac") && dbfStr(row, "serfac") !== serie) return false;
-    if (ejefac && dbfStr(row, "ejefac") && dbfStr(row, "ejefac") !== ejefac) return false;
-    return true;
+    if (dbfStr(row, "ejefac") !== ejefac) return false;
+    if (dbfStr(row, "serfac") !== serfac) return false;
+    return lineMatchesKey(row, "numfac", numfac);
   });
   return JSON.stringify(
     lines.map((ln) => ({
@@ -160,6 +158,22 @@ const articulosHandler: EntityHandler = {
       p_sync_version: syncVersionFrom(cola, src),
     };
   },
+  toInboundJson(row) {
+    const p = row.payload ?? {};
+    return {
+      entity_type: "article",
+      operation: row.operation,
+      codart: String(row.style_key ?? p["codart"] ?? ""),
+      desart: String(p["desart"] ?? ""),
+      familia1: String(p["familia1"] ?? ""),
+      pvpa: p["pvpa"] ?? 0,
+      coste: p["coste"] ?? 0,
+      stock: p["stock"] ?? 0,
+      iva: p["iva"] ?? 21,
+      obsoleto: p["obsoleto"] ?? "NO",
+      sync_version: p["sync_version"] ?? 0,
+    };
+  },
 };
 
 /** Style→Suite: bonoscli.dbf → public.bonos (Fase 3). */
@@ -184,9 +198,23 @@ const bonosHandler: EntityHandler = {
       p_consumidas: dbfNum(src, "consumi") || dbfNum(src, "consumidas"),
       p_importe: dbfNum(src, "importe"),
       p_fecha: dbfDateIso(src, "fecha"),
-      p_fecaducidad: dbfDateIso(src, "fecadu") || dbfDateIso(src, "fecaducidad"),
+      p_fecaducidad: dbfDateIso(src, "fecven") || dbfDateIso(src, "fecadu") || dbfDateIso(src, "fecaducidad"),
       p_obsoleto: dbfBool(src, "obsoleto"),
       p_sync_version: syncVersionFrom(cola, src),
+    };
+  },
+  toInboundJson(row) {
+    const p = row.payload ?? {};
+    return {
+      entity_type: "bono",
+      operation: row.operation,
+      codboncli: String(row.style_key ?? p["codboncli"] ?? ""),
+      codcli: String(p["codcli"] ?? ""),
+      desbon: String(p["desbon"] ?? ""),
+      sesiones: p["sesiones"] ?? 0,
+      consumidas: p["consumidas"] ?? 0,
+      obsoleto: p["obsoleto"] ?? "NO",
+      sync_version: p["sync_version"] ?? 0,
     };
   },
 };
@@ -214,19 +242,39 @@ const ventasHandler: EntityHandler = {
       p_sync_version: syncVersionFrom(cola, src),
     };
   },
+  toInboundJson(row) {
+    const p = row.payload ?? {};
+    let lineas: unknown = p["lineas"];
+    if (typeof lineas === "string") {
+      try {
+        lineas = JSON.parse(lineas);
+      } catch {
+        lineas = [];
+      }
+    }
+    return {
+      entity_type: "sale",
+      operation: row.operation,
+      codcli: String(p["codcli"] ?? ""),
+      fecha: String(p["fecha"] ?? ""),
+      total: p["total"] ?? 0,
+      lineas: lineas ?? [],
+      sync_version: p["sync_version"] ?? 0,
+    };
+  },
 };
 
 /** Style→Suite: faccab.dbf → public.invoices (Fase 5). */
 const facturasHandler: EntityHandler = {
   entityType: "invoice",
   tabla: "faccab",
-  source: { table: "faccab", keyField: "numfac" },
+  source: { table: "faccab", keyField: "ejefac" },
   rpc: "style_facturas_apply_from_style",
   async buildArgs(companyId, cola, src, deps) {
-    const numfac = cola.id_reg.trim();
+    if (!src) return null;
+    const numfac = dbfStr(src, "numfac");
     if (!numfac) return null;
     const accion = isDelete(cola.accion) ? "DELETE" : "UPSERT";
-    if (accion === "UPSERT" && !src) return null;
     const serie = dbfStr(src, "serie") || dbfStr(src, "serfac");
     return {
       p_company_id: companyId,
@@ -234,12 +282,36 @@ const facturasHandler: EntityHandler = {
       p_numfac: numfac,
       p_serie: serie,
       p_codcli: dbfStr(src, "codcli"),
-      p_fecha: dbfDateIso(src, "fecha") || dbfDateIso(src, "fecfac"),
-      p_baseimp: dbfNum(src, "baseimp") || dbfNum(src, "totimpbas"),
-      p_iva: dbfNum(src, "iva") || dbfNum(src, "totimpiva"),
-      p_total: dbfNum(src, "total") || dbfNum(src, "totfac"),
-      p_lineas: await faclinJson(deps, numfac, serie, dbfStr(src, "ejefac")),
+      p_fecha: dbfDateIso(src, "fecfac"),
+      p_baseimp: dbfNum(src, "totimpbas") || dbfNum(src, "baseimp"),
+      p_iva: dbfNum(src, "totimpiva") || dbfNum(src, "iva"),
+      p_total: dbfNum(src, "totfac") || dbfNum(src, "total"),
+      p_lineas: await faclinJson(deps, src),
       p_sync_version: syncVersionFrom(cola, src),
+      p_ejefac: dbfStr(src, "ejefac"),
+    };
+  },
+  toInboundJson(row) {
+    const p = row.payload ?? {};
+    let lineas: unknown = p["lineas"];
+    if (typeof lineas === "string") {
+      try {
+        lineas = JSON.parse(lineas);
+      } catch {
+        lineas = [];
+      }
+    }
+    return {
+      entity_type: "invoice",
+      operation: row.operation,
+      numfac: String(p["numfac"] ?? row.style_key ?? ""),
+      codcli: String(p["codcli"] ?? ""),
+      fecha: String(p["fecha"] ?? ""),
+      baseimp: p["baseimp"] ?? 0,
+      iva: p["iva"] ?? 0,
+      total: p["total"] ?? 0,
+      lineas: lineas ?? [],
+      sync_version: p["sync_version"] ?? 0,
     };
   },
 };
@@ -259,11 +331,24 @@ const cajaHandler: EntityHandler = {
       p_company_id: companyId,
       p_accion: accion,
       p_numcie: numcie,
-      p_fecha: dbfDateIso(src, "fecha"),
+      p_fecha: dbfDateIso(src, "feccie") || dbfDateIso(src, "fecha"),
       p_efectivo: dbfNum(src, "efectivo") || dbfNum(src, "efec"),
       p_tarjeta: dbfNum(src, "tarjeta") || dbfNum(src, "tarj"),
       p_total: dbfNum(src, "total") || dbfNum(src, "totalcie"),
       p_sync_version: syncVersionFrom(cola, src),
+    };
+  },
+  toInboundJson(row) {
+    const p = row.payload ?? {};
+    return {
+      entity_type: "cash_session",
+      operation: row.operation,
+      numcie: String(row.style_key ?? p["numcie"] ?? ""),
+      fecha: String(p["fecha"] ?? ""),
+      efectivo: p["efectivo"] ?? 0,
+      tarjeta: p["tarjeta"] ?? 0,
+      total: p["total"] ?? 0,
+      sync_version: p["sync_version"] ?? 0,
     };
   },
 };

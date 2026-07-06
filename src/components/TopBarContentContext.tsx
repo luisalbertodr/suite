@@ -42,10 +42,12 @@ export function useTopBarContent(): TopBarContentContextValue {
 export function useRegisterTopBarContent(content: TopBarContent, deps: React.DependencyList = []) {
   const { setContent } = useTopBarContent();
   const panelActive = useRoutePanelActive();
+  const contentRef = React.useRef(content);
+  contentRef.current = content;
 
   useEffect(() => {
     if (!panelActive) return;
-    setContent(content);
+    setContent(contentRef.current);
     return () => setContent({});
     // `deps` lets each screen decide when dynamic actions must be refreshed.
     // eslint-disable-next-line react-hooks/exhaustive-deps

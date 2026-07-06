@@ -394,6 +394,37 @@ FUNCTION SuiteEnqueuePlan2009
     lcTel1cli = ALLTRIM(NVL(tcSnapTel1cli, ""))
  ENDIF
 
+ * UPD/INS: snapshot de Reservas_Incidencia prevalece (estado nuevo post-cambio).
+ IF lcacc = "UPD" .OR. lcacc = "INS"
+    IF PCOUNT() >= 3 .AND. TYPE("tcSnapCodemp")="C" .AND. .NOT. EMPTY(tcSnapCodemp)
+       lcCodemp = ALLTRIM(tcSnapCodemp)
+    ENDIF
+    IF PCOUNT() >= 4 .AND. TYPE("tcSnapCodcli")="C" .AND. .NOT. EMPTY(tcSnapCodcli)
+       lcCodcli = ALLTRIM(tcSnapCodcli)
+    ENDIF
+    IF PCOUNT() >= 5 .AND. TYPE("tdSnapFecha")="D" .AND. .NOT. EMPTY(tdSnapFecha)
+       ldFecha = tdSnapFecha
+    ENDIF
+    IF PCOUNT() >= 6 .AND. TYPE("tcSnapHorini")="C" .AND. .NOT. EMPTY(tcSnapHorini)
+       lcHorini = ALLTRIM(tcSnapHorini)
+    ENDIF
+    IF PCOUNT() >= 7 .AND. TYPE("tcSnapHorfin")="C" .AND. .NOT. EMPTY(tcSnapHorfin)
+       lcHorfin = ALLTRIM(tcSnapHorfin)
+    ENDIF
+    IF PCOUNT() >= 8 .AND. TYPE("tcSnapTexto")="C" .AND. .NOT. EMPTY(tcSnapTexto)
+       lcTexto = LEFT(ALLTRIM(tcSnapTexto), 250)
+    ENDIF
+    IF PCOUNT() >= 9 .AND. TYPE("tcSnapCodrec")="C" .AND. .NOT. EMPTY(tcSnapCodrec)
+       lcCodrec = ALLTRIM(tcSnapCodrec)
+    ENDIF
+    IF PCOUNT() >= 10 .AND. TYPE("tcSnapNomcli")="C" .AND. .NOT. EMPTY(tcSnapNomcli)
+       lcNomcli = ALLTRIM(tcSnapNomcli)
+    ENDIF
+    IF PCOUNT() >= 11 .AND. TYPE("tcSnapTel1cli")="C" .AND. .NOT. EMPTY(tcSnapTel1cli)
+       lcTel1cli = ALLTRIM(tcSnapTel1cli)
+    ENDIF
+ ENDIF
+
  lcServicios = SuiteBuildServiciosJson(VAL(lcId))
 
  * Fecha tambien como cadena ISO YYYY-MM-DD: el dbf-reader del agente Node malinterpreta

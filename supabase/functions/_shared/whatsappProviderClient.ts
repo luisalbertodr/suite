@@ -44,6 +44,8 @@ function buildOpenwaSendMediaBody(
 }
 
 const FETCH_TIMEOUT_MS = 25_000;
+/** OpenWA getChats() puede tardar mucho; fallar antes del wall-clock de Kong. */
+export const OPENWA_CHATS_TIMEOUT_MS = 18_000;
 export const PROVIDER_MEDIA_TIMEOUT_MS = 55_000;
 
 export class WhatsappProviderError extends Error {
@@ -276,7 +278,7 @@ export async function providerSendMedia(
           {
             ...media,
             mime: audioMime,
-            filename: media.filename?.trim() || OPENWA_VOICE_FILENAME,
+            filename: OPENWA_VOICE_FILENAME,
           },
           base64,
           'application/ogg',

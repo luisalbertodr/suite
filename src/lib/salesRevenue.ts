@@ -172,6 +172,106 @@ export type DashboardBilling = {
   series: Array<{ monthStart: Date; monthEnd: Date; total: number }>;
 };
 
+export type YearBillingRow = {
+  name: string;
+  monthNum: number;
+  presupuestos?: number;
+  [yearKey: string]: number | string | undefined;
+};
+
+const MONTH_SHORT = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+
+type RpcBillingRow = { month_num: number; month_key: string; total: number };
+
+async function fetchRpcMonthlyBilling(
+  companyId: string,
+  year: number,
+): Promise<Map<number, number>> {
+  const { data, error } = await supabase.rpc('dashboard_billing_monthly', {
+    p_company_id: companyId,
+    p_year: year,
+  });
+  if (error) throw error;
+  const out = new Map<number, number>();
+  for (const row of (data ?? []) as RpcBillingRow[]) {
+    out.set(row.month_num, Number(row.total ?? 0));
+  }
+  return out;
+}
+
+/** Comparativa mensual entre varios años (Ene–Dic). Usa RPC alineado con Style sync en hub. */
+export async function fetchYearBillingComparison(
+  companyId: string,
+  years: number[],
+): Promise<YearBillingRow[]> {
+  const sortedYears = [...years].sort((a, b) => a - b);
+  const byYear = new Map<number, Map<number, number>>();
+
+  try {
+    await Promise.all(
+      sortedYears.map(async (year) => {
+        byYear.set(year, await fetchRpcMonthlyBilling(companyId, year));
+      }),
+    );
+  } catch {
+    // Fallback si la migración RPC aún no está desplegada
+    for (const year of sortedYears) {
+      const from = `${year}-01-01`;
+      const to = `${year}-12-31`;
+      const invoices = await loadInvoices(companyId, from, to);
+      byYear.set(year, bucketInvoicesByMonthNum(invoices));
+    }
+  }
+
+  const currentYear = new Date().getFullYear();
+  let quoteBuckets = new Map<number, number>();
+  if (sortedYears.includes(currentYear)) {
+    const quoRes = await supabase
+      .from('quotes')
+      .select('total_amount, created_at')
+      .eq('company_id', companyId)
+      .gte('created_at', `${currentYear}-01-01T00:00:00`)
+      .lte('created_at', `${currentYear}-12-31T23:59:59`);
+    for (const q of quoRes.data ?? []) {
+      const m = new Date(q.created_at).getMonth() + 1;
+      quoteBuckets.set(m, (quoteBuckets.get(m) ?? 0) + Number(q.total_amount ?? 0));
+    }
+  }
+
+  return MONTH_SHORT.map((name, idx) => {
+    const monthNum = idx + 1;
+    const row: YearBillingRow = { name, monthNum };
+    for (const year of sortedYears) {
+      row[String(year)] = byYear.get(year)?.get(monthNum) ?? 0;
+    }
+    if (sortedYears.includes(currentYear)) {
+      row.presupuestos = quoteBuckets.get(monthNum) ?? 0;
+    }
+    return row;
+  });
+}
+
+function bucketInvoicesByMonthNum(rows: InvoiceRow[]): Map<number, number> {
+  const buckets = new Map<number, number>();
+  for (const inv of rows) {
+    if (!invoiceCountsAsBilling(inv) || !inv.issue_date) continue;
+    const m = parseInt(inv.issue_date.slice(5, 7), 10);
+    buckets.set(m, (buckets.get(m) ?? 0) + Number(inv.total_amount ?? 0));
+  }
+  return buckets;
+}
+
+async function fetchCurrentMonthBillingRpc(companyId: string): Promise<number | null> {
+  const year = new Date().getFullYear();
+  const month = new Date().getMonth() + 1;
+  try {
+    const buckets = await fetchRpcMonthlyBilling(companyId, year);
+    return buckets.get(month) ?? 0;
+  } catch {
+    return null;
+  }
+}
+
 /** Una sola carga para tarjeta + gráfico del dashboard (evita N consultas repetidas). */
 export async function fetchDashboardBilling(
   companyId: string,
@@ -210,12 +310,13 @@ export async function fetchDashboardBilling(
 
   const invTotal = sumInvoices(currentInvoices);
   const salesTotal = sumSales(currentSales);
+  const rpcMonthTotal = await fetchCurrentMonthBillingRpc(companyId);
 
   return {
     currentMonth: {
       invoices: invTotal,
       salesWithoutInvoice: salesTotal,
-      total: billingTotalFromInvoices(invTotal),
+      total: rpcMonthTotal ?? billingTotalFromInvoices(invTotal),
     },
     series,
   };

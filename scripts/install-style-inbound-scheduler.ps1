@@ -35,18 +35,33 @@ if (-not (Test-Path $worker)) {
 }
 
 $oncePrg = Join-Path $StyleRoot "PROGS\_inbound_once.prg"
-$once = @"
-* Wrapper scheduler: cwd + SAFETY OFF + cierra VFP.
+$onceSrc = Join-Path (Split-Path -Parent $PSScriptRoot) "vfp\_inbound_once.prg"
+if (Test-Path $onceSrc) {
+    $once = Get-Content $onceSrc -Raw -Encoding UTF8
+    $once = $once -replace 'C:\\Duna\\Style-Suite-Test\\', ($StyleRoot.TrimEnd('\') + '\')
+} else {
+    $once = @"
+LOCAL lcWorker
 SET SAFETY OFF
 SET ESCAPE OFF
+SET NOTIFY OFF
+ON ERROR DO InboundOnceError
 _SCREEN.Visible = .F.
 PUBLIC pcSuiteStyleRoot
 pcSuiteStyleRoot = "$StyleRoot\"
 SET DEFAULT TO (pcSuiteStyleRoot)
-SET PROCEDURE TO (pcSuiteStyleRoot + "PROGS\suite_inbound_worker_sync.prg") ADDITIVE
+lcWorker = pcSuiteStyleRoot + "PROGS\suite_inbound_worker_sync.prg"
+IF .NOT. FILE(lcWorker)
+   QUIT
+ENDIF
+SET PROCEDURE TO (lcWorker) ADDITIVE
+IF TYPE("SuiteInboundWorkerRun") = "U"
+   QUIT
+ENDIF
 DO SuiteInboundWorkerRun
 QUIT
 "@
+}
 Set-Content -Path $oncePrg -Value $once -Encoding ASCII
 
 $runner = Join-Path $StyleRoot "run_inbound_worker.bat"

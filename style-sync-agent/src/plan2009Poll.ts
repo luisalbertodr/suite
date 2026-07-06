@@ -7,10 +7,14 @@ import {
   dbfStr,
   loadDbfFilteredRows,
   loadDbfIndexed,
+  loadDbfRowsForKeySet,
+  parseDbfLayout,
+  readRowFromBuffer,
   resolveDbfPath,
   type DbfRow,
 } from "./dbfSource.js";
 import { serviciosJsonToLegacy } from "./servicios.js";
+import { loadRecentPlanincIdPlans } from "./planincRecent.js";
 
 const TABLA = "plan2009";
 const PLAN_FIELDS = [
@@ -18,14 +22,17 @@ const PLAN_FIELDS = [
   "nomcli", "tel1cli", "facturado", "colfon", "collet",
 ];
 
-type PollDeps = {
+/** Re-escaneo completo aunque el mtime del DBF no haya cambiado (CIFS a veces miente). */
+const FORCE_POLL_MS = Number(process.env.PLAN2009_FORCE_POLL_MS ?? "30000");
+
+export type PollDeps = {
   supabase: SupabaseClient;
   companyId: string;
   styleRoot: string;
   log: (msg: string) => void;
 };
 
-function rowFingerprint(row: DbfRow, serviciosJson: string): string {
+export function rowFingerprint(row: DbfRow, serviciosJson: string): string {
   const parts = PLAN_FIELDS.map((f) => {
     if (f === "fecha") return `fecha=${dbfDateIso(row, f) ?? ""}`;
     if (f === "facturado") return `facturado=${dbfBool(row, f) ? "1" : "0"}`;
@@ -36,7 +43,11 @@ function rowFingerprint(row: DbfRow, serviciosJson: string): string {
 }
 
 /** Índice idplan → JSON servicios (una lectura de planart.dbf por tick). */
-async function loadPlanartServiciosIndex(styleRoot: string): Promise<Map<string, string>> {
+let planartServiciosCache: Map<string, string> | null = null;
+let planartServiciosMtime = 0;
+
+async function loadPlanartServiciosIndex(styleRoot: string, artMtime: number): Promise<Map<string, string>> {
+  if (planartServiciosCache && artMtime === planartServiciosMtime) return planartServiciosCache;
   const rows = await loadDbfFilteredRows(styleRoot, "planart", () => true);
   const buckets = new Map<string, Array<{ servicio: string; hora: string }>>();
   for (const r of rows) {
@@ -51,10 +62,12 @@ async function loadPlanartServiciosIndex(styleRoot: string): Promise<Map<string,
   }
   const out = new Map<string, string>();
   for (const [key, items] of buckets) out.set(key, JSON.stringify(items));
+  planartServiciosCache = out;
+  planartServiciosMtime = artMtime;
   return out;
 }
 
-function normalizePlanKey(key: string): string {
+export function normalizePlanKey(key: string): string {
   const t = String(key ?? "").trim();
   return /^\d+$/.test(t) ? t.replace(/^0+/, "") || "0" : t;
 }
@@ -72,7 +85,20 @@ async function loadFingerprintMap(deps: PollDeps): Promise<Map<string, string>> 
   return out;
 }
 
-async function upsertFingerprints(
+let fingerprintCache: { map: Map<string, string>; at: number } | null = null;
+const FINGERPRINT_CACHE_MS = Number(process.env.PLAN2009_FP_CACHE_MS ?? "45000");
+
+async function loadFingerprintMapCached(deps: PollDeps): Promise<Map<string, string>> {
+  const now = Date.now();
+  if (fingerprintCache && now - fingerprintCache.at < FINGERPRINT_CACHE_MS) {
+    return fingerprintCache.map;
+  }
+  const map = await loadFingerprintMap(deps);
+  fingerprintCache = { map, at: now };
+  return map;
+}
+
+export async function upsertFingerprints(
   deps: PollDeps,
   entries: Array<{ style_key: string; fingerprint: string }>,
 ): Promise<void> {
@@ -92,6 +118,7 @@ async function upsertFingerprints(
       .upsert(slice, { onConflict: "company_id,tabla,style_key" });
     if (error) throw error;
   }
+  fingerprintCache = null;
 }
 
 async function applyPlan2009(
@@ -127,6 +154,63 @@ async function applyPlan2009(
 }
 
 const lastMtime = { plan2009: 0, planart: 0 };
+let lastForcePollAt = 0;
+let lastLightMtime = 0;
+let lastLightPollAt = 0;
+const LIGHT_POLL_MIN_MS = Number(process.env.PLAN2009_LIGHT_POLL_MIN_MS ?? "2000");
+
+async function loadPlanartServiciosForKeys(
+  styleRoot: string,
+  keys: Set<string>,
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (!keys.size) return out;
+  const dbfPath = resolveDbfPath(styleRoot, "planart");
+  if (!dbfPath) return out;
+  const buf = fs.readFileSync(dbfPath);
+  const layout = parseDbfLayout(buf);
+  const field = layout.fields.find((f) => f.name === "IDPLAN");
+  if (!field) return out;
+  const buckets = new Map<string, Array<{ servicio: string; hora: string }>>();
+  for (let i = 0; i < layout.nRecords; i++) {
+    const recOff = layout.headerLen + i * layout.recordLen;
+    if (buf[recOff] === 0x2a) continue;
+    const rawKey = buf
+      .slice(recOff + field.pos, recOff + field.pos + field.flen)
+      .toString("ascii")
+      .replace(/\0/g, "")
+      .trim();
+    const normKey = rawKey.replace(/^0+/, "") || "0";
+    if (!keys.has(normKey)) continue;
+    const row = readRowFromBuffer(buf, layout, recOff);
+    const cod = dbfStr(row, "codart");
+    if (!cod) continue;
+    const list = buckets.get(normKey) ?? [];
+    list.push({ servicio: cod, hora: dbfStr(row, "hora") });
+    buckets.set(normKey, list);
+  }
+  for (const [key, items] of buckets) out.set(key, JSON.stringify(items));
+  return out;
+}
+
+function sortChangesByPriority(
+  changed: Array<{ key: string; row: DbfRow; fp: string; accion: "UPDATE" | "DELETE" }>,
+  known: Map<string, string>,
+  recentPlaninc: string[],
+): void {
+  const recentRank = new Map(recentPlaninc.map((id, i) => [id, i]));
+  changed.sort((a, b) => {
+    const aRecent = recentRank.has(a.key) ? recentRank.get(a.key)! : 999_999;
+    const bRecent = recentRank.has(b.key) ? recentRank.get(b.key)! : 999_999;
+    if (aRecent !== bRecent) return aRecent - bRecent;
+    const aNew = known.has(a.key) ? 1 : 0;
+    const bNew = known.has(b.key) ? 1 : 0;
+    if (aNew !== bNew) return aNew - bNew;
+    const aNum = /^\d+$/.test(a.key) ? Number(a.key) : 0;
+    const bNum = /^\d+$/.test(b.key) ? Number(b.key) : 0;
+    return bNum - aNum;
+  });
+}
 
 /**
  * Detecta cambios en plan2009/planart cuando Style no encola en cola_sincro.
@@ -146,23 +230,36 @@ export async function pollPlan2009FromDbf(deps: PollDeps, batch: number): Promis
     return;
   }
 
-  const known = await loadFingerprintMap(deps);
+  const known = await loadFingerprintMapCached(deps);
   const seeded = known.size > 0;
-  if (seeded && planMtime === lastMtime.plan2009 && artMtime === lastMtime.planart) return;
+  const forcePoll = Date.now() - lastForcePollAt >= FORCE_POLL_MS;
+  if (seeded && !forcePoll && planMtime === lastMtime.plan2009 && artMtime === lastMtime.planart) {
+    return;
+  }
+  if (forcePoll) lastForcePollAt = Date.now();
   lastMtime.plan2009 = planMtime;
   lastMtime.planart = artMtime;
 
   const index = await loadDbfIndexed(deps.styleRoot, "plan2009", "idplan");
-  const serviciosByPlan = await loadPlanartServiciosIndex(deps.styleRoot);
+  const serviciosByPlan = await loadPlanartServiciosIndex(deps.styleRoot, artMtime);
   const changed: Array<{ key: string; row: DbfRow; fp: string; accion: "UPDATE" | "DELETE" }> = [];
-  const allEntries: Array<{ style_key: string; fingerprint: string }> = [];
+
+  if (!seeded) {
+    const allEntries: Array<{ style_key: string; fingerprint: string }> = [];
+    for (const [key, row] of index) {
+      const normKey = normalizePlanKey(key);
+      const serviciosJson = serviciosByPlan.get(normKey) ?? "[]";
+      allEntries.push({ style_key: normKey, fingerprint: rowFingerprint(row, serviciosJson) });
+    }
+    await upsertFingerprints(deps, allEntries);
+    deps.log(`dbf-poll ${TABLA}: baseline ${allEntries.length} huellas (sin reimportar historial)`);
+    return;
+  }
 
   for (const [key, row] of index) {
     const normKey = normalizePlanKey(key);
     const serviciosJson = serviciosByPlan.get(normKey) ?? "[]";
     const fp = rowFingerprint(row, serviciosJson);
-    allEntries.push({ style_key: normKey, fingerprint: fp });
-    if (!seeded) continue;
     if (known.get(normKey) !== fp) changed.push({ key: normKey, row, fp, accion: "UPDATE" });
   }
 
@@ -175,13 +272,13 @@ export async function pollPlan2009FromDbf(deps: PollDeps, batch: number): Promis
     }
   }
 
-  if (!seeded) {
-    await upsertFingerprints(deps, allEntries);
-    deps.log(`dbf-poll ${TABLA}: baseline ${allEntries.length} huellas (sin reimportar historial)`);
-    return;
-  }
-
   if (!changed.length) return;
+
+  const recentPlaninc = await loadRecentPlanincIdPlans(deps.styleRoot);
+  if (recentPlaninc.length) {
+    deps.log(`dbf-poll ${TABLA}: ${recentPlaninc.length} idplan(s) recientes en planinc`);
+  }
+  sortChangesByPriority(changed, known, recentPlaninc);
 
   deps.log(`dbf-poll ${TABLA}: ${changed.length} cambio(s) detectado(s)`);
   for (const item of changed.slice(0, batch)) {
@@ -207,5 +304,67 @@ export async function pollPlan2009FromDbf(deps: PollDeps, batch: number): Promis
   }
   if (changed.length > batch) {
     deps.log(`dbf-poll ${TABLA}: quedan ${changed.length - batch} pendientes (siguiente tick)`);
+  }
+}
+
+/**
+ * Poll ligero mientras Style está abierto: solo idplans recientes en planinc.
+ * No indexa 80k filas en RAM ni recorre todo plan2009.
+ */
+export async function pollPlan2009Lightweight(deps: PollDeps, batch: number): Promise<void> {
+  const now = Date.now();
+  if (now - lastLightPollAt < LIGHT_POLL_MIN_MS) return;
+  lastLightPollAt = now;
+
+  const known = await loadFingerprintMapCached(deps);
+  if (!known.size) return;
+
+  const recentPlaninc = await loadRecentPlanincIdPlans(deps.styleRoot);
+  if (!recentPlaninc.length) return;
+
+  const keySet = new Set(recentPlaninc.map(normalizePlanKey));
+  const rowsByKey = loadDbfRowsForKeySet(deps.styleRoot, "plan2009", "idplan", keySet);
+  const serviciosByPlan = await loadPlanartServiciosForKeys(deps.styleRoot, keySet);
+
+  const changed: Array<{ key: string; row: DbfRow; fp: string }> = [];
+  for (const key of recentPlaninc) {
+    const row = rowsByKey.get(normalizePlanKey(key));
+    if (!row) continue;
+    const serviciosJson = serviciosByPlan.get(normalizePlanKey(key)) ?? "[]";
+    const fp = rowFingerprint(row, serviciosJson);
+    if (known.get(normalizePlanKey(key)) !== fp) {
+      changed.push({ key: normalizePlanKey(key), row, fp });
+    }
+  }
+
+  if (!changed.length) return;
+
+  sortChangesByPriority(
+    changed.map((c) => ({ ...c, accion: "UPDATE" as const })),
+    known,
+    recentPlaninc,
+  );
+
+  deps.log(`dbf-poll ${TABLA} (ligero): ${changed.length} cambio(s) en ${keySet.size} idplan(s) recientes`);
+  for (const item of changed.slice(0, batch)) {
+    try {
+      const serviciosJson = serviciosByPlan.get(item.key) ?? "[]";
+      await applyPlan2009(deps, item.key, item.row, "UPDATE", serviciosJson);
+      await upsertFingerprints(deps, [{ style_key: item.key, fingerprint: item.fp }]);
+    } catch (err) {
+      deps.log(
+        `dbf-poll ${TABLA} (ligero) idplan=${item.key} error: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  const planPath = resolveDbfPath(deps.styleRoot, "plan2009");
+  if (planPath) {
+    try {
+      lastLightMtime = fs.statSync(planPath).mtimeMs;
+      lastMtime.plan2009 = lastLightMtime;
+    } catch {
+      /* ignore */
+    }
   }
 }

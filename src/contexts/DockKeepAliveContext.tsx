@@ -12,7 +12,8 @@ const DockKeepAliveContext = createContext<DockKeepAliveValue>({
 });
 
 export function DockKeepAliveProvider({ children }: { children: React.ReactNode }) {
-  const [mountedKeys, setMountedKeys] = useState<Set<DockRouteKey>>(() => new Set());
+  // Agenda es la ruta por defecto: montarla desde el primer render evita barra superior vacía.
+  const [mountedKeys, setMountedKeys] = useState<Set<DockRouteKey>>(() => new Set(['agenda']));
 
   const mountPanel = useCallback((key: DockRouteKey) => {
     setMountedKeys((prev) => {

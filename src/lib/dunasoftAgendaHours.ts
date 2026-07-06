@@ -90,7 +90,8 @@ export function employeeSegmentsForDate(
 ): AgendaTimeSegment[] {
   const jsDay = date.getDay();
   const workField = WORK_DAY_FIELDS[jsDay];
-  if (workField && row[workField] === false) return [];
+  // En VFP/Style, lunes/martes/… = .T. significa «día festivo del empleado» (no trabaja).
+  if (workField && row[workField] === true) return [];
 
   const dunDay = JS_TO_DUN_DAY[jsDay] ?? 1;
   const prefix = `dia${dunDay}`;

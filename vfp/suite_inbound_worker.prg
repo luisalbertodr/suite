@@ -585,7 +585,7 @@ PROCEDURE SuiteInboundRecycleFailed
 ENDPROC
 
 PROCEDURE SuiteInboundWorkerRun
- LOCAL lcRoot, lcInbound, lcAck, lnN, lnI, lcFile, lcJson, loMsg, lcerr, lnCycle
+ LOCAL lcRoot, lcInbound, lcAck, lnN, lnI, lcFile, lcJson, loMsg, lcerr, lnCycle, lcEType
  LOCAL ARRAY laFiles[1]
 
  SET SAFETY OFF
@@ -648,7 +648,6 @@ PROCEDURE SuiteInboundWorkerRun
        LOOP
     ENDIF
     lcerr = ""
-    LOCAL lcEType
     lcEType = LOWER(ALLTRIM(SuiteGetObj(loMsg, "entity_type", "")))
     TRY
        IF  .NOT. EMPTY(lcEType) .AND. lcEType <> "plan2009"

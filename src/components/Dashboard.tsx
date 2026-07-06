@@ -1,16 +1,37 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
-  Users, Calendar, Receipt, TrendingUp, DollarSign, Activity,
-  Loader2, AlertCircle, RefreshCw, CreditCard, BarChart3
+  Users, Calendar, Receipt, TrendingUp,
+  Loader2, AlertCircle, RefreshCw, CreditCard, BarChart3, Activity
 } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  LineChart, Line, Legend,
+} from 'recharts';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useDashboardData } from '../hooks/useDashboardData';
 import { Reportes } from './Reportes';
 import { useRegisterTopBarContent } from '@/components/TopBarContentContext';
 
+const YEAR_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#ef4444'];
+
+function toggleYear(selected: number[], year: number): number[] {
+  if (selected.includes(year)) {
+    const next = selected.filter((y) => y !== year);
+    return next.length ? next : selected;
+  }
+  return [...selected, year].sort((a, b) => a - b);
+}
+
 export const Dashboard: React.FC = () => {
-  const { stats, chartData, recentActivity, isLoading } = useDashboardData();
+  const nowYear = new Date().getFullYear();
+  const availableYears = useMemo(() => {
+    const years: number[] = [];
+    for (let y = nowYear; y >= nowYear - 12; y -= 1) years.push(y);
+    return years;
+  }, [nowYear]);
+  const [selectedYears, setSelectedYears] = useState<number[]>([nowYear, nowYear - 1]);
+
+  const { stats, yearBilling, recentActivity, isLoading } = useDashboardData(selectedYears);
   const topBarActions = useMemo(() => (
     <button
       type="button"
@@ -33,6 +54,34 @@ export const Dashboard: React.FC = () => {
     },
     [topBarActions],
   );
+
+  const yearSelector = (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="text-xs text-muted-foreground mr-1">Años:</span>
+      {availableYears.map((year) => {
+        const active = selectedYears.includes(year);
+        return (
+          <button
+            key={year}
+            type="button"
+            onClick={() => setSelectedYears(toggleYear(selectedYears, year))}
+            className={`h-7 rounded-md border px-2.5 text-xs font-medium transition-colors ${
+              active
+                ? 'border-primary bg-primary/10 text-primary'
+                : 'border-border bg-card text-muted-foreground hover:bg-muted'
+            }`}
+          >
+            {year}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  const currencyTooltip = (v: number, name: string) => [
+    `€${Number(v).toLocaleString('es-ES', { minimumFractionDigits: 2 })}`,
+    name,
+  ];
 
   if (isLoading) {
     return (
@@ -73,6 +122,9 @@ export const Dashboard: React.FC = () => {
     },
   ];
 
+  const chartRows = yearBilling ?? [];
+  const showPresupuestos = selectedYears.includes(nowYear);
+
   return (
     <div className="space-y-4">
       <Tabs defaultValue="resumen" className="space-y-4">
@@ -95,7 +147,6 @@ export const Dashboard: React.FC = () => {
         </div>
 
         <TabsContent value="resumen" className="space-y-6 mt-0">
-          {/* Stats Cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             {statsCards.map((stat, i) => {
               const Icon = stat.icon;
@@ -115,53 +166,77 @@ export const Dashboard: React.FC = () => {
             })}
           </div>
 
-          {/* Charts */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-card rounded-xl shadow-lg p-6 border">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-base font-semibold text-foreground">Evolución de Facturación</h3>
-                <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <DollarSign className="w-3.5 h-3.5" /> 6 meses
-                </div>
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                <h3 className="text-base font-semibold text-foreground">Facturación por mes</h3>
+                {yearSelector}
               </div>
-              <ResponsiveContainer width="100%" height={260}>
-                <LineChart data={chartData || []}>
+              <ResponsiveContainer width="100%" height={280}>
+                <LineChart data={chartRows}>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                   <XAxis dataKey="name" stroke="hsl(var(--muted-foreground))" fontSize={12} />
                   <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
                   <Tooltip
                     contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px' }}
-                    formatter={(v: number) => [`€${v.toLocaleString('es-ES')}`, 'Facturación']}
+                    formatter={(v: number, name: string) => currencyTooltip(v, `Facturación ${name}`)}
                   />
-                  <Line type="monotone" dataKey="ventas" stroke="hsl(var(--primary))" strokeWidth={2.5} dot={{ r: 3 }} />
+                  <Legend />
+                  {selectedYears.map((year, idx) => (
+                    <Line
+                      key={year}
+                      type="monotone"
+                      dataKey={String(year)}
+                      name={String(year)}
+                      stroke={YEAR_COLORS[idx % YEAR_COLORS.length]}
+                      strokeWidth={2.5}
+                      dot={{ r: 3 }}
+                    />
+                  ))}
                 </LineChart>
               </ResponsiveContainer>
             </div>
 
             <div className="bg-card rounded-xl shadow-lg p-6 border">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-base font-semibold text-foreground">Presupuestos vs Facturación</h3>
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                <h3 className="text-base font-semibold text-foreground">Comparativa anual</h3>
                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <Activity className="w-3.5 h-3.5" /> Comparativa
+                  <Activity className="w-3.5 h-3.5" /> IVA incl.
                 </div>
               </div>
-              <ResponsiveContainer width="100%" height={260}>
-                <BarChart data={chartData || []}>
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart data={chartRows}>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                   <XAxis dataKey="name" stroke="hsl(var(--muted-foreground))" fontSize={12} />
                   <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
                   <Tooltip
                     contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px' }}
-                    formatter={(v: number, n: string) => [`€${v.toLocaleString('es-ES')}`, n === 'presupuestos' ? 'Presupuestos' : 'Facturación']}
+                    formatter={(v: number, name: string) => {
+                      if (name === 'presupuestos') return currencyTooltip(v, 'Presupuestos');
+                      return currencyTooltip(v, `Facturación ${name}`);
+                    }}
                   />
-                  <Bar dataKey="presupuestos" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="ventas" fill="#10b981" radius={[4, 4, 0, 0]} />
+                  <Legend />
+                  {selectedYears.map((year, idx) => (
+                    <Bar
+                      key={year}
+                      dataKey={String(year)}
+                      name={String(year)}
+                      fill={YEAR_COLORS[idx % YEAR_COLORS.length]}
+                      radius={[3, 3, 0, 0]}
+                    />
+                  ))}
+                  {showPresupuestos && (
+                    <Bar dataKey="presupuestos" name="Presupuestos" fill="#a78bfa" radius={[3, 3, 0, 0]} />
+                  )}
                 </BarChart>
               </ResponsiveContainer>
+              <p className="text-[11px] text-muted-foreground mt-2">
+                Facturación fiscal Style sync (serie A). Selecciona varios años para comparar.
+              </p>
             </div>
           </div>
 
-          {/* Recent Activity */}
           <div className="bg-card rounded-xl shadow-lg p-6 border">
             <h3 className="text-base font-semibold text-foreground mb-4">Actividad Reciente</h3>
             <div className="space-y-3">

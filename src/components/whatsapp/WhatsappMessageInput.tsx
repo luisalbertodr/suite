@@ -21,7 +21,14 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
-import { assertWhatsappVoiceNoteFile, fileToBase64, mediaKindFromMime, messagePreviewText, resolveWhatsappFileMime } from './whatsappUtils';
+import {
+  assertWhatsappVoiceNoteFile,
+  fileToBase64,
+  isWhatsappOggAttachment,
+  mediaKindFromMime,
+  messagePreviewText,
+  resolveWhatsappFileMime,
+} from './whatsappUtils';
 import { useWhatsappTheme } from './WhatsappThemeContext';
 import { WHATSAPP_EMOJI_GRID } from './whatsappEmojis';
 import type { SendMessageInput, WhatsappMessageRow } from '@/hooks/useWhatsappMessages';
@@ -134,16 +141,19 @@ export const WhatsappMessageInput: React.FC<Props> = ({
       return;
     }
     try {
-      await assertWhatsappVoiceNoteFile(file);
-      const base64 = await fileToBase64(file);
       const mime = resolveWhatsappFileMime(file.name, file.type);
-      const kind = mediaKindFromMime(mime);
+      const oggVoice = isWhatsappOggAttachment(file.name, mime);
+      if (oggVoice) {
+        await assertWhatsappVoiceNoteFile(file);
+      }
+      const base64 = await fileToBase64(file);
+      const kind = oggVoice ? 'voice' : mediaKindFromMime(mime);
       await onSend(
         buildSendPayload({
           type: kind,
           media_base64: base64,
-          mime_type: mime,
-          filename: file.name,
+          mime_type: oggVoice ? 'audio/ogg' : mime,
+          filename: oggVoice ? 'voice.ogg' : file.name,
           caption: text.trim() || undefined,
         }),
       );

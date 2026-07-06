@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
-import { invokeWhatsappProxy } from '@/hooks/useWhatsappConfig';
+import { invokeWhatsappProxy, useWhatsappConfig } from '@/hooks/useWhatsappConfig';
 import { jidsSameContact } from '@/components/whatsapp/whatsappUtils';
 import { patchChatsListAfterOutgoing } from '@/lib/whatsappQueryCache';
 import type { Database } from '@/integrations/supabase/types';
@@ -246,6 +246,8 @@ export const useWhatsappMessages = (
 ) => {
   const queryClient = useQueryClient();
   const { companyId, loading: companyLoading } = useWhatsappCompanyId();
+  const { config } = useWhatsappConfig();
+  const isOpenwa = config?.provider === 'openwa';
   const historySyncedAt = options?.historySyncedAt ?? null;
   const lastMessageAt = options?.lastMessageAt ?? null;
 
@@ -371,6 +373,7 @@ export const useWhatsappMessages = (
     const skipRecent = shouldSkipRecentProviderSync(cached, historySyncedAt, lastMessageAt);
 
     const runSync = () => {
+      if (isOpenwa && (cached?.length ?? 0) > 0) return;
       if (skipRecent) return;
 
       refreshFromWaha.mutate('recent', {
@@ -396,10 +399,10 @@ export const useWhatsappMessages = (
     const delayMs = cached?.length ? 2800 : 800;
     const timer = window.setTimeout(runSync, delayMs);
     return () => window.clearTimeout(timer);
-  }, [enabled, chatId, chatIds.join('|'), historySyncedAt, lastMessageAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [enabled, chatId, chatIds.join('|'), historySyncedAt, lastMessageAt, isOpenwa]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || isOpenwa) return;
     const tick = () => {
       if (document.visibilityState !== 'visible') return;
       if (refreshFromWaha.isPending) return;
@@ -409,7 +412,7 @@ export const useWhatsappMessages = (
     };
     const timer = window.setInterval(tick, RECENT_POLL_MS);
     return () => window.clearInterval(timer);
-  }, [enabled, chatIds.join('|'), historySyncedAt, lastMessageAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [enabled, chatIds.join('|'), historySyncedAt, lastMessageAt, isOpenwa]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sendMessage = useMutation({
     mutationFn: async (input: SendMessageInput) => {
