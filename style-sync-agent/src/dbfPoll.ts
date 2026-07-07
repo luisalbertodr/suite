@@ -21,7 +21,7 @@ const FINGERPRINT_FIELDS: Record<string, string[]> = {
   bonoscli: ["codcli", "codbon", "desbon", "sesiones", "consumi", "importe", "obsoleto"],
   albcab: ["serie", "seralb", "codcli", "fecha", "total", "totalalb"],
   faccab: ["serie", "serfac", "codcli", "fecha", "fecfac", "totfac", "totimpbas"],
-  ciecab: ["fecha", "efectivo", "efec", "tarjeta", "tarj", "total", "totalcie"],
+  ciecab: ["feccie", "impcie", "horcie", "cerrado"],
 };
 
 function rowFingerprint(row: DbfRow, fields: string[]): string {

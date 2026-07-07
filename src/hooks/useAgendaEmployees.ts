@@ -13,6 +13,7 @@ export interface AgendaEmployee {
   phone: string | null;
   company_id: string;
   billing_company_id?: string | null;
+  dunasoft_codemp?: string | null;
   active: boolean | null;
   /** Orden en la cuadrícula de agenda (menor = más a la izquierda). */
   agenda_sort_order?: number | null;
@@ -30,6 +31,17 @@ export type UseAgendaEmployeesOptions = {
   agendaOnly?: boolean;
 };
 
+const normalizeStyleEmployeeCode = (value: unknown): string =>
+  String(value ?? '')
+    .trim()
+    .replace(/^0+/, '') || '0';
+
+const isAgendaPseudoEmployee = (row: { dunasoft_codemp?: string | null; name?: string | null }): boolean => {
+  const codemp = normalizeStyleEmployeeCode(row.dunasoft_codemp);
+  if (codemp === '9999999') return true;
+  return String(row.name ?? '').trim().toUpperCase() === 'TPV';
+};
+
 export const useAgendaEmployees = (options?: UseAgendaEmployeesOptions) => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -42,6 +54,17 @@ export const useAgendaEmployees = (options?: UseAgendaEmployeesOptions) => {
     queryKey: ['agenda-employees', scopeCompanyId, agendaOnly ? 'active' : 'all'],
     queryFn: async () => {
       if (!scopeCompanyId) return [];
+
+      try {
+        const { error: syncError } = await supabase.rpc('sync_agenda_employees_from_style', {
+          p_company_id: scopeCompanyId,
+        });
+        if (syncError) {
+          console.warn('Error syncing agenda employees from Style:', syncError);
+        }
+      } catch (syncError) {
+        console.warn('Unexpected error syncing agenda employees from Style:', syncError);
+      }
 
       const baseQuery = () =>
         supabase
@@ -63,10 +86,12 @@ export const useAgendaEmployees = (options?: UseAgendaEmployeesOptions) => {
         throw error;
       }
 
-      return (data || []).map((row: any) => ({
-        ...row,
-        active: row.active ?? row.is_active ?? true,
-      })) as AgendaEmployee[];
+      return (data || [])
+        .map((row: any) => ({
+          ...row,
+          active: row.active ?? row.is_active ?? true,
+        }))
+        .filter((row: AgendaEmployee) => !isAgendaPseudoEmployee(row));
     },
     enabled: !!scopeCompanyId && !wcLoading,
     retry: false,

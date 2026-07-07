@@ -30,6 +30,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAgendaPreferences } from '@/hooks/useAgendaPreferences';
 import { appointmentItemsQueryKey, fetchAppointmentItems, syncAppointmentItems } from '@/hooks/useAppointmentItems';
+import { syncAgendaAppointmentToStyle } from '@/lib/dunasoftDualWriteApi';
 import { applyBonoSessionDelta } from '@/lib/consumeBonoSessions';
 import type { AppointmentItemDraft, Appointment } from '@/types/agenda';
 import {
@@ -486,6 +487,15 @@ export const Agenda: React.FC = () => {
     const { error } = await supabase.from('customer_aesthetic_history').insert(payload);
     if (error) throw error;
   };
+
+  const exportAppointmentToStyle = async (appointmentId: string) => {
+    try {
+      await syncAgendaAppointmentToStyle(appointmentId);
+    } catch (err) {
+      console.warn('Style export', err);
+    }
+  };
+
   const appointmentIds = useMemo(() => dbAppointments.map((a) => a.id), [dbAppointments]);
   const { data: appointmentTotals = {} } = useQuery({
     queryKey: ['appointment-item-totals', companyId, appointmentIds.join('|')],
@@ -1370,6 +1380,7 @@ export const Agenda: React.FC = () => {
         await queryClient.invalidateQueries({ queryKey: ['customer-active-bonos'] });
         await queryClient.invalidateQueries({ queryKey: ['bonos'] });
         await registerAppointmentHistory(data.customerId ?? null, dateStr, items, created.id);
+        await exportAppointmentToStyle(created.id);
       } catch (e) {
         console.error('appointment_items sync', e);
         toast({
@@ -1445,6 +1456,7 @@ export const Agenda: React.FC = () => {
         await queryClient.invalidateQueries({ queryKey: ['customer-active-bonos'] });
         await queryClient.invalidateQueries({ queryKey: ['bonos'] });
         await registerAppointmentHistory(updated.customerId ?? null, updated.date, items, updated.id);
+        await exportAppointmentToStyle(updated.id);
       } catch (e) {
         console.error('appointment_items sync', e);
         toast({

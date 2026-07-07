@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -22,6 +22,8 @@ import {
   type DayGroup,
   type DayTimelineItem,
 } from '@/hooks/useCustomerDayTimeline';
+import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useStyleSyncAgentStatus } from '@/hooks/useStyleSyncAgentStatus';
 import { CUSTOMER_APPOINTMENTS_TIMELINE_LIMIT } from '@/lib/agendaCustomerAppointments';
 import { cn } from '@/lib/utils';
 
@@ -35,6 +37,8 @@ type HistoryTableRow = {
   muted?: boolean;
   appointmentId?: string;
   appointmentDate?: string;
+  appointmentStatusLabel?: string;
+  isFutureAppointment?: boolean;
   attachments?: AppointmentAttachmentHints;
   consentId?: string;
 };
@@ -85,18 +89,40 @@ function formatPrice(amount: number | null | undefined, amountLabel?: string): s
   return '';
 }
 
+function buildAppointmentInstant(dateYmd: string, timeRange?: string): number | null {
+  const time = (timeRange || '').split('–')[0]?.trim() || '12:00';
+  const iso = `${dateYmd}T${time.length === 5 ? time : '12:00'}:00`;
+  const ts = Date.parse(iso);
+  return Number.isFinite(ts) ? ts : null;
+}
+
+function isFutureAppointment(dateYmd: string, timeRange?: string): boolean {
+  const instant = buildAppointmentInstant(dateYmd, timeRange);
+  if (instant == null) return false;
+  return instant > Date.now();
+}
+
 function itemToRow(dayDate: string, it: DayTimelineItem): HistoryTableRow {
   if (it.kind === 'appointment' && it.appointmentDetails) {
     const d = it.appointmentDetails;
+    const future = isFutureAppointment(dayDate, d.timeRange);
+    const futureLabel =
+      future && d.statusLabel !== 'Cancelada'
+        ? `Pendiente${d.statusLabel && d.statusLabel !== 'Confirmada' ? ` · ${d.statusLabel}` : ''}`
+        : undefined;
     return {
       id: it.id,
       dateLabel: formatDateLabel(dayDate),
       time: appointmentTime(d, it.timeLabel),
       employee: d.employeeName || '',
-      details: appointmentDetailsText(d, it.title),
+      details: futureLabel
+        ? `${appointmentDetailsText(d, it.title)} · ${futureLabel}`
+        : appointmentDetailsText(d, it.title),
       price: formatPrice(d.chargedAmount, it.amountLabel),
       appointmentId: d.appointmentId,
       appointmentDate: dayDate,
+      appointmentStatusLabel: futureLabel ?? (d.statusLabel && d.statusLabel !== 'Confirmada' ? d.statusLabel : undefined),
+      isFutureAppointment: future && d.statusLabel !== 'Cancelada',
       attachments: d.attachments,
     };
   }
@@ -169,11 +195,27 @@ export const ClienteDailyScrollView: React.FC<Props> = ({ customerId, className,
   const [appointmentLimit, setAppointmentLimit] = useState(CUSTOMER_APPOINTMENTS_TIMELINE_LIMIT);
   const [viewConsent, setViewConsent] = useState<Consentimiento | null>(null);
   const [loadingConsent, setLoadingConsent] = useState(false);
-  const { data, isLoading, isFetching, isError, error } = useCustomerDayTimeline(customerId, {
+  const { companyId } = useCompanyFilter();
+  const { data: styleSync } = useStyleSyncAgentStatus(companyId, 4_000);
+  const lastSyncRef = useRef<string | null>(null);
+  const { data, isLoading, isFetching, isError, error, refetch } = useCustomerDayTimeline(customerId, {
     appointmentLimit,
   });
   const rows = useMemo(() => buildTableRows(data?.days || []), [data?.days]);
   const hasMoreAppointments = data?.hasMoreAppointments ?? false;
+
+  useEffect(() => {
+    const ts = styleSync?.last_outbound_ok_at;
+    if (!ts) return;
+    if (lastSyncRef.current === null) {
+      lastSyncRef.current = ts;
+      return;
+    }
+    if (ts !== lastSyncRef.current) {
+      lastSyncRef.current = ts;
+      void refetch();
+    }
+  }, [refetch, styleSync?.last_outbound_ok_at]);
 
   const openConsent = async (consentId: string) => {
     setLoadingConsent(true);
@@ -258,6 +300,7 @@ export const ClienteDailyScrollView: React.FC<Props> = ({ customerId, className,
                 'hover:bg-muted/30',
                 row.muted && 'bg-muted/20',
                 isAppointment && 'cursor-pointer hover:bg-sky-50/80 dark:hover:bg-sky-950/30',
+                row.isFutureAppointment && 'bg-emerald-50/55 dark:bg-emerald-950/20',
                 isConsent && 'cursor-pointer hover:bg-sky-50/80 dark:hover:bg-sky-950/30',
               )}
               onClick={() => {
@@ -290,8 +333,20 @@ export const ClienteDailyScrollView: React.FC<Props> = ({ customerId, className,
                 )}
                 title={row.details}
               >
-                <div className="flex items-center min-w-0 gap-0.5">
+                <div className="flex items-center min-w-0 gap-1">
                   <span className="truncate flex-1 min-w-0">{row.details}</span>
+                  {row.appointmentStatusLabel ? (
+                    <span
+                      className={cn(
+                        'shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium',
+                        row.isFutureAppointment
+                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200'
+                          : 'bg-muted text-muted-foreground',
+                      )}
+                    >
+                      {row.appointmentStatusLabel}
+                    </span>
+                  ) : null}
                   {row.attachments ? (
                     <AppointmentAttachmentIcons
                       attachments={row.attachments}

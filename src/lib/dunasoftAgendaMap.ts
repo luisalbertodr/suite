@@ -49,6 +49,10 @@ export function employeeDisplayName(row: DunasoftEmpleadoRow): string {
   return name || String(row.codemp).trim();
 }
 
+function hasRealEmployeeName(row: DunasoftEmpleadoRow): boolean {
+  return [row.nomemp, row.ape1emp, row.ape2emp].some((part) => String(part ?? '').trim().length > 0);
+}
+
 export function normHHMM(raw: string | null | undefined, fallback = '09:00'): string {
   const t = String(raw ?? '').trim();
   if (!t) return fallback;
@@ -65,7 +69,7 @@ export function normHHMM(raw: string | null | undefined, fallback = '09:00'): st
 
 export function mapDunasoftEmployees(rows: DunasoftEmpleadoRow[]): Employee[] {
   return rows
-    .filter((r) => r.obsoleto !== true && r.verplan !== false)
+    .filter((r) => r.obsoleto !== true && r.verplan !== false && hasRealEmployeeName(r))
     .sort((a, b) => {
       const oa = Number(a.ordplan ?? 0);
       const ob = Number(b.ordplan ?? 0);

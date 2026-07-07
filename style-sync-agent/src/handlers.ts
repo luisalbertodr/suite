@@ -316,25 +316,95 @@ const facturasHandler: EntityHandler = {
   },
 };
 
+/** Style→Suite: recursos.dbf → public.recursos */
+const recursosHandler: EntityHandler = {
+  entityType: "recurso",
+  tabla: "recursos",
+  source: { table: "recursos", keyField: "codrec" },
+  rpc: "style_recursos_apply_from_style",
+  buildArgs(companyId, cola, src) {
+    const codrec = cola.id_reg.trim();
+    if (!codrec || codrec === "0") return null;
+    const accion = isDelete(cola.accion) ? "DELETE" : "UPSERT";
+    if (accion === "UPSERT" && !src) return null;
+    return {
+      p_company_id: companyId,
+      p_accion: accion,
+      p_codrec: codrec,
+      p_desrec: dbfStr(src, "desrec"),
+      p_obsoleto: dbfBool(src, "obsoleto"),
+      p_colorpf: Number(dbfStr(src, "colorpf") || 0),
+      p_colorpl: Number(dbfStr(src, "colorpl") || 0),
+      p_sync_version: syncVersionFrom(cola, src),
+    };
+  },
+  toInboundJson(row) {
+    const p = row.payload ?? {};
+    return {
+      entity_type: "recurso",
+      operation: row.operation,
+      codrec: String(row.style_key ?? p["codrec"] ?? ""),
+      desrec: String(p["desrec"] ?? ""),
+      obsoleto: p["obsoleto"] ? "SI" : "NO",
+      colorpf: p["colorpf"] ?? 0,
+      colorpl: p["colorpl"] ?? 0,
+      sync_version: p["sync_version"] ?? 0,
+    };
+  },
+};
+
+async function aggregateCieentsal(
+  deps: EntityEngineDeps | undefined,
+  numcie: string,
+  feccie: string | null,
+): Promise<{ cashE: number; cardE: number }> {
+  if (!deps) return { cashE: 0, cardE: 0 };
+  const lines = await loadDbfFilteredRows(deps.styleRoot, "cieentsal", (row) => {
+    const rowCie = normalizeStyleKey(dbfStr(row, "numcie"));
+    if (rowCie && rowCie === normalizeStyleKey(numcie)) return true;
+    if (!rowCie && feccie) return dbfDateIso(row, "fecdoc") === feccie;
+    return false;
+  });
+  let cashE = 0;
+  let cardE = 0;
+  for (const ln of lines) {
+    if (dbfStr(ln, "tipdoc").toUpperCase() !== "E") continue;
+    const imp = dbfNum(ln, "impdoc");
+    const pay = dbfStr(ln, "forpag").toUpperCase();
+    if (pay.includes("EFECT")) cashE += imp;
+    else if (pay.includes("TARJ")) cardE += imp;
+  }
+  return { cashE, cardE };
+}
+
 /** Style→Suite: ciecab.dbf → public.cash_register_sessions (Fase 6). */
 const cajaHandler: EntityHandler = {
   entityType: "cash_session",
   tabla: "ciecab",
   source: { table: "ciecab", keyField: "numcie" },
   rpc: "style_caja_apply_from_style",
-  buildArgs(companyId, cola, src) {
+  async buildArgs(companyId, cola, src, deps) {
     const numcie = cola.id_reg.trim();
     if (!numcie) return null;
     const accion = isDelete(cola.accion) ? "DELETE" : "UPSERT";
     if (accion === "UPSERT" && !src) return null;
+    const fecha = dbfDateIso(src, "feccie") || dbfDateIso(src, "fecha");
+    const impcie = dbfNum(src, "impcie");
+    const agg = await aggregateCieentsal(deps, numcie, fecha);
+    const legacyCash = dbfNum(src, "efectivo") || dbfNum(src, "efec");
+    const legacyCard = dbfNum(src, "tarjeta") || dbfNum(src, "tarj");
+    const legacyTotal = dbfNum(src, "total") || dbfNum(src, "totalcie");
+    const card = agg.cardE || legacyCard;
+    const cash = impcie || legacyCash || agg.cashE;
+    const total = impcie || legacyTotal || cash + card;
     return {
       p_company_id: companyId,
       p_accion: accion,
       p_numcie: numcie,
-      p_fecha: dbfDateIso(src, "feccie") || dbfDateIso(src, "fecha"),
-      p_efectivo: dbfNum(src, "efectivo") || dbfNum(src, "efec"),
-      p_tarjeta: dbfNum(src, "tarjeta") || dbfNum(src, "tarj"),
-      p_total: dbfNum(src, "total") || dbfNum(src, "totalcie"),
+      p_fecha: fecha,
+      p_efectivo: cash,
+      p_tarjeta: card,
+      p_total: total,
       p_sync_version: syncVersionFrom(cola, src),
     };
   },
@@ -359,5 +429,6 @@ export const ENTITY_HANDLERS: EntityHandler[] = [
   bonosHandler,
   ventasHandler,
   facturasHandler,
+  recursosHandler,
   cajaHandler,
 ];

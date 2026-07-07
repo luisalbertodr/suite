@@ -52,6 +52,20 @@ export type ClinicalHistoryFormValues = {
   avisoNotifyUserId: string;
 };
 
+export function emptyClinicalHistoryFormValues(): ClinicalHistoryFormValues {
+  return {
+    birthDate: '',
+    antecedentesPersonales: '',
+    motivoConsulta: '',
+    tratamiento: '',
+    proximaRevisionFecha: '',
+    proximaRevisionDescripcion: '',
+    revisiones: [],
+    avisoText: '',
+    avisoNotifyUserId: '',
+  };
+}
+
 const SELECT_FIELDS =
   'id, customer_id, company_id, fecha, appointment_id, antecedentes_personales, motivo_consulta, tratamiento, proxima_revision_fecha, proxima_revision_descripcion, aviso_text, titulo, tipo, descripcion, observaciones, empleado_id, created_at';
 
@@ -182,6 +196,28 @@ export async function fetchClinicalHistoryList(customerId: string): Promise<Clin
   return attachReviews((data ?? []).map((row) => mapRow(row as Record<string, unknown>)));
 }
 
+export async function fetchLatestClinicalHistory(
+  customerId: string,
+  excludeAppointmentId?: string | null,
+): Promise<ClinicalHistoryRecord | null> {
+  let query = supabase
+    .from('historial_clinico')
+    .select(SELECT_FIELDS)
+    .eq('customer_id', customerId)
+    .order('fecha', { ascending: false })
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  if (excludeAppointmentId) {
+    query = query.neq('appointment_id', excludeAppointmentId);
+  }
+
+  const { data, error } = await query.maybeSingle();
+  if (error) throw error;
+  const records = data ? await attachReviews([mapRow(data as Record<string, unknown>)]) : [];
+  return records[0] ?? null;
+}
+
 export function clinicalHistoryToFormValues(
   record: ClinicalHistoryRecord | null,
   birthDate: string | null,
@@ -212,6 +248,25 @@ export function clinicalHistoryToFormValues(
     proximaRevisionDescripcion: revisiones[0]?.descripcion ?? '',
     revisiones,
     avisoText: record?.aviso_text ?? '',
+    avisoNotifyUserId: '',
+  };
+}
+
+export function clinicalHistoryToPrefillValues(
+  record: ClinicalHistoryRecord | null,
+  birthDate: string | null,
+): ClinicalHistoryFormValues {
+  if (!record && !birthDate) {
+    return emptyClinicalHistoryFormValues();
+  }
+
+  const base = clinicalHistoryToFormValues(record, birthDate);
+  return {
+    ...base,
+    proximaRevisionFecha: '',
+    proximaRevisionDescripcion: '',
+    revisiones: [],
+    avisoText: '',
     avisoNotifyUserId: '',
   };
 }

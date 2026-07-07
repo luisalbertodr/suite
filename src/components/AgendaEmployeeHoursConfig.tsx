@@ -140,6 +140,7 @@ export const AgendaEmployeeHoursConfig: React.FC = () => {
         {sortedEmployees.map((emp) => {
           const st = edits[emp.id] ?? empToEdit(emp);
           const isInactive = emp.active === false;
+          const managedByStyle = Boolean(String(emp.dunasoft_codemp ?? '').trim());
           return (
             <div
               key={emp.id}
@@ -153,6 +154,11 @@ export const AgendaEmployeeHoursConfig: React.FC = () => {
                       Inactivo
                     </span>
                   )}
+                  {managedByStyle && (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-sky-100 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300 shrink-0">
+                      Sync Style {emp.dunasoft_codemp}
+                    </span>
+                  )}
                 </div>
                 <Button size="sm" variant="secondary" onClick={() => saveOne(emp)}>
                   Guardar este empleado
@@ -162,7 +168,9 @@ export const AgendaEmployeeHoursConfig: React.FC = () => {
               <div className="flex items-center gap-2">
                 <Switch
                   checked={emp.active !== false}
+                  disabled={managedByStyle}
                   onCheckedChange={(v) => {
+                    if (managedByStyle) return;
                     if (v === true) {
                       void updateEmployee.mutateAsync({ id: emp.id, active: true });
                       return;
@@ -173,6 +181,12 @@ export const AgendaEmployeeHoursConfig: React.FC = () => {
                 />
                 <Label className="text-sm">Activo en la agenda</Label>
               </div>
+              {managedByStyle && (
+                <p className="text-xs text-muted-foreground">
+                  El estado activo se sincroniza desde Style. Aquí puedes seguir ajustando horario, excepciones y orden
+                  de columna.
+                </p>
+              )}
 
               <div className="flex flex-wrap items-end gap-3">
                 <div className="space-y-1">

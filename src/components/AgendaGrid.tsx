@@ -13,7 +13,7 @@ import { AppointmentAttachmentIcons } from '@/components/AppointmentAttachmentIc
 import { hasAttachmentHints } from '@/lib/appointmentAttachmentHints';
 import { Employee, Appointment, TimeSlot } from '@/types/agenda';
 import { slotOverlapsOccupiedTime } from '@/lib/agendaAppointmentItems';
-import { segmentAppearance } from '@/lib/agendaResourceColors';
+import { segmentAppearance, segmentStyleFromHex } from '@/lib/agendaResourceColors';
 import {
   anchorTimeFromScrollTop,
   loadAgendaViewPersisted,
@@ -111,6 +111,21 @@ const slotDescriptionText = (appointment: Appointment): string | null => {
   return raw;
 };
 
+const SHORT_NAME_PREFIXES = new Set(['dr', 'dr.', 'dra', 'dra.', 'doctor', 'doctora']);
+
+const agendaEmployeeShortName = (name: string): string => {
+  const words = String(name || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (words.length <= 1) return String(name || '').trim();
+  const first = words[0].toLowerCase();
+  if (SHORT_NAME_PREFIXES.has(first)) {
+    return words.slice(0, 2).join(' ');
+  }
+  return words[0];
+};
+
 function EmployeeNamesRow({
   employees,
   edge,
@@ -133,7 +148,9 @@ function EmployeeNamesRow({
           key={`${edge}-${employee.id}`}
           className={`flex items-center justify-center border-r border-border px-2 py-2 text-center text-xs font-semibold leading-tight text-foreground ${employee.color}`}
         >
-          <span className="line-clamp-2">{employee.name}</span>
+          <span className="line-clamp-2" title={employee.name}>
+            {agendaEmployeeShortName(employee.name)}
+          </span>
         </div>
       ))}
     </div>
@@ -558,10 +575,23 @@ export const AgendaGrid: React.FC<AgendaGridProps> = ({
             const slotDesc =
               visibleFields.description ? slotDescriptionText(appointment) : null;
             const lockedByPayment = appointment.paymentStatus === 'paid' || appointment.paymentStatus === 'invoiced';
+            const singleSegmentColor =
+              segments.length === 1 ? segments[0]?.recursoColor ?? null : null;
+            const outerRecursoStyle = segmentStyleFromHex(singleSegmentColor);
 
             const appointmentBlock = (
               <div
-                className={`relative h-full p-0.5 text-[11px] overflow-hidden rounded border-2 border-border dark:border-border ${lockedByPayment ? 'cursor-default' : 'cursor-move'} ${employees[employeeIndex]?.color}`}
+                className={`relative h-full p-0.5 text-[11px] overflow-hidden rounded border-2 ${lockedByPayment ? 'cursor-default' : 'cursor-move'} ${
+                  outerRecursoStyle ? 'border-border dark:border-border' : employees[employeeIndex]?.color
+                }`}
+                style={
+                  outerRecursoStyle
+                    ? {
+                        backgroundColor: outerRecursoStyle.backgroundColor,
+                        borderColor: outerRecursoStyle.borderColor,
+                      }
+                    : undefined
+                }
                 draggable={!lockedByPayment}
                 onDragStart={(e) => handleDragStart(e, appointment)}
                 onDragEnd={handleDragEnd}

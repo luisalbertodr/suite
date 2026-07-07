@@ -124,16 +124,20 @@ if (Test-Path $vfpExe) {
     $runner = Join-Path $StyleRoot "run_inbound_worker.bat"
     @"
 @echo off
-cd /d "$StyleRoot"
-set STYLE_HOME=$StyleRoot
+pushd "%~dp0"
+set "STYLE_HOME=%~dp0"
 set SUITE_INBOUND_HEADLESS=1
 "$vfpExe" "PROGS\_inbound_once.prg"
+set EXITCODE=%ERRORLEVEL%
+popd
+exit /b %EXITCODE%
 "@ | Set-Content -Path $runner -Encoding ASCII
     $vbs = Join-Path $StyleRoot "run_inbound_worker_hidden.vbs"
     @"
+Set fso = CreateObject("Scripting.FileSystemObject")
 Set sh = CreateObject("WScript.Shell")
-sh.CurrentDirectory = "$StyleRoot"
-sh.Run Chr(34) & "$runner" & Chr(34), 0, True
+batPath = fso.BuildPath(fso.GetParentFolderName(WScript.ScriptFullName), "run_inbound_worker.bat")
+sh.Run Chr(34) & batPath & Chr(34), 0, True
 "@ | Set-Content -Path $vbs -Encoding ASCII
 }
 

@@ -122,6 +122,18 @@ function shouldSkipDailyLogItem(it: {
   return false;
 }
 
+function shouldAddDailyRefKey(it: {
+  item_kind: string;
+  title: string | null;
+  body: string | null;
+  ref_table: string | null;
+  ref_id: string | null;
+}): boolean {
+  if (!it.ref_table || !it.ref_id) return false;
+  if (it.item_kind === 'sale' && it.ref_table === 'agenda_appointments') return false;
+  return !shouldSkipDailyLogItem(it);
+}
+
 /** No mostrar en Servicios: historial estético ni espejos vacíos de cita. */
 function shouldHideTimelineItem(it: DayTimelineItem): boolean {
   if (it.id.startsWith('aesthetic:')) return true;
@@ -317,6 +329,7 @@ function mergeByDay(
   for (const log of dailyRows) {
     for (const it of log.daily_customer_log_items || []) {
       if (!it) continue;
+      if (!shouldAddDailyRefKey(it)) continue;
       const k = refKey(it.ref_table, it.ref_id);
       if (k) dailyRefKeys.add(k);
     }

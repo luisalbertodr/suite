@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dialog';
 import { ClinicalHistoryFormBody } from '@/components/clinical/ClinicalHistoryFormBody';
 import {
+  emptyClinicalHistoryFormValues,
   clinicalHistoryToFormValues,
   saveClinicalHistory,
   updateCustomerBirthDate,
@@ -22,18 +23,6 @@ import {
 import { defaultReceptionNotifyUserId, sendAppointmentNotification } from '@/lib/appointmentNotification';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
-
-const emptyForm = (): ClinicalHistoryFormValues => ({
-  birthDate: '',
-  antecedentesPersonales: '',
-  motivoConsulta: '',
-  tratamiento: '',
-  proximaRevisionFecha: '',
-  proximaRevisionDescripcion: '',
-  revisiones: [],
-  avisoText: '',
-  avisoNotifyUserId: '',
-});
 
 type Props = {
   open: boolean;
@@ -49,6 +38,7 @@ type Props = {
   notifyRecipients?: { userId: string; label: string }[];
   onNotify?: (recipientUserId: string, message: string) => Promise<void> | void;
   overlayClassName?: string;
+  initialValues?: ClinicalHistoryFormValues | null;
 };
 
 export const ClinicalHistoryRecordDialog: React.FC<Props> = ({
@@ -65,6 +55,7 @@ export const ClinicalHistoryRecordDialog: React.FC<Props> = ({
   notifyRecipients = [],
   onNotify,
   overlayClassName = 'z-[110]',
+  initialValues = null,
 }) => {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -76,7 +67,7 @@ export const ClinicalHistoryRecordDialog: React.FC<Props> = ({
     [notifyRecipients],
   );
 
-  const [form, setForm] = useState<ClinicalHistoryFormValues>(emptyForm());
+  const [form, setForm] = useState<ClinicalHistoryFormValues>(emptyClinicalHistoryFormValues());
   const [fechaConsulta, setFechaConsulta] = useState(
     () => defaultFecha ?? format(new Date(), 'yyyy-MM-dd'),
   );
@@ -84,11 +75,14 @@ export const ClinicalHistoryRecordDialog: React.FC<Props> = ({
   useEffect(() => {
     if (!open) return;
     setFechaConsulta(record?.fecha ?? defaultFecha ?? format(new Date(), 'yyyy-MM-dd'));
+    const baseValues = record
+      ? clinicalHistoryToFormValues(record, birthDateProp)
+      : initialValues ?? emptyClinicalHistoryFormValues();
     setForm({
-      ...clinicalHistoryToFormValues(record, birthDateProp),
+      ...baseValues,
       avisoNotifyUserId: defaultNotifyUserId,
     });
-  }, [open, record, birthDateProp, defaultFecha, defaultNotifyUserId]);
+  }, [open, record, birthDateProp, defaultFecha, defaultNotifyUserId, initialValues]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {

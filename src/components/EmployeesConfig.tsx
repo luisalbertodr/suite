@@ -50,6 +50,8 @@ export const EmployeesConfig: React.FC = () => {
   const deactivateCloseFormAfterRef = useRef(false);
 
   const allEmployees = employees || [];
+  const editingEmployee = editingId ? allEmployees.find((e) => e.id === editingId) ?? null : null;
+  const editingManagedByStyle = Boolean(String(editingEmployee?.dunasoft_codemp ?? '').trim());
 
   const handleCreate = () => {
     setForm(emptyForm);
@@ -58,6 +60,7 @@ export const EmployeesConfig: React.FC = () => {
   };
 
   const handleEdit = (emp: {
+    id: string;
     name: string;
     color?: string | null;
     active?: boolean | null;
@@ -82,7 +85,7 @@ export const EmployeesConfig: React.FC = () => {
     if (editingId) {
       const existing = allEmployees.find((e) => e.id === editingId);
       const wasActive = existing?.active !== false;
-      if (!form.active && wasActive) {
+      if (!editingManagedByStyle && !form.active && wasActive) {
         deactivateCloseFormAfterRef.current = true;
         setDeactivateTarget({
           id: editingId,
@@ -97,14 +100,24 @@ export const EmployeesConfig: React.FC = () => {
         setDeactivateOpen(true);
         return;
       }
-      await updateEmployee.mutateAsync({
+      const payload: {
+        id: string;
+        name: string;
+        color: string;
+        agenda_sort_order: number;
+        billing_company_id: string | null;
+        active?: boolean;
+      } = {
         id: editingId,
         name: form.name,
         color: form.color,
-        active: form.active,
         agenda_sort_order: Math.max(0, Math.floor(Number(form.agenda_sort_order)) || 0),
         billing_company_id: form.billing_company_id,
-      });
+      };
+      if (!editingManagedByStyle) {
+        payload.active = form.active;
+      }
+      await updateEmployee.mutateAsync(payload);
     } else {
       const nextOrder =
         allEmployees.length === 0
@@ -220,10 +233,20 @@ export const EmployeesConfig: React.FC = () => {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Switch checked={form.active} onCheckedChange={v => setForm({ ...form, active: v })} />
+                  <Switch
+                    checked={form.active}
+                    disabled={editingManagedByStyle}
+                    onCheckedChange={v => setForm({ ...form, active: v })}
+                  />
                   <Label className="text-sm">Activo en la agenda</Label>
                 </div>
               </div>
+              {editingManagedByStyle && (
+                <p className="text-xs text-muted-foreground">
+                  Este empleado está sincronizado con Style (`codemp {editingEmployee?.dunasoft_codemp}`).
+                  Su estado activo/inactivo se toma de Style; aquí solo puedes editar color, orden y empresa.
+                </p>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-md">
                 <div>
                   <Label>Posición en la agenda</Label>
@@ -283,6 +306,7 @@ export const EmployeesConfig: React.FC = () => {
                       {isMultiEntity && emp.billing_company_id && (
                         <> · {companyLabels.get(emp.billing_company_id) ?? 'Empresa'}</>
                       )}
+                      {emp.dunasoft_codemp && <> · Style {emp.dunasoft_codemp}</>}
                     </p>
                   </div>
                   <span className={`text-xs px-2 py-0.5 rounded-full ${emp.active !== false ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400' : 'bg-muted text-muted-foreground'}`}>
@@ -291,7 +315,17 @@ export const EmployeesConfig: React.FC = () => {
                   <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => handleEdit(emp)}>
                     <Edit2 className="h-3.5 w-3.5" />
                   </Button>
-                  {emp.active !== false ? (
+                  {emp.dunasoft_codemp ? (
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-8 w-8 opacity-50 cursor-not-allowed"
+                      title="Activo sincronizado desde Style"
+                      disabled
+                    >
+                      <Ban className="h-3.5 w-3.5" />
+                    </Button>
+                  ) : emp.active !== false ? (
                     <Button
                       size="icon"
                       variant="ghost"

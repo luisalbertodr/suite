@@ -108,6 +108,16 @@ export function readRowFromBuffer(buf: Buffer, layout: DbfLayout, recOff: number
       row[key] = ["t", "y", "1"].includes(trimmed.toLowerCase());
       continue;
     }
+    if (field.type === "B") {
+      const bin = buf.slice(recOff + field.pos, recOff + field.pos + field.flen);
+      if (bin.length === 8 && !bin.every((b) => b === 0 || b === 0x20)) {
+        const n = bin.readDoubleLE(0);
+        row[key] = Number.isFinite(n) ? n : 0;
+      } else {
+        row[key] = 0;
+      }
+      continue;
+    }
     if (field.type === "N" || field.type === "F") {
       if (!trimmed) {
         row[key] = 0;
@@ -248,6 +258,10 @@ export function dbfStr(row: DbfRow | null | undefined, field: string): string {
 }
 
 export function dbfNum(row: DbfRow | null | undefined, field: string): number {
+  if (!row) return 0;
+  const key = field.toLowerCase();
+  const direct = row[key];
+  if (typeof direct === "number" && Number.isFinite(direct)) return direct;
   const s = dbfStr(row, field);
   if (!s) return 0;
   const n = Number(s.replace(",", "."));

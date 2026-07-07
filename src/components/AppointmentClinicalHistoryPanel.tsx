@@ -11,9 +11,12 @@ import { AGENDA_CLINICAL_HISTORY_OVERLAY_Z } from '@/lib/agendaResourceColors';
 import { DOCK_CLEARANCE_BOTTOM } from '@/lib/dialogLayers';
 import { PanelAwareBodyPortal } from '@/components/PanelAwareBodyPortal';
 import {
+  clinicalHistoryToPrefillValues,
   clinicalHistoryToFormValues,
+  emptyClinicalHistoryFormValues,
   fetchClinicalHistoryByAppointment,
   fetchCustomerBirthDate,
+  fetchLatestClinicalHistory,
   saveClinicalHistory,
   updateCustomerBirthDate,
   type ClinicalHistoryFormValues,
@@ -39,17 +42,6 @@ type Props = {
   onNotify?: (recipientUserId: string, message: string) => Promise<void> | void;
 };
 
-const emptyForm = (): ClinicalHistoryFormValues => ({
-  birthDate: '',
-  antecedentesPersonales: '',
-  motivoConsulta: '',
-  tratamiento: '',
-  proximaRevisionFecha: '',
-  proximaRevisionDescripcion: '',
-  avisoText: '',
-  avisoNotifyUserId: '',
-});
-
 export const AppointmentClinicalHistoryPanel: React.FC<Props> = ({
   open,
   onClose,
@@ -65,7 +57,7 @@ export const AppointmentClinicalHistoryPanel: React.FC<Props> = ({
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [form, setForm] = useState<ClinicalHistoryFormValues>(emptyForm());
+  const [form, setForm] = useState<ClinicalHistoryFormValues>(emptyClinicalHistoryFormValues());
   const [existingId, setExistingId] = useState<string | null>(null);
 
   const defaultNotifyUserId = useMemo(
@@ -77,19 +69,23 @@ export const AppointmentClinicalHistoryPanel: React.FC<Props> = ({
     queryKey: ['clinical_history_appointment', appointmentId, customerId],
     enabled: open && !!appointmentId && !!customerId,
     queryFn: async () => {
-      const [record, birthDate] = await Promise.all([
+      const [record, birthDate, previousRecord] = await Promise.all([
         fetchClinicalHistoryByAppointment(appointmentId),
         fetchCustomerBirthDate(customerId),
+        fetchLatestClinicalHistory(customerId, appointmentId),
       ]);
-      return { record, birthDate };
+      return { record, birthDate, previousRecord };
     },
   });
 
   useEffect(() => {
     if (!open || isLoading || !data) return;
     setExistingId(data.record?.id ?? null);
+    const baseValues = data.record
+      ? clinicalHistoryToFormValues(data.record, data.birthDate)
+      : clinicalHistoryToPrefillValues(data.previousRecord, data.birthDate);
     setForm({
-      ...clinicalHistoryToFormValues(data.record, data.birthDate),
+      ...baseValues,
       avisoNotifyUserId: defaultNotifyUserId,
     });
   }, [open, isLoading, data, defaultNotifyUserId]);

@@ -49,6 +49,11 @@ export type CustomerAppointmentRow = {
   ymd: string | null;
 };
 
+type AppointmentAttempt = {
+  key: string;
+  applyFilter: (q: ReturnType<typeof supabase.from>) => ReturnType<typeof supabase.from>;
+};
+
 function normalizeLegacyCode(code: string): string {
   const c = code.trim();
   return c.replace(/^0+/, '') || c;
@@ -180,7 +185,8 @@ export async function fetchAppointmentsForCustomer(
   const includeItems = options?.includeItems !== false;
   const limit = options?.limit;
   const offset = options?.offset ?? 0;
-  const rangeEnd = limit != null ? offset + limit : null;
+  const fetchLimit = limit != null ? limit + offset + 1 : undefined;
+  const rangeEnd = fetchLimit != null ? fetchLimit - 1 : null;
   const { data: customer } = await supabase
     .from('customers')
     .select('legacy_codcli, name, company_id')
@@ -197,21 +203,35 @@ export async function fetchAppointmentsForCustomer(
   const baseSelect =
     'id, customer_id, client_name, description, appointment_date, start_time, end_time, status, legacy_codcli, legacy_codemp, employee_id';
 
-  const attempts: Array<{
-    applyFilter: (q: ReturnType<typeof supabase.from>) => ReturnType<typeof supabase.from>;
-  }> = [];
+  const attempts: AppointmentAttempt[] = [];
 
   if (customerId) {
-    attempts.push({ applyFilter: (q) => q.eq('customer_id', customerId) });
+    attempts.push({
+      key: `customer:${customerId}`,
+      applyFilter: (q) => q.eq('customer_id', customerId),
+    });
   }
   if (legacyCod) {
-    attempts.push({ applyFilter: (q) => q.eq('legacy_codcli', legacyCod) });
+    attempts.push({
+      key: `legacy:${legacyCod}`,
+      applyFilter: (q) => q.eq('legacy_codcli', legacyCod),
+    });
+    const normalizedLegacy = normalizeLegacyCode(legacyCod);
+    if (normalizedLegacy && normalizedLegacy !== legacyCod) {
+      attempts.push({
+        key: `legacy-normalized:${normalizedLegacy}`,
+        applyFilter: (q) => q.eq('legacy_codcli', normalizedLegacy),
+      });
+    }
   }
   if (customerName) {
-    attempts.push({ applyFilter: (q) => q.eq('client_name', customerName) });
+    attempts.push({
+      key: `name:${customerName}`,
+      applyFilter: (q) => q.eq('client_name', customerName),
+    });
   }
 
-  let rows: Record<string, unknown>[] = [];
+  const rowsById = new Map<string, Record<string, unknown>>();
 
   for (const attempt of attempts) {
     let q = attempt
@@ -233,25 +253,32 @@ export async function fetchAppointmentsForCustomer(
     }
 
     if (!res.error) {
-      const seen = new Set<string>();
-      rows = ((res.data || []) as Record<string, unknown>[]).filter((row) => {
-        const id = String(row.id);
-        if (seen.has(id)) return false;
-        seen.add(id);
-        return true;
-      });
-      break;
+      for (const row of (res.data || []) as Record<string, unknown>[]) {
+        rowsById.set(String(row.id), row);
+      }
+      continue;
     }
 
     console.warn('fetchAppointmentsForCustomer:', res.error.message);
   }
 
+  let rows = Array.from(rowsById.values()).sort((a, b) => {
+    const dayA = String(a.appointment_date ?? '');
+    const dayB = String(b.appointment_date ?? '');
+    if (dayA !== dayB) return dayA < dayB ? 1 : -1;
+    const timeA = String(a.start_time ?? '');
+    const timeB = String(b.start_time ?? '');
+    return timeA < timeB ? 1 : timeA > timeB ? -1 : 0;
+  });
+
   if (!rows.length) return { rows: [], hasMore: false };
 
   let hasMore = false;
-  if (limit != null && rows.length > limit) {
+  if (limit != null && rows.length > offset + limit) {
     hasMore = true;
-    rows = rows.slice(0, limit);
+  }
+  if (offset > 0 || limit != null) {
+    rows = rows.slice(offset, limit != null ? offset + limit : undefined);
   }
 
   const itemsByAppt = includeItems

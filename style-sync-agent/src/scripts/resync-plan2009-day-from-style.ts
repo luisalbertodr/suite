@@ -139,6 +139,16 @@ async function main() {
   }
 
   console.log(`Listo: ${ok} actualizadas, ${moved} movidas, ${deleted} borradas`);
+
+  const { error: mergeErr } = await supabase.schema("dunasoft").rpc("style_merge_consecutive_appointments", {
+    p_company_id: COMPANY_ID,
+    p_date: DATE,
+  });
+  if (mergeErr) {
+    console.warn("merge consecutive:", mergeErr.message);
+  } else {
+    console.log("merge consecutive: OK");
+  }
 }
 
 main().catch((e) => {

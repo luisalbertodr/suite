@@ -17,12 +17,23 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $VfpExe = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual FoxPro 9\vfp9.exe"
 
+# En la VM Style la ruta local es C:\Style-Dunasoft; desde el PC desplegamos por SMB.
+$VmLocalRoot = "C:\Style-Dunasoft"
 if ($VmHost) {
     $StyleRoot = "\\$VmHost\c$\Style-Dunasoft"
+    $TaskStyleRoot = $VmLocalRoot
+    $TaskVfpExe = $VfpExe
+} else {
+    $StyleRoot = $StyleRoot
+    $TaskStyleRoot = $StyleRoot
+    $TaskVfpExe = $VfpExe
 }
 $StyleRoot = [IO.Path]::GetFullPath($StyleRoot.TrimEnd('\'))
+$TaskStyleRoot = $TaskStyleRoot.TrimEnd('\')
 
-if (-not (Test-Path $VfpExe)) { throw "VFP9 no instalado" }
+if (-not (Test-Path $VfpExe) -and -not $VmHost) {
+    throw "VFP9 no instalado en esta máquina (necesario para generar el .bat en local)"
+}
 if ($IntervalSec -lt 60) {
     Write-Warning "Task Scheduler minimo ~60s; usando IntervalSec=60"
     $IntervalSec = 60
@@ -39,7 +50,7 @@ $oncePrg = Join-Path $StyleRoot "PROGS\_inbound_once.prg"
 $onceSrc = Join-Path (Split-Path -Parent $PSScriptRoot) "vfp\_inbound_once.prg"
 if (Test-Path $onceSrc) {
     $once = Get-Content $onceSrc -Raw -Encoding UTF8
-    $once = $once -replace 'C:\\Duna\\Style-Suite-Test\\', ($StyleRoot.TrimEnd('\') + '\')
+    $once = $once -replace 'C:\\Duna\\Style-Suite-Test\\', ($TaskStyleRoot + '\')
 } else {
     $once = @"
 LOCAL lcWorker
@@ -49,7 +60,7 @@ SET NOTIFY OFF
 ON ERROR DO InboundOnceError
 _SCREEN.Visible = .F.
 PUBLIC pcSuiteStyleRoot
-pcSuiteStyleRoot = "$StyleRoot\"
+pcSuiteStyleRoot = "$TaskStyleRoot\"
 SET DEFAULT TO (pcSuiteStyleRoot)
 lcWorker = pcSuiteStyleRoot + "PROGS\suite_inbound_worker_sync.prg"
 IF .NOT. FILE(lcWorker)
@@ -68,31 +79,49 @@ Set-Content -Path $oncePrg -Value $once -Encoding ASCII
 $runner = Join-Path $StyleRoot "run_inbound_worker.bat"
 $bat = @"
 @echo off
-cd /d "$StyleRoot"
-set STYLE_HOME=$StyleRoot
+rem pushd mapea UNC a unidad temporal (cd /d falla con \\server\share)
+pushd "%~dp0"
+set "STYLE_HOME=%~dp0"
 set SUITE_INBOUND_HEADLESS=1
-"$VfpExe" "PROGS\_inbound_once.prg"
+set "VFP="
+if exist "%STYLE_HOME%runtime\vfp9\vfp9.exe" set "VFP=%STYLE_HOME%runtime\vfp9\vfp9.exe"
+if not defined VFP if exist "C:\Program Files (x86)\Microsoft Visual FoxPro 9\vfp9.exe" set "VFP=C:\Program Files (x86)\Microsoft Visual FoxPro 9\vfp9.exe"
+if not defined VFP if exist "C:\Program Files\Microsoft Visual FoxPro 9\vfp9.exe" set "VFP=C:\Program Files\Microsoft Visual FoxPro 9\vfp9.exe"
+if defined VFP9_HOME if exist "%VFP9_HOME%\vfp9.exe" set "VFP=%VFP9_HOME%\vfp9.exe"
+if not defined VFP (
+  echo ERROR: No se encuentra vfp9.exe
+  echo Copia runtime: .\scripts\deploy-vfp9-runtime-vm.ps1 desde el PC de desarrollo
+  popd
+  exit /b 1
+)
+"%VFP%" "PROGS\_inbound_once.prg"
+set EXITCODE=%ERRORLEVEL%
+popd
+exit /b %EXITCODE%
 "@
 Set-Content -Path $runner -Value $bat -Encoding ASCII
 
 $vbs = Join-Path $StyleRoot "run_inbound_worker_hidden.vbs"
+# Ruta relativa al .vbs: evita UNC embebido si se despliega por SMB (popup SAFETY en VFP).
 $vbsContent = @"
+Set fso = CreateObject("Scripting.FileSystemObject")
 Set sh = CreateObject("WScript.Shell")
-sh.CurrentDirectory = "$StyleRoot"
-sh.Run Chr(34) & "$runner" & Chr(34), 0, True
+batPath = fso.BuildPath(fso.GetParentFolderName(WScript.ScriptFullName), "run_inbound_worker.bat")
+sh.Run Chr(34) & batPath & Chr(34), 0, True
 "@
 Set-Content -Path $vbs -Value $vbsContent -Encoding ASCII
 
 $intervalMin = [Math]::Max(1, [int][Math]::Ceiling($IntervalSec / 60.0))
 
 if ($RegisterScheduledTask) {
-    $action = New-ScheduledTaskAction -Execute "wscript.exe" -Argument "//B `"$vbs`"" -WorkingDirectory $StyleRoot
+    $taskVbs = Join-Path $TaskStyleRoot "run_inbound_worker_hidden.vbs"
+    $action = New-ScheduledTaskAction -Execute "wscript.exe" -Argument "//B `"$taskVbs`"" -WorkingDirectory $TaskStyleRoot
     $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
         -RepetitionInterval (New-TimeSpan -Minutes $intervalMin) `
         -RepetitionDuration (New-TimeSpan -Days 3650)
     $settings = New-ScheduledTaskSettingsSet `
         -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
-        -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 5) `
+        -MultipleInstances Queue -ExecutionTimeLimit (New-TimeSpan -Minutes 3) `
         -Hidden
 
     if ($VmHost) {

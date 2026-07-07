@@ -600,20 +600,20 @@ PROCEDURE SuiteInboundWorkerRun
  IF TYPE("SuiteEnsureControlSincro") <> "U"
     DO SuiteEnsureControlSincro
  ENDIF
+ DO SuiteInboundHeartbeat
  IF TYPE("SuiteSyncModoV2Active") <> "U" .AND. .NOT. SuiteSyncModoV2Active()
     RETURN
  ENDIF
 
  lcRoot = SuiteInboundRoot()
+ IF  .NOT. DIRECTORY(lcRoot + "sync\")
+    MD (lcRoot + "sync\")
+ ENDIF
  * Abrir wedb SHARED (misma logica que general.prg) para coexistir con Duna.exe.
  DO SuiteInboundEnsureWedb WITH lcRoot
 
  lcInbound = lcRoot + "sync\inbound\"
  lcAck = lcRoot + "sync\inbound_ack\"
- IF  .NOT. DIRECTORY(lcRoot + "sync\")
-    MD (lcRoot + "sync\")
- ENDIF
- DO SuiteInboundHeartbeat
  IF  .NOT. DIRECTORY(lcInbound)
     MD (lcInbound)
  ENDIF

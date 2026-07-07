@@ -40,7 +40,7 @@ $sr = ssh @ssh "docker exec supabase-edge-functions printenv SUPABASE_SERVICE_RO
 if (-not $sr) { throw "No se pudo leer SUPABASE_SERVICE_ROLE_KEY" }
 
 Write-Step "Docker build + run"
-$runCmd = "docker run -d --name style-sync-agent --restart unless-stopped -e STYLE_ROOT=$StyleRoot -e SUPABASE_URL=https://supabase.lipoout.com -e SUPABASE_SERVICE_ROLE_KEY=$sr -e COMPANY_ID=$CompanyId -e POLL_MS=1500 -e INBOUND_POLL_MS=3000 -v ${StyleRoot}:${StyleRoot}:rw style-sync-agent:0.2.1"
+$runCmd = "docker run -d --name style-sync-agent --restart unless-stopped -e STYLE_ROOT=$StyleRoot -e SUPABASE_URL=https://supabase.lipoout.com -e SUPABASE_SERVICE_ROLE_KEY=$sr -e COMPANY_ID=$CompanyId -e POLL_MS=1500 -e INBOUND_POLL_MS=3000 -e PLAN2009_POLL_ENABLED=1 -e SYNC_EVENT_DRIVEN=1 -e ENTITY_POLL_MS=120000 -v ${StyleRoot}:${StyleRoot}:rw style-sync-agent:0.2.1"
 $dockerLines = @(
     "set -e",
     "cd $remoteBase",
