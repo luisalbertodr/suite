@@ -22,6 +22,7 @@ import { ENTITY_HANDLERS } from "./handlers.js";
 import { pollDbfEntityChanges } from "./dbfPoll.js";
 import { pollPlan2009FromDbf, pollPlan2009Lightweight } from "./plan2009Poll.js";
 import { logDeferHeavyPoll, shouldDeferHeavyPoll } from "./styleSession.js";
+import { resolveDbfPath } from "./dbfSource.js";
 import {
   dbfBool,
   dbfDateIso,
@@ -36,6 +37,7 @@ import {
   upsertFingerprints,
   type PollDeps,
 } from "./plan2009Poll.js";
+import { startFileWatchers, startRealtimeWatchers } from "./eventWatchers.js";
 
 const require = createRequire(import.meta.url);
 const { version: pkgVersion } = require("../package.json") as { version: string };
@@ -61,6 +63,10 @@ const AGENT_VERSION = process.env.AGENT_VERSION ?? pkgVersion;
 const OUTBOUND_MAX_RETRIES = Number(process.env.OUTBOUND_MAX_RETRIES ?? "5");
 const INBOUND_ACK_MAX_RETRIES = Number(process.env.INBOUND_ACK_MAX_RETRIES ?? "5");
 
+const SYNC_EVENT_DRIVEN = process.env.SYNC_EVENT_DRIVEN !== "0";
+const SYNC_DEBOUNCE_MS = Number(process.env.SYNC_DEBOUNCE_MS ?? "300");
+const SYNC_POLL_FALLBACK_MS = Number(process.env.SYNC_POLL_FALLBACK_MS ?? "120000");
+
 const POLL_MS = Number(process.env.POLL_MS ?? "1500");
 const INBOUND_POLL_MS = Number(process.env.INBOUND_POLL_MS ?? "3000");
 const INBOUND_BATCH = Number(process.env.INBOUND_BATCH ?? "50");
@@ -72,6 +78,16 @@ const ENTITY_BATCH = Number(process.env.ENTITY_BATCH ?? "50");
 const ENTITY_POLL_MS = Number(process.env.ENTITY_POLL_MS ?? "2500");
 const PLAN2009_POLL_MS = Number(process.env.PLAN2009_POLL_MS ?? "2500");
 const PLAN2009_BATCH = Number(process.env.PLAN2009_BATCH ?? "100");
+const PLAN2009_POLL_ENABLED =
+  process.env.PLAN2009_POLL_ENABLED === "1" ||
+  process.env.PLAN2009_POLL_ENABLED === "true" ||
+  (!SYNC_EVENT_DRIVEN && process.env.PLAN2009_POLL_ENABLED !== "0");
+
+const COLA_DELETE_ACTIONS = new Set(["DEL", "BOR", "BAJA", "BORRAR", "DELETE"]);
+
+function isColaDeleteAction(accion: string): boolean {
+  return COLA_DELETE_ACTIONS.has(String(accion ?? "").trim().toUpperCase());
+}
 
 let plan2009IndexCache: Map<string, DbfRow> | null = null;
 let plan2009IndexCacheMtime = 0;
@@ -286,7 +302,18 @@ async function enrichColaRowFromDbf(row: ColaRow): Promise<{
   if (!idReg) return { row, dbfRow: null, serviciosJson: "[]" };
   const index = await getPlan2009Index();
   const dbfRow = lookupDbfRow(index, "plan2009", idReg);
-  if (!dbfRow) return { row, dbfRow: null, serviciosJson: String(row.servicios ?? "").trim() || "[]" };
+  if (!dbfRow) {
+    const fechaIso = String(row.fechaiso ?? "").trim();
+    const enrichedNoDbf: ColaRow = {
+      ...row,
+      fechaiso: /^\d{4}-\d{2}-\d{2}$/.test(fechaIso) ? fechaIso : "",
+    };
+    return {
+      row: enrichedNoDbf,
+      dbfRow: null,
+      serviciosJson: String(row.servicios ?? "").trim() || "[]",
+    };
+  }
 
   const fechaIso = String(row.fechaiso ?? "").trim();
   const fechaFromDbf = dbfDateIso(dbfRow, "fecha");
@@ -331,7 +358,7 @@ async function updatePlan2009FingerprintAfterCola(
   const deps: PollDeps = { supabase, companyId, styleRoot: STYLE_ROOT, log };
   const key = normalizePlanKey(idReg);
   const rpcAccion = accion.toUpperCase();
-  if (rpcAccion === "DEL") {
+  if (isColaDeleteAction(accion)) {
     await supabase
       .schema("dunasoft")
       .from("style_sync_dbf_fingerprint")
@@ -352,7 +379,7 @@ async function processRow(row: ColaRow): Promise<void> {
   if (!companyId) throw new Error("Falta COMPANY_ID");
 
   const accion = String(enriched.accion ?? "").toUpperCase();
-  const rpcAccion = accion === "DEL" ? "DELETE" : "UPDATE";
+  const rpcAccion = isColaDeleteAction(accion) ? "DELETE" : "UPDATE";
   const fechaIso = String(enriched.fechaiso ?? "").trim();
   const fecha = /^\d{4}-\d{2}-\d{2}$/.test(fechaIso)
     ? fechaIso
@@ -488,12 +515,12 @@ async function pollInboundToJson(): Promise<void> {
       { styleRoot: STYLE_ROOT, heartbeatPath: HEARTBEAT_PATH, inboundDir: INBOUND_DIR, log },
       "json_written",
     );
-  } else {
-    maybeTriggerInboundWorker(
-      { styleRoot: STYLE_ROOT, heartbeatPath: HEARTBEAT_PATH, inboundDir: INBOUND_DIR, log },
-      "poll_pending",
-    );
   }
+}
+
+function countPendingInboundJson(): number {
+  if (!fs.existsSync(INBOUND_DIR)) return 0;
+  return fs.readdirSync(INBOUND_DIR).filter((f) => f.toLowerCase().endsWith(".json")).length;
 }
 
 function parseAckFile(raw: string): { idand: number; idplan: number; macand: string; ok: boolean } {
@@ -660,6 +687,20 @@ async function checkInboundWorkerHeartbeat(): Promise<void> {
 
   const ageMs = seen ? Date.now() - mtimeMs : Number.POSITIVE_INFINITY;
   const stale = !seen || ageMs > HEARTBEAT_STALE_MS;
+  const pendingInbound = countPendingInboundJson();
+
+  if (SYNC_EVENT_DRIVEN && pendingInbound === 0 && stale) {
+    lastInboundAlertRaised = false;
+    await patchAgentState(supabase, companyId, {
+      inbound_worker_status: "idle",
+      inbound_worker_last_seen_at: seen ? new Date(mtimeMs).toISOString() : null,
+      inbound_worker_alert_at: null,
+      inbound_worker_alert_message: null,
+      worker_version: workerVersion,
+      agent_version: AGENT_VERSION,
+    });
+    return;
+  }
 
   if (stale) {
     const msg = seen
@@ -823,54 +864,115 @@ async function entityOutboundTick(): Promise<void> {
   await drainOutboxAcks(deps);
 }
 
+function runSafe(label: string, fn: () => Promise<void>): void {
+  void fn().catch((e) => log(`${label} error: ${e instanceof Error ? e.message : String(e)}`));
+}
+
+async function onColaChanged(): Promise<void> {
+  await tick();
+  if (PLAN2009_POLL_ENABLED) {
+    try {
+      await plan2009PollTick();
+    } catch (err) {
+      log(`plan2009 poll (cola) error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  runSafe("entity", entityTick);
+}
+
+async function onInboundDirChanged(): Promise<void> {
+  const pending = countPendingInboundJson();
+  if (pending > 0) {
+    maybeTriggerInboundWorker(
+      { styleRoot: STYLE_ROOT, heartbeatPath: HEARTBEAT_PATH, inboundDir: INBOUND_DIR, log },
+      "json_detected",
+    );
+  }
+}
+
+async function onAckDirChanged(): Promise<void> {
+  await drainInboundAcks();
+  const deps = entityDeps();
+  if (deps) await drainOutboxAcks(deps);
+}
+
+async function runFallbackSync(): Promise<void> {
+  await tick();
+  await pollInboundToJson();
+  await drainInboundAcks();
+  await entityOutboundTick();
+  if (PLAN2009_POLL_ENABLED) await plan2009PollTick();
+}
+
 async function main() {
-  log(`Style sync agent v${AGENT_VERSION} — root=${STYLE_ROOT} poll=${POLL_MS}ms`);
+  const mode = SYNC_EVENT_DRIVEN ? "event-driven" : `poll outbound=${POLL_MS}ms inbound=${INBOUND_POLL_MS}ms`;
+  log(`Style sync agent v${AGENT_VERSION} — root=${STYLE_ROOT} modo=${mode}`);
+  const planPath = resolveDbfPath(STYLE_ROOT, "plan2009");
+  const colaOk = fs.existsSync(COLA_DBF);
+  if (!planPath || !colaOk) {
+    const msg = `CRÍTICO: sin acceso a DBFs de Style (plan2009=${planPath ?? "missing"}, cola=${colaOk ? "ok" : COLA_DBF}). Montar CIFS o ejecutar agente en la VM Style.`;
+    log(msg);
+    if (companyId) {
+      await patchAgentState(supabase, companyId, {
+        last_error: msg,
+        last_error_at: new Date().toISOString(),
+        agent_version: AGENT_VERSION,
+      });
+    }
+  }
   log(`Entidades activas: ${ENTITY_HANDLERS.map((h) => h.tabla).join(", ") || "(ninguna)"}`);
   log(`Inbound: ${INBOUND_DIR} | ack: ${INBOUND_ACK_DIR} | archive: ${ARCHIVE_DIR}`);
   log(`Dead-letter: ${DEADLETTER_DIR} | heartbeat: ${HEARTBEAT_PATH}`);
 
-  setInterval(() => {
-    void tick().catch((e) => log(`tick error: ${e instanceof Error ? e.message : String(e)}`));
-  }, POLL_MS);
+  ensureDirSync(INBOUND_DIR);
+  ensureDirSync(INBOUND_ACK_DIR);
 
-  setInterval(() => {
-    void pollInboundToJson().catch((e) => log(`inbound poll error: ${e instanceof Error ? e.message : String(e)}`));
-  }, INBOUND_POLL_MS);
+  if (SYNC_EVENT_DRIVEN) {
+    log(`Watchers: debounce=${SYNC_DEBOUNCE_MS}ms fallback=${SYNC_POLL_FALLBACK_MS}ms plan2009_poll=${PLAN2009_POLL_ENABLED}`);
+    startFileWatchers({
+      colaPath: COLA_DBF,
+      inboundDir: INBOUND_DIR,
+      ackDir: INBOUND_ACK_DIR,
+      debounceMs: SYNC_DEBOUNCE_MS,
+      onColaChange: () => runSafe("cola", onColaChanged),
+      onInboundDirChange: () => runSafe("inbound_dir", onInboundDirChanged),
+      onAckDirChange: () => runSafe("ack", onAckDirChanged),
+      log,
+    });
+    if (companyId) {
+      startRealtimeWatchers({
+        supabase,
+        companyId,
+        debounceMs: SYNC_DEBOUNCE_MS,
+        onReservasInsert: () => runSafe("realtime_reservas", pollInboundToJson),
+        onOutboxInsert: () => runSafe("realtime_outbox", entityOutboundTick),
+        log,
+      });
+    }
+    if (SYNC_POLL_FALLBACK_MS > 0) {
+      setInterval(() => runSafe("fallback", runFallbackSync), SYNC_POLL_FALLBACK_MS);
+    }
+    if (PLAN2009_POLL_ENABLED) {
+      setInterval(() => runSafe("plan2009", plan2009PollTick), PLAN2009_POLL_MS);
+    }
+  } else {
+    setInterval(() => runSafe("tick", tick), POLL_MS);
+    setInterval(() => runSafe("inbound", pollInboundToJson), INBOUND_POLL_MS);
+    setInterval(() => runSafe("ack", drainInboundAcks), INBOUND_POLL_MS);
+    setInterval(() => runSafe("entity", entityTick), ENTITY_POLL_MS);
+    setInterval(() => runSafe("entity_outbound", entityOutboundTick), ENTITY_POLL_MS);
+    if (PLAN2009_POLL_ENABLED) {
+      setInterval(() => runSafe("plan2009", plan2009PollTick), PLAN2009_POLL_MS);
+    }
+  }
 
-  setInterval(() => {
-    void drainInboundAcks().catch((e) => log(`ack drain error: ${e instanceof Error ? e.message : String(e)}`));
-  }, INBOUND_POLL_MS);
+  setInterval(() => runSafe("heartbeat", checkInboundWorkerHeartbeat), HEARTBEAT_CHECK_MS);
+  setInterval(() => runSafe("stale_purge", purgeStaleInboundJson), 60 * 60 * 1000);
 
-  setInterval(() => {
-    void checkInboundWorkerHeartbeat().catch((e) =>
-      log(`heartbeat error: ${e instanceof Error ? e.message : String(e)}`),
-    );
-  }, HEARTBEAT_CHECK_MS);
-
-  setInterval(() => {
-    void purgeStaleInboundJson().catch((e) =>
-      log(`stale purge error: ${e instanceof Error ? e.message : String(e)}`),
-    );
-  }, 60 * 60 * 1000);
-
-  setInterval(() => {
-    void entityTick().catch((e) => log(`entity tick error: ${e instanceof Error ? e.message : String(e)}`));
-  }, ENTITY_POLL_MS);
-
-  setInterval(() => {
-    void entityOutboundTick().catch((e) =>
-      log(`entity outbound error: ${e instanceof Error ? e.message : String(e)}`),
-    );
-  }, ENTITY_POLL_MS);
-
-  setInterval(() => {
-    void plan2009PollTick().catch((e) =>
-      log(`plan2009 poll error: ${e instanceof Error ? e.message : String(e)}`),
-    );
-  }, PLAN2009_POLL_MS);
-
-  await tick();
-  await plan2009PollTick();
+  await onColaChanged();
+  await pollInboundToJson();
+  await onAckDirChanged();
+  if (PLAN2009_POLL_ENABLED) await plan2009PollTick();
   await checkInboundWorkerHeartbeat();
 }
 

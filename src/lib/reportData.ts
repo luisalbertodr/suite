@@ -14,7 +14,7 @@ import {
   resolveLineArticle,
 } from '@/lib/invoiceLineCatalogMatch';
 import { fetchCatalogCustomers } from '@/lib/customerSearch';
-import { fetchSalesWithoutInvoiceRows } from '@/lib/salesRevenue';
+import { fetchSalesWithoutInvoiceRows, resolveStyleBillingRpcCompanyId } from '@/lib/salesRevenue';
 import { MEDICINA_COMPANY_ID } from '@/lib/workCenterBilling';
 
 export type ReportFilters = {
@@ -385,11 +385,11 @@ async function fetchFacturacionMensual(scope: Scope, filters: ReportFilters) {
   const from = dateFrom(filters);
   const to = dateTo(filters);
   const hubOnly =
-    scope.billingCompanyIds.length === 1 &&
-    scope.billingCompanyIds[0] === MEDICINA_COMPANY_ID &&
+    scope.billingCompanyIds.some((id) => resolveStyleBillingRpcCompanyId(id) === MEDICINA_COMPANY_ID) &&
     (!filters.cliente || filters.cliente === 'todos');
 
   if (hubOnly) {
+    const rpcCompanyId = MEDICINA_COMPANY_ID;
     const startYear = from ? parseInt(from.slice(0, 4), 10) : new Date().getFullYear();
     const endYear = to ? parseInt(to.slice(0, 4), 10) : startYear;
     const monthly: Record<string, { totalFacturado: number; numFacturas: number }> = {};

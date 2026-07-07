@@ -3,6 +3,33 @@ LOCAL lcRoot, lcCola, lcCtrl, lcBoot, lcAlert, lcSavErr, lcErr
 
 lcRoot = ADDBS(SYS(5) + SYS(2003))
 
+* Entorno test / sin modulo conta: persistir flags en EMPRESA.config antes del bootstrap embebido.
+IF .NOT. FILE(lcRoot + "conta.exe") .AND. FILE(lcRoot + "empresa.dbf")
+   LOCAL llEmpWasOpen, lcSavErr, lcErr
+   llEmpWasOpen = USED("empresa")
+   lcSavErr = ON("ERROR")
+   lcErr = ""
+   ON ERROR lcErr = MESSAGE()
+   IF .NOT. llEmpWasOpen
+      USE (lcRoot + "empresa.dbf") IN 0 ALIAS empresa SHARED
+   ENDIF
+   SELECT empresa
+   IF .NOT. EMPTY(empresa.config)
+      RESTORE FROM MEMO config ADDITIVE
+   ENDIF
+   cfgcontabilidaddunasoft = .F.
+   cfgcontabilidad = .F.
+   IF .NOT. FILE(lcRoot + "..\UTILIDADES\UTILIDADES.EXE") ;
+      .AND. .NOT. FILE(lcRoot + "UTILIDADES\UTILIDADES.EXE")
+      cfgvercopia = .F.
+   ENDIF
+   SAVE TO MEMO config ALL LIKE cfg*
+   IF .NOT. llEmpWasOpen .AND. USED("empresa")
+      USE IN empresa
+   ENDIF
+   ON ERROR &lcSavErr
+ENDIF
+
 * PROGS\funciones.prg tiene el hook Reservas_Incidencia -> SuiteEnqueuePlan2009 (v2).
 * Debe cargarse antes del bootstrap embebido; si no, el exe antiguo no encola en cola_sincro.
 IF FILE(lcRoot + "PROGS\funciones.prg")

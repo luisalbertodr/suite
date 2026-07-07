@@ -52,8 +52,12 @@ PROCEDURE SuiteApplyLicenseFlags
  ENDIF
  cfglicenciaandroid = .F.
  cfglicenciacentralreservas = .F.
- cfgcontabilidad = .T.
- cfgcontabilidaddunasoft = .T.
+ cfgcontabilidad = .F.
+ IF FILE(ADDBS(SYS(5)+SYS(2003))+"conta.exe") .OR. FILE(ADDBS(SYS(5)+SYS(2003))+"CONTA.EXE")
+    cfgcontabilidaddunasoft = .T.
+ ELSE
+    cfgcontabilidaddunasoft = .F.
+ ENDIF
  IF TYPE("policencias") = "O"
     policencias.nlicenciasmaximas = 999
  ENDIF

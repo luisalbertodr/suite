@@ -21,14 +21,22 @@ interface Company {
   address_country: string;
   website: string;
   additional_info: string;
+  short_name?: string;
+  tpv_ticket_prefix?: string;
 }
 
 interface EmpresaFormProps {
   onClose: () => void;
   company?: Company & { id: string };
+  /** Campos extra del centro laboral (nombre corto, prefijo TPV). */
+  showWorkCenterFields?: boolean;
 }
 
-export const EmpresaForm: React.FC<EmpresaFormProps> = ({ onClose, company }) => {
+export const EmpresaForm: React.FC<EmpresaFormProps> = ({
+  onClose,
+  company,
+  showWorkCenterFields = false,
+}) => {
   const [formData, setFormData] = useState<Company>({
     name: company?.name || '',
     tax_id: company?.tax_id || '',
@@ -40,7 +48,9 @@ export const EmpresaForm: React.FC<EmpresaFormProps> = ({ onClose, company }) =>
     address_postal_code: company?.address_postal_code || '',
     address_country: company?.address_country || 'España',
     website: company?.website || '',
-    additional_info: company?.additional_info || ''
+    additional_info: company?.additional_info || '',
+    short_name: company?.short_name || '',
+    tpv_ticket_prefix: company?.tpv_ticket_prefix || '',
   });
 
   const queryClient = useQueryClient();
@@ -81,6 +91,9 @@ export const EmpresaForm: React.FC<EmpresaFormProps> = ({ onClose, company }) =>
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['companies'] });
+      queryClient.invalidateQueries({ queryKey: ['company'] });
+      queryClient.invalidateQueries({ queryKey: ['work-center-companies-full'] });
+      queryClient.invalidateQueries({ queryKey: ['work-center-billing-companies'] });
       toast({
         title: "Empresa actualizada",
         description: "La empresa ha sido actualizada correctamente."
@@ -126,6 +139,30 @@ export const EmpresaForm: React.FC<EmpresaFormProps> = ({ onClose, company }) =>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
+            {showWorkCenterFields && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 rounded-lg border bg-muted/30 p-4">
+                <div>
+                  <Label htmlFor="short_name">Nombre corto (etiquetas)</Label>
+                  <Input
+                    id="short_name"
+                    value={formData.short_name ?? ''}
+                    onChange={(e) => handleInputChange('short_name', e.target.value)}
+                    placeholder="Ej. Medicina, Estética"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="tpv_ticket_prefix">Prefijo tickets TPV</Label>
+                  <Input
+                    id="tpv_ticket_prefix"
+                    value={formData.tpv_ticket_prefix ?? ''}
+                    onChange={(e) => handleInputChange('tpv_ticket_prefix', e.target.value)}
+                    placeholder="Ej. MED, EST"
+                    maxLength={12}
+                  />
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="name">Nombre de la empresa *</Label>

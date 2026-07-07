@@ -14,7 +14,8 @@ import {
   type DbfRow,
 } from "./dbfSource.js";
 import { serviciosJsonToLegacy } from "./servicios.js";
-import { loadRecentPlanincIdPlans } from "./planincRecent.js";
+import { loadPlan2009TailIdPlans, loadRecentPlanincDeletedPlans, loadRecentPlanincIdPlans } from "./planincRecent.js";
+import { patchAgentState } from "./agentState.js";
 
 const TABLA = "plan2009";
 const PLAN_FIELDS = [
@@ -151,6 +152,10 @@ async function applyPlan2009(
   });
   if (error) throw new Error(error.message ?? JSON.stringify(error));
   deps.log(`dbf-poll ${TABLA} idplan=${idplan} -> style_reservas_apply_from_style (${accion})`);
+  await patchAgentState(deps.supabase, deps.companyId, {
+    last_outbound_ok_at: new Date().toISOString(),
+    agent_last_tick_at: new Date().toISOString(),
+  });
 }
 
 const lastMtime = { plan2009: 0, planart: 0 };
@@ -194,12 +199,17 @@ async function loadPlanartServiciosForKeys(
 }
 
 function sortChangesByPriority(
-  changed: Array<{ key: string; row: DbfRow; fp: string; accion: "UPDATE" | "DELETE" }>,
+  changed: Array<{ key: string; row: DbfRow | null; fp: string; accion: "UPDATE" | "DELETE" }>,
   known: Map<string, string>,
   recentPlaninc: string[],
 ): void {
   const recentRank = new Map(recentPlaninc.map((id, i) => [id, i]));
   changed.sort((a, b) => {
+    // Altas/modificaciones antes que borrados (evita atascar el batch con DELETE históricos).
+    if (a.accion !== b.accion) {
+      if (a.accion === "UPDATE") return -1;
+      if (b.accion === "UPDATE") return 1;
+    }
     const aRecent = recentRank.has(a.key) ? recentRank.get(a.key)! : 999_999;
     const bRecent = recentRank.has(b.key) ? recentRank.get(b.key)! : 999_999;
     if (aRecent !== bRecent) return aRecent - bRecent;
@@ -210,6 +220,16 @@ function sortChangesByPriority(
     const bNum = /^\d+$/.test(b.key) ? Number(b.key) : 0;
     return bNum - aNum;
   });
+}
+
+function takePlan2009Batch<T extends { accion: "UPDATE" | "DELETE" }>(
+  changed: T[],
+  batch: number,
+): T[] {
+  const maxDeletes = Number(process.env.PLAN2009_DELETE_BATCH ?? "3");
+  const updates = changed.filter((c) => c.accion === "UPDATE");
+  const deletes = changed.filter((c) => c.accion === "DELETE").slice(0, maxDeletes);
+  return [...updates, ...deletes].slice(0, batch);
 }
 
 /**
@@ -265,8 +285,9 @@ export async function pollPlan2009FromDbf(deps: PollDeps, batch: number): Promis
 
   if (seeded) {
     const currentKeys = new Set([...index.keys()].map((k) => normalizePlanKey(k)));
-    for (const key of known.keys()) {
-      if (!currentKeys.has(key)) {
+    const recentDeletes = await loadRecentPlanincDeletedPlans(deps.styleRoot);
+    for (const key of recentDeletes) {
+      if (!currentKeys.has(key) && known.has(key)) {
         changed.push({ key, row: null as unknown as DbfRow, fp: "", accion: "DELETE" });
       }
     }
@@ -281,7 +302,7 @@ export async function pollPlan2009FromDbf(deps: PollDeps, batch: number): Promis
   sortChangesByPriority(changed, known, recentPlaninc);
 
   deps.log(`dbf-poll ${TABLA}: ${changed.length} cambio(s) detectado(s)`);
-  for (const item of changed.slice(0, batch)) {
+  for (const item of takePlan2009Batch(changed, batch)) {
     try {
       const serviciosJson = item.accion === "DELETE" ? "[]" : (serviciosByPlan.get(item.key) ?? "[]");
       await applyPlan2009(deps, item.key, item.accion === "DELETE" ? null : item.row, item.accion, serviciosJson);
@@ -317,40 +338,59 @@ export async function pollPlan2009Lightweight(deps: PollDeps, batch: number): Pr
   lastLightPollAt = now;
 
   const known = await loadFingerprintMapCached(deps);
-  if (!known.size) return;
-
   const recentPlaninc = await loadRecentPlanincIdPlans(deps.styleRoot);
-  if (!recentPlaninc.length) return;
+  const tailPlan2009 = loadPlan2009TailIdPlans(deps.styleRoot);
+  if (!recentPlaninc.length && !tailPlan2009.length) return;
 
-  const keySet = new Set(recentPlaninc.map(normalizePlanKey));
+  const keySet = new Set([...recentPlaninc.map(normalizePlanKey), ...tailPlan2009]);
   const rowsByKey = loadDbfRowsForKeySet(deps.styleRoot, "plan2009", "idplan", keySet);
   const serviciosByPlan = await loadPlanartServiciosForKeys(deps.styleRoot, keySet);
 
-  const changed: Array<{ key: string; row: DbfRow; fp: string }> = [];
-  for (const key of recentPlaninc) {
-    const row = rowsByKey.get(normalizePlanKey(key));
-    if (!row) continue;
-    const serviciosJson = serviciosByPlan.get(normalizePlanKey(key)) ?? "[]";
+  const changed: Array<{ key: string; row: DbfRow | null; fp: string; accion: "UPDATE" | "DELETE" }> = [];
+  for (const key of keySet) {
+    const normKey = normalizePlanKey(key);
+    const row = rowsByKey.get(normKey);
+    if (!row) {
+      // Solo borrar si teníamos huella (cita existía en Suite). Cola DEL cubre el resto.
+      if (known.has(normKey)) {
+        changed.push({ key: normKey, row: null, fp: "", accion: "DELETE" });
+      }
+      continue;
+    }
+    const serviciosJson = serviciosByPlan.get(normKey) ?? "[]";
     const fp = rowFingerprint(row, serviciosJson);
-    if (known.get(normalizePlanKey(key)) !== fp) {
-      changed.push({ key: normalizePlanKey(key), row, fp });
+    if (known.get(normKey) !== fp) {
+      changed.push({ key: normKey, row, fp, accion: "UPDATE" });
     }
   }
 
   if (!changed.length) return;
 
-  sortChangesByPriority(
-    changed.map((c) => ({ ...c, accion: "UPDATE" as const })),
-    known,
-    recentPlaninc,
-  );
+  sortChangesByPriority(changed, known, recentPlaninc);
 
   deps.log(`dbf-poll ${TABLA} (ligero): ${changed.length} cambio(s) en ${keySet.size} idplan(s) recientes`);
-  for (const item of changed.slice(0, batch)) {
+  for (const item of takePlan2009Batch(changed, batch)) {
     try {
-      const serviciosJson = serviciosByPlan.get(item.key) ?? "[]";
-      await applyPlan2009(deps, item.key, item.row, "UPDATE", serviciosJson);
-      await upsertFingerprints(deps, [{ style_key: item.key, fingerprint: item.fp }]);
+      const serviciosJson = item.accion === "DELETE" ? "[]" : (serviciosByPlan.get(item.key) ?? "[]");
+      await applyPlan2009(
+        deps,
+        item.key,
+        item.accion === "DELETE" ? null : item.row,
+        item.accion,
+        serviciosJson,
+      );
+      if (item.accion === "DELETE") {
+        await deps.supabase
+          .schema("dunasoft")
+          .from("style_sync_dbf_fingerprint")
+          .delete()
+          .eq("company_id", deps.companyId)
+          .eq("tabla", TABLA)
+          .eq("style_key", item.key);
+        fingerprintCache = null;
+      } else {
+        await upsertFingerprints(deps, [{ style_key: item.key, fingerprint: item.fp }]);
+      }
     } catch (err) {
       deps.log(
         `dbf-poll ${TABLA} (ligero) idplan=${item.key} error: ${err instanceof Error ? err.message : String(err)}`,

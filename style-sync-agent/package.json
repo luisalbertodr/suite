@@ -1,6 +1,6 @@
 {
   "name": "style-sync-agent",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "type": "module",
   "description": "Agente local Style (cola_sincro.dbf) <-> Supabase Suite",

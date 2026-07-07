@@ -22,7 +22,12 @@ export function buildAgendaSyncBadge(
     (styleSync?.outbound_errors ?? 0) +
     (styleSync?.inbound_errors ?? 0);
 
-  const label = cursor > 0 ? `${pending}/${cursor} Sync` : `${pending} Sync`;
+  const label =
+    pending > 0
+      ? cursor > 0
+        ? `${pending}/${cursor} Sync`
+        : `${pending} Sync`
+      : 'Sync OK';
 
   const parts: string[] = [];
   if (pendingDbf > 0) parts.push(`${pendingDbf} pendiente(s) DBF/cola`);

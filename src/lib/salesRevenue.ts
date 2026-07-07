@@ -1,5 +1,12 @@
 import { supabase } from '@/lib/supabase';
 import { isSchemaColumnError } from '@/lib/appointmentSales';
+import {
+  ESTETICA_COMPANY_ID,
+  MEDICINA_COMPANY_ID,
+  WORK_CENTER_BILLING_COMPANY_IDS,
+} from '@/lib/workCenterBilling';
+
+export type BillingEntityView = 'both' | 'medicina' | 'estetica';
 
 export type RevenueBreakdown = {
   invoices: number;
@@ -182,13 +189,30 @@ export type YearBillingRow = {
 const MONTH_SHORT = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
 type RpcBillingRow = { month_num: number; month_key: string; total: number };
+type RpcBillingSplitRow = { month_num: number; month_key: string; company_id: string; total: number };
+
+export function isWorkCenterStyleBilling(companyId: string): boolean {
+  return (WORK_CENTER_BILLING_COMPANY_IDS as readonly string[]).includes(companyId);
+}
+
+/** Centro laboral Lipoout: facturación fiscal vía mapeos Style del hub (M+E). */
+export function resolveStyleBillingRpcCompanyId(companyId: string): string {
+  if (
+    companyId === MEDICINA_COMPANY_ID ||
+    (WORK_CENTER_BILLING_COMPANY_IDS as readonly string[]).includes(companyId)
+  ) {
+    return MEDICINA_COMPANY_ID;
+  }
+  return companyId;
+}
 
 async function fetchRpcMonthlyBilling(
   companyId: string,
   year: number,
 ): Promise<Map<number, number>> {
+  const rpcCompanyId = resolveStyleBillingRpcCompanyId(companyId);
   const { data, error } = await supabase.rpc('dashboard_billing_monthly', {
-    p_company_id: companyId,
+    p_company_id: rpcCompanyId,
     p_year: year,
   });
   if (error) throw error;
@@ -199,22 +223,66 @@ async function fetchRpcMonthlyBilling(
   return out;
 }
 
-/** Comparativa mensual entre varios años (Ene–Dic). Usa RPC alineado con Style sync en hub. */
+async function fetchRpcMonthlyBillingSplit(
+  year: number,
+): Promise<Map<string, Map<number, number>>> {
+  const { data, error } = await supabase.rpc('dashboard_billing_monthly_split', {
+    p_year: year,
+  });
+  if (error) throw error;
+  const out = new Map<string, Map<number, number>>();
+  for (const row of (data ?? []) as RpcBillingSplitRow[]) {
+    if (!out.has(row.company_id)) out.set(row.company_id, new Map());
+    out.get(row.company_id)!.set(row.month_num, Number(row.total ?? 0));
+  }
+  return out;
+}
+
+export function yearBillingDataKey(year: number, view: BillingEntityView): string {
+  if (view === 'medicina') return `${year}_medicina`;
+  if (view === 'estetica') return `${year}_estetica`;
+  return String(year);
+}
+
+export function yearBillingLegend(year: number, view: BillingEntityView): string {
+  if (view === 'medicina') return `${year} Medicina`;
+  if (view === 'estetica') return `${year} Estética`;
+  return String(year);
+}
+
+/** Comparativa mensual entre varios años (Ene–Dic). Incluye desglose M/E en centro laboral. */
 export async function fetchYearBillingComparison(
   companyId: string,
   years: number[],
 ): Promise<YearBillingRow[]> {
   const sortedYears = [...years].sort((a, b) => a - b);
   const byYear = new Map<number, Map<number, number>>();
+  const splitByYear = new Map<number, { medicina: Map<number, number>; estetica: Map<number, number> }>();
+  const useSplit = isWorkCenterStyleBilling(companyId);
 
   try {
-    await Promise.all(
-      sortedYears.map(async (year) => {
-        byYear.set(year, await fetchRpcMonthlyBilling(companyId, year));
-      }),
-    );
+    if (useSplit) {
+      await Promise.all(
+        sortedYears.map(async (year) => {
+          const split = await fetchRpcMonthlyBillingSplit(year);
+          const medicina = split.get(MEDICINA_COMPANY_ID) ?? new Map();
+          const estetica = split.get(ESTETICA_COMPANY_ID) ?? new Map();
+          splitByYear.set(year, { medicina, estetica });
+          const total = new Map<number, number>();
+          for (let m = 1; m <= 12; m += 1) {
+            total.set(m, (medicina.get(m) ?? 0) + (estetica.get(m) ?? 0));
+          }
+          byYear.set(year, total);
+        }),
+      );
+    } else {
+      await Promise.all(
+        sortedYears.map(async (year) => {
+          byYear.set(year, await fetchRpcMonthlyBilling(companyId, year));
+        }),
+      );
+    }
   } catch {
-    // Fallback si la migración RPC aún no está desplegada
     for (const year of sortedYears) {
       const from = `${year}-01-01`;
       const to = `${year}-12-31`;
@@ -224,7 +292,7 @@ export async function fetchYearBillingComparison(
   }
 
   const currentYear = new Date().getFullYear();
-  let quoteBuckets = new Map<number, number>();
+  const quoteBuckets = new Map<number, number>();
   if (sortedYears.includes(currentYear)) {
     const quoRes = await supabase
       .from('quotes')
@@ -242,13 +310,37 @@ export async function fetchYearBillingComparison(
     const monthNum = idx + 1;
     const row: YearBillingRow = { name, monthNum };
     for (const year of sortedYears) {
-      row[String(year)] = byYear.get(year)?.get(monthNum) ?? 0;
+      const total = byYear.get(year)?.get(monthNum) ?? 0;
+      row[String(year)] = total;
+      if (useSplit) {
+        const split = splitByYear.get(year);
+        row[`${year}_medicina`] = split?.medicina.get(monthNum) ?? 0;
+        row[`${year}_estetica`] = split?.estetica.get(monthNum) ?? 0;
+      }
     }
     if (sortedYears.includes(currentYear)) {
       row.presupuestos = quoteBuckets.get(monthNum) ?? 0;
     }
     return row;
   });
+}
+
+export async function fetchMonthBillingForView(
+  companyId: string,
+  view: BillingEntityView,
+): Promise<number> {
+  const year = new Date().getFullYear();
+  const month = new Date().getMonth() + 1;
+  if (!isWorkCenterStyleBilling(companyId)) {
+    const buckets = await fetchRpcMonthlyBilling(companyId, year);
+    return buckets.get(month) ?? 0;
+  }
+  const split = await fetchRpcMonthlyBillingSplit(year);
+  const med = split.get(MEDICINA_COMPANY_ID)?.get(month) ?? 0;
+  const est = split.get(ESTETICA_COMPANY_ID)?.get(month) ?? 0;
+  if (view === 'medicina') return med;
+  if (view === 'estetica') return est;
+  return med + est;
 }
 
 function bucketInvoicesByMonthNum(rows: InvoiceRow[]): Map<number, number> {
@@ -281,42 +373,54 @@ export async function fetchDashboardBilling(
   const rangeStart = new Date(now.getFullYear(), now.getMonth() - monthsBack, 1);
   const rangeEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
   const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const useRpc = resolveStyleBillingRpcCompanyId(companyId) === MEDICINA_COMPANY_ID;
 
-  const [invoices, salesNoInv] = await Promise.all([
-    loadInvoices(companyId, localDateOnly(rangeStart), localDateOnly(rangeEnd)),
-    loadSalesWithoutInvoice(companyId, rangeStart.toISOString(), rangeEnd.toISOString()),
-  ]);
+  let series: DashboardBilling['series'] = [];
+  let rpcMonthTotal: number | null = null;
 
-  const invBuckets = bucketInvoices(invoices);
-  const saleBuckets = bucketSales(salesNoInv);
-
-  const series: DashboardBilling['series'] = [];
-  for (let i = monthsBack; i >= 0; i -= 1) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const monthStart = new Date(d.getFullYear(), d.getMonth(), 1);
-    const monthEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
-    const key = localMonthKey(monthStart);
-    const total = invBuckets.get(key) ?? 0;
-    series.push({ monthStart, monthEnd, total });
+  if (useRpc) {
+    const years = new Set<number>();
+    for (let i = monthsBack; i >= 0; i -= 1) {
+      years.add(new Date(now.getFullYear(), now.getMonth() - i, 1).getFullYear());
+    }
+    const rpcBuckets = new Map<string, number>();
+    for (const year of years) {
+      const monthly = await fetchRpcMonthlyBilling(companyId, year);
+      for (const [monthNum, total] of monthly) {
+        rpcBuckets.set(`${year}-${String(monthNum).padStart(2, '0')}`, total);
+      }
+    }
+    for (let i = monthsBack; i >= 0; i -= 1) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const monthStart = new Date(d.getFullYear(), d.getMonth(), 1);
+      const monthEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
+      const key = localMonthKey(monthStart);
+      series.push({ monthStart, monthEnd, total: rpcBuckets.get(key) ?? 0 });
+    }
+    rpcMonthTotal = await fetchCurrentMonthBillingRpc(companyId);
+  } else {
+    const [invoices, salesNoInv] = await Promise.all([
+      loadInvoices(companyId, localDateOnly(rangeStart), localDateOnly(rangeEnd)),
+      loadSalesWithoutInvoice(companyId, rangeStart.toISOString(), rangeEnd.toISOString()),
+    ]);
+    const invBuckets = bucketInvoices(invoices);
+    for (let i = monthsBack; i >= 0; i -= 1) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const monthStart = new Date(d.getFullYear(), d.getMonth(), 1);
+      const monthEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
+      const key = localMonthKey(monthStart);
+      series.push({ monthStart, monthEnd, total: invBuckets.get(key) ?? 0 });
+    }
   }
 
   const cmKey = localMonthKey(currentMonthStart);
-  const currentInvoices = invoices.filter(
-    (inv) => inv.issue_date && monthKey(inv.issue_date) === cmKey,
-  );
-  const currentSales = salesNoInv.filter(
-    (s) => s.created_at && monthKey(s.created_at) === cmKey,
-  );
-
-  const invTotal = sumInvoices(currentInvoices);
-  const salesTotal = sumSales(currentSales);
-  const rpcMonthTotal = await fetchCurrentMonthBillingRpc(companyId);
+  const currentFromSeries = series.find((s) => localMonthKey(s.monthStart) === cmKey)?.total ?? 0;
 
   return {
     currentMonth: {
-      invoices: invTotal,
-      salesWithoutInvoice: salesTotal,
-      total: rpcMonthTotal ?? billingTotalFromInvoices(invTotal),
+      invoices: currentFromSeries,
+      salesWithoutInvoice: 0,
+      total: rpcMonthTotal ?? currentFromSeries,
     },
     series,
   };

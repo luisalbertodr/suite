@@ -25,6 +25,7 @@ import { MetaConfig } from './MetaConfig';
 import { WhatsappConfig } from './WhatsappConfig';
 import { WhatsappAutomationConfig } from './WhatsappAutomationConfig';
 import { WorkCenterAuditPanel } from './WorkCenterAuditPanel';
+import { WorkCenterCompaniesConfig } from './WorkCenterCompaniesConfig';
 import { LegacyImportPanel } from './LegacyImportPanel';
 import { InbodyCsvImportPanel } from './InbodyCsvImportPanel';
 import { TpvSettingsConfig } from './TpvSettingsConfig';
@@ -233,6 +234,7 @@ export const Configuracion: React.FC = () => {
         </TabsContent>
 
         <TabsContent value="empresa" className="space-y-4">
+          <WorkCenterCompaniesConfig />
           <Empresas />
           <TabletUnlockConfig />
           <ConsentimientoPlantillasConfig />

@@ -13,13 +13,17 @@ const STYLE_DEFER_AFTER_WRITE_MS = Number(process.env.STYLE_DEFER_AFTER_WRITE_MS
 let lastDeferLogAt = 0;
 
 export function isStyleProcessRunning(): boolean {
-  try {
-    const out = execSync("tasklist /FO CSV /NH", { encoding: "utf8", timeout: 8000 });
-    const lower = out.toLowerCase();
-    return STYLE_PROCESS_NAMES.some((name) => lower.includes(name));
-  } catch {
-    return false;
+  if (process.platform === "win32") {
+    try {
+      const out = execSync("tasklist /FO CSV /NH", { encoding: "utf8", timeout: 8000 });
+      const lower = out.toLowerCase();
+      return STYLE_PROCESS_NAMES.some((name) => lower.includes(name));
+    } catch {
+      return false;
+    }
   }
+  // En Linux/Docker no hay Duna.exe; no usar tasklist (ensucia logs y falla siempre).
+  return false;
 }
 
 function plan2009RecentlyWritten(styleRoot: string): boolean {

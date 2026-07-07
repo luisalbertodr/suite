@@ -4363,6 +4363,24 @@ FUNCTION Reservas_Incidencia
        REPLACE nomcli WITH pcnomcli
        REPLACE tel1cli WITH pctel1cli
        REPLACE planart WITH pclineasreserva
+    CASE UPPER(ALLTRIM(tctipinc))=="CREAR"
+       SELECT planinc
+       APPEND BLANK
+       REPLACE idplaninc WITH damenumero("PLANIFICADOR INCIDENCIAS", "PLANINC", "", 0, .F.)
+       REPLACE codusu WITH pcusuario
+       REPLACE fechorinc WITH DATETIME()
+       REPLACE tipinc WITH UPPER(ALLTRIM(tctipinc))
+       REPLACE idplan WITH tnidplan
+       REPLACE codemp WITH pccodempnew
+       REPLACE codcli WITH pccodclinew
+       REPLACE fecha WITH pdfechanew
+       REPLACE horini WITH pchorininew
+       REPLACE horfin WITH pchorfinnew
+       REPLACE texto WITH pctextonew
+       REPLACE codrec WITH pccodrecnew
+       REPLACE nomcli WITH pcnomclinew
+       REPLACE tel1cli WITH pctel1clinew
+       REPLACE planart WITH pclineasreservanew
  ENDCASE
  IF  .NOT. llplanincabierto
     USE IN planinc

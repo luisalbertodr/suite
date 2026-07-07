@@ -871,7 +871,9 @@
     IF TYPE("plDesarrollo")="L" .AND. pldesarrollo
        DO CONTA.PRG WITH "INICIO"
     ELSE
-       DO CONTA.EXE WITH "INICIO"
+       IF FILE(SYS(5)+SYS(2003)+"conta.exe") .OR. FILE(SYS(5)+SYS(2003)+"CONTA.EXE")
+          DO CONTA.EXE WITH "INICIO"
+       ENDIF
     ENDIF
  ENDIF
  llinstalacionnueva = .F.

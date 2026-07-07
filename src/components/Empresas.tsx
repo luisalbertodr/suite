@@ -9,6 +9,7 @@ import { Plus, Edit, Eye, Trash2, Search, Building2, Mail, Phone, Globe } from '
 import { useToast } from '@/hooks/use-toast';
 import { EmpresaForm } from './EmpresaForm';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useWorkCenter } from '@/hooks/useWorkCenter';
 
 interface Company {
   id: string;
@@ -34,6 +35,7 @@ export const Empresas: React.FC = () => {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { companyId, loading: companyLoading } = useCompanyFilter();
+  const { isMultiEntity } = useWorkCenter();
 
   const { data: company, isLoading } = useQuery({
     queryKey: ['company', companyId],
@@ -59,7 +61,7 @@ export const Empresas: React.FC = () => {
       console.log('Fetched company:', data);
       return data as Company;
     },
-    enabled: !!companyId && !companyLoading,
+    enabled: !!companyId && !companyLoading && !isMultiEntity,
   });
 
   const deleteMutation = useMutation({
@@ -88,6 +90,10 @@ export const Empresas: React.FC = () => {
     setShowForm(false);
     setEditingCompany(null);
   };
+
+  if (isMultiEntity) {
+    return null;
+  }
 
   if (companyLoading) {
     return (

@@ -23,6 +23,7 @@ import { useDunasoftAgendaDay } from '@/hooks/useDunasoftAgendaDay';
 import { useDunasoftAppointmentMutations } from '@/hooks/useDunasoftAppointmentMutations';
 import { useDunasoftSyncStatus } from '@/hooks/useDunasoftSyncStatus';
 import { useStyleSyncAgentStatus } from '@/hooks/useStyleSyncAgentStatus';
+import { useAgendaInboundSyncRefetch } from '@/hooks/useAgendaInboundSyncRefetch';
 import { buildAgendaSyncBadge } from '@/lib/agendaSyncBadge';
 import { useAuth } from '@/hooks/useAuth';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
@@ -138,6 +139,7 @@ export const DunasoftAgenda: React.FC = () => {
 
   const { data, isLoading, isError, error, refetch, isFetching, isDayLoading, isDayRefreshing } =
     useDunasoftAgendaDay(selectedDateYmd, companyId);
+  useAgendaInboundSyncRefetch(companyId, refetch);
   const showInitialSkeleton = isLoading && !data;
   const { createMutation, updateMutation, deleteMutation } = useDunasoftAppointmentMutations(selectedDateYmd);
   const { data: syncStatus } = useDunasoftSyncStatus(20_000);

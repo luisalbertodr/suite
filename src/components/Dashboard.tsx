@@ -11,8 +11,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useDashboardData } from '../hooks/useDashboardData';
 import { Reportes } from './Reportes';
 import { useRegisterTopBarContent } from '@/components/TopBarContentContext';
+import {
+  type BillingEntityView,
+  yearBillingDataKey,
+  yearBillingLegend,
+} from '@/lib/salesRevenue';
 
 const YEAR_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#ef4444'];
+const MEDICINA_COLOR = '#0ea5e9';
+const ESTETICA_COLOR = '#ec4899';
 
 function toggleYear(selected: number[], year: number): number[] {
   if (selected.includes(year)) {
@@ -22,6 +29,12 @@ function toggleYear(selected: number[], year: number): number[] {
   return [...selected, year].sort((a, b) => a - b);
 }
 
+const BILLING_VIEW_OPTIONS: { id: BillingEntityView; label: string }[] = [
+  { id: 'both', label: 'Ambas' },
+  { id: 'medicina', label: 'Medicina' },
+  { id: 'estetica', label: 'Estética' },
+];
+
 export const Dashboard: React.FC = () => {
   const nowYear = new Date().getFullYear();
   const availableYears = useMemo(() => {
@@ -30,8 +43,13 @@ export const Dashboard: React.FC = () => {
     return years;
   }, [nowYear]);
   const [selectedYears, setSelectedYears] = useState<number[]>([nowYear, nowYear - 1]);
+  const [billingView, setBillingView] = useState<BillingEntityView>('both');
 
-  const { stats, yearBilling, recentActivity, isLoading } = useDashboardData(selectedYears);
+  const { stats, yearBilling, isMultiEntity, recentActivity, isLoading } = useDashboardData(
+    selectedYears,
+    billingView,
+  );
+
   const topBarActions = useMemo(() => (
     <button
       type="button"
@@ -78,10 +96,44 @@ export const Dashboard: React.FC = () => {
     </div>
   );
 
+  const entitySelector = isMultiEntity ? (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="text-xs text-muted-foreground mr-1">Empresa:</span>
+      {BILLING_VIEW_OPTIONS.map(({ id, label }) => (
+        <button
+          key={id}
+          type="button"
+          onClick={() => setBillingView(id)}
+          className={`h-7 rounded-md border px-2.5 text-xs font-medium transition-colors ${
+            billingView === id
+              ? 'border-primary bg-primary/10 text-primary'
+              : 'border-border bg-card text-muted-foreground hover:bg-muted'
+          }`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  ) : null;
+
+  const chartControls = (
+    <div className="flex flex-col items-end gap-2">
+      {entitySelector}
+      {yearSelector}
+    </div>
+  );
+
   const currencyTooltip = (v: number, name: string) => [
     `€${Number(v).toLocaleString('es-ES', { minimumFractionDigits: 2 })}`,
     name,
   ];
+
+  const monthlyRevenueLabel =
+    billingView === 'medicina'
+      ? 'Facturación Mes (Medicina)'
+      : billingView === 'estetica'
+        ? 'Facturación Mes (Estética)'
+        : 'Facturación Mes';
 
   if (isLoading) {
     return (
@@ -115,7 +167,7 @@ export const Dashboard: React.FC = () => {
     { title: 'Clientes Activos', value: stats.activeClients.toString(), icon: Users, color: 'from-pink-500 to-pink-600' },
     { title: 'Bonos Activos', value: stats.activeVouchers.toString(), icon: CreditCard, color: 'from-purple-500 to-purple-600' },
     {
-      title: 'Facturación Mes',
+      title: monthlyRevenueLabel,
       value: `€${stats.monthlyRevenue.toLocaleString('es-ES', { minimumFractionDigits: 2 })}`,
       icon: Receipt,
       color: 'from-emerald-500 to-emerald-600',
@@ -166,11 +218,14 @@ export const Dashboard: React.FC = () => {
             })}
           </div>
 
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            {chartControls}
+          </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-card rounded-xl shadow-lg p-6 border">
-              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <div className="mb-4">
                 <h3 className="text-base font-semibold text-foreground">Facturación por mes</h3>
-                {yearSelector}
               </div>
               <ResponsiveContainer width="100%" height={280}>
                 <LineChart data={chartRows}>
@@ -179,15 +234,15 @@ export const Dashboard: React.FC = () => {
                   <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
                   <Tooltip
                     contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px' }}
-                    formatter={(v: number, name: string) => currencyTooltip(v, `Facturación ${name}`)}
+                    formatter={(v: number, name: string) => currencyTooltip(v, name)}
                   />
                   <Legend />
                   {selectedYears.map((year, idx) => (
                     <Line
-                      key={year}
+                      key={`${year}-${billingView}`}
                       type="monotone"
-                      dataKey={String(year)}
-                      name={String(year)}
+                      dataKey={yearBillingDataKey(year, billingView)}
+                      name={yearBillingLegend(year, billingView)}
                       stroke={YEAR_COLORS[idx % YEAR_COLORS.length]}
                       strokeWidth={2.5}
                       dot={{ r: 3 }}
@@ -198,7 +253,7 @@ export const Dashboard: React.FC = () => {
             </div>
 
             <div className="bg-card rounded-xl shadow-lg p-6 border">
-              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
                 <h3 className="text-base font-semibold text-foreground">Comparativa anual</h3>
                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
                   <Activity className="w-3.5 h-3.5" /> IVA incl.
@@ -213,26 +268,47 @@ export const Dashboard: React.FC = () => {
                     contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px' }}
                     formatter={(v: number, name: string) => {
                       if (name === 'presupuestos') return currencyTooltip(v, 'Presupuestos');
-                      return currencyTooltip(v, `Facturación ${name}`);
+                      return currencyTooltip(v, name);
                     }}
                   />
                   <Legend />
-                  {selectedYears.map((year, idx) => (
-                    <Bar
-                      key={year}
-                      dataKey={String(year)}
-                      name={String(year)}
-                      fill={YEAR_COLORS[idx % YEAR_COLORS.length]}
-                      radius={[3, 3, 0, 0]}
-                    />
-                  ))}
+                  {isMultiEntity && billingView === 'both'
+                    ? selectedYears.flatMap((year) => [
+                        <Bar
+                          key={`${year}-med`}
+                          stackId={String(year)}
+                          dataKey={`${year}_medicina`}
+                          name={`${year} Medicina`}
+                          fill={MEDICINA_COLOR}
+                          radius={[0, 0, 0, 0]}
+                        />,
+                        <Bar
+                          key={`${year}-est`}
+                          stackId={String(year)}
+                          dataKey={`${year}_estetica`}
+                          name={`${year} Estética`}
+                          fill={ESTETICA_COLOR}
+                          radius={[3, 3, 0, 0]}
+                        />,
+                      ])
+                    : selectedYears.map((year, idx) => (
+                        <Bar
+                          key={`${year}-${billingView}`}
+                          dataKey={yearBillingDataKey(year, billingView)}
+                          name={yearBillingLegend(year, billingView)}
+                          fill={YEAR_COLORS[idx % YEAR_COLORS.length]}
+                          radius={[3, 3, 0, 0]}
+                        />
+                      ))}
                   {showPresupuestos && (
                     <Bar dataKey="presupuestos" name="Presupuestos" fill="#a78bfa" radius={[3, 3, 0, 0]} />
                   )}
                 </BarChart>
               </ResponsiveContainer>
               <p className="text-[11px] text-muted-foreground mt-2">
-                Facturación fiscal Style sync (serie A). Selecciona varios años para comparar.
+                {isMultiEntity
+                  ? 'Medicina: familias 025, 23-BMED, 33-SKYMEDIC y Fotrej/manchas de 09-Facial. El resto es Estética.'
+                  : 'Facturación fiscal. Selecciona varios años para comparar.'}
               </p>
             </div>
           </div>

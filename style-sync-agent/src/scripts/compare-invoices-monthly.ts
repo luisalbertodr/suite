@@ -3,7 +3,7 @@
  */
 import "dotenv/config";
 import { createClient } from "@supabase/supabase-js";
-import { sumStyleBillingByMonth, loadDbfFilteredRows, dbfStr } from "../dbfSource.js";
+import { sumStyleBillingByMonth, loadDbfFilteredRows, dbfStr, fiscalInvoiceMapKey } from "../dbfSource.js";
 
 const REF: Record<string, number> = {
   "2026-03": 16229.69,
@@ -25,10 +25,12 @@ async function suiteSyncedByMonth(): Promise<Map<string, number>> {
     (r) => dbfStr(r, "ejefac") === "2026" && dbfStr(r, "serfac") !== "00",
   );
   const canonicalKeys = new Set(
-    fiscal.map(
-      (r) =>
-        `${dbfStr(r, "serfac") || "A"}/${dbfStr(r, "numfac")}/${dbfStr(r, "codcli")}/${HUB_ID}`,
-    ),
+    fiscal.map((r) => {
+      const ser = dbfStr(r, "serfac") || "A";
+      const num = dbfStr(r, "numfac");
+      const cli = dbfStr(r, "codcli");
+      return fiscalInvoiceMapKey("2026", ser, num, cli, HUB_ID);
+    }),
   );
 
   const { data: maps } = await supabase
@@ -36,14 +38,13 @@ async function suiteSyncedByMonth(): Promise<Map<string, number>> {
     .from("style_sync_entity_map")
     .select("style_key, suite_id")
     .eq("company_id", HUB_ID)
-    .eq("entity_type", "invoice");
-  const ids = new Set(
-    (maps ?? []).filter((m) => canonicalKeys.has(m.style_key)).map((m) => m.suite_id),
-  );
+    .eq("entity_type", "invoice")
+    .like("style_key", "2026/%");
+  const ids = new Set((maps ?? []).filter((m) => canonicalKeys.has(m.style_key)).map((m) => m.suite_id));
   const { data: inv } = await supabase
     .from("invoices")
-    .select("id, issue_date, total_amount, status")
-    .eq("company_id", HUB_ID);
+    .select("id, issue_date, total_amount, status, company_id")
+    .in("id", [...ids]);
   const out = new Map<string, number>();
   for (const i of inv ?? []) {
     if (!ids.has(i.id) || i.status === "cancelled") continue;
@@ -54,15 +55,15 @@ async function suiteSyncedByMonth(): Promise<Map<string, number>> {
 }
 
 async function suiteBothCompaniesByMonth(): Promise<Map<string, number>> {
-  const { data: inv } = await supabase
-    .from("invoices")
-    .select("issue_date, total_amount, status, company_id")
-    .in("company_id", [HUB_ID, SL_ID]);
+  const { data, error } = await supabase.rpc('dashboard_billing_monthly', {
+    p_company_id: HUB_ID,
+    p_year: 2026,
+  });
+  if (error) throw error;
   const out = new Map<string, number>();
-  for (const i of inv ?? []) {
-    if (i.status === "cancelled") continue;
-    const mes = String(i.issue_date).slice(0, 7);
-    out.set(mes, (out.get(mes) ?? 0) + Number(i.total_amount ?? 0));
+  for (const row of data ?? []) {
+    const key = `2026-${String(row.month_num).padStart(2, "0")}`;
+    out.set(key, Number(row.total ?? 0));
   }
   return out;
 }
@@ -79,7 +80,7 @@ async function main() {
     "DBF leído".padStart(12),
     "Δ DBF".padStart(10),
     "Suite sync".padStart(12),
-    "Suite 2emp".padStart(12),
+    "Suite M+E".padStart(12),
   );
   console.log("-".repeat(68));
 

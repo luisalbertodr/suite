@@ -7,7 +7,7 @@ import type { PostgrestError } from '@supabase/supabase-js';
 
 import { countCatalogCustomers } from '@/lib/customerSearch';
 import { isSchemaColumnError } from '@/lib/appointmentSales';
-import { fetchDashboardBilling, fetchYearBillingComparison, monthKey, type YearBillingRow } from '@/lib/salesRevenue';
+import { fetchDashboardBilling, fetchMonthBillingForView, fetchYearBillingComparison, monthKey, type BillingEntityView, type YearBillingRow } from '@/lib/salesRevenue';
 
 const isMissingRelation = (error: PostgrestError | null) =>
   Boolean(
@@ -17,9 +17,9 @@ const isMissingRelation = (error: PostgrestError | null) =>
         (error.message || '').toLowerCase().includes('does not exist'))
   );
 
-export const useDashboardData = (compareYears?: number[]) => {
+export const useDashboardData = (compareYears?: number[], billingView: BillingEntityView = 'both') => {
   const { companyId, loading: companyLoading } = useCompanyFilter();
-  const { operationalCompanyId, loading: wcLoading } = useWorkCenter();
+  const { operationalCompanyId, loading: wcLoading, isMultiEntity } = useWorkCenter();
   const opCompanyId = operationalCompanyId ?? companyId;
 
   const today = format(new Date(), 'yyyy-MM-dd');
@@ -27,11 +27,14 @@ export const useDashboardData = (compareYears?: number[]) => {
   const years = compareYears?.length ? compareYears : [nowYear, nowYear - 1];
 
   const { data: main, isLoading: mainLoading } = useQuery({
-    queryKey: ['dashboard-main', companyId, opCompanyId],
+    queryKey: ['dashboard-main', companyId, opCompanyId, billingView],
     queryFn: async () => {
       if (!companyId || !opCompanyId) return null;
 
       const billingPromise = fetchDashboardBilling(companyId, 5);
+      const monthRevenuePromise = isMultiEntity
+        ? fetchMonthBillingForView(companyId, billingView).catch(() => null)
+        : Promise.resolve(null);
       const customersCountPromise = countCatalogCustomers(supabase, opCompanyId);
       const countsPromise = Promise.all([
         customersCountPromise,
@@ -45,8 +48,9 @@ export const useDashboardData = (compareYears?: number[]) => {
           .eq('company_id', opCompanyId).eq('estado', 'activo'),
       ]);
 
-      const [billing, [customersCount, appointmentsRes, vouchersRes, bonosRes]] = await Promise.all([
+      const [billing, monthRevenue, [customersCount, appointmentsRes, vouchersRes, bonosRes]] = await Promise.all([
         billingPromise,
+        monthRevenuePromise,
         countsPromise,
       ]);
 
@@ -80,7 +84,7 @@ export const useDashboardData = (compareYears?: number[]) => {
           activeClients: customersCount,
           todayAppointments: appointmentsRes.count || 0,
           activeVouchers: (vouchersRes.count || 0) + bonosCount,
-          monthlyRevenue: billing.currentMonth.total,
+          monthlyRevenue: monthRevenue ?? billing.currentMonth.total,
         },
         chartData,
       };
@@ -157,6 +161,7 @@ export const useDashboardData = (compareYears?: number[]) => {
     chartData: main?.chartData,
     yearBilling,
     compareYears: years,
+    isMultiEntity,
     recentActivity,
     isLoading: mainLoading || activityLoading || yearBillingLoading || companyLoading || wcLoading,
   };

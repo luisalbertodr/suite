@@ -161,7 +161,7 @@ export const useAgendaAppointments = (date?: string) => {
   const { operationalCompanyId, loading: wcLoading } = useWorkCenter();
   const scopeCompanyId = operationalCompanyId ?? companyId;
 
-  const { data: appointments = [], isLoading, error } = useQuery({
+  const { data: appointments = [], isLoading, error, refetch } = useQuery({
     queryKey: ['agenda-appointments', date, scopeCompanyId],
     queryFn: async () => {
       if (!scopeCompanyId) return [];
@@ -223,6 +223,8 @@ export const useAgendaAppointments = (date?: string) => {
       return dedupeByLegacyPlanincId(dedupeByLegacyIdPlan(merged));
     },
     enabled: !!scopeCompanyId && !wcLoading,
+    refetchInterval: 12_000,
+    refetchIntervalInBackground: false,
   });
 
   const createAppointment = useMutation({
@@ -332,6 +334,7 @@ export const useAgendaAppointments = (date?: string) => {
     appointments,
     isLoading,
     error,
+    refetch,
     createAppointment,
     updateAppointment,
     deleteAppointment,

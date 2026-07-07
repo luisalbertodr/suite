@@ -9,7 +9,8 @@ param(
     [string]$StyleRoot = "C:\Duna\Style-Suite-Test",
     [string]$TaskName = "SuiteStyleInboundWorker",
     [int]$IntervalSec = 60,
-    [string]$VmHost = ""
+    [string]$VmHost = "",
+    [switch]$RegisterScheduledTask
 )
 
 $ErrorActionPreference = "Stop"
@@ -83,20 +84,26 @@ sh.Run Chr(34) & "$runner" & Chr(34), 0, True
 Set-Content -Path $vbs -Value $vbsContent -Encoding ASCII
 
 $intervalMin = [Math]::Max(1, [int][Math]::Ceiling($IntervalSec / 60.0))
-$action = New-ScheduledTaskAction -Execute "wscript.exe" -Argument "`"$vbs`"" -WorkingDirectory $StyleRoot
-$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
-    -RepetitionInterval (New-TimeSpan -Minutes $intervalMin) `
-    -RepetitionDuration (New-TimeSpan -Days 3650)
-$settings = New-ScheduledTaskSettingsSet `
-    -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
-    -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 5) `
-    -Hidden
 
-if ($VmHost) {
-    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings `
-        -User "SYSTEM" -RunLevel Highest -Force -CimSession (New-CimSession -ComputerName $VmHost)
-    Write-Host "OK Task $TaskName en VM $VmHost cada ~$($intervalMin) min (oculto)" -ForegroundColor Green
+if ($RegisterScheduledTask) {
+    $action = New-ScheduledTaskAction -Execute "wscript.exe" -Argument "//B `"$vbs`"" -WorkingDirectory $StyleRoot
+    $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
+        -RepetitionInterval (New-TimeSpan -Minutes $intervalMin) `
+        -RepetitionDuration (New-TimeSpan -Days 3650)
+    $settings = New-ScheduledTaskSettingsSet `
+        -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
+        -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 5) `
+        -Hidden
+
+    if ($VmHost) {
+        Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings `
+            -User "SYSTEM" -RunLevel Highest -Force -CimSession (New-CimSession -ComputerName $VmHost)
+        Write-Host "OK Task $TaskName en VM $VmHost cada ~$($intervalMin) min (oculto)" -ForegroundColor Green
+    } else {
+        Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Force
+        Write-Host "OK Task $TaskName local cada ~$($intervalMin) min (oculto, sin ventana CMD/VFP)" -ForegroundColor Green
+    }
 } else {
-    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Force
-    Write-Host "OK Task $TaskName local cada ~$($intervalMin) min (oculto, sin ventana CMD/VFP)" -ForegroundColor Green
+    Write-Host "Sin tarea programada (modo event-driven: el agente Node dispara el worker al escribir JSON)" -ForegroundColor Cyan
+    Write-Host "  Para registrar cron VFP: -RegisterScheduledTask" -ForegroundColor DarkGray
 }

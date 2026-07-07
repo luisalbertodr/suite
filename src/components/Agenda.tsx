@@ -20,6 +20,7 @@ import { EditAppointmentForm } from './EditAppointmentForm';
 import { AppointmentResourceConflictDialog } from './AppointmentResourceConflictDialog';
 import { useAgendaEmployees } from '@/hooks/useAgendaEmployees';
 import { useAgendaAppointments } from '@/hooks/useAgendaAppointments';
+import { useAgendaInboundSyncRefetch } from '@/hooks/useAgendaInboundSyncRefetch';
 import { useAgendaAppointmentAttachments } from '@/hooks/useAgendaAppointmentAttachments';
 import { hasAttachmentHints } from '@/lib/appointmentAttachmentHints';
 import { useCabinas, useRecursos } from '@/hooks/useRecursosCabinas';
@@ -404,7 +405,9 @@ export const Agenda: React.FC = () => {
     isLoading: appointmentsLoading,
     createAppointment,
     updateAppointment,
+    refetch: refetchAppointments,
   } = useAgendaAppointments(selectedDateYmd);
+  useAgendaInboundSyncRefetch(opCompanyId, refetchAppointments);
 
   const agendaAppointmentIds = useMemo(
     () => dbAppointments.map((a) => a.id).filter(Boolean),
