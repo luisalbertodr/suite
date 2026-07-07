@@ -1,7 +1,24 @@
 * Arranque v2 (config.fpw STARTUP): agente Node + watcher inbound antes del bootstrap embebido.
-LOCAL lcRoot, lcCola, lcCtrl, lcBoot, lcAlert, lcSavErr, lcErr
+LOCAL lcRoot, lcCola, lcCtrl, lcBoot, lcAlert, lcSavErr, lcErr, lcUnlock
 
 lcRoot = ADDBS(SYS(5) + SYS(2003))
+
+* Duna.exe embebido puede llamar CREATEOBJECT("licencias_unlock") antes de PROGS\general.
+* Registrar la clase en STARTUP (antes del main del exe). Requiere licencias.vcx cargado.
+SET DEFAULT TO (lcRoot)
+SET PATH TO (lcRoot) ADDITIVE
+SET PATH TO (lcRoot + "PROGS") ADDITIVE
+SET PATH TO (lcRoot + "vcx") ADDITIVE
+IF FILE(lcRoot + "vcx\licencias.vcx")
+   SET CLASSLIB TO (lcRoot + "vcx\licencias.vcx") ADDITIVE
+ENDIF
+lcUnlock = lcRoot + "PROGS\suite_full_unlock.fxp"
+IF .NOT. FILE(lcUnlock)
+   lcUnlock = lcRoot + "PROGS\suite_full_unlock.prg"
+ENDIF
+IF FILE(lcUnlock)
+   SET PROCEDURE TO (lcUnlock) ADDITIVE
+ENDIF
 
 * Entorno test / sin modulo conta: persistir flags en EMPRESA.config antes del bootstrap embebido.
 IF .NOT. FILE(lcRoot + "conta.exe") .AND. FILE(lcRoot + "empresa.dbf")
@@ -41,7 +58,8 @@ IF FILE(lcLicense)
    SET PROCEDURE TO (lcLicense) ADDITIVE
 ENDIF
 
-IF TYPE("SuiteBootstrapLog")="U" AND FILE(lcRoot + "PROGS\general.prg")
+* Siempre cargar PROGS\general.prg: parches SuiteSafeCreateObject / sync v2 prevalecen sobre exe embebido.
+IF FILE(lcRoot + "PROGS\general.prg")
    SET PROCEDURE TO (lcRoot + "PROGS\general.prg") ADDITIVE
 ENDIF
 

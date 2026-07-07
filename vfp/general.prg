@@ -1202,6 +1202,9 @@ ENDFUNC
 #INCLUDE suite_cola_sync.prg
 #INCLUDE suite_entity_sync.prg
 #INCLUDE suite_apply_license_unlock.prg
+#INCLUDE suite_boot_sync.prg
+#INCLUDE suite_sync_pending_alert.prg
+#INCLUDE suite_shutdown_sync.prg
 
 PROCEDURE SuiteEnsureGlobals
  IF TYPE("pcidioma")#"C"
@@ -1442,29 +1445,32 @@ ENDPROC
 **
 PROCEDURE SuiteBootExternalSyncIfReady
  PARAMETER tcStyleRoot
- LOCAL lcBootPrg, lcSav, lcErr
+ LOCAL lcPs1, lcCmd, lcSav, lcErr
  IF TYPE("tcStyleRoot")="C" AND .NOT. EMPTY(tcStyleRoot)
     tcStyleRoot = ADDBS(tcStyleRoot)
  ELSE
     tcStyleRoot = ADDBS(SYS(5)+SYS(2003))
  ENDIF
- lcBootPrg = tcStyleRoot+"PROGS\suite_boot_sync.prg"
- IF .NOT. FILE(lcBootPrg)
-    lcBootPrg = tcStyleRoot+"suite_boot_sync.prg"
+ * Embebido en exe: RUN powershell (no DO a .prg externo ni TYPE() de PROCEDURE).
+ lcPs1 = tcStyleRoot+"ensure-style-sync.ps1"
+ IF .NOT. FILE(lcPs1)
+    lcPs1 = tcStyleRoot+"PROGS\ensure-style-sync.ps1"
  ENDIF
- IF .NOT. FILE(lcBootPrg)
+ IF .NOT. FILE(lcPs1)
+    DO SuiteBootstrapLog WITH "[BOOT-SYNC] sin ensure-style-sync.ps1"
+    DO SuiteSyncPendingWatcherStartIfReady WITH tcStyleRoot
     RETURN
  ENDIF
+ lcCmd = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "'+lcPs1+'" -StyleRoot "'+tcStyleRoot+'" -EnsureAgent'
  lcSav = ON("ERROR")
  lcErr = ""
  ON ERROR lcErr = MESSAGE()
- SET PROCEDURE TO (lcBootPrg) ADDITIVE
- IF TYPE("SuiteBootExternalSync")#"U"
-    DO ("SuiteBootExternalSync")
- ENDIF
+ RUN /N &lcCmd
  ON ERROR &lcSav
  IF .NOT. EMPTY(lcErr)
     DO SuiteBootstrapLog WITH "[BOOT-SYNC] "+lcErr
+ ELSE
+    DO SuiteBootstrapLog WITH "[BOOT-SYNC] EnsureAgent lanzado"
  ENDIF
  DO SuiteSyncPendingWatcherStartIfReady WITH tcStyleRoot
 ENDPROC
@@ -1492,7 +1498,7 @@ PROCEDURE SuiteSyncPendingWatcherStartIfReady
  ON ERROR lcErr = MESSAGE()
  SET PROCEDURE TO (lcPrg) ADDITIVE
  IF TYPE("SuiteSyncPendingWatcherStart")#"U"
-    DO ("SuiteSyncPendingWatcherStart")
+    DO SuiteSyncPendingWatcherStart
  ENDIF
  ON ERROR &lcSav
 ENDPROC
@@ -1508,7 +1514,7 @@ PROCEDURE SuiteOnShutdown
     IF FILE(lcShutPrg)
        SET PROCEDURE TO (lcShutPrg) ADDITIVE
        IF TYPE("SuiteShutdownInboundDrain")#"U"
-          DO ("SuiteShutdownInboundDrain")
+          DO SuiteShutdownInboundDrain
        ENDIF
     ENDIF
  CATCH

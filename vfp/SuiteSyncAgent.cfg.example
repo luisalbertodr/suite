@@ -1,3 +1,5 @@
 # Ruta del agente Node style-sync-agent (repo o copia local).
 # Copiar a SuiteSyncAgent.cfg en la raiz de Style.
-AGENT_DIR=C:\Users\OportoW11\Suite\suite\style-sync-agent
+AGENT_DIR=C:\Style-Dunasoft\style-sync-agent
+# Opcional si Node no esta en PATH (VM sin instalacion global):
+NODE_EXE=C:\Style-Dunasoft\style-sync-agent\runtime\node.exe

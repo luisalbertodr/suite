@@ -67,6 +67,14 @@ Write-Host ("  Origen:  {0} bytes  {1}" -f $localExe.Length, $localExe.LastWrite
 Copy-Item $ExportExe (Join-Path $StyleRemote "Duna.exe") -Force
 Copy-Item $ExportExe (Join-Path $StyleRemote "Duna2.exe") -Force
 
+foreach ($f in @("_menus.dbf", "_menus.cdx", "foxypreviewer_locs.dbf")) {
+    $src = Join-Path $ExportRoot $f
+    if (Test-Path $src) {
+        Copy-Item $src (Join-Path $StyleRemote $f) -Force
+        Write-Host "$f -> VM (runtime arranque)" -ForegroundColor Cyan
+    }
+}
+
 $StyleRuntime = Join-Path $ExportRoot "STYLE-RUNTIME"
 if (Test-Path $StyleRuntime) {
     foreach ($f in @(
@@ -97,13 +105,9 @@ if (Test-Path $exportProgs) {
 }
 if (Test-Path $vcxSrc) {
     New-Item -ItemType Directory -Force -Path $vcxDest | Out-Null
-    foreach ($f in @("licencias.vcx", "licencias.vct", "seguridad.vcx", "seguridad.vct", "screen_nueva.vcx", "screen_nueva.vct", "tickets_nuevo.vcx", "tickets_nuevo.vct")) {
-        $src = Join-Path $vcxSrc $f
-        if (Test-Path $src) {
-            Copy-Item $src $vcxDest -Force
-        }
-    }
-    Write-Host "vcx\ (clases arranque) -> VM" -ForegroundColor Cyan
+    robocopy $vcxSrc $vcxDest /E /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
+    $vcxCount = @(Get-ChildItem $vcxDest -Filter "*.vcx" -ErrorAction SilentlyContinue).Count
+    Write-Host "vcx\ ($vcxCount archivos) -> VM" -ForegroundColor Cyan
 }
 
 if ($RemoveUnlockFallback) {

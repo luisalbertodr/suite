@@ -42,6 +42,16 @@ foreach ($f in $copyRoot) {
     Write-Host "  OK $f" -ForegroundColor Green
 }
 
+$fpw = Join-Path $StyleRoot "config.fpw"
+@"
+* VFP: directorio de trabajo = raiz Style; STARTUP antes del main de Duna.exe
+DEFAULT=$StyleRoot
+STARTUP=PROGS\suite_v2_startup.prg
+RESOURCE=OFF
+MVCOUNT=4096
+"@ | Set-Content -Path $fpw -Encoding ASCII
+Write-Host "  OK config.fpw STARTUP v2" -ForegroundColor Green
+
 $progs = @(
     "suite_boot_sync.prg",
     "suite_shutdown_sync.prg",

@@ -31,24 +31,54 @@ function Write-SyncLog([string]$Msg) {
     Write-Host $line
 }
 
+function Read-SuiteSyncAgentCfg {
+    param([string]$Root)
+    $cfg = @{ AGENT_DIR = ""; NODE_EXE = "" }
+    $cfgPath = Join-Path $Root "SuiteSyncAgent.cfg"
+    if (-not (Test-Path $cfgPath)) { return $cfg }
+    foreach ($line in Get-Content $cfgPath -ErrorAction SilentlyContinue) {
+        if ($line -match '^\s*AGENT_DIR\s*=\s*(.+)\s*$') {
+            $cfg.AGENT_DIR = $Matches[1].Trim().Trim('"')
+        }
+        if ($line -match '^\s*NODE_EXE\s*=\s*(.+)\s*$') {
+            $cfg.NODE_EXE = $Matches[1].Trim().Trim('"')
+        }
+    }
+    return $cfg
+}
+
 function Read-AgentDirFromCfg {
     param([string]$Root, [string]$Override)
     if ($Override) { return [IO.Path]::GetFullPath($Override) }
     $envDir = $env:STYLE_SYNC_AGENT_DIR
     if ($envDir -and (Test-Path $envDir)) { return [IO.Path]::GetFullPath($envDir) }
-    $cfg = Join-Path $Root "SuiteSyncAgent.cfg"
-    if (Test-Path $cfg) {
-        foreach ($line in Get-Content $cfg -ErrorAction SilentlyContinue) {
-            if ($line -match '^\s*AGENT_DIR\s*=\s*(.+)\s*$') {
-                $p = $Matches[1].Trim().Trim('"')
-                if ($p -and (Test-Path $p)) { return [IO.Path]::GetFullPath($p) }
-            }
-        }
-    }
+    $cfg = Read-SuiteSyncAgentCfg -Root $Root
+    if ($cfg.AGENT_DIR -and (Test-Path $cfg.AGENT_DIR)) { return [IO.Path]::GetFullPath($cfg.AGENT_DIR) }
     $local = Join-Path $Root "style-sync-agent"
     if (Test-Path (Join-Path $local "dist\index.js")) { return $local }
     $repo = "C:\Users\OportoW11\Suite\suite\style-sync-agent"
     if (Test-Path (Join-Path $repo "dist\index.js")) { return $repo }
+    return $null
+}
+
+function Resolve-NodeExe {
+    param([string]$Root, [string]$AgentDirPath)
+    $candidates = @()
+    $cfg = Read-SuiteSyncAgentCfg -Root $Root
+    if ($cfg.NODE_EXE) { $candidates += $cfg.NODE_EXE }
+    if ($env:NODE_EXE) { $candidates += $env:NODE_EXE }
+    if ($AgentDirPath) {
+        $candidates += (Join-Path $AgentDirPath "runtime\node.exe")
+    }
+    $candidates += @(
+        "C:\Program Files\nodejs\node.exe",
+        "C:\Program Files (x86)\nodejs\node.exe"
+    )
+    foreach ($c in $candidates) {
+        if ($c -and (Test-Path $c)) { return [IO.Path]::GetFullPath($c) }
+    }
+    $where = (Get-Command node -ErrorAction SilentlyContinue).Source
+    if ($where -and (Test-Path $where)) { return [IO.Path]::GetFullPath($where) }
     return $null
 }
 
@@ -59,25 +89,21 @@ function Test-StyleSyncAgentRunning {
 }
 
 function Ensure-StyleSyncAgentFiles {
-    param([string]$AgentDirPath, [string]$Root)
+    param([string]$AgentDirPath, [string]$Root, [string]$NodeExe)
     $runner = Join-Path $Root "run_style_sync_agent.bat"
     $vbs = Join-Path $Root "run_style_sync_agent_hidden.vbs"
-    if (-not (Test-Path $runner)) {
-        @"
+    @"
 @echo off
 cd /d "$AgentDirPath"
 powershell -NoProfile -Command "`$p=Get-CimInstance Win32_Process -Filter \"name='node.exe'\" -EA SilentlyContinue | Where-Object { `$_.CommandLine -match 'dist[/\\]index\.js' } | Select-Object -First 1; if(`$p){exit 0}else{exit 1}"
 if %ERRORLEVEL%==0 exit /b 0
-start /B node dist/index.js >> agent-run.log 2>&1
+start /B "" "$NodeExe" dist/index.js >> agent-run.log 2>&1
 "@ | Set-Content -Path $runner -Encoding ASCII
-    }
-    if (-not (Test-Path $vbs)) {
-        @"
+    @"
 Set sh = CreateObject("WScript.Shell")
 sh.CurrentDirectory = "$AgentDirPath"
 sh.Run Chr(34) & "$runner" & Chr(34), 0, False
 "@ | Set-Content -Path $vbs -Encoding ASCII
-    }
 }
 
 function Start-StyleSyncAgent {
@@ -90,17 +116,22 @@ function Start-StyleSyncAgent {
         Write-SyncLog "AVISO: no existe $AgentDirPath\dist\index.js - ejecuta npm run build en style-sync-agent"
         return $false
     }
-    Ensure-StyleSyncAgentFiles -AgentDirPath $AgentDirPath -Root $Root
+    $nodeExe = Resolve-NodeExe -Root $Root -AgentDirPath $AgentDirPath
+    if (-not $nodeExe) {
+        Write-SyncLog "AVISO: no se encuentra node.exe - instala Node o copia runtime a $AgentDirPath\runtime\node.exe"
+        return $false
+    }
+    Ensure-StyleSyncAgentFiles -AgentDirPath $AgentDirPath -Root $Root -NodeExe $nodeExe
     $vbs = Join-Path $Root "run_style_sync_agent_hidden.vbs"
     Start-Process wscript.exe -ArgumentList "`"$vbs`"" -WindowStyle Hidden
     Start-Sleep -Seconds 4
     $ok = [bool](Test-StyleSyncAgentRunning)
     if (-not $ok) {
-        Start-Process -FilePath "node" -ArgumentList "dist/index.js" -WorkingDirectory $AgentDirPath -WindowStyle Hidden | Out-Null
+        Start-Process -FilePath $nodeExe -ArgumentList "dist/index.js" -WorkingDirectory $AgentDirPath -WindowStyle Hidden | Out-Null
         Start-Sleep -Seconds 2
         $ok = [bool](Test-StyleSyncAgentRunning)
     }
-    Write-SyncLog $(if ($ok) { "agente Node iniciado" } else { "AVISO: agente Node no arranco" })
+    Write-SyncLog $(if ($ok) { "agente Node iniciado ($nodeExe)" } else { "AVISO: agente Node no arranco ($nodeExe)" })
     return $ok
 }
 

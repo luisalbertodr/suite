@@ -103,14 +103,32 @@ function Sync-SuitePrgs {
     if ($gen -notmatch '#INCLUDE\s+suite_apply_license_unlock\.prg') {
         throw "general.prg sin marcador '#INCLUDE suite_apply_license_unlock.prg' para inline"
     }
+    if ($gen -notmatch '#INCLUDE\s+suite_boot_sync\.prg') {
+        throw "general.prg sin marcador '#INCLUDE suite_boot_sync.prg' para inline"
+    }
+    if ($gen -notmatch '#INCLUDE\s+suite_sync_pending_alert\.prg') {
+        throw "general.prg sin marcador '#INCLUDE suite_sync_pending_alert.prg' para inline"
+    }
+    if ($gen -notmatch '#INCLUDE\s+suite_shutdown_sync\.prg') {
+        throw "general.prg sin marcador '#INCLUDE suite_shutdown_sync.prg' para inline"
+    }
     if (-not (Test-Path $licenseSrc)) { throw "Falta $licenseSrc" }
+    $bootSrc = Join-Path $VfpRepo "suite_boot_sync.prg"
+    $alertSrc = Join-Path $VfpRepo "suite_sync_pending_alert.prg"
+    $shutSrc = Join-Path $VfpRepo "suite_shutdown_sync.prg"
+    foreach ($p in @($bootSrc, $alertSrc, $shutSrc)) {
+        if (-not (Test-Path $p)) { throw "Falta $p" }
+    }
     $ctrl = [System.IO.File]::ReadAllText($ctrlSrc, $enc)
     $cola = [System.IO.File]::ReadAllText($colaSrc, $enc)
     $entity = [System.IO.File]::ReadAllText($entitySrc, $enc)
     $license = [System.IO.File]::ReadAllText($licenseSrc, $enc)
-    $gen = $gen.Replace("#INCLUDE suite_control_sync.prg", $ctrl).Replace("#INCLUDE suite_cola_sync.prg", $cola).Replace("#INCLUDE suite_entity_sync.prg", $entity).Replace("#INCLUDE suite_apply_license_unlock.prg", $license)
+    $boot = [System.IO.File]::ReadAllText($bootSrc, $enc)
+    $alert = [System.IO.File]::ReadAllText($alertSrc, $enc)
+    $shut = [System.IO.File]::ReadAllText($shutSrc, $enc)
+    $gen = $gen.Replace("#INCLUDE suite_control_sync.prg", $ctrl).Replace("#INCLUDE suite_cola_sync.prg", $cola).Replace("#INCLUDE suite_entity_sync.prg", $entity).Replace("#INCLUDE suite_apply_license_unlock.prg", $license).Replace("#INCLUDE suite_boot_sync.prg", $boot).Replace("#INCLUDE suite_sync_pending_alert.prg", $alert).Replace("#INCLUDE suite_shutdown_sync.prg", $shut)
     [System.IO.File]::WriteAllText((Join-Path $Progs "general.prg"), $gen, $enc)
-    Write-Ok "general.prg con suite_control_sync + suite_cola_sync + suite_entity_sync + suite_apply_license_unlock INLINE (embebidos para compilar)"
+    Write-Ok "general.prg con sync v2 INLINE (cola, boot, alert, shutdown)"
 }
 
 function Remove-StaleBuildFxp {

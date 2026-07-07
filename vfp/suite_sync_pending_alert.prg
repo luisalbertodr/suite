@@ -68,7 +68,7 @@ PROCEDURE SuiteSyncPendingWatcherTick
  ENDIF
  STRTOFILE(TTOC(DATETIME()), lcFlag)
  LOCAL lcmsg
- lcm sg = "Hay "+ALLTRIM(STR(lnPending))+" cambio(s) de Suite pendientes de aplicar en Style."
+ lcmsg = "Hay "+ALLTRIM(STR(lnPending))+" cambio(s) de Suite pendientes de aplicar en Style."
  IF llWedbErr
     lcmsg = lcmsg+CHR(13)+CHR(13)+"El worker no pudo abrir wedb (Style en uso)."
     lcmsg = lcmsg+CHR(13)+"Al cerrar Style se sincronizaran solos."

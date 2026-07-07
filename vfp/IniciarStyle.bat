@@ -5,6 +5,7 @@ REM Sync v2: agente Node + drenaje inbound antes de Duna (wedb libre).
 
 cd /d "%~dp0"
 set "STYLE_HOME=%CD%"
+set "PATH=%STYLE_HOME%\PROGS;%STYLE_HOME%\vcx;%PATH%"
 
 set "SYNCSCRIPT=%STYLE_HOME%\ensure-style-sync.ps1"
 if not exist "%SYNCSCRIPT%" set "SYNCSCRIPT=%STYLE_HOME%\PROGS\ensure-style-sync.ps1"
@@ -23,8 +24,7 @@ if "%STYLE_LEGACY%"=="1" (
   )
 )
 
-if exist "%STYLE_HOME%\PROGS\suite_full_unlock.fxp" ren "%STYLE_HOME%\PROGS\suite_full_unlock.fxp" suite_full_unlock.fxp.bak >nul 2>&1
-if exist "%STYLE_HOME%\PROGS\suite_full_unlock.FXP" ren "%STYLE_HOME%\PROGS\suite_full_unlock.FXP" suite_full_unlock.fxp.bak >nul 2>&1
+rem NO renombrar suite_full_unlock.fxp: Duna.exe antiguo necesita licencias_unlock (error 1732).
 rem NO renombrar funciones.fxp: PROGS\funciones.prg (hook cola v2) debe prevalecer via STARTUP
 if exist "%STYLE_HOME%\PROGS\general.fxp" ren "%STYLE_HOME%\PROGS\general.fxp" general.fxp.bak >nul 2>&1
 if exist "%STYLE_HOME%\PROGS\general.FXP" ren "%STYLE_HOME%\PROGS\general.FXP" general.fxp.bak >nul 2>&1
