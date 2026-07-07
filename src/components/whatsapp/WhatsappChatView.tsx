@@ -247,11 +247,7 @@ export const WhatsappChatView: React.FC<Props> = ({
     !isGroup &&
     !isSystemChatJid(chat.chat_id) &&
     (!isTestWaChat || effectiveMarketingLeadId);
-  const showCampaignAudio =
-    !isGroup &&
-    !isSystemChatJid(chat.chat_id) &&
-    !!effectiveMarketingLeadId &&
-    (leadMeta ? !!leadMeta.hasCampaignAudio : true);
+  const showCampaignAudio = !isGroup && !isSystemChatJid(chat.chat_id);
 
   const relatedPhoneChatIds = useMemo(() => {
     const ids: string[] = [];

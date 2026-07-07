@@ -14,8 +14,10 @@ import {
 } from './whatsappProviderClient.ts';
 import {
   buildDefaultStoragePublicUrl,
+  isOggOpusBase64,
   openwaMediaRequiresPublicUrl,
   uploadWhatsappOutgoingMedia,
+  wahaVoiceRequiresPublicUrl,
 } from './whatsappOutgoingMediaStorage.ts';
 import {
   normalizeWhatsappProvider,
@@ -449,26 +451,34 @@ async function sendWhatsappMedia(
   media: { base64: string; mime: string; filename: string },
 ): Promise<{ chatId: string; wahaId: string | null }> {
   const providerCfg = asProviderConfig(cfg);
-  const preview = `[audio] ${media.filename}`;
+  const normalizedMime = normalizeWhatsappAudioMime(media.mime, media.filename);
+  const isVoiceNote =
+    (normalizedMime === 'audio/ogg' ||
+      normalizedMime.includes('opus') ||
+      /\.ogg$/i.test(media.filename)) &&
+    isOggOpusBase64(media.base64);
+  const mediaType = isVoiceNote ? 'voice' : 'audio';
+  const preview = isVoiceNote ? '[nota de voz]' : `[audio] ${media.filename}`;
   const mediaPayload = {
     base64: media.base64,
-    mime: media.mime,
+    mime: normalizedMime,
     filename: media.filename,
   };
   if (
-    normalizeWhatsappProvider(providerCfg.provider) === 'openwa' &&
-    openwaMediaRequiresPublicUrl('audio')
+    (normalizeWhatsappProvider(providerCfg.provider) === 'openwa' &&
+      openwaMediaRequiresPublicUrl(mediaType)) ||
+    wahaVoiceRequiresPublicUrl(providerCfg.provider, mediaType)
   ) {
     mediaPayload.url = await uploadWhatsappOutgoingMedia(
       admin,
       companyId,
       media.base64,
-      media.mime,
+      normalizedMime,
       buildDefaultStoragePublicUrl,
       media.filename,
     );
   }
-  const sent = await providerSendMedia(providerCfg, chatId, 'audio', mediaPayload);
+  const sent = await providerSendMedia(providerCfg, chatId, mediaType, mediaPayload);
   const wahaId = sent.messageId;
   const ts = sent.timestamp
     ? new Date(sent.timestamp * 1000).toISOString()
@@ -480,9 +490,9 @@ async function sendWhatsappMedia(
     chatId,
     wahaId,
     ts,
-    'audio',
+    mediaType,
     preview,
-    { mime: media.mime, filename: media.filename },
+    { mime: normalizedMime, filename: media.filename },
     sent.raw,
   );
   return { chatId: resolvedChatId, wahaId };

@@ -25,14 +25,20 @@ export const WhatsappSendCampaignAudioButton: React.FC<Props> = ({
 }) => {
   const { toast } = useToast();
   const [sending, setSending] = useState(false);
-
-  if (!marketingLeadId && !isMetaMarketingLead(leadMeta)) return null;
-  if (leadMeta?.hasCampaignAudio === false) return null;
+  const isMetaLead = isMetaMarketingLead(leadMeta);
+  const hasCampaignAudio = leadMeta?.hasCampaignAudio !== false;
+  const isEligible = isMetaLead && hasCampaignAudio;
+  const disabledReason = !isMetaLead
+    ? 'Disponible solo para leads de Meta'
+    : !hasCampaignAudio
+      ? 'Esta campaña no tiene audio configurado'
+      : null;
 
   const campaignLabel =
     leadMeta?.campaign?.trim() || leadMeta?.formName?.trim() || 'campaña';
 
   const handleClick = async () => {
+    if (!isEligible) return;
     setSending(true);
     try {
       const res = await invokeWhatsappProxy<{
@@ -74,8 +80,10 @@ export const WhatsappSendCampaignAudioButton: React.FC<Props> = ({
       variant="outline"
       size="sm"
       className="h-8 gap-1.5 text-xs border-violet-200 bg-violet-50/80 text-violet-800 hover:bg-violet-100 dark:border-violet-900 dark:bg-violet-950/40 dark:text-violet-200"
-      disabled={sending}
-      title={`Enviar audio de la campaña «${campaignLabel}»`}
+      disabled={sending || !isEligible}
+      title={
+        disabledReason ?? `Enviar audio de la campaña «${campaignLabel}»`
+      }
       onClick={handleClick}
     >
       {sending ? (
