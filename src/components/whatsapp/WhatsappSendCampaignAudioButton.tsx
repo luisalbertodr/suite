@@ -55,12 +55,16 @@ export const WhatsappSendCampaignAudioButton: React.FC<Props> = ({
         marketing_lead_id: marketingLeadId ?? null,
       });
       if (!res.ok) throw new Error(res.error ?? 'No se pudo enviar');
+      const label = res.campaign_label ?? campaignLabel;
+      const description =
+        res.sent_kind === 'audio_link'
+          ? `Enlace de audio (${res.filename ?? label}) enviado.`
+          : res.sent_kind === 'voice'
+            ? `Nota de voz de «${label}» enviada.`
+            : `Audio adjunto de «${label}» enviado.`;
       toast({
         title: 'Audio de campaña enviado',
-        description:
-          res.sent_kind === 'audio_link'
-            ? `Enlace de audio (${res.filename ?? campaignLabel}) enviado.`
-            : `Nota de voz de «${res.campaign_label ?? campaignLabel}» enviada.`,
+        description,
       });
       onSent?.();
     } catch (e) {

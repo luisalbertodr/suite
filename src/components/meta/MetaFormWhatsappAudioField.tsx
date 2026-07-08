@@ -99,7 +99,7 @@ export const MetaFormWhatsappAudioField: React.FC<Props> = ({
           <input
             ref={fileInputRef}
             type="file"
-            accept="audio/*,.ogg,.opus,.mp3,.m4a,.wav,.webm"
+            accept="audio/ogg,audio/opus,.ogg,.opus,application/ogg"
             className="hidden"
             aria-label="Adjuntar audio de campaña"
             onChange={(e) => void handleUpload(e.target.files?.[0] ?? null)}
@@ -137,7 +137,7 @@ export const MetaFormWhatsappAudioField: React.FC<Props> = ({
             </>
           ) : (
             <span className="text-[10px] text-amber-700 dark:text-amber-400">
-              OGG/Opus (nota de voz), MP3, M4A o WAV
+              Solo OGG/Opus (nota de voz de WhatsApp)
             </span>
           )}
         </div>

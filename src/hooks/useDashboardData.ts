@@ -7,7 +7,7 @@ import type { PostgrestError } from '@supabase/supabase-js';
 
 import { countCatalogCustomers } from '@/lib/customerSearch';
 import { isSchemaColumnError } from '@/lib/appointmentSales';
-import { fetchDashboardBilling, fetchMonthBillingForView, fetchYearBillingComparison, monthKey, type BillingEntityView, type YearBillingRow } from '@/lib/salesRevenue';
+import { fetchDashboardBilling, fetchMonthBillingForView, fetchYearBillingComparison, type BillingEntityView, type YearBillingRow } from '@/lib/salesRevenue';
 
 const isMissingRelation = (error: PostgrestError | null) =>
   Boolean(
@@ -56,26 +56,11 @@ export const useDashboardData = (compareYears?: number[], billingView: BillingEn
 
       const bonosCount = isMissingRelation(bonosRes.error) ? 0 : (bonosRes.count || 0);
 
-      const rangeStart = billing.series[0]?.monthStart;
-      const rangeEnd = billing.series[billing.series.length - 1]?.monthEnd;
-      const quoRes = rangeStart && rangeEnd
-        ? await supabase.from('quotes').select('total_amount, created_at').eq('company_id', companyId)
-            .gte('created_at', rangeStart.toISOString()).lte('created_at', rangeEnd.toISOString())
-        : { data: [] as { total_amount: number | null; created_at: string }[] };
-
-      const quoteBuckets = new Map<string, number>();
-      for (const q of quoRes.data ?? []) {
-        const key = monthKey(q.created_at);
-        quoteBuckets.set(key, (quoteBuckets.get(key) ?? 0) + Number(q.total_amount ?? 0));
-      }
-
       const chartData = billing.series.map(({ monthStart, total }) => {
         const monthName = monthStart.toLocaleDateString('es-ES', { month: 'short' });
-        const key = `${monthStart.getFullYear()}-${String(monthStart.getMonth() + 1).padStart(2, '0')}`;
         return {
           name: monthName.charAt(0).toUpperCase() + monthName.slice(1),
           ventas: total,
-          presupuestos: quoteBuckets.get(key) ?? 0,
         };
       });
 

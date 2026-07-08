@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { assertWhatsappVoiceNoteFile } from '@/components/whatsapp/whatsappUtils';
 
 export const META_WA_AUDIO_BUCKET = 'documents';
 
@@ -29,12 +30,11 @@ export function isAcceptedWhatsappAudioFile(file: File): boolean {
   if (
     mime.includes('ogg') ||
     mime.includes('opus') ||
-    mime.startsWith('audio/') ||
     mime === 'application/ogg'
   ) {
     return true;
   }
-  return /\.(ogg|opus|mp3|m4a|wav|webm|aac)$/i.test(file.name);
+  return /\.(ogg|opus)$/i.test(file.name);
 }
 
 export function metaFormWhatsappAudioStoragePath(
@@ -52,8 +52,9 @@ export async function uploadMetaFormWhatsappAudio(
   file: File,
 ): Promise<{ path: string; filename: string; mime: string }> {
   if (!isAcceptedWhatsappAudioFile(file)) {
-    throw new Error('Formato no soportado. Usa OGG, MP3, M4A, WAV o WEBM.');
+    throw new Error('Formato no soportado. Usa OGG/Opus (nota de voz de WhatsApp).');
   }
+  await assertWhatsappVoiceNoteFile(file);
   const path = metaFormWhatsappAudioStoragePath(companyId, formId, file.name);
   const mime = resolveWhatsappAudioMimeType(file.name, file.type);
   const { error } = await supabase.storage.from(META_WA_AUDIO_BUCKET).upload(path, file, {
@@ -95,8 +96,8 @@ export function formHasCampaignAudioConfigured(form: {
   );
 }
 
-export function sendKindLabel(kind: 'audio' | 'audio_link' | 'text' | null | undefined): string {
-  if (kind === 'audio') return 'Audio';
+export function sendKindLabel(kind: 'audio' | 'audio_link' | 'text' | 'voice' | null | undefined): string {
+  if (kind === 'voice' || kind === 'audio') return 'Audio';
   if (kind === 'audio_link') return 'Audio (enlace)';
   if (kind === 'text') return 'Texto';
   return '—';

@@ -182,7 +182,6 @@ export type DashboardBilling = {
 export type YearBillingRow = {
   name: string;
   monthNum: number;
-  presupuestos?: number;
   [yearKey: string]: number | string | undefined;
 };
 
@@ -291,21 +290,6 @@ export async function fetchYearBillingComparison(
     }
   }
 
-  const currentYear = new Date().getFullYear();
-  const quoteBuckets = new Map<number, number>();
-  if (sortedYears.includes(currentYear)) {
-    const quoRes = await supabase
-      .from('quotes')
-      .select('total_amount, created_at')
-      .eq('company_id', companyId)
-      .gte('created_at', `${currentYear}-01-01T00:00:00`)
-      .lte('created_at', `${currentYear}-12-31T23:59:59`);
-    for (const q of quoRes.data ?? []) {
-      const m = new Date(q.created_at).getMonth() + 1;
-      quoteBuckets.set(m, (quoteBuckets.get(m) ?? 0) + Number(q.total_amount ?? 0));
-    }
-  }
-
   return MONTH_SHORT.map((name, idx) => {
     const monthNum = idx + 1;
     const row: YearBillingRow = { name, monthNum };
@@ -317,9 +301,6 @@ export async function fetchYearBillingComparison(
         row[`${year}_medicina`] = split?.medicina.get(monthNum) ?? 0;
         row[`${year}_estetica`] = split?.estetica.get(monthNum) ?? 0;
       }
-    }
-    if (sortedYears.includes(currentYear)) {
-      row.presupuestos = quoteBuckets.get(monthNum) ?? 0;
     }
     return row;
   });

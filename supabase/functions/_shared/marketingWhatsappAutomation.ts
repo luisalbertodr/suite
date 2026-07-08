@@ -16,6 +16,7 @@ import {
   buildDefaultStoragePublicUrl,
   isOggOpusBase64,
   openwaMediaRequiresPublicUrl,
+  openwaVoiceNoteFormatError,
   uploadWhatsappOutgoingMedia,
   wahaVoiceRequiresPublicUrl,
 } from './whatsappOutgoingMediaStorage.ts';
@@ -69,7 +70,7 @@ export type MetaFormAutomation = {
   stripe_deposit_amount_cents?: number | null;
 };
 
-export type InitialWhatsappSendKind = 'text' | 'audio' | 'audio_link';
+export type InitialWhatsappSendKind = 'text' | 'audio' | 'audio_link' | 'voice';
 
 /** Tipo de bienvenida automática al lead (solo texto; el audio es manual desde el chat). */
 export function resolveInitialWhatsappSendKind(
@@ -443,39 +444,59 @@ async function createStorageSignedUrl(
   return data.signedUrl;
 }
 
+function isOggVoiceAttachment(filename: string, mime: string): boolean {
+  const f = filename.toLowerCase();
+  const m = mime.toLowerCase();
+  return (
+    f.endsWith('.ogg') ||
+    f.endsWith('.opus') ||
+    m.includes('ogg') ||
+    m.includes('opus') ||
+    m === 'application/ogg'
+  );
+}
+
 async function sendWhatsappMedia(
   admin: SupabaseClient,
   cfg: WhatsappConfigRow,
   companyId: string,
   chatId: string,
   media: { base64: string; mime: string; filename: string },
-): Promise<{ chatId: string; wahaId: string | null }> {
+): Promise<{ chatId: string; wahaId: string | null; mediaType: 'voice' | 'audio' }> {
   const providerCfg = asProviderConfig(cfg);
+  const provider = normalizeWhatsappProvider(providerCfg.provider);
   const normalizedMime = normalizeWhatsappAudioMime(media.mime, media.filename);
-  const isVoiceNote =
-    (normalizedMime === 'audio/ogg' ||
-      normalizedMime.includes('opus') ||
-      /\.ogg$/i.test(media.filename)) &&
-    isOggOpusBase64(media.base64);
-  const mediaType = isVoiceNote ? 'voice' : 'audio';
-  const preview = isVoiceNote ? '[nota de voz]' : `[audio] ${media.filename}`;
+  const looksLikeOggVoice = isOggVoiceAttachment(media.filename, normalizedMime);
+
+  if (
+    provider === 'openwa' &&
+    looksLikeOggVoice &&
+    !isOggOpusBase64(media.base64)
+  ) {
+    throw new Error(openwaVoiceNoteFormatError());
+  }
+
+  // Misma lógica que el chat manual: .ogg/.opus → nota de voz.
+  const mediaType = looksLikeOggVoice ? 'voice' : 'audio';
+  const sendMime = mediaType === 'voice' ? 'audio/ogg' : normalizedMime;
+  const sendFilename = mediaType === 'voice' ? 'voice.ogg' : media.filename;
+  const preview = mediaType === 'voice' ? '[nota de voz]' : `[audio] ${media.filename}`;
   const mediaPayload = {
     base64: media.base64,
-    mime: normalizedMime,
-    filename: media.filename,
+    mime: sendMime,
+    filename: sendFilename,
   };
   if (
-    (normalizeWhatsappProvider(providerCfg.provider) === 'openwa' &&
-      openwaMediaRequiresPublicUrl(mediaType)) ||
+    (provider === 'openwa' && openwaMediaRequiresPublicUrl(mediaType)) ||
     wahaVoiceRequiresPublicUrl(providerCfg.provider, mediaType)
   ) {
     mediaPayload.url = await uploadWhatsappOutgoingMedia(
       admin,
       companyId,
       media.base64,
-      normalizedMime,
+      sendMime,
       buildDefaultStoragePublicUrl,
-      media.filename,
+      sendFilename,
     );
   }
   const sent = await providerSendMedia(providerCfg, chatId, mediaType, mediaPayload);
@@ -492,10 +513,10 @@ async function sendWhatsappMedia(
     ts,
     mediaType,
     preview,
-    { mime: normalizedMime, filename: media.filename },
+    { mime: sendMime, filename: sendFilename },
     sent.raw,
   );
-  return { chatId: resolvedChatId, wahaId };
+  return { chatId: resolvedChatId, wahaId, mediaType };
 }
 
 async function sendAutomatedLeadMessage(
@@ -1316,14 +1337,20 @@ export async function sendManualCampaignAudioForChat(
     const { chatPhone } = resolveRecipientPhone(intendedPhone, settings);
 
     try {
-      await sendWhatsappMedia(admin, cfg, companyId, chatId.trim(), { base64, mime, filename });
+      const sent = await sendWhatsappMedia(admin, cfg, companyId, chatId.trim(), {
+        base64,
+        mime,
+        filename,
+      });
+      actualSentKind = sent.mediaType === 'voice' ? 'voice' : 'audio';
       await logAutomationSend(admin, {
         company_id: companyId,
         automation_type: 'meta_initial_audio',
         reference_id: `${lead.id}:manual_audio`,
         intended_phone: intendedPhone,
         sent_to_phone: chatPhone,
-        message_preview: `[audio] ${filename}`,
+        message_preview:
+          sent.mediaType === 'voice' ? '[nota de voz]' : `[audio] ${filename}`,
         success: true,
       });
     } catch (e) {

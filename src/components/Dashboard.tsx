@@ -18,8 +18,54 @@ import {
 } from '@/lib/salesRevenue';
 
 const YEAR_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#ef4444'];
-const MEDICINA_COLOR = '#0ea5e9';
-const ESTETICA_COLOR = '#ec4899';
+
+function mixHex(color: string, target: string, amount: number): string {
+  const parse = (h: string) => {
+    const x = h.replace('#', '');
+    return [
+      parseInt(x.slice(0, 2), 16),
+      parseInt(x.slice(2, 4), 16),
+      parseInt(x.slice(4, 6), 16),
+    ] as const;
+  };
+  const [r1, g1, b1] = parse(color);
+  const [r2, g2, b2] = parse(target);
+  const ch = (a: number, b: number) => Math.round(a + (b - a) * amount);
+  return `#${[ch(r1, r2), ch(g1, g2), ch(b1, b2)]
+    .map((v) => v.toString(16).padStart(2, '0'))
+    .join('')}`;
+}
+
+function yearColorForIndex(idx: number): string {
+  return YEAR_COLORS[idx % YEAR_COLORS.length];
+}
+
+function yearStackGradientIds(year: number) {
+  return {
+    medicina: `billing-${year}-medicina`,
+    estetica: `billing-${year}-estetica`,
+  };
+}
+
+function YearStackGradients({ year, baseColor }: { year: number; baseColor: string }) {
+  const ids = yearStackGradientIds(year);
+  const medicinaSolid = mixHex(baseColor, '#0f172a', 0.28);
+  const medicinaLight = mixHex(medicinaSolid, '#ffffff', 0.14);
+  const esteticaLight = mixHex(baseColor, '#ffffff', 0.42);
+  return (
+    <>
+      <linearGradient id={ids.medicina} x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stopColor={medicinaLight} />
+        <stop offset="100%" stopColor={medicinaSolid} />
+      </linearGradient>
+      <linearGradient id={ids.estetica} x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stopColor={esteticaLight} stopOpacity={0.95} />
+        <stop offset="55%" stopColor={baseColor} stopOpacity={0.72} />
+        <stop offset="100%" stopColor={baseColor} stopOpacity={0.38} />
+      </linearGradient>
+    </>
+  );
+}
 
 function toggleYear(selected: number[], year: number): number[] {
   if (selected.includes(year)) {
@@ -175,7 +221,6 @@ export const Dashboard: React.FC = () => {
   ];
 
   const chartRows = yearBilling ?? [];
-  const showPresupuestos = selectedYears.includes(nowYear);
 
   return (
     <div className="space-y-4">
@@ -243,7 +288,7 @@ export const Dashboard: React.FC = () => {
                       type="monotone"
                       dataKey={yearBillingDataKey(year, billingView)}
                       name={yearBillingLegend(year, billingView)}
-                      stroke={YEAR_COLORS[idx % YEAR_COLORS.length]}
+                      stroke={yearColorForIndex(idx)}
                       strokeWidth={2.5}
                       dot={{ r: 3 }}
                     />
@@ -261,25 +306,29 @@ export const Dashboard: React.FC = () => {
               </div>
               <ResponsiveContainer width="100%" height={280}>
                 <BarChart data={chartRows}>
+                  <defs>
+                    {selectedYears.map((year, idx) => (
+                      <YearStackGradients key={year} year={year} baseColor={yearColorForIndex(idx)} />
+                    ))}
+                  </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                   <XAxis dataKey="name" stroke="hsl(var(--muted-foreground))" fontSize={12} />
                   <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
                   <Tooltip
                     contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px' }}
-                    formatter={(v: number, name: string) => {
-                      if (name === 'presupuestos') return currencyTooltip(v, 'Presupuestos');
-                      return currencyTooltip(v, name);
-                    }}
+                    formatter={(v: number, name: string) => currencyTooltip(v, name)}
                   />
                   <Legend />
                   {isMultiEntity && billingView === 'both'
-                    ? selectedYears.flatMap((year) => [
+                    ? selectedYears.flatMap((year) => {
+                        const gradients = yearStackGradientIds(year);
+                        return [
                         <Bar
                           key={`${year}-med`}
                           stackId={String(year)}
                           dataKey={`${year}_medicina`}
                           name={`${year} Medicina`}
-                          fill={MEDICINA_COLOR}
+                          fill={`url(#${gradients.medicina})`}
                           radius={[0, 0, 0, 0]}
                         />,
                         <Bar
@@ -287,22 +336,20 @@ export const Dashboard: React.FC = () => {
                           stackId={String(year)}
                           dataKey={`${year}_estetica`}
                           name={`${year} Estética`}
-                          fill={ESTETICA_COLOR}
+                          fill={`url(#${gradients.estetica})`}
                           radius={[3, 3, 0, 0]}
                         />,
-                      ])
+                      ];
+                      })
                     : selectedYears.map((year, idx) => (
                         <Bar
                           key={`${year}-${billingView}`}
                           dataKey={yearBillingDataKey(year, billingView)}
                           name={yearBillingLegend(year, billingView)}
-                          fill={YEAR_COLORS[idx % YEAR_COLORS.length]}
+                          fill={yearColorForIndex(idx)}
                           radius={[3, 3, 0, 0]}
                         />
                       ))}
-                  {showPresupuestos && (
-                    <Bar dataKey="presupuestos" name="Presupuestos" fill="#a78bfa" radius={[3, 3, 0, 0]} />
-                  )}
                 </BarChart>
               </ResponsiveContainer>
               <p className="text-[11px] text-muted-foreground mt-2">

@@ -97,7 +97,9 @@ export async function runMarketingPresentadaInvoicedSync(input: {
       continue;
     }
 
-    const total = sumInvoicedSince(invoices, customerId, sinceDate);
+    const total = sumInvoicedSince(invoices, customerId, sinceDate, {
+      appointmentInvoiceIds,
+    });
     if (total <= 0) {
       skipped++;
       continue;
