@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import {
   dbfStr,
+  dbfFingerprintKey,
+  invoiceIdentityFromMapKey,
   loadDbfIndexed,
   lookupDbfRow,
   normalizeStyleKey,
@@ -40,7 +42,17 @@ async function loadEntityMapKeys(
     .eq("company_id", deps.companyId)
     .eq("entity_type", entityType);
   if (error) throw error;
-  return new Set((data ?? []).map((r) => normalizeStyleKey(String(r.style_key))));
+  const out = new Set<string>();
+  for (const row of data ?? []) {
+    const key = String(row.style_key);
+    if (entityType === "invoice") {
+      const id = invoiceIdentityFromMapKey(key);
+      if (id) out.add(id);
+      continue;
+    }
+    out.add(normalizeStyleKey(key));
+  }
+  return out;
 }
 
 async function loadFingerprintMap(
@@ -91,6 +103,11 @@ async function markBaselineSeeded(deps: EntityEngineDeps, tabla: string): Promis
     .update({ dbf_baseline_seeded: true, updated_at: new Date().toISOString() })
     .eq("company_id", deps.companyId)
     .eq("tabla", tabla);
+}
+
+function handlerApplyKey(handler: EntityHandler, row: DbfRow, mapKey: string): string {
+  const table = handler.source!.table;
+  return styleRowKey(table, row) || dbfStr(row, handler.source!.keyField) || mapKey;
 }
 
 async function applyHandlerRow(
@@ -166,13 +183,13 @@ export async function pollDbfEntityChanges(
 
     for (const [key, row] of index) {
       const fp = rowFingerprint(row, fields);
-      const mapKey = normalizeStyleKey(key.includes("/") ? key.split("/").pop() ?? key : key);
+      const mapKey = dbfFingerprintKey(tabla, key, row);
       allEntries.push({ style_key: mapKey, fingerprint: fp });
       if (!seeded) {
         if (!mappedKeys.has(mapKey)) changed.push({ key: mapKey, row, fp });
         continue;
       }
-      if (known.get(mapKey) !== fp || !mappedKeys.has(mapKey)) {
+      if (known.get(mapKey) !== fp) {
         changed.push({ key: mapKey, row, fp });
       }
     }
@@ -183,7 +200,7 @@ export async function pollDbfEntityChanges(
           `dbf-poll ${tabla}: baseline pendiente, ${changed.length} sin mapear (lote ${Math.min(batch, changed.length)})`,
         );
         for (const item of changed.slice(0, batch)) {
-          const rawKey = styleRowKey(handler.source.table, item.row) || item.key;
+          const rawKey = handlerApplyKey(handler, item.row, item.key);
           try {
             await applyHandlerRow(deps, handler, rawKey, item.row);
             await upsertFingerprints(deps, tabla, [{ style_key: item.key, fingerprint: item.fp }]);
@@ -205,7 +222,7 @@ export async function pollDbfEntityChanges(
 
     deps.log(`dbf-poll ${tabla}: ${changed.length} cambio(s) detectado(s)`);
     for (const item of changed.slice(0, batch)) {
-      const rawKey = dbfStr(item.row, handler.source.keyField) || styleRowKey(handler.source.table, item.row) || item.key;
+      const rawKey = handlerApplyKey(handler, item.row, item.key);
       try {
         await applyHandlerRow(deps, handler, rawKey, item.row);
         await upsertFingerprints(deps, tabla, [{ style_key: item.key, fingerprint: item.fp }]);

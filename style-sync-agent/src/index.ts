@@ -1,7 +1,6 @@
 import "dotenv/config";
 import { createClient } from "@supabase/supabase-js";
 import WebSocket from "ws";
-import { Dbf } from "dbf-reader";
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -19,6 +18,7 @@ import {
   type EntityEngineDeps,
 } from "./entitySync.js";
 import { ENTITY_HANDLERS } from "./handlers.js";
+import { readColaRows } from "./colaDbf.js";
 import { pollDbfEntityChanges } from "./dbfPoll.js";
 import { pollPlan2009FromDbf, pollPlan2009Lightweight } from "./plan2009Poll.js";
 import { logDeferHeavyPoll, shouldDeferHeavyPoll } from "./styleSession.js";
@@ -27,8 +27,7 @@ import {
   dbfBool,
   dbfDateIso,
   dbfStr,
-  loadDbfIndexed,
-  lookupDbfRow,
+  loadDbfRowsForKeySet,
   type DbfRow,
 } from "./dbfSource.js";
 import {
@@ -67,7 +66,7 @@ const SYNC_EVENT_DRIVEN = process.env.SYNC_EVENT_DRIVEN !== "0";
 const SYNC_DEBOUNCE_MS = Number(process.env.SYNC_DEBOUNCE_MS ?? "300");
 const SYNC_POLL_FALLBACK_MS = Number(process.env.SYNC_POLL_FALLBACK_MS ?? "120000");
 
-const POLL_MS = Number(process.env.POLL_MS ?? "1500");
+const POLL_MS = Number(process.env.POLL_MS ?? "3000");
 const INBOUND_POLL_MS = Number(process.env.INBOUND_POLL_MS ?? "3000");
 const INBOUND_BATCH = Number(process.env.INBOUND_BATCH ?? "50");
 const OUTBOUND_BATCH = Number(process.env.OUTBOUND_BATCH ?? "50");
@@ -75,22 +74,19 @@ const HEARTBEAT_CHECK_MS = Number(process.env.HEARTBEAT_CHECK_MS ?? "60000");
 const HEARTBEAT_STALE_MS = Number(process.env.HEARTBEAT_STALE_MS ?? "300000");
 const LAG_ALERT_MS = Number(process.env.LAG_ALERT_MS ?? "30000");
 const ENTITY_BATCH = Number(process.env.ENTITY_BATCH ?? "50");
-const ENTITY_POLL_MS = Number(process.env.ENTITY_POLL_MS ?? "2500");
+const ENTITY_POLL_MS = Number(process.env.ENTITY_POLL_MS ?? "5000");
 const PLAN2009_POLL_MS = Number(process.env.PLAN2009_POLL_MS ?? "2500");
 const PLAN2009_BATCH = Number(process.env.PLAN2009_BATCH ?? "100");
+/** Desactivado por defecto: cola_sincro con snapshot completo evita escaneo DBF. Activar solo como red de seguridad. */
 const PLAN2009_POLL_ENABLED =
   process.env.PLAN2009_POLL_ENABLED === "1" ||
-  process.env.PLAN2009_POLL_ENABLED === "true" ||
-  (!SYNC_EVENT_DRIVEN && process.env.PLAN2009_POLL_ENABLED !== "0");
+  process.env.PLAN2009_POLL_ENABLED === "true";
 
 const COLA_DELETE_ACTIONS = new Set(["DEL", "BOR", "BAJA", "BORRAR", "DELETE"]);
 
 function isColaDeleteAction(accion: string): boolean {
   return COLA_DELETE_ACTIONS.has(String(accion ?? "").trim().toUpperCase());
 }
-
-let plan2009IndexCache: Map<string, DbfRow> | null = null;
-let plan2009IndexCacheMtime = 0;
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -236,34 +232,9 @@ function parseHeartbeat(raw: string): { workerVersion: string | null } {
   return { workerVersion: m?.[1] ?? null };
 }
 
-function normalizeKeys(row: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const k of Object.keys(row)) {
-    out[k.toLowerCase()] = row[k];
-  }
-  return out;
-}
-
 async function readPendingCola(lastColaId: number): Promise<ColaRow[]> {
-  return withFsRetry(
-    () => {
-      if (!fs.existsSync(COLA_DBF)) return [];
-      const buf = fs.readFileSync(COLA_DBF);
-      const dt = Dbf.read(buf as unknown as Buffer);
-      // dbf-reader devuelve claves en MAYUSCULAS; normalizar a minusculas.
-      const rows = (dt.rows as unknown as Record<string, unknown>[]).map(
-        (r) => normalizeKeys(r) as unknown as ColaRow,
-      );
-      return rows
-        .filter((r) => r && Number(r.id) > lastColaId)
-        .filter((r) => String(r.tabla ?? "").toLowerCase() === "plan2009")
-        .sort((a, b) => Number(a.id) - Number(b.id));
-    },
-    {
-      label: "read cola_sincro.dbf",
-      onRetry: (a, e) => logFsRetry("cola_dbf", a, e),
-    },
-  );
+  const rows = await readColaRows(COLA_DBF, { sinceId: lastColaId, tabla: "plan2009" });
+  return rows as ColaRow[];
 }
 
 function colaCreatedMs(row: ColaRow): number | null {
@@ -276,88 +247,108 @@ function colaCreatedMs(row: ColaRow): number | null {
   return null;
 }
 
-async function getPlan2009Index(): Promise<Map<string, DbfRow>> {
-  const planPath = path.join(STYLE_ROOT, "dbf", "plan2009.dbf");
-  const altPath = path.join(STYLE_ROOT, "plan2009.dbf");
-  const p = fs.existsSync(planPath) ? planPath : fs.existsSync(altPath) ? altPath : null;
-  const mtime = p ? fs.statSync(p).mtimeMs : 0;
-  if (plan2009IndexCache && mtime === plan2009IndexCacheMtime) return plan2009IndexCache;
-  plan2009IndexCache = await loadDbfIndexed(STYLE_ROOT, "plan2009", "idplan");
-  plan2009IndexCacheMtime = mtime;
-  return plan2009IndexCache;
-}
-
 function dbfFieldOrCola(dbfVal: string, colaVal: string): string {
   const d = dbfVal.trim();
   if (d) return d;
   return String(colaVal ?? "").trim();
 }
 
-async function enrichColaRowFromDbf(row: ColaRow): Promise<{
+function colaHasCompleteSnapshot(row: ColaRow): boolean {
+  const accion = String(row.accion ?? "").toUpperCase();
+  if (isColaDeleteAction(accion)) return true;
+  const fechaIso = String(row.fechaiso ?? "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(fechaIso) && String(row.codemp ?? "").trim() !== "";
+}
+
+function colaRowToFingerprintShape(row: ColaRow): DbfRow {
+  return {
+    codemp: row.codemp,
+    codcli: row.codcli,
+    fecha: row.fechaiso ?? row.fecha,
+    horini: row.horini,
+    horfin: row.horfin,
+    texto: row.texto,
+    codrec: row.codrec,
+    nomcli: row.nomcli,
+    tel1cli: row.tel1cli,
+    facturado: row.facturado,
+    colfon: row.colfon,
+    collet: row.collet,
+  };
+}
+
+async function enrichColaRow(row: ColaRow): Promise<{
   row: ColaRow;
-  dbfRow: DbfRow | null;
+  fingerprintRow: DbfRow | null;
   serviciosJson: string;
 }> {
   const idReg = String(row.id_reg ?? "").trim();
-  if (!idReg) return { row, dbfRow: null, serviciosJson: "[]" };
-  const index = await getPlan2009Index();
-  const dbfRow = lookupDbfRow(index, "plan2009", idReg);
-  if (!dbfRow) {
+  const serviciosFromCola = String(row.servicios ?? "").trim() || "[]";
+
+  if (!idReg) {
+    return { row, fingerprintRow: null, serviciosJson: "[]" };
+  }
+
+  if (colaHasCompleteSnapshot(row)) {
     const fechaIso = String(row.fechaiso ?? "").trim();
-    const enrichedNoDbf: ColaRow = {
+    const enriched: ColaRow = {
       ...row,
-      fechaiso: /^\d{4}-\d{2}-\d{2}$/.test(fechaIso) ? fechaIso : "",
+      fechaiso: fechaIso,
+      servicios: serviciosFromCola,
     };
     return {
-      row: enrichedNoDbf,
-      dbfRow: null,
-      serviciosJson: String(row.servicios ?? "").trim() || "[]",
+      row: enriched,
+      fingerprintRow: colaRowToFingerprintShape(enriched),
+      serviciosJson: serviciosFromCola,
     };
   }
 
+  // Fallback raro: cola sin snapshot (cola antigua). Una sola fila, sin indexar plan2009 entero.
+  const normKey = idReg.replace(/^0+/, "") || "0";
+  const keySet = new Set([normKey]);
+  const rowsByKey = loadDbfRowsForKeySet(STYLE_ROOT, "plan2009", "idplan", keySet);
+  const dbfRow = rowsByKey.get(normKey) ?? null;
+
   const fechaIso = String(row.fechaiso ?? "").trim();
-  const fechaFromDbf = dbfDateIso(dbfRow, "fecha");
-  const serviciosFromDbf = await (async () => {
-    const norm = idReg.replace(/^0+/, "") || "0";
-    const { loadDbfFilteredRows } = await import("./dbfSource.js");
-    const arts = await loadDbfFilteredRows(STYLE_ROOT, "planart", () => true);
-    const items = arts
-      .filter((r) => String(r.idplan ?? "").trim().replace(/^0+/, "") === norm)
-      .map((r) => ({ servicio: dbfStr(r, "codart"), hora: dbfStr(r, "hora") }));
-    if (items.length) return JSON.stringify(items);
-    const fromCola = String(row.servicios ?? "").trim();
-    return fromCola || "[]";
-  })();
+  const fechaFromDbf = dbfRow ? dbfDateIso(dbfRow, "fecha") : null;
 
   const enriched: ColaRow = {
     ...row,
-    codemp: dbfFieldOrCola(dbfStr(dbfRow, "codemp"), String(row.codemp ?? "")),
-    codcli: dbfFieldOrCola(dbfStr(dbfRow, "codcli"), String(row.codcli ?? "")),
+    codemp: dbfRow ? dbfFieldOrCola(dbfStr(dbfRow, "codemp"), String(row.codemp ?? "")) : row.codemp,
+    codcli: dbfRow ? dbfFieldOrCola(dbfStr(dbfRow, "codcli"), String(row.codcli ?? "")) : row.codcli,
     fechaiso: fechaFromDbf ?? (/^\d{4}-\d{2}-\d{2}$/.test(fechaIso) ? fechaIso : ""),
-    horini: dbfFieldOrCola(dbfStr(dbfRow, "horini"), String(row.horini ?? "")),
-    horfin: dbfFieldOrCola(dbfStr(dbfRow, "horfin"), String(row.horfin ?? "")),
-    texto: dbfFieldOrCola(dbfStr(dbfRow, "texto"), String(row.texto ?? "")),
-    codrec: dbfFieldOrCola(dbfStr(dbfRow, "codrec"), String(row.codrec ?? "")),
-    nomcli: dbfFieldOrCola(dbfStr(dbfRow, "nomcli"), String(row.nomcli ?? "")),
-    tel1cli: dbfFieldOrCola(dbfStr(dbfRow, "tel1cli"), String(row.tel1cli ?? "")),
-    facturado: dbfBool(dbfRow, "facturado") || Boolean(row.facturado),
-    servicios: serviciosFromDbf,
-    colfon: Number(dbfStr(dbfRow, "colfon") || 0) || Number(row.colfon ?? 0),
-    collet: Number(dbfStr(dbfRow, "collet") || 0) || Number(row.collet ?? 0),
+    horini: dbfRow ? dbfFieldOrCola(dbfStr(dbfRow, "horini"), String(row.horini ?? "")) : row.horini,
+    horfin: dbfRow ? dbfFieldOrCola(dbfStr(dbfRow, "horfin"), String(row.horfin ?? "")) : row.horfin,
+    texto: dbfRow ? dbfFieldOrCola(dbfStr(dbfRow, "texto"), String(row.texto ?? "")) : row.texto,
+    codrec: dbfRow ? dbfFieldOrCola(dbfStr(dbfRow, "codrec"), String(row.codrec ?? "")) : row.codrec,
+    nomcli: dbfRow ? dbfFieldOrCola(dbfStr(dbfRow, "nomcli"), String(row.nomcli ?? "")) : row.nomcli,
+    tel1cli: dbfRow ? dbfFieldOrCola(dbfStr(dbfRow, "tel1cli"), String(row.tel1cli ?? "")) : row.tel1cli,
+    facturado: dbfRow ? dbfBool(dbfRow, "facturado") || Boolean(row.facturado) : Boolean(row.facturado),
+    servicios: serviciosFromCola,
+    colfon: dbfRow
+      ? Number(dbfStr(dbfRow, "colfon") || 0) || Number(row.colfon ?? 0)
+      : Number(row.colfon ?? 0),
+    collet: dbfRow
+      ? Number(dbfStr(dbfRow, "collet") || 0) || Number(row.collet ?? 0)
+      : Number(row.collet ?? 0),
   };
-  return { row: enriched, dbfRow, serviciosJson: serviciosFromDbf };
+
+  return {
+    row: enriched,
+    fingerprintRow: dbfRow ?? colaRowToFingerprintShape(enriched),
+    serviciosJson: serviciosFromCola,
+  };
 }
 
 async function updatePlan2009FingerprintAfterCola(
   idReg: string,
-  dbfRow: DbfRow | null,
+  fingerprintRow: DbfRow | null,
   serviciosJson: string,
   accion: string,
 ): Promise<void> {
   if (!companyId) return;
   const deps: PollDeps = { supabase, companyId, styleRoot: STYLE_ROOT, log };
   const key = normalizePlanKey(idReg);
-  const rpcAccion = accion.toUpperCase();
   if (isColaDeleteAction(accion)) {
     await supabase
       .schema("dunasoft")
@@ -368,13 +359,13 @@ async function updatePlan2009FingerprintAfterCola(
       .eq("style_key", key);
     return;
   }
-  if (!dbfRow) return;
-  const fp = rowFingerprint(dbfRow, serviciosJson || "[]");
+  if (!fingerprintRow) return;
+  const fp = rowFingerprint(fingerprintRow, serviciosJson || "[]");
   await upsertFingerprints(deps, [{ style_key: key, fingerprint: fp }]);
 }
 
 async function processRow(row: ColaRow): Promise<void> {
-  const { row: enriched, dbfRow, serviciosJson } = await enrichColaRowFromDbf(row);
+  const { row: enriched, fingerprintRow, serviciosJson } = await enrichColaRow(row);
   log(`procesar plan2009 id=${enriched.id_reg} accion=${enriched.accion}`);
   if (!companyId) throw new Error("Falta COMPANY_ID");
 
@@ -411,7 +402,7 @@ async function processRow(row: ColaRow): Promise<void> {
   if (error) throw new Error(error.message ?? JSON.stringify(error));
   await updatePlan2009FingerprintAfterCola(
     String(enriched.id_reg),
-    dbfRow,
+    fingerprintRow,
     serviciosJson,
     accion,
   );

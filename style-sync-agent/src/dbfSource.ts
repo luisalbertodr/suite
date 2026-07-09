@@ -249,6 +249,22 @@ export function normalizeStyleKey(key: string): string {
   return t;
 }
 
+/** Clave única para huellas DBF (índice compuesto normalizado). */
+export function dbfFingerprintKey(table: string, indexKey: string, row?: DbfRow): string {
+  const raw = row ? styleRowKey(table, row) : indexKey;
+  if (raw.includes("/")) {
+    return raw.split("/").map((p) => normalizeStyleKey(p)).join("/");
+  }
+  return normalizeStyleKey(raw);
+}
+
+/** Identidad factura (ejefac/serie/numfac) para cruzar con entity_map. */
+export function invoiceIdentityFromMapKey(styleKey: string): string | null {
+  const parts = styleKey.split("/");
+  if (parts.length < 3) return null;
+  return parts.slice(0, 3).map((p) => normalizeStyleKey(p)).join("/");
+}
+
 export function dbfStr(row: DbfRow | null | undefined, field: string): string {
   if (!row) return "";
   const v = row[field.toLowerCase()];

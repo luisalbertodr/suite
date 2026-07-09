@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import { Dbf } from "dbf-reader";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { withFsRetry } from "./fsRetry.js";
+import { readColaRows } from "./colaDbf.js";
 import { loadDbfIndexed, lookupDbfRow, normalizeStyleKey, type DbfRow } from "./dbfSource.js";
 
 /**
@@ -65,12 +65,6 @@ export type EntityEngineDeps = {
   log: (msg: string) => void;
 };
 
-function normalizeKeys(row: DbfRow): DbfRow {
-  const out: DbfRow = {};
-  for (const k of Object.keys(row)) out[k.toLowerCase()] = row[k];
-  return out;
-}
-
 function colaCreatedMs(row: EntityColaRow): number | null {
   const raw = row.creado;
   if (raw instanceof Date) return raw.getTime();
@@ -81,38 +75,22 @@ function colaCreatedMs(row: EntityColaRow): number | null {
   return null;
 }
 
-/** Lee cola_sincro.dbf y devuelve filas de las tablas indicadas con id > lastId respectivo. */
+/** Lee cola_sincro.dbf (tail) y devuelve filas de las tablas indicadas. */
 async function readPendingByTabla(
   colaPath: string,
   tablas: Set<string>,
 ): Promise<Map<string, EntityColaRow[]>> {
-  return withFsRetry(
-    () => {
-      const byTabla = new Map<string, EntityColaRow[]>();
-      if (!fs.existsSync(colaPath)) return byTabla;
-      const buf = fs.readFileSync(colaPath);
-      const dt = Dbf.read(buf as unknown as Buffer);
-      for (const raw of dt.rows as unknown as DbfRow[]) {
-        if (!raw) continue;
-        const row = normalizeKeys(raw);
-        const tabla = String(row.tabla ?? "").trim().toLowerCase();
-        if (!tablas.has(tabla)) continue;
-        const entry: EntityColaRow = {
-          id: Number(row.id),
-          tabla,
-          id_reg: String(row.id_reg ?? "").trim(),
-          accion: String(row.accion ?? "").trim().toUpperCase(),
-          creado: (row.creado as Date | string | null) ?? null,
-        };
-        const list = byTabla.get(tabla) ?? [];
-        list.push(entry);
-        byTabla.set(tabla, list);
-      }
-      for (const list of byTabla.values()) list.sort((a, b) => a.id - b.id);
-      return byTabla;
-    },
-    { label: "read cola_sincro.dbf (entities)" },
-  );
+  const rows = await readColaRows(colaPath, { tablas, sinceId: 0 });
+  const byTabla = new Map<string, EntityColaRow[]>();
+  for (const row of rows) {
+    const tabla = String(row.tabla ?? "").trim().toLowerCase();
+    if (!tablas.has(tabla)) continue;
+    const list = byTabla.get(tabla) ?? [];
+    list.push(row);
+    byTabla.set(tabla, list);
+  }
+  for (const list of byTabla.values()) list.sort((a, b) => a.id - b.id);
+  return byTabla;
 }
 
 type CursorRow = { tabla: string; last_id: number; enabled: boolean };
