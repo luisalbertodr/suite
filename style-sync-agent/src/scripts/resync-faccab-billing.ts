@@ -5,6 +5,7 @@
  */
 import "dotenv/config";
 import { createClient } from "@supabase/supabase-js";
+import WebSocket from "ws";
 import { ENTITY_HANDLERS } from "../handlers.js";
 import {
   dbfDateIso,
@@ -27,6 +28,7 @@ const EJEFAC = yearArg ?? process.env.BILLING_EJEFAC ?? "2026";
 const CHECKPOINT_KEY = `resync_faccab_${EJEFAC}`;
 
 const facturasHandler = ENTITY_HANDLERS.find((h) => h.tabla === "faccab")!;
+(globalThis as { WebSocket?: unknown }).WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 const deps = {
   styleRoot: STYLE_ROOT,
@@ -45,7 +47,7 @@ async function syncEjefac(ejefac: string): Promise<{ ok: number; err: number; sk
     (r) =>
       dbfStr(r, "ejefac") === ejefac &&
       dbfStr(r, "serfac") !== "00" &&
-      (!ONLY_MONTH || dbfDateIso(r, "fecfac")?.startsWith(ONLY_MONTH)),
+      (!ONLY_MONTH || (dbfDateIso(r, "fecfac")?.startsWith(ONLY_MONTH) ?? false)),
   );
 
   const { data: exclusions } = await supabase
@@ -76,8 +78,12 @@ async function syncEjefac(ejefac: string): Promise<{ ok: number; err: number; sk
     try {
       const args = await facturasHandler.buildArgs!(COMPANY_ID, cola, row, deps);
       if (!args) continue;
-      const { error } = await supabase.schema("dunasoft").rpc(facturasHandler.rpc, args);
+      const { data, error } = await supabase.schema("dunasoft").rpc(facturasHandler.rpc, args);
       if (error) throw error;
+      const result = data as { ok?: boolean; error?: string; skipped?: boolean } | null;
+      if (result?.ok === false && !result.skipped) {
+        throw new Error(result.error ?? "RPC devolvió ok=false");
+      }
       ok++;
       if (ok <= 2 || ok % 200 === 0) {
         console.log(`  ok ${ok}: ${key} ${dbfDateIso(row, "fecfac")}`);
@@ -96,7 +102,7 @@ async function main() {
   const years = ALL_YEARS ? await listDistinctFiscalEjefac(STYLE_ROOT) : [EJEFAC];
   console.log(`Resync facturación fiscal: ${years.join(", ")}`);
 
-  if (!FORCE && !ALL_YEARS) {
+  if (!FORCE && !ALL_YEARS && !ONLY_MONTH) {
     const { data: done } = await supabase
       .schema("dunasoft")
       .rpc("style_billing_checkpoint_done", {
@@ -122,7 +128,7 @@ async function main() {
   }
   console.log(`\nListo total ok=${totalOk} err=${totalErr} omitidas=${totalSkipped}`);
 
-  if (!ALL_YEARS && totalErr === 0 && totalOk > 0) {
+  if (!ALL_YEARS && !ONLY_MONTH && totalErr === 0 && totalOk > 0) {
     const { error } = await supabase
       .schema("dunasoft")
       .from("style_sync_billing_checkpoints")
