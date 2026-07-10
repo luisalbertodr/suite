@@ -326,21 +326,39 @@ export const useWhatsappChats = () => {
       const key = ['whatsapp-chats', companyId] as const;
       await queryClient.cancelQueries({ queryKey: key });
       const prev = queryClient.getQueryData<WhatsappChatRow[]>(key) ?? [];
+      const clearedUnread = prev
+        .filter((c) => c.chat_id === chatId || jidsSameContact(c.chat_id, chatId))
+        .reduce((acc, c) => acc + (c.unread_count ?? 0), 0);
       const next = prev.map((c) =>
         c.chat_id === chatId || jidsSameContact(c.chat_id, chatId)
           ? { ...c, unread_count: 0 }
           : c,
       );
       queryClient.setQueryData<WhatsappChatRow[]>(key, next);
+      if (clearedUnread > 0) {
+        queryClient.setQueryData<number>(['whatsapp-unread-total', companyId], (total) =>
+          Math.max(0, (total ?? 0) - clearedUnread),
+        );
+      }
       return { prev };
     },
     onError: (_error, _chatId, ctx) => {
       if (!companyId) return;
       if (ctx?.prev) {
         queryClient.setQueryData(['whatsapp-chats', companyId], ctx.prev);
+        void queryClient.invalidateQueries({
+          queryKey: ['whatsapp-unread-total', companyId],
+        });
       }
     },
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate();
+      if (companyId) {
+        void queryClient.invalidateQueries({
+          queryKey: ['whatsapp-unread-total', companyId],
+        });
+      }
+    },
   });
 
   return {
