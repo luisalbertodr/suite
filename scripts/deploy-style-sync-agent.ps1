@@ -1,4 +1,6 @@
 # Build y despliegue del contenedor style-sync-agent en suite-supabase (110).
+# NOTA: En produccion preferir la VM Style (sin CIFS):
+#   .\scripts\deploy-style-sync-agent-vm.ps1
 #
 # Uso:
 #   .\scripts\deploy-style-sync-agent.ps1

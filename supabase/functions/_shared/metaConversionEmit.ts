@@ -1,5 +1,8 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
+/** Nombre del CRM en eventos CAPI (Meta CRM integration → lead_event_source). */
+const META_CRM_SOURCE_NAME = 'Suite';
+
 export type MetaConversionEventInput = {
   event_name: string;
   event_id: string;
@@ -9,6 +12,8 @@ export type MetaConversionEventInput = {
   first_name?: string | null;
   last_name?: string | null;
   external_id?: string | null;
+  /** ID numérico de lead Meta (15-17 dígitos); si no se pasa, se infiere de external_id. */
+  meta_lead_id?: number | null;
   value?: number | null;
   currency?: string | null;
   campaign?: string | null;
@@ -48,24 +53,43 @@ function normName(name: string | null | undefined): string | null {
   return v.length > 0 ? v : null;
 }
 
+/** Lead ID de Meta Lead Ads (15-17 dígitos). */
+export function parseMetaLeadId(
+  externalId: string | null | undefined,
+): number | null {
+  if (!externalId) return null;
+  const digits = String(externalId).replace(/\D/g, '');
+  if (digits.length < 15 || digits.length > 17) return null;
+  const n = Number(digits);
+  return Number.isSafeInteger(n) ? n : null;
+}
+
 export async function buildMetaCapiPayload(
   event: MetaConversionEventInput,
   testEventCode?: string | null,
 ): Promise<Record<string, unknown>> {
-  const user_data: Record<string, string[]> = {};
+  const user_data: Record<string, unknown> = {};
   const em = normEmail(event.email);
   const ph = normPhone(event.phone);
   const fn = normName(event.first_name);
   const ln = normName(event.last_name);
   const ext = event.external_id ? String(event.external_id) : null;
+  const metaLeadId = event.meta_lead_id ?? parseMetaLeadId(ext);
 
   if (em) user_data.em = [await sha256Hex(em)];
   if (ph) user_data.ph = [await sha256Hex(ph)];
   if (fn) user_data.fn = [await sha256Hex(fn)];
   if (ln) user_data.ln = [await sha256Hex(ln)];
-  if (ext) user_data.external_id = [await sha256Hex(ext)];
+  if (metaLeadId != null) {
+    user_data.lead_id = metaLeadId;
+  } else if (ext) {
+    user_data.external_id = [await sha256Hex(ext)];
+  }
 
-  const custom_data: Record<string, unknown> = {};
+  const custom_data: Record<string, unknown> = {
+    event_source: 'crm',
+    lead_event_source: META_CRM_SOURCE_NAME,
+  };
   if (event.value != null && Number.isFinite(Number(event.value))) {
     custom_data.value = Number(event.value);
   }
@@ -77,10 +101,8 @@ export async function buildMetaCapiPayload(
     event_id: event.event_id,
     action_source: 'system_generated',
     user_data,
+    custom_data,
   };
-  if (Object.keys(custom_data).length > 0) {
-    capiEvent.custom_data = custom_data;
-  }
 
   const payload: Record<string, unknown> = { data: [capiEvent] };
   const testCode = testEventCode?.trim();
@@ -169,6 +191,7 @@ export async function emitLeadConversionFromRow(
   },
   eventName = 'Lead',
 ): Promise<boolean> {
+  const metaLeadId = parseMetaLeadId(lead.external_id);
   return emitMetaConversion(admin, companyId, {
     event_name: eventName,
     event_id: `${lead.id}-${eventName.toLowerCase()}`,
@@ -177,6 +200,7 @@ export async function emitLeadConversionFromRow(
     first_name: lead.first_name,
     last_name: lead.last_name,
     external_id: lead.external_id ?? lead.id,
+    meta_lead_id: metaLeadId,
     campaign: lead.campaign,
   });
 }
@@ -227,16 +251,18 @@ export async function emitMetaConversionForLeadStage(
   const epoch = Math.floor(Date.now() / 1000);
   const row = rule as StageRuleRow;
   const leadRow = lead as LeadForStageEmit;
+  const metaLeadId = parseMetaLeadId(leadRow.external_id);
 
   return emitMetaConversion(admin, companyId, {
     event_name: row.event_name,
-    event_id: `${leadRow.id}-stage-${leadRow.stage_id}-${epoch}`,
+    event_id: `${leadRow.id}-stage-${leadRow.stage_id}`,
     event_time: epoch,
     email: leadRow.email,
     phone: leadRow.phone,
     first_name: leadRow.first_name,
     last_name: leadRow.last_name,
     external_id: leadRow.external_id ?? leadRow.id,
+    meta_lead_id: metaLeadId,
     campaign: leadRow.campaign,
     value: row.value_amount != null ? Number(row.value_amount) : null,
     currency: row.currency ?? 'EUR',

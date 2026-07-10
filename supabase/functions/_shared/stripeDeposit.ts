@@ -1,5 +1,5 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { emitMetaConversion, emitMetaConversionForLeadStage } from './metaConversionEmit.ts';
+import { emitMetaConversion, emitMetaConversionForLeadStage, parseMetaLeadId } from './metaConversionEmit.ts';
 import {
   buildWhatsappTemplateVars,
   renderWhatsappTemplate,
@@ -668,6 +668,7 @@ export async function markDepositPaid(
         first_name: lead.first_name,
         last_name: lead.last_name,
         external_id: lead.external_id ?? lead.id,
+        meta_lead_id: parseMetaLeadId(lead.external_id),
         campaign: lead.campaign,
         value: amountCents > 0 ? amountCents / 100 : null,
         currency: 'EUR',

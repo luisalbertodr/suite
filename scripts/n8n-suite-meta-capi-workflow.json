@@ -28,7 +28,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://graph.facebook.com/v23.0/291687001692956/events",
+        "url": "https://graph.facebook.com/v25.0/291687001692956/events",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [

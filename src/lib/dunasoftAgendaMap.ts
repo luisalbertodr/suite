@@ -2,6 +2,7 @@ import type { Appointment, Employee } from '@/types/agenda';
 import type { AppointmentTimeSegment } from '@/types/agenda';
 import { employeeTailwindColor } from '@/lib/dunasoftColors';
 import { normLegacyCodcli } from '@/lib/appointmentCustomerResolve';
+import { repairStyleText } from '@/lib/styleTextEncoding';
 
 export type DunasoftPlan2009Row = {
   _row_id: number;
@@ -45,7 +46,7 @@ export function normalizeCodemp(code: string | null | undefined): string {
 
 export function employeeDisplayName(row: DunasoftEmpleadoRow): string {
   const parts = [row.nomemp, row.ape1emp, row.ape1emp ? row.ape2emp : null].filter(Boolean);
-  const name = parts.map((p) => String(p).trim()).filter(Boolean).join(' ');
+  const name = parts.map((p) => repairStyleText(String(p).trim())).filter(Boolean).join(' ');
   return name || String(row.codemp).trim();
 }
 
@@ -172,10 +173,10 @@ export function mapPlan2009ToAppointments(
       return {
         id: idplan,
         employeeId,
-        clientName: String(p.nomcli ?? '').trim() || 'Sin nombre',
+        clientName: repairStyleText(String(p.nomcli ?? '').trim()) || 'Sin nombre',
         clientPhone: String(p.tel1cli ?? '').trim() || undefined,
         customerId: null,
-        description: String(p.texto ?? '').trim(),
+        description: repairStyleText(String(p.texto ?? '').trim()),
         serviceName: serviceLine,
         legacyClientCode: p.codcli != null ? String(p.codcli).trim() : undefined,
         legacyEmployeeCode: codempRaw,

@@ -51,6 +51,9 @@ export type MonitorSettingsRow = {
   notification_cooldown_minutes: number;
   failures_before_alert: number;
   successes_before_recovery: number;
+  spa3102_offhook_minutes: number;
+  spa3102_reboot_cooldown_minutes: number;
+  spa3102_auto_reboot: boolean;
   updated_at: string;
 };
 

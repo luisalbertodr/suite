@@ -13,6 +13,14 @@ import {
 } from '../_shared/serviceMonitorNotify.ts';
 import { issabelAuthHeaders } from '../_shared/issabelAuth.ts';
 import { evaluateServiceAlerts, markAlertDown, markAlertRecovered } from '../_shared/serviceMonitorAlertState.ts';
+import {
+  fetchSpa3102Status,
+  isPstnInCall,
+  isPstnLineStuck,
+  loadSpa3102Config,
+  rebootSpa3102,
+  type Spa3102Status,
+} from '../_shared/spa3102Client.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -21,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-type ServiceKey = 'supabase' | 'waha' | 'meta' | 'issabel' | 'style_dunasoft';
+type ServiceKey = 'supabase' | 'waha' | 'meta' | 'issabel' | 'style_dunasoft' | 'spa3102';
 type ServiceStatus = 'ok' | 'degraded' | 'down' | 'unknown';
 
 type CheckResult = {
@@ -379,6 +387,158 @@ async function checkIssabel(): Promise<CheckResult> {
   }
 }
 
+function spa3102StuckSince(
+  prevDetails: Record<string, unknown>,
+  stuckNow: boolean,
+): string | null {
+  if (!stuckNow) return null;
+  const prev = prevDetails.pstn_off_since;
+  return typeof prev === 'string' && prev ? prev : new Date().toISOString();
+}
+
+function spa3102StuckMinutes(sinceIso: string | null): number {
+  if (!sinceIso) return 0;
+  const ms = Date.now() - new Date(sinceIso).getTime();
+  return ms > 0 ? ms / 60_000 : 0;
+}
+
+function spa3102CanReboot(
+  prevDetails: Record<string, unknown>,
+  cooldownMinutes: number,
+): boolean {
+  const last = prevDetails.last_reboot_at;
+  if (typeof last !== 'string' || !last) return true;
+  const elapsedMin = (Date.now() - new Date(last).getTime()) / 60_000;
+  return elapsedMin >= cooldownMinutes;
+}
+
+function spa3102StatusMessage(
+  status: Spa3102Status,
+  offMinutes: number,
+  inCall = false,
+): string {
+  const parts = inCall
+    ? [`En llamada PSTN`, `estado ${status.pstnState}`]
+    : [`PSTN hook ${status.pstnHookState}`, `estado ${status.pstnState}`];
+  if (status.lineVoltage) parts.push(`tensión ${status.lineVoltage}`);
+  if (offMinutes > 0) parts.push(`off-hook idle ${Math.round(offMinutes)} min`);
+  return parts.join(', ');
+}
+
+async function checkSpa3102(
+  prevDetails: Record<string, unknown>,
+  settings: MonitorSettings,
+  runRecovery: boolean,
+): Promise<CheckResult> {
+  const t0 = Date.now();
+  const cfg = loadSpa3102Config();
+  if (!cfg) {
+    return {
+      status: 'unknown',
+      latencyMs: Date.now() - t0,
+      message: 'SPA3102_PASSWORD no configurada en el contenedor edge',
+    };
+  }
+
+  let status: Spa3102Status;
+  try {
+    status = await fetchSpa3102Status(cfg);
+  } catch (e) {
+    return {
+      status: 'down',
+      latencyMs: Date.now() - t0,
+      message: e instanceof Error ? e.message : 'SPA3102 no responde',
+      details: { reachable: false },
+    };
+  }
+
+  const offhookMinutes = settings.spa3102_offhook_minutes ?? 30;
+  const rebootCooldown = settings.spa3102_reboot_cooldown_minutes ?? 60;
+  const autoReboot = settings.spa3102_auto_reboot !== false;
+
+  const inCall = isPstnInCall(status);
+  const lineStuck = isPstnLineStuck(status);
+  const offSince = spa3102StuckSince(prevDetails, lineStuck);
+  const offMinutes = spa3102StuckMinutes(offSince);
+
+  const stuckThresholdHit = offMinutes >= offhookMinutes;
+
+  const baseDetails: Record<string, unknown> = {
+    reachable: true,
+    pstn_in_call: inCall,
+    pstn_hook_state: status.pstnHookState,
+    line1_hook_state: status.line1HookState,
+    pstn_state: status.pstnState,
+    line_voltage: status.lineVoltage,
+    line1_registration: status.line1Registration,
+    pstn_off_since: offSince,
+    pstn_busy_since: null,
+    pstn_off_minutes: Math.round(offMinutes),
+    pstn_busy_minutes: 0,
+    last_reboot_at: prevDetails.last_reboot_at ?? null,
+  };
+
+  if (inCall || !lineStuck) {
+    return {
+      status: 'ok',
+      latencyMs: Date.now() - t0,
+      message: spa3102StatusMessage(status, 0, inCall),
+      details: {
+        ...baseDetails,
+        pstn_off_since: null,
+        pstn_off_minutes: 0,
+      },
+    };
+  }
+
+  let recoveryAttempted = false;
+  let recoverySuccess: boolean | undefined;
+  let recoveryMessage = '';
+  let details = { ...baseDetails };
+
+  if (stuckThresholdHit && runRecovery && autoReboot && spa3102CanReboot(prevDetails, rebootCooldown)) {
+    recoveryAttempted = true;
+    try {
+      recoveryMessage = await rebootSpa3102(cfg);
+      recoverySuccess = true;
+      const rebootAt = new Date().toISOString();
+      details = {
+        ...details,
+        last_reboot_at: rebootAt,
+        pstn_off_since: null,
+      };
+      recoveryMessage +=
+        ' — Gateway reiniciado automáticamente por bloqueo de línea PSTN';
+      return {
+        status: 'degraded',
+        latencyMs: Date.now() - t0,
+        message: `${spa3102StatusMessage(status, offMinutes)}; reinicio enviado`,
+        recoveryAttempted,
+        recoverySuccess,
+        recoveryMessage,
+        details,
+      };
+    } catch (e) {
+      recoverySuccess = false;
+      recoveryMessage = e instanceof Error ? e.message : 'Reinicio SPA3102 falló';
+    }
+  } else if (stuckThresholdHit && runRecovery && autoReboot && !spa3102CanReboot(prevDetails, rebootCooldown)) {
+    recoveryAttempted = false;
+    recoveryMessage = `Reinicio omitido (cooldown ${rebootCooldown} min)`;
+  }
+
+  const statusLevel: ServiceStatus = stuckThresholdHit ? 'down' : 'degraded';
+  return {
+    status: statusLevel,
+    latencyMs: Date.now() - t0,
+    message: spa3102StatusMessage(status, offMinutes),
+    recoveryAttempted,
+    recoverySuccess,
+    recoveryMessage: recoveryMessage || undefined,
+    details,
+  };
+}
+
 async function checkStyleDunasoft(admin: ReturnType<typeof createClient>): Promise<CheckResult> {
   const t0 = Date.now();
   const { data: cfg, error: cfgErr } = await admin
@@ -547,6 +707,58 @@ async function notifyServiceAlert(
   return out;
 }
 
+/** Aviso inmediato por WhatsApp cuando el SPA3102 se reinicia automáticamente. */
+async function notifySpa3102Reboot(
+  admin: ReturnType<typeof createClient>,
+  settings: MonitorSettings,
+  companyId: string,
+  waCfg: WhatsappCfg | null,
+  wahaUsable: boolean,
+  recoveryMessage: string,
+  statusMessage: string,
+  details: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  let out = { ...details };
+  const stamp = new Date().toLocaleString('es-ES', { timeZone: 'Europe/Madrid' });
+  const bodyText =
+    `[Suite Monitor] SPA3102 — reinicio automático\n${recoveryMessage}\n${statusMessage}\n${stamp}`;
+  const destination = settings.waha_up_whatsapp;
+
+  if (wahaUsable && waCfg) {
+    const res = await sendMonitorWhatsapp(waCfg, destination, bodyText);
+    await logNotification(admin, {
+      service_key: 'spa3102',
+      channel: 'whatsapp',
+      destination,
+      body: bodyText,
+      success: res.ok,
+      error: res.error,
+    });
+    if (res.ok) out = markNotified(out, 'last_whatsapp_spa3102_reboot');
+    return out;
+  }
+
+  const html = `<p><strong>Suite — SPA3102 reiniciado</strong></p><p>${recoveryMessage}</p><p>${statusMessage}</p><p><small>${stamp}</small></p><p><small>(WAHA no disponible; aviso por email)</small></p>`;
+  const res = await sendMonitorEmail(
+    admin,
+    companyId,
+    settings.alert_email,
+    'Suite: SPA3102 reiniciado automáticamente',
+    html,
+  );
+  await logNotification(admin, {
+    service_key: 'spa3102',
+    channel: 'email',
+    destination: settings.alert_email,
+    subject: 'Suite: SPA3102 reiniciado automáticamente',
+    body: bodyText,
+    success: res.ok,
+    error: res.error,
+  });
+  if (res.ok) out = markNotified(out, 'last_email_spa3102_reboot');
+  return out;
+}
+
 async function authorizeRequest(
   req: Request,
   admin: ReturnType<typeof createClient>,
@@ -614,6 +826,10 @@ serve(async (req) => {
     { key: 'supabase', name: 'Supabase', run: () => checkSupabase(admin) },
     { key: 'meta', name: 'Meta', run: () => checkMeta(admin, companyId) },
     { key: 'issabel', name: 'Issabel', run: () => checkIssabel() },
+    { key: 'spa3102', name: 'FXO-FXS SPA3102', run: async () => {
+      const prev = await loadPreviousStatus(admin, 'spa3102');
+      return checkSpa3102(prev.details, settings, runRecovery);
+    } },
     { key: 'style_dunasoft', name: 'Style Dunasoft', run: () => checkStyleDunasoft(admin) },
   ];
 
@@ -674,6 +890,59 @@ serve(async (req) => {
             details,
           );
         }
+      }
+    } else if (item.key === 'spa3102' && companyId) {
+      if (result.recoveryAttempted && result.recoverySuccess === true) {
+        details = await notifySpa3102Reboot(
+          admin,
+          settings,
+          companyId,
+          waCfg,
+          wahaUsable,
+          result.recoveryMessage || 'Reinicio SPA3102 ejecutado',
+          result.message,
+          details,
+        );
+      }
+      if (alert.notifyDown) {
+        details = await notifyServiceAlert(
+          admin,
+          settings,
+          companyId,
+          waCfg,
+          wahaUsable,
+          item.key,
+          item.name,
+          result.message,
+          details,
+          'down',
+        );
+      } else if (alert.notifyDegraded) {
+        details = await notifyServiceAlert(
+          admin,
+          settings,
+          companyId,
+          waCfg,
+          wahaUsable,
+          item.key,
+          item.name,
+          result.message,
+          details,
+          'degraded',
+        );
+      } else if (alert.notifyRecovery) {
+        details = await notifyServiceAlert(
+          admin,
+          settings,
+          companyId,
+          waCfg,
+          wahaUsable,
+          item.key,
+          item.name,
+          result.message,
+          details,
+          'up',
+        );
       }
     } else if (companyId) {
       if (alert.notifyDown) {

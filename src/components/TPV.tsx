@@ -434,6 +434,7 @@ export const TPV: React.FC = () => {
     queryClient.invalidateQueries({ queryKey: ['sales-history'] });
     queryClient.invalidateQueries({ queryKey: ['appointment-sale'] });
     queryClient.invalidateQueries({ queryKey: ['appointment-charged-totals'] });
+    queryClient.invalidateQueries({ queryKey: ['dashboard-main'] });
     queryClient.invalidateQueries({ queryKey: ['agenda-appointments'] });
 
     let autoInvoiceDone = false;

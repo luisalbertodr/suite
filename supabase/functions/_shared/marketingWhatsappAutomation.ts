@@ -26,6 +26,7 @@ import {
   type WhatsappProvider,
   type WhatsappProviderConfig,
 } from './whatsappProviderTypes.ts';
+import { ensureWhatsappSessionReadyForSend } from './whatsappSessionStatus.ts';
 
 export type WhatsappConfigRow = {
   company_id: string;
@@ -1312,15 +1313,17 @@ export async function sendManualCampaignAudioForChat(
   if (!cfg?.enabled || !cfg.base_url) {
     return { ok: false, error: 'WhatsApp no configurado o deshabilitado' };
   }
-  if ((cfg.last_status ?? '').toUpperCase() !== 'WORKING') {
-    return {
-      ok: false,
-      error: `Sesión WhatsApp no conectada (${cfg.last_status ?? 'desconocido'})`,
-    };
+  const providerCfg = asProviderConfig(cfg);
+  const session = await ensureWhatsappSessionReadyForSend(admin, companyId, {
+    ...providerCfg,
+    last_status: cfg.last_status,
+    me_jid: cfg.me_jid,
+  });
+  if (!session.ready) {
+    return { ok: false, error: session.error ?? 'Sesión WhatsApp no conectada' };
   }
 
   const contactName = leadDisplayName(lead);
-  const providerCfg = asProviderConfig(cfg);
   const audioPath = form!.whatsapp_initial_audio_path!.trim();
   const filename = form!.whatsapp_initial_audio_filename?.trim() || 'bienvenida.ogg';
   const bytes = await loadStorageFileBytes(admin, audioPath);

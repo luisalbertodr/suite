@@ -64,10 +64,14 @@ export function ymdFromVfpDbfDateRaw(raw: string): string | null {
   return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
 }
 
+function decodeDbfFieldChars(buf: Buffer, start: number, len: number): string {
+  return buf.slice(start, start + len).toString('latin1').replace(/\0/g, '').trim();
+}
+
 function readRawFieldAt(buf: Buffer, layout: DbfLayout, recOff: number, fieldName: string): string {
   const field = layout.fields.find((f) => f.name === fieldName.toUpperCase());
   if (!field || buf[recOff] === 0x2a) return "";
-  return buf.slice(recOff + field.pos, recOff + field.pos + field.flen).toString("ascii");
+  return decodeDbfFieldChars(buf, recOff + field.pos, field.flen);
 }
 
 /** Mapa clave compuesta → offset de registro (ej. ejefac|serfac|numfac). */
@@ -83,7 +87,7 @@ function buildCompositeKeyOffsetIndex(
     const recOff = layout.headerLen + i * layout.recordLen;
     if (buf[recOff] === 0x2a) continue;
     const parts = fields.map((field) =>
-      buf.slice(recOff + field!.pos, recOff + field!.pos + field!.flen).toString("ascii").trim(),
+      decodeDbfFieldChars(buf, recOff + field!.pos, field!.flen),
     );
     index.set(parts.join("/"), recOff);
   }
@@ -93,9 +97,9 @@ function buildCompositeKeyOffsetIndex(
 export function readRowFromBuffer(buf: Buffer, layout: DbfLayout, recOff: number): DbfRow {
   const row: DbfRow = {};
   for (const field of layout.fields) {
-    const raw = buf.slice(recOff + field.pos, recOff + field.pos + field.flen).toString("ascii");
+    const raw = decodeDbfFieldChars(buf, recOff + field.pos, field.flen);
     const key = field.name.toLowerCase();
-    const trimmed = raw.replace(/\0/g, "").trim();
+    const trimmed = raw;
     if (field.type === "D") {
       const ymd = ymdFromVfpDbfDateRaw(trimmed);
       if (ymd) {

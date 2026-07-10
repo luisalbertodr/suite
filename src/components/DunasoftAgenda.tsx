@@ -139,7 +139,7 @@ export const DunasoftAgenda: React.FC = () => {
 
   const { data, isLoading, isError, error, refetch, isFetching, isDayLoading, isDayRefreshing } =
     useDunasoftAgendaDay(selectedDateYmd, companyId);
-  useAgendaInboundSyncRefetch(companyId, refetch);
+  useAgendaInboundSyncRefetch(companyId, refetch, selectedDateYmd);
   const showInitialSkeleton = isLoading && !data;
   const { createMutation, updateMutation, deleteMutation } = useDunasoftAppointmentMutations(selectedDateYmd);
   const { data: syncStatus } = useDunasoftSyncStatus(20_000);
@@ -394,9 +394,9 @@ export const DunasoftAgenda: React.FC = () => {
   };
 
   return (
-    <div className="flex h-[calc(100dvh-9rem)] min-h-[560px] flex-col gap-2">
+    <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-hidden">
       {isError ? (
-        <div className="flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+        <div className="flex shrink-0 items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-sm text-destructive">
           <AlertCircle className="w-4 h-4 shrink-0" />
           <span>{error instanceof Error ? error.message : 'Error al cargar la agenda Dunasoft'}</span>
           <Button variant="outline" size="sm" className="ml-auto h-7" onClick={() => void refetch()}>
@@ -406,7 +406,7 @@ export const DunasoftAgenda: React.FC = () => {
       ) : null}
 
       {showInitialSkeleton ? (
-        <Skeleton className="flex-1 min-h-[24rem] w-full rounded-lg" />
+        <Skeleton className="min-h-0 flex-1 w-full rounded-lg" />
       ) : (
         <div
           className={`flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border/60 bg-card transition-opacity duration-150 ${

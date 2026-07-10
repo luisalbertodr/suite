@@ -9,8 +9,6 @@ export interface AgendaEmployee {
   id: string;
   name: string;
   color: string | null;
-  email: string | null;
-  phone: string | null;
   company_id: string;
   billing_company_id?: string | null;
   dunasoft_codemp?: string | null;
@@ -31,6 +29,30 @@ export type UseAgendaEmployeesOptions = {
   agendaOnly?: boolean;
 };
 
+const AGENDA_EMPLOYEE_SELECT =
+  'id,name,color,company_id,billing_company_id,dunasoft_codemp,is_active,agenda_sort_order,weekly_hours,unavailability,created_at,updated_at';
+
+const STYLE_EMPLOYEE_SYNC_KEY = 'agenda-employees-style-sync-at';
+const STYLE_EMPLOYEE_SYNC_INTERVAL_MS = 5 * 60_000;
+
+async function maybeSyncAgendaEmployeesFromStyle(scopeCompanyId: string) {
+  const lastRaw = sessionStorage.getItem(`${STYLE_EMPLOYEE_SYNC_KEY}:${scopeCompanyId}`);
+  const last = lastRaw ? Number(lastRaw) : 0;
+  if (last && Date.now() - last < STYLE_EMPLOYEE_SYNC_INTERVAL_MS) return;
+
+  try {
+    const { error: syncError } = await supabase.rpc('sync_agenda_employees_from_style', {
+      p_company_id: scopeCompanyId,
+    });
+    if (syncError) {
+      console.warn('Error syncing agenda employees from Style:', syncError);
+      return;
+    }
+    sessionStorage.setItem(`${STYLE_EMPLOYEE_SYNC_KEY}:${scopeCompanyId}`, String(Date.now()));
+  } catch (syncError) {
+    console.warn('Unexpected error syncing agenda employees from Style:', syncError);
+  }
+}
 const normalizeStyleEmployeeCode = (value: unknown): string =>
   String(value ?? '')
     .trim()
@@ -55,21 +77,12 @@ export const useAgendaEmployees = (options?: UseAgendaEmployeesOptions) => {
     queryFn: async () => {
       if (!scopeCompanyId) return [];
 
-      try {
-        const { error: syncError } = await supabase.rpc('sync_agenda_employees_from_style', {
-          p_company_id: scopeCompanyId,
-        });
-        if (syncError) {
-          console.warn('Error syncing agenda employees from Style:', syncError);
-        }
-      } catch (syncError) {
-        console.warn('Unexpected error syncing agenda employees from Style:', syncError);
-      }
+      await maybeSyncAgendaEmployeesFromStyle(scopeCompanyId);
 
       const baseQuery = () =>
         supabase
           .from('agenda_employees')
-          .select('*')
+          .select(AGENDA_EMPLOYEE_SELECT)
           .eq('company_id', scopeCompanyId)
           .order('agenda_sort_order', { ascending: true })
           .order('name');
@@ -94,6 +107,8 @@ export const useAgendaEmployees = (options?: UseAgendaEmployeesOptions) => {
         .filter((row: AgendaEmployee) => !isAgendaPseudoEmployee(row));
     },
     enabled: !!scopeCompanyId && !wcLoading,
+    staleTime: 5 * 60_000,
+    gcTime: 30 * 60_000,
     retry: false,
   });
 
@@ -101,8 +116,6 @@ export const useAgendaEmployees = (options?: UseAgendaEmployeesOptions) => {
     mutationFn: async (employee: {
       name: string;
       color?: string;
-      email?: string;
-      phone?: string;
       active?: boolean;
       agenda_sort_order?: number;
       billing_company_id?: string | null;

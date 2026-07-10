@@ -406,6 +406,7 @@ export const WhatsappChatView: React.FC<Props> = ({
               marketingLeadId={effectiveMarketingLeadId}
               customerId={effectiveCustomerId}
               leadMeta={leadMeta}
+              messages={messages}
               onSent={() => refreshFromWaha.mutate('recent')}
             />
           ) : null}

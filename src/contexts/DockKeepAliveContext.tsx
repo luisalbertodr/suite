@@ -39,7 +39,7 @@ export function DockKeepAliveProvider({ children }: { children: React.ReactNode 
     ).cancelIdleCallback;
 
     // Precarga solo las pestañas más usadas en el flujo recepción/marketing (no todas a la vez).
-    const prefetchKeys: DockRouteKey[] = ['agenda', 'clientes', 'marketing', 'whatsapp'];
+    const prefetchKeys: DockRouteKey[] = ['inicio', 'agenda', 'clientes', 'marketing', 'whatsapp'];
     const run = () => {
       setMountedKeys((prev) => {
         const next = new Set(prev);

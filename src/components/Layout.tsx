@@ -29,10 +29,10 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     <DockKeepAliveProvider>
       <SuiteTopBannerProvider>
         <TopBarContentProvider>
-          <div className="min-h-screen bg-background">
+          <div className="suite-app-shell min-h-screen bg-background">
             <Screensaver />
             <TopBar />
-            <main className="pt-14 pb-24 px-4 sm:px-6">
+            <main className="suite-app-main pt-14 pb-24 px-4 sm:px-6">
               {children}
             </main>
             <DockBar />

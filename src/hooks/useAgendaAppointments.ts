@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { useWorkCenter } from '@/hooks/useWorkCenter';
+import { fetchAgendaAppointmentsForDay } from '@/lib/agendaAppointmentsQuery';
 import {
   parseMissingTableColumn,
   sanitizeAgendaAppointmentWritePayload,
@@ -26,56 +27,6 @@ export interface AgendaAppointment {
   legacy_planinc_id?: number | null;
   /** IDPLAN Dunasoft: identifica la cita lógica (historial en planinc). */
   legacy_idplan?: string | null;
-}
-
-/** Una fila por legacy_idplan (misma cita lógica). */
-function dedupeByLegacyIdPlan<T extends AgendaAppointment>(rows: T[]): T[] {
-  const best = new Map<string, T>();
-  for (const r of rows) {
-    const p = r.legacy_idplan != null ? String(r.legacy_idplan).trim() : '';
-    if (!p) continue;
-    const cur = best.get(p);
-    if (!cur) {
-      best.set(p, r);
-      continue;
-    }
-    const tNew = new Date(r.updated_at || 0).getTime();
-    const tOld = new Date(cur.updated_at || 0).getTime();
-    if (tNew >= tOld) best.set(p, r);
-  }
-  return rows.filter((r) => {
-    const p = r.legacy_idplan != null ? String(r.legacy_idplan).trim() : '';
-    if (!p) return true;
-    const chosen = best.get(p);
-    return chosen?.id === r.id;
-  });
-}
-
-/** Evita mostrar la misma cita legacy dos veces si la BD tiene filas duplicadas. */
-function dedupeByLegacyPlanincId<T extends AgendaAppointment>(rows: T[]): T[] {
-  const best = new Map<number, T>();
-  for (const r of rows) {
-    const lid = r.legacy_planinc_id;
-    if (lid == null || lid === undefined) continue;
-    const n = typeof lid === 'number' ? lid : Number(lid);
-    if (!Number.isFinite(n)) continue;
-    const cur = best.get(n);
-    if (!cur) {
-      best.set(n, r);
-      continue;
-    }
-    const tNew = new Date(r.updated_at || 0).getTime();
-    const tOld = new Date(cur.updated_at || 0).getTime();
-    if (tNew >= tOld) best.set(n, r);
-  }
-  return rows.filter((r) => {
-    const lid = r.legacy_planinc_id;
-    if (lid == null || lid === undefined) return true;
-    const n = typeof lid === 'number' ? lid : Number(lid);
-    if (!Number.isFinite(n)) return true;
-    const chosen = best.get(n);
-    return chosen?.id === r.id;
-  });
 }
 
 type CreateAppointmentInput = {
@@ -161,70 +112,22 @@ export const useAgendaAppointments = (date?: string) => {
   const { operationalCompanyId, loading: wcLoading } = useWorkCenter();
   const scopeCompanyId = operationalCompanyId ?? companyId;
 
-  const { data: appointments = [], isLoading, error, refetch } = useQuery({
+  const {
+    data: appointments = [],
+    isLoading,
+    isFetching,
+    error,
+    refetch,
+  } = useQuery({
     queryKey: ['agenda-appointments', date, scopeCompanyId],
-    queryFn: async () => {
-      if (!scopeCompanyId) return [];
-
-      const base = supabase
-        .from('agenda_appointments')
-        .select('*')
-        .eq('company_id', scopeCompanyId);
-
-      // Soporta ambos esquemas:
-      // - Legacy: appointment_date + start_time(HH:mm)
-      // - Moderno: start_time/end_time TIMESTAMP
-      // Si existe appointment_date pero las citas importadas tienen solo start_time, legacy devuelve 0 filas: se usa moderno.
-      const nextCalendarDay = (ymd: string) => {
-        const [y, mo, d] = ymd.split('-').map(Number);
-        const dt = new Date(y, mo - 1, d);
-        dt.setDate(dt.getDate() + 1);
-        const yy = dt.getFullYear();
-        const mm = String(dt.getMonth() + 1).padStart(2, '0');
-        const dd = String(dt.getDate()).padStart(2, '0');
-        return `${yy}-${mm}-${dd}`;
-      };
-
-      let legacyRows: AgendaAppointment[] = [];
-      if (date) {
-        const legacyResult = await base
-          .eq('appointment_date', date)
-          .order('start_time');
-
-        if (!legacyResult.error) {
-          legacyRows = (legacyResult.data || []) as AgendaAppointment[];
-        } else if (legacyResult.error.code !== '42703') {
-          console.error('Error fetching appointments (legacy mode):', legacyResult.error);
-          throw legacyResult.error;
-        }
-      }
-
-      let modernQuery = base.order('start_time');
-      if (date) {
-        const next = nextCalendarDay(date);
-        modernQuery = modernQuery
-          .gte('start_time', `${date}T00:00:00`)
-          .lt('start_time', `${next}T00:00:00`);
-      }
-
-      const modernResult = await modernQuery;
-      if (modernResult.error) {
-        console.error('Error fetching appointments (modern mode):', modernResult.error);
-        throw modernResult.error;
-      }
-
-      const modernRows = (modernResult.data || []) as AgendaAppointment[];
-      const mergedById = new Map<string, AgendaAppointment>();
-      for (const row of [...legacyRows, ...modernRows]) {
-        if (row?.id) mergedById.set(row.id, row);
-      }
-      const merged = mergedById.size > 0 ? Array.from(mergedById.values()) : modernRows;
-
-      return dedupeByLegacyPlanincId(dedupeByLegacyIdPlan(merged));
-    },
+    queryFn: () => fetchAgendaAppointmentsForDay(scopeCompanyId!, date),
     enabled: !!scopeCompanyId && !wcLoading,
-    refetchInterval: 12_000,
+    staleTime: 60_000,
+    gcTime: 10 * 60_000,
+    refetchInterval: 0,
     refetchIntervalInBackground: false,
+    placeholderData: (previousData, previousQuery) =>
+      previousQuery?.queryKey[1] === date ? previousData : undefined,
   });
 
   const createAppointment = useMutation({
@@ -333,6 +236,7 @@ export const useAgendaAppointments = (date?: string) => {
   return {
     appointments,
     isLoading,
+    isFetching,
     error,
     refetch,
     createAppointment,

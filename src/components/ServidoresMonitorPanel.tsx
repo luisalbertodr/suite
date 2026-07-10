@@ -70,6 +70,16 @@ function ServiceCard({ row }: { row: ServiceStatusRow }) {
             {row.status === 'ok' && row.details?.last_message && (
               <p className="text-xs text-muted-foreground mt-1">{String(row.details.last_message)}</p>
             )}
+            {row.service_key === 'spa3102' && row.details?.pstn_hook_state && (
+              <p className="text-xs text-muted-foreground mt-1">
+                {row.details.pstn_in_call === true ? 'En llamada' : `PSTN: ${String(row.details.pstn_hook_state)}`}
+                {row.details.pstn_state ? ` · ${String(row.details.pstn_state)}` : ''}
+                {row.details.line_voltage ? ` · ${String(row.details.line_voltage)}` : ''}
+                {Number(row.details.pstn_off_minutes) > 0
+                  ? ` · off-hook idle ${row.details.pstn_off_minutes} min`
+                  : ''}
+              </p>
+            )}
             <p className="text-[10px] text-muted-foreground mt-2">
               {row.last_check_at
                 ? `Último check: ${format(new Date(row.last_check_at), 'dd/MM/yyyy HH:mm:ss', { locale: es })}`
@@ -192,7 +202,7 @@ export const ServidoresMonitorPanel: React.FC = () => {
               />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">WhatsApp WAHA OK</Label>
+              <Label className="text-xs">WhatsApp alertas (WAHA OK + reinicio SPA3102)</Label>
               <Input
                 defaultValue={settings?.waha_up_whatsapp ?? '34667435503'}
                 key={`wa-${settings?.updated_at}`}
@@ -249,6 +259,49 @@ export const ServidoresMonitorPanel: React.FC = () => {
                   }
                 }}
               />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">SPA3102: min off-hook antes de reinicio</Label>
+              <Input
+                type="number"
+                min={5}
+                max={180}
+                defaultValue={settings?.spa3102_offhook_minutes ?? 30}
+                key={`spa-off-${settings?.updated_at}`}
+                onBlur={(e) => {
+                  const n = Number(e.target.value);
+                  if (n >= 5 && n !== settings?.spa3102_offhook_minutes) {
+                    saveSettings({ spa3102_offhook_minutes: n });
+                  }
+                }}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">SPA3102: cooldown reinicio (min)</Label>
+              <Input
+                type="number"
+                min={15}
+                max={720}
+                defaultValue={settings?.spa3102_reboot_cooldown_minutes ?? 60}
+                key={`spa-cd-${settings?.updated_at}`}
+                onBlur={(e) => {
+                  const n = Number(e.target.value);
+                  if (n >= 15 && n !== settings?.spa3102_reboot_cooldown_minutes) {
+                    saveSettings({ spa3102_reboot_cooldown_minutes: n });
+                  }
+                }}
+              />
+            </div>
+            <div className="flex items-center gap-2 sm:col-span-2">
+              <Switch
+                id="spa3102-auto-reboot"
+                checked={settings?.spa3102_auto_reboot ?? true}
+                disabled={settingsLoading || updateSettings.isPending}
+                onCheckedChange={(spa3102_auto_reboot) => saveSettings({ spa3102_auto_reboot })}
+              />
+              <Label htmlFor="spa3102-auto-reboot" className="text-xs">
+                SPA3102: reinicio automático si línea PSTN bloqueada
+              </Label>
             </div>
           </div>
         </CardContent>
@@ -341,6 +394,10 @@ export const ServidoresMonitorPanel: React.FC = () => {
         Para comprobaciones 24/7 sin depender del navegador, configura el cron en el servidor Supabase
         con <code className="text-[10px]">scripts/setup-service-monitor-cron.ps1</code> y la variable{' '}
         <code className="text-[10px]">SERVICE_MONITOR_CRON_SECRET</code> en el contenedor edge.
+        {' '}Para el gateway FXO-FXS SPA3102 (192.168.99.82), añade{' '}
+        <code className="text-[10px]">SPA3102_PASSWORD</code> (y opcionalmente{' '}
+        <code className="text-[10px]">SPA3102_BASE_URL</code>,{' '}
+        <code className="text-[10px]">SPA3102_USERNAME</code>) al contenedor edge.
       </p>
     </div>
   );

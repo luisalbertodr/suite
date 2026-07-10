@@ -14,8 +14,7 @@ import {
   resolveLineArticle,
 } from '@/lib/invoiceLineCatalogMatch';
 import { fetchCatalogCustomers } from '@/lib/customerSearch';
-import { fetchSalesWithoutInvoiceRows, resolveStyleBillingRpcCompanyId } from '@/lib/salesRevenue';
-import { MEDICINA_COMPANY_ID } from '@/lib/workCenterBilling';
+import { fetchSalesWithoutInvoiceRows, usesWorkCenterStyleBillingRpc } from '@/lib/salesRevenue';
 
 export type ReportFilters = {
   fechaDesde?: Date;
@@ -385,18 +384,18 @@ async function fetchFacturacionMensual(scope: Scope, filters: ReportFilters) {
   const from = dateFrom(filters);
   const to = dateTo(filters);
   const hubOnly =
-    scope.billingCompanyIds.some((id) => resolveStyleBillingRpcCompanyId(id) === MEDICINA_COMPANY_ID) &&
+    scope.billingCompanyIds.some((id) => usesWorkCenterStyleBillingRpc(id)) &&
     (!filters.cliente || filters.cliente === 'todos');
 
   if (hubOnly) {
-    const rpcCompanyId = MEDICINA_COMPANY_ID;
+    const rpcCompanyId = scope.billingCompanyIds[0]!;
     const startYear = from ? parseInt(from.slice(0, 4), 10) : new Date().getFullYear();
     const endYear = to ? parseInt(to.slice(0, 4), 10) : startYear;
     const monthly: Record<string, { totalFacturado: number; numFacturas: number }> = {};
 
     for (let year = startYear; year <= endYear; year++) {
       const { data, error } = await supabase.rpc('dashboard_billing_monthly', {
-        p_company_id: MEDICINA_COMPANY_ID,
+        p_company_id: rpcCompanyId,
         p_year: year,
       });
       if (error) throw error;

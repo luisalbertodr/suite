@@ -152,8 +152,8 @@ export function useDunasoftAgendaDay(dateYmd: string, companyId: string | null) 
     queryFn: () =>
       fetchDunasoftDayAppointments(dateYmd, companyId, employeesQuery.data?.employees ?? []),
     enabled: !!dateYmd && !!employeesQuery.data,
-    staleTime: 0,
-    refetchInterval: 12_000,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
     refetchIntervalInBackground: false,
     // Solo conservar datos previos al refrescar el mismo día; al cambiar de fecha no mezclar citas.
     placeholderData: (previousData, previousQuery) =>

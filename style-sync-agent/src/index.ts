@@ -21,7 +21,7 @@ import { ENTITY_HANDLERS } from "./handlers.js";
 import { readColaRows } from "./colaDbf.js";
 import { pollDbfEntityChanges } from "./dbfPoll.js";
 import { pollPlan2009FromDbf, pollPlan2009Lightweight } from "./plan2009Poll.js";
-import { logDeferHeavyPoll, shouldDeferHeavyPoll } from "./styleSession.js";
+import { logDeferHeavyPoll, logDeferEntityDbfPoll, shouldDeferEntityDbfPoll, shouldDeferHeavyPoll } from "./styleSession.js";
 import { resolveDbfPath } from "./dbfSource.js";
 import {
   dbfBool,
@@ -75,6 +75,9 @@ const HEARTBEAT_STALE_MS = Number(process.env.HEARTBEAT_STALE_MS ?? "300000");
 const LAG_ALERT_MS = Number(process.env.LAG_ALERT_MS ?? "30000");
 const ENTITY_BATCH = Number(process.env.ENTITY_BATCH ?? "50");
 const ENTITY_POLL_MS = Number(process.env.ENTITY_POLL_MS ?? "5000");
+/** Barrido completo de DBFs maestros; omitir si solo se usa cola_sincro (DBF_ENTITY_POLL_ENABLED=0). */
+const DBF_ENTITY_POLL_ENABLED =
+  process.env.DBF_ENTITY_POLL_ENABLED !== "0" && process.env.DBF_ENTITY_POLL_ENABLED !== "false";
 const PLAN2009_POLL_MS = Number(process.env.PLAN2009_POLL_MS ?? "2500");
 const PLAN2009_BATCH = Number(process.env.PLAN2009_BATCH ?? "100");
 /** Desactivado por defecto: cola_sincro con snapshot completo evita escaneo DBF. Activar solo como red de seguridad. */
@@ -729,7 +732,7 @@ async function checkInboundWorkerHeartbeat(): Promise<void> {
 async function plan2009PollTick(): Promise<void> {
   if (!companyId) return;
   if (shouldDeferHeavyPoll(STYLE_ROOT)) {
-    logDeferHeavyPoll(log);
+    logDeferHeavyPoll(log, STYLE_ROOT);
     try {
       await pollPlan2009Lightweight(
         { supabase, companyId, styleRoot: STYLE_ROOT, log },
@@ -824,11 +827,14 @@ async function entityTick(): Promise<void> {
   if (!deps || ENTITY_HANDLERS.length === 0) return;
   const v2 = await isSyncV2Active(STYLE_ROOT);
   if (!v2) return;
-  if (shouldDeferHeavyPoll(STYLE_ROOT)) {
-    logDeferHeavyPoll(log);
+  // Cola ligera (solo filas nuevas en cola_sincro) — no lee DBF entero.
+  await processEntitiesFromStyle(deps, ENTITY_HANDLERS, ENTITY_BATCH);
+  if (shouldDeferEntityDbfPoll(STYLE_ROOT)) {
+    logDeferEntityDbfPoll(log, STYLE_ROOT);
     return;
   }
-  await processEntitiesFromStyle(deps, ENTITY_HANDLERS, ENTITY_BATCH);
+  if (!DBF_ENTITY_POLL_ENABLED) return;
+  log("dbf-poll tick: barrido maestros (Style cerrado)");
   await pollDbfEntityChanges(deps, ENTITY_HANDLERS, ENTITY_BATCH);
 }
 
@@ -860,6 +866,19 @@ function runSafe(label: string, fn: () => Promise<void>): void {
 }
 
 async function onColaChanged(): Promise<void> {
+  let lastColaId = 0;
+  let hasEntityRows = false;
+  try {
+    lastColaId = await getLastColaId();
+    const entityTablas = new Set(ENTITY_HANDLERS.map((h) => h.tabla.toLowerCase()));
+    const pending = await readColaRows(COLA_DBF, { sinceId: lastColaId });
+    hasEntityRows = pending.some((r) => entityTablas.has(String(r.tabla ?? "").trim().toLowerCase()));
+  } catch (err) {
+    if (!isRetryableFsError(err)) {
+      log(`cola pre-check error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   await tick();
   if (PLAN2009_POLL_ENABLED) {
     try {
@@ -868,7 +887,8 @@ async function onColaChanged(): Promise<void> {
       log(`plan2009 poll (cola) error: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
-  runSafe("entity", entityTick);
+  // Movimientos de agenda (plan2009) no deben disparar escaneo de clientes/faccab/… por CIFS.
+  if (hasEntityRows) runSafe("entity", entityTick);
 }
 
 async function onInboundDirChanged(): Promise<void> {
@@ -892,6 +912,7 @@ async function runFallbackSync(): Promise<void> {
   await pollInboundToJson();
   await drainInboundAcks();
   await entityOutboundTick();
+  await entityTick();
   if (PLAN2009_POLL_ENABLED) await plan2009PollTick();
 }
 
@@ -943,6 +964,7 @@ async function main() {
     if (SYNC_POLL_FALLBACK_MS > 0) {
       setInterval(() => runSafe("fallback", runFallbackSync), SYNC_POLL_FALLBACK_MS);
     }
+    setInterval(() => runSafe("entity", entityTick), ENTITY_POLL_MS);
     if (PLAN2009_POLL_ENABLED) {
       setInterval(() => runSafe("plan2009", plan2009PollTick), PLAN2009_POLL_MS);
     }

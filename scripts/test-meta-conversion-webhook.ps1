@@ -31,6 +31,11 @@ $capiEvent = @{
     ph = @($ph)
     fn = @($fn)
     ln = @($ln)
+    lead_id = 1234567890123456
+  }
+  custom_data = @{
+    event_source = 'crm'
+    lead_event_source = 'Suite'
   }
 }
 

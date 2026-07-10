@@ -21,7 +21,8 @@ import {
 } from '@/hooks/useMarketingStages';
 import { useMarketingFieldConfig } from '@/hooks/useMarketingFieldConfig';
 import { useMarketingLeadNotesIndex } from '@/hooks/useMarketingLeadNotes';
-import { useCustomerLookup, type CustomerLookupRow } from '@/hooks/useCustomerLookup';
+import { useMarketingCustomerLookup } from '@/hooks/useMarketingCustomerLookup';
+import type { CustomerLookupRow } from '@/hooks/useCustomerLookup';
 import { MarketingStageColumn } from './marketing/MarketingStageColumn';
 import { MarketingLeadDetailDialog } from './marketing/MarketingLeadDetailDialog';
 import { MarketingLeadNotesDialog } from './marketing/MarketingLeadNotesDialog';
@@ -97,7 +98,9 @@ export const Marketing: React.FC = () => {
   const { fields, isLoading: fieldsLoading } = useMarketingFieldConfig(marketingCompanyIdStable);
   const { config: metaConfig, forms: metaForms, syncNow } = useMetaConfig(marketingCompanyIdStable);
   const { data: notesIndex } = useMarketingLeadNotesIndex(marketingCompanyIdStable);
-  const { index: customerIndex } = useCustomerLookup();
+  const { index: customerIndex } = useMarketingCustomerLookup(
+    !companyLoading && !marketingPermsLoading,
+  );
   const markLeadViewed = useMarkMarketingLeadViewed();
   const { queueRows } = useMarketingWhatsappQueue(marketingCompanyIdStable);
   const intakeStageId = useMemo(
@@ -287,6 +290,7 @@ export const Marketing: React.FC = () => {
     stages,
     leads,
     matchCustomer: matchLeadToCustomer,
+    customerLookupRows: customerIndex.customers,
     enabled: !companyLoading && !leadsLoading && !stagesLoading,
   });
 

@@ -1,0 +1,24 @@
+\timing on
+DO $$
+DECLARE
+  v_company uuid := '5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4';
+  v_user uuid := '256357e4-d428-42ab-a848-113a4d83fd67';
+  t0 timestamptz;
+  t1 timestamptz;
+  v_result jsonb;
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', v_user::text, true);
+  PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+
+  t0 := clock_timestamp();
+  v_result := public.dashboard_command_board_stats(v_company, v_company, '2026-07-01'::date, '2026-07-10'::date);
+  t1 := clock_timestamp();
+  RAISE NOTICE 'month10 elapsed_ms=%', extract(epoch FROM (t1 - t0)) * 1000;
+
+  t0 := clock_timestamp();
+  v_result := public.dashboard_command_board_stats(v_company, v_company, '2026-01-01'::date, '2026-07-10'::date);
+  t1 := clock_timestamp();
+  RAISE NOTICE 'ytd elapsed_ms=%', extract(epoch FROM (t1 - t0)) * 1000;
+END $$;
+
+SHOW statement_timeout;

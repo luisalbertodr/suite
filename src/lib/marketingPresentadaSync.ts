@@ -3,17 +3,28 @@ import type { MarketingLead } from '@/hooks/useMarketingLeads';
 import type { CustomerLookupRow } from '@/lib/customerLookupMatch';
 import {
   buildCustomerLookupIndex,
-  fetchCustomerLookupRows,
+  fetchCustomerLookupRowsForCompanies,
 } from '@/lib/customerLookupMatch';
 import { isPresentadaExitoStageName } from '@/lib/marketingPresentadaStage';
 import {
+  MARKETING_ACCESS_COMPANY_IDS,
+  MARKETING_BILLING_COMPANY_IDS,
+} from '@/lib/marketingScope';
+import {
+  fetchDunasoftFacturadoCharges,
+  hasDunasoftFacturadoSince,
+} from '@/lib/marketingDunasoftCharges';
+import {
+  fetchCustomerAppointmentCharges,
   fetchCustomerAppointmentInvoiceIds,
   fetchCustomerInvoices,
-  hasAppointmentInvoiceSince,
+  hasChargedAppointmentSince,
+  hasStyleSyncedInvoiceSince,
   invoicedValueDiffers,
   leadInvoicingSinceDate,
   sumInvoicedSince,
 } from '@/lib/marketingInvoicedTotals';
+import { notifyMetaConversionStageChange } from '@/lib/metaConversionStageNotify';
 
 export type MarketingPresentadaSyncResult = {
   moved: number;
@@ -35,14 +46,53 @@ type LeadUpdate = {
   position_in_stage?: number;
 };
 
+function customerChargeMetaForIds(
+  customerIds: string[],
+  customerLookupRows: CustomerLookupRow[],
+  leadCustomerPairs: Array<{ lead: MarketingLead; customerId: string }>,
+  matchCustomer: MatchCustomer,
+) {
+  const byId = new Map(customerLookupRows.map((c) => [c.id, c]));
+  const out: Array<{
+    id: string;
+    phone?: string | null;
+    phone_mobile?: string | null;
+    phone_home?: string | null;
+    legacy_codcli?: string | null;
+  }> = [];
+  const added = new Set<string>();
+
+  for (const customerId of customerIds) {
+    if (added.has(customerId)) continue;
+    let row = byId.get(customerId);
+    if (!row) {
+      const pair = leadCustomerPairs.find((p) => p.customerId === customerId);
+      if (pair) row = matchCustomer(pair.lead) ?? undefined;
+    }
+    if (!row) continue;
+    added.add(customerId);
+    out.push({
+      id: row.id,
+      phone: row.phone,
+      phone_mobile: row.phone_mobile,
+      phone_home: row.phone_home,
+      legacy_codcli: row.legacy_codcli ?? null,
+    });
+  }
+  return out;
+}
+
 export async function runMarketingPresentadaInvoicedSync(input: {
   companyId: string;
   stages: StageLike[];
   leads: MarketingLead[];
   matchCustomer: MatchCustomer;
+  /** Clientes ya cargados (Estética + Medicina); evita GET gigante id=in.(...) */
+  customerLookupRows?: CustomerLookupRow[];
   customerIdsFilter?: string[] | null;
 }): Promise<MarketingPresentadaSyncResult> {
-  const { companyId, stages, leads, matchCustomer, customerIdsFilter } = input;
+  const { companyId, stages, leads, matchCustomer, customerLookupRows, customerIdsFilter } =
+    input;
 
   const presentadaStage = stages.find((s) => isPresentadaExitoStageName(s.name));
   if (!presentadaStage) {
@@ -74,10 +124,21 @@ export async function runMarketingPresentadaInvoicedSync(input: {
   }
 
   const customerIds = [...new Set(leadCustomerPairs.map((p) => p.customerId))];
-  const [invoices, appointmentInvoiceIds] = await Promise.all([
-    fetchCustomerInvoices(companyId, customerIds),
-    fetchCustomerAppointmentInvoiceIds(companyId, customerIds),
-  ]);
+  const billingCompanyIds = [...MARKETING_BILLING_COMPANY_IDS];
+  const customerMeta = customerChargeMetaForIds(
+    customerIds,
+    customerLookupRows ?? [],
+    leadCustomerPairs,
+    matchCustomer,
+  );
+
+  const [invoices, appointmentInvoiceIds, appointmentCharges, dunasoftCharges] =
+    await Promise.all([
+      fetchCustomerInvoices(billingCompanyIds, customerIds),
+      fetchCustomerAppointmentInvoiceIds(billingCompanyIds, customerIds),
+      fetchCustomerAppointmentCharges(billingCompanyIds, customerIds),
+      fetchDunasoftFacturadoCharges(customerMeta),
+    ]);
 
   const presentadaCount = leads.filter((l) => l.stage_id === presentadaStage.id).length;
   let nextPosition = presentadaCount;
@@ -86,13 +147,11 @@ export async function runMarketingPresentadaInvoicedSync(input: {
 
   for (const { lead, customerId } of leadCustomerPairs) {
     const sinceDate = leadInvoicingSinceDate(lead);
-    const hasAppointmentInvoice = hasAppointmentInvoiceSince(
-      invoices,
-      appointmentInvoiceIds,
-      customerId,
-      sinceDate,
-    );
-    if (!hasAppointmentInvoice) {
+    const hasChargedAppointment =
+      hasChargedAppointmentSince(appointmentCharges, customerId, sinceDate) ||
+      hasDunasoftFacturadoSince(dunasoftCharges, customerId, sinceDate) ||
+      hasStyleSyncedInvoiceSince(invoices, customerId, sinceDate);
+    if (!hasChargedAppointment) {
       skipped++;
       continue;
     }
@@ -100,10 +159,6 @@ export async function runMarketingPresentadaInvoicedSync(input: {
     const total = sumInvoicedSince(invoices, customerId, sinceDate, {
       appointmentInvoiceIds,
     });
-    if (total <= 0) {
-      skipped++;
-      continue;
-    }
 
     const inPresentada = lead.stage_id === presentadaStage.id;
     const valueChanged = invoicedValueDiffers(lead.value, total);
@@ -138,6 +193,10 @@ export async function runMarketingPresentadaInvoicedSync(input: {
     );
     const firstErr = results.find((r) => r.error)?.error;
     if (firstErr) throw firstErr;
+
+    for (const u of updates) {
+      if (u.stage_id) void notifyMetaConversionStageChange(u.id);
+    }
   }
 
   const moved = updates.filter((u) => u.stage_id).length;
@@ -166,7 +225,7 @@ export async function runMarketingPresentadaInvoicedSyncForCompany(
       .select('*')
       .eq('company_id', companyId)
       .is('archived_at', null),
-    fetchCustomerLookupRows(companyId),
+    fetchCustomerLookupRowsForCompanies(MARKETING_ACCESS_COMPANY_IDS),
   ]);
 
   if (stagesRes.error) throw stagesRes.error;
@@ -179,6 +238,7 @@ export async function runMarketingPresentadaInvoicedSyncForCompany(
     stages: stagesRes.data ?? [],
     leads: (leadsRes.data ?? []) as MarketingLead[],
     matchCustomer,
+    customerLookupRows: customers,
     customerIdsFilter: opts?.customerIds ?? null,
   });
 }

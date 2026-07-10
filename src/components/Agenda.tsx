@@ -18,11 +18,9 @@ import { AgendaGrid } from './AgendaGrid';
 import { AppointmentForm, type AppointmentFormInitialPrefill } from './AppointmentForm';
 import { EditAppointmentForm } from './EditAppointmentForm';
 import { AppointmentResourceConflictDialog } from './AppointmentResourceConflictDialog';
-import { useAgendaEmployees } from '@/hooks/useAgendaEmployees';
+import { fetchAgendaAppointmentsForDay } from '@/lib/agendaAppointmentsQuery';
 import { useAgendaAppointments } from '@/hooks/useAgendaAppointments';
 import { useAgendaInboundSyncRefetch } from '@/hooks/useAgendaInboundSyncRefetch';
-import { useAgendaAppointmentAttachments } from '@/hooks/useAgendaAppointmentAttachments';
-import { hasAttachmentHints } from '@/lib/appointmentAttachmentHints';
 import { useCabinas, useRecursos } from '@/hooks/useRecursosCabinas';
 import { format, addDays, subDays, parse, isValid } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -50,6 +48,7 @@ import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { usePermissionGuard } from '@/hooks/usePermissionGuard';
 import type { CustomerSearchRow } from '@/lib/customerSearch';
 import { fetchCatalogCustomers } from '@/lib/customerSearch';
+import { repairStyleText } from '@/lib/styleTextEncoding';
 import {
   loadAgendaViewPersisted,
   loadInitialAgendaDateYmd,
@@ -68,8 +67,6 @@ import {
   canChargeAppointment,
   appointmentChargeableTotal,
   fetchAppointmentSales,
-  fetchAppointmentSalesMap,
-  summarizeAppointmentChargeState,
 } from '@/lib/appointmentSales';
 import {
   attachPendingCorrectives,
@@ -304,19 +301,23 @@ export const Agenda: React.FC = () => {
     [companyAgendaRow?.agenda_center_hours],
   );
 
+  const fromLeadIdParam = useMemo(
+    () => new URLSearchParams(location.search).get('fromLead'),
+    [location.search],
+  );
+
   const { data: agendaCustomers = [] } = useQuery({
     queryKey: ['customers', opCompanyId, 'agenda-picker'],
     queryFn: async () => {
       if (!opCompanyId) return [];
       return fetchCatalogCustomers(supabase, opCompanyId);
     },
-    enabled: !!opCompanyId && !companyLoading,
+    enabled:
+      !!opCompanyId &&
+      !companyLoading &&
+      (showAppointmentForm || showEditForm || !!fromLeadIdParam),
+    staleTime: 5 * 60_000,
   });
-
-  const fromLeadIdParam = useMemo(
-    () => new URLSearchParams(location.search).get('fromLead'),
-    [location.search],
-  );
 
   const { data: fromLeadMarketingRow } = useQuery({
     queryKey: ['agenda-marketing-lead-prefill', companyId, fromLeadIdParam],
@@ -376,7 +377,8 @@ export const Agenda: React.FC = () => {
       for (const item of recipients) uniqueByUserId.set(item.userId, item);
       return Array.from(uniqueByUserId.values()).sort((a, b) => a.label.localeCompare(b.label, 'es'));
     },
-    enabled: !!opCompanyId && !!user?.id,
+    enabled: !!opCompanyId && !!user?.id && showEditForm,
+    staleTime: 10 * 60_000,
   });
 
   const { employees: dbEmployeesRaw, isLoading: employeesLoading } = useAgendaEmployees({ agendaOnly: true });
@@ -404,17 +406,37 @@ export const Agenda: React.FC = () => {
   const {
     appointments: dbAppointments,
     isLoading: appointmentsLoading,
+    isFetching: appointmentsFetching,
     createAppointment,
     updateAppointment,
     refetch: refetchAppointments,
   } = useAgendaAppointments(selectedDateYmd);
   useAgendaInboundSyncRefetch(opCompanyId, refetchAppointments);
 
+  useEffect(() => {
+    if (!opCompanyId || !selectedDateYmd) return;
+    const prefetchDay = (ymd: string) => {
+      void queryClient.prefetchQuery({
+        queryKey: ['agenda-appointments', ymd, opCompanyId],
+        queryFn: () => fetchAgendaAppointmentsForDay(opCompanyId, ymd),
+        staleTime: 60_000,
+      });
+    };
+    const base = parse(selectedDateYmd, 'yyyy-MM-dd', new Date());
+    if (!isValid(base)) return;
+    prefetchDay(format(subDays(base, 1), 'yyyy-MM-dd'));
+    prefetchDay(format(addDays(base, 1), 'yyyy-MM-dd'));
+  }, [opCompanyId, queryClient, selectedDateYmd]);
+
   const agendaAppointmentIds = useMemo(
     () => dbAppointments.map((a) => a.id).filter(Boolean),
     [dbAppointments],
   );
-  const { data: agendaAttachmentHints } = useAgendaAppointmentAttachments(agendaAppointmentIds);
+  const shouldLoadDayItems =
+    showAppointmentForm ||
+    showEditForm ||
+    Boolean(clipboard) ||
+    (isMultiEntity && agendaBillingView !== 'all');
 
   const { cabinas } = useCabinas();
   const { recursos } = useRecursos();
@@ -497,117 +519,12 @@ export const Agenda: React.FC = () => {
   };
 
   const appointmentIds = useMemo(() => dbAppointments.map((a) => a.id), [dbAppointments]);
-  const { data: appointmentTotals = {} } = useQuery({
-    queryKey: ['appointment-item-totals', companyId, appointmentIds.join('|')],
-    enabled: !!companyId && appointmentIds.length > 0,
-    queryFn: async () => {
-      const parsePricingFromNotes = (notes: string | null) => {
-        if (!notes || !notes.startsWith('__pricing__')) return { quantity: 1, unit_price: 0, bonus_payment_mode: 'none' as const };
-        try {
-          const parsed = JSON.parse(notes.slice('__pricing__'.length)) as {
-            quantity?: number;
-            unit_price?: number;
-            bonus_payment_mode?: 'none' | 'full' | '60' | '40';
-          };
-          return {
-            quantity: Number(parsed.quantity ?? 1),
-            unit_price: Number(parsed.unit_price ?? 0),
-            bonus_payment_mode: parsed.bonus_payment_mode ?? 'none',
-          };
-        } catch {
-          return { quantity: 1, unit_price: 0, bonus_payment_mode: 'none' as const };
-        }
-      };
-
-      let data: any[] | null = null;
-      let error: any = null;
-
-      ({ data, error } = await supabase
-        .from('appointment_items')
-        .select('appointment_id,kind,label,notes,article_id,articles(precio)')
-        .in('appointment_id', appointmentIds));
-
-      if (
-        error &&
-        error.code !== '42P01' &&
-        error.code !== 'PGRST205'
-      ) {
-        throw error;
-      }
-      if (!data || error) return {};
-
-      const normalizeText = (value: string | null | undefined) =>
-        String(value || '')
-          .toLowerCase()
-          .normalize('NFD')
-          .replace(/[\u0300-\u036f]/g, '')
-          .replace(/\s+/g, ' ')
-          .trim();
-
-      const inferItemPriceFromLabel = (
-        label: string | null | undefined,
-        byCode: Map<string, number>,
-        byDescription: Map<string, number>
-      ) => {
-        const raw = String(label || '').trim();
-        if (!raw) return 0;
-        const codeMatch = raw.match(/^([A-Za-z0-9._-]+)\s*[-:]/);
-        if (codeMatch?.[1]) {
-          const p = byCode.get(codeMatch[1].toLowerCase());
-          if (typeof p === 'number' && p > 0) return p;
-        }
-        const normalized = normalizeText(raw.replace(/^([A-Za-z0-9._-]+)\s*[-:]\s*/, ''));
-        return Math.max(0, Number(byDescription.get(normalized) || 0));
-      };
-
-      const byCode = new Map<string, number>();
-      const byDescription = new Map<string, number>();
-      const { data: articleRows } = await supabase
-        .from('articles')
-        .select('codigo,descripcion,precio')
-        .eq('company_id', opCompanyId);
-      for (const a of articleRows || []) {
-        const price = Math.max(0, Number(a.precio || 0));
-        if (price <= 0) continue;
-        if (a.codigo) byCode.set(String(a.codigo).toLowerCase(), price);
-        if (a.descripcion) byDescription.set(normalizeText(a.descripcion), price);
-      }
-
-      const totals: Record<string, number> = {};
-      for (const row of data) {
-        const fallback = parsePricingFromNotes(row.notes ?? null);
-        const qty = Math.max(0, Number(fallback.quantity ?? 1));
-        const baseUnit = Math.max(0, Number(fallback.unit_price ?? 0));
-        const articlePrice = Math.max(0, Number(row.articles?.precio ?? 0));
-        const inferredLabelPrice =
-          !row.article_id && baseUnit <= 0
-            ? inferItemPriceFromLabel(row.label, byCode, byDescription)
-            : 0;
-        const unit = baseUnit > 0 ? baseUnit : (row.article_id ? articlePrice : inferredLabelPrice);
-        const mode = String(fallback.bonus_payment_mode ?? 'none');
-        let line = qty * unit;
-        if (row.kind === 'bonus') {
-          if (mode === '60') line = unit * 0.6;
-          else if (mode === '40') line = unit * 0.4;
-          else if (mode === 'full') line = unit;
-          else line = 0;
-        }
-        totals[row.appointment_id] = (totals[row.appointment_id] || 0) + line;
-      }
-      return totals;
-    },
-  });
-
-  const { data: appointmentSalesMap = new Map() } = useQuery({
-    queryKey: ['appointment-sales-map', companyId, appointmentIds.join('|')],
-    enabled: !!companyId && appointmentIds.length > 0,
-    queryFn: () => fetchAppointmentSalesMap(appointmentIds),
-    staleTime: 30_000,
-  });
 
   const { data: appointmentItemsPayload = { grouped: {}, articleHints: new Map<string, ArticleResourceHint>(), billingIdsByAppt: {} as Record<string, string[]> } } = useQuery({
     queryKey: ['appointment-time-segments', companyId, appointmentIds.join('|'), familyRecords.length],
-    enabled: !!companyId && appointmentIds.length > 0,
+    enabled: shouldLoadDayItems && !!companyId && appointmentIds.length > 0,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('appointment_items')
@@ -732,9 +649,9 @@ export const Agenda: React.FC = () => {
   const appointments: Appointment[] = dbAppointments.map((apt) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const row: any = apt;
-    const description = row.description || '';
+    const description = repairStyleText(row.description || '');
     const parsedService = parseServiceFromDescription(description);
-    const clientName = row.client_name || row.title || '';
+    const clientName = repairStyleText(row.client_name || row.title || '');
     const startTime = normalizeTime(row.start_time);
     const endTime = normalizeTime(row.end_time);
     const itemDrafts = appointmentItemsByAppt[row.id] || [];
@@ -748,22 +665,7 @@ export const Agenda: React.FC = () => {
       .filter((it) => !it.occupies_time || Number(it.duration_minutes || 0) <= 0)
       .map((it) => (it.label || '').trim())
       .filter(Boolean);
-    const chargeTotal = Object.prototype.hasOwnProperty.call(appointmentTotals, row.id)
-      ? Number(appointmentTotals[row.id] || 0)
-      : 0;
-    const sales = appointmentSalesMap.get(row.id) ?? [];
-    const chargeState = summarizeAppointmentChargeState(sales, chargeTotal);
     const aptStatus = (['confirmed', 'pending', 'cancelled'].includes(row.status) ? row.status : 'pending') as Appointment['status'];
-    let paymentStatus: Appointment['paymentStatus'] = 'none';
-    if (aptStatus !== 'cancelled') {
-      if (chargeState.allCompleted) {
-        paymentStatus = chargeState.allInvoiced ? 'invoiced' : 'paid';
-      } else if (chargeState.completedTotal > 0) {
-        paymentStatus = 'pending_charge';
-      } else if (chargeTotal > 0) {
-        paymentStatus = 'pending_charge';
-      }
-    }
     return {
       id: row.id,
       employeeId: row.employee_id || '',
@@ -783,15 +685,10 @@ export const Agenda: React.FC = () => {
       paymentOnlyLabels,
       date: normalizeDate(row.start_time, row.appointment_date),
       color: row.color || '#3B82F6',
-      totalAmount: Object.prototype.hasOwnProperty.call(appointmentTotals, row.id)
-        ? chargeTotal
-        : undefined,
-      paymentStatus,
+      totalAmount: undefined,
+      paymentStatus: aptStatus === 'cancelled' ? 'none' : undefined,
       status: aptStatus,
-      attachments: (() => {
-        const hints = agendaAttachmentHints?.get(row.id);
-        return hints && hasAttachmentHints(hints) ? hints : undefined;
-      })(),
+      attachments: undefined,
     };
   });
 
@@ -1084,7 +981,7 @@ export const Agenda: React.FC = () => {
   };
 
   const putAppointmentOnClipboard = useCallback(
-    (appointment: Appointment, mode: 'copy' | 'cut') => {
+    async (appointment: Appointment, mode: 'copy' | 'cut') => {
       if (isAppointmentFinanciallyClosed(appointment.paymentStatus)) {
         toast({
           title: 'Cita cerrada',
@@ -1093,7 +990,9 @@ export const Agenda: React.FC = () => {
         });
         return;
       }
-      const items = appointmentItemsByAppt[appointment.id] ?? [];
+      const items =
+        appointmentItemsByAppt[appointment.id] ??
+        (await fetchAppointmentItems(appointment.id, companyId || undefined));
       setClipboard(
         buildClipboardPayload({
           mode,
@@ -1113,7 +1012,7 @@ export const Agenda: React.FC = () => {
           'Haz clic en un hueco libre para pegar. Cambia de día en el calendario si lo necesitas. Mayús+clic = nueva cita vacía.',
       });
     },
-    [appointmentItemsByAppt, setClipboard, toast],
+    [appointmentItemsByAppt, companyId, setClipboard, toast],
   );
 
   const pasteAppointmentAt = useCallback(
@@ -1305,7 +1204,9 @@ export const Agenda: React.FC = () => {
       const newEndMin = newH * 60 + newM + duration;
       const newEndTime = `${Math.floor(newEndMin / 60).toString().padStart(2, '0')}:${(newEndMin % 60).toString().padStart(2, '0')}`;
 
-      const itemDrafts = appointmentItemsByAppt[appointmentId] || [];
+      const itemDrafts =
+        appointmentItemsByAppt[appointmentId] ||
+        (await fetchAppointmentItems(appointmentId, companyId || undefined));
 
       const moveConflict = checkItemsResourceConflict(
         format(selectedDate, 'yyyy-MM-dd'),
@@ -1578,7 +1479,7 @@ export const Agenda: React.FC = () => {
 
   const handleChargeAppointment = async (apt: Appointment, items: AppointmentItemDraft[]) => {
     const chargeableTotal = appointmentChargeableTotal(items);
-    const existingSales = appointmentSalesMap.get(apt.id) ?? [];
+    const existingSales = await fetchAppointmentSales(apt.id);
     const chargeCheck = canChargeAppointment({
       status: apt.status,
       chargeableTotal,
@@ -1733,7 +1634,6 @@ export const Agenda: React.FC = () => {
 
   if (
     (employeesLoading && dbEmployeesRaw.length === 0) ||
-    (appointmentsLoading && dbAppointments.length === 0) ||
     prefsLoading
   ) {
     return (
@@ -1760,15 +1660,22 @@ export const Agenda: React.FC = () => {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100dvh-9rem)] min-h-[560px]">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       {isMultiEntity && agendaBillingView !== 'all' && (
-        <p className="mb-2 text-[10px] text-muted-foreground text-violet-600 dark:text-violet-400">
+        <p className="mb-1 shrink-0 text-[10px] leading-tight text-muted-foreground text-violet-600 dark:text-violet-400">
           Las citas mixtas (estética + medicina) solo se ven en «Ambas empresas»
         </p>
       )}
 
       {/* Grid */}
-      <div className="flex-1 overflow-hidden rounded-lg border bg-card">
+      <div className="relative min-h-0 flex-1 overflow-hidden rounded-lg border bg-card">
+        {appointmentsFetching && dbAppointments.length === 0 ? (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-start justify-center bg-background/40 pt-24">
+            <div className="rounded-md border bg-card px-3 py-2 text-xs text-muted-foreground shadow-sm">
+              Cargando citas…
+            </div>
+          </div>
+        ) : null}
         <AgendaGrid
           employees={filteredEmployees}
           appointments={filteredAppointments}
@@ -1776,8 +1683,8 @@ export const Agenda: React.FC = () => {
           onAppointmentClick={handleAppointmentClick}
           onAppointmentMove={handleAppointmentMove}
           appointmentClipboard={clipboard ? { mode: clipboard.mode } : null}
-          onAppointmentCopy={(apt) => putAppointmentOnClipboard(apt, 'copy')}
-          onAppointmentCut={(apt) => putAppointmentOnClipboard(apt, 'cut')}
+          onAppointmentCopy={(apt) => void putAppointmentOnClipboard(apt, 'copy')}
+          onAppointmentCut={(apt) => void putAppointmentOnClipboard(apt, 'cut')}
           onSlotPaste={(employeeId, time) => void pasteAppointmentAt(employeeId, time, selectedDateYmd)}
           persistUserId={user?.id ?? null}
           viewDateYmd={selectedDateYmd}

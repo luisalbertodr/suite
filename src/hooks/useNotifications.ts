@@ -16,6 +16,22 @@ interface Notification {
 
 let notificationsTableMissing = false;
 
+const READ_RETENTION_MS = 2 * 24 * 60 * 60 * 1000;
+
+function readRetentionCutoffIso(): string {
+  return new Date(Date.now() - READ_RETENTION_MS).toISOString();
+}
+
+/** Campanita: todas las no leídas + leídas de los últimos 2 días. */
+export function filterBellNotifications<T extends { read: boolean; created_at: string }>(
+  items: T[],
+): T[] {
+  const cutoff = Date.now() - READ_RETENTION_MS;
+  return items.filter(
+    (n) => !n.read || new Date(n.created_at).getTime() >= cutoff,
+  );
+}
+
 export const useNotifications = () => {
   const queryClient = useQueryClient();
   const { companyId } = useCompanyFilter();
@@ -32,9 +48,11 @@ export const useNotifications = () => {
     queryKey: ['notifications'],
     queryFn: async () => {
       if (notificationsTableMissing) return [];
+      const cutoffIso = readRetentionCutoffIso();
       const { data, error } = await supabase
         .from('notifications')
         .select('*')
+        .or(`read.eq.false,created_at.gte.${cutoffIso}`)
         .order('created_at', { ascending: false })
         .limit(500);
       if (isMissingRelation(error)) {
@@ -62,7 +80,9 @@ export const useNotifications = () => {
   });
 
   const notifications = (() => {
-    const merged = [...questionnaireNotifications, ...dbNotifications] as Notification[];
+    const merged = filterBellNotifications(
+      [...questionnaireNotifications, ...dbNotifications] as Notification[],
+    );
     merged.sort(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
     );

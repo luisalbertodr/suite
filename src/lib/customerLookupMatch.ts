@@ -7,6 +7,7 @@ export type CustomerLookupRow = {
   phone: string | null;
   phone_mobile: string | null;
   phone_home: string | null;
+  legacy_codcli?: string | null;
 };
 
 const digitsOnly = (s: string | null | undefined): string =>
@@ -65,8 +66,23 @@ export function buildCustomerLookupIndex(customers: CustomerLookupRow[]): Custom
 export async function fetchCustomerLookupRows(companyId: string): Promise<CustomerLookupRow[]> {
   const { data, error } = await supabase
     .from('customers')
-    .select('id, name, email, phone, phone_mobile, phone_home')
+    .select('id, name, email, phone, phone_mobile, phone_home, legacy_codcli')
     .eq('company_id', companyId);
   if (error) throw error;
   return data ?? [];
+}
+
+/** Clientes de varias empresas (p. ej. Estética + Medicina) para enlazar leads con agenda/facturación. */
+export async function fetchCustomerLookupRowsForCompanies(
+  companyIds: readonly string[],
+): Promise<CustomerLookupRow[]> {
+  const unique = [...new Set(companyIds.filter(Boolean))];
+  if (!unique.length) return [];
+
+  const chunks = await Promise.all(unique.map((companyId) => fetchCustomerLookupRows(companyId)));
+  const byId = new Map<string, CustomerLookupRow>();
+  for (const row of chunks.flat()) {
+    if (!byId.has(row.id)) byId.set(row.id, row);
+  }
+  return [...byId.values()];
 }

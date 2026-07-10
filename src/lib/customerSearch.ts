@@ -4,6 +4,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { repairStyleText } from '@/lib/styleTextEncoding';
 export type CustomerSearchRow = {
   id: string;
   name: string;
@@ -108,7 +109,10 @@ export async function fetchCatalogCustomers(
     p_offset: options?.offset ?? 0,
   });
   if (error) throw error;
-  return (data ?? []) as CustomerSearchRow[];
+  return ((data ?? []) as CustomerSearchRow[]).map((row) => ({
+    ...row,
+    name: repairStyleText(row.name),
+  }));
 }
 
 /** Conteo de clientes del catálogo. */
