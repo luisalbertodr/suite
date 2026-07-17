@@ -42,16 +42,20 @@ Variables opcionales:
 
 Cuando el usuario pida desplegar o hayas modificado código que afecte producción, **ejecuta los scripts** (no solo documentes comandos) si hay acceso SSH.
 
+### Frontend: subir siempre
+
+Tras cualquier cambio que afecte la UI (`src/`, assets públicos, `VITE_*`, build), **despliega el frontend en la misma sesión** con `.\scripts\deploy-frontend.ps1` (o `-SkipBuild` si `dist/` ya está al día). No dejes la subida pendiente ni te limites a indicar el comando: súbelo. Si falta SSH a `suite-web`, configura acceso (`.\scripts\setup-ssh-deploy.ps1 -IncludeWeb`) y reintenta el deploy antes de cerrar.
+
 ### Orden recomendado (si aplica todo)
 
 1. **Migración SQL** (`supabase/migrations/`)
 2. **Edge Functions** (`supabase/functions/`) — especialmente si dependen del esquema
-3. **Frontend** (`src/`, assets, `.env` con `VITE_*`)
+3. **Frontend** (`src/`, assets, `.env` con `VITE_*`) — **siempre subir** (ver arriba)
 
 ### Cuándo NO desplegar
 
 - Solo lectura o preguntas sin cambios.
-- SSH no disponible: informar con comandos exactos.
+- SSH no disponible tras intentar configurarlo: informar con comandos exactos y qué falta (p. ej. contraseña root del 112 una vez).
 - Migración ya en `supabase_migrations.schema_migrations`: no re-ejecutar.
 
 ## Scripts de despliegue (PowerShell)

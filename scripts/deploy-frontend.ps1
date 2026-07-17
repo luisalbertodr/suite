@@ -22,8 +22,20 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$IdentityFile = Join-Path $env:USERPROFILE ".ssh\suite_deploy"
 $SshOpts = @("-o", "ConnectTimeout=15", "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=3")
+if (Test-Path $IdentityFile) {
+  $SshOpts += @("-i", $IdentityFile, "-o", "IdentitiesOnly=yes")
+}
 $SshTarget = if ($env:SUITE_WEB_SSH_HOST) { $env:SUITE_WEB_SSH_HOST } else { "suite-web" }
+# Fallback si el alias suite-web no está en ~/.ssh/config
+if ($SshTarget -eq "suite-web") {
+  # ssh -G puede escribir avisos a stderr; no deben abortar el script con $ErrorActionPreference Stop
+  cmd /c "ssh -G suite-web >nul 2>&1"
+  if ($LASTEXITCODE -ne 0) {
+    $SshTarget = "root@192.168.99.112"
+  }
+}
 $RemoteRoot = if ($env:SUITE_WEB_ROOT) {
   $env:SUITE_WEB_ROOT
 } else {

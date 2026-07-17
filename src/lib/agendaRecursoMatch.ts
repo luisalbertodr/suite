@@ -33,7 +33,7 @@ const DEFAULT_COLOR_BY_RESOURCE_NAME: Record<string, string> = {
 
 const DEFAULT_KEYWORDS_BY_RESOURCE_NAME: Record<string, string> = {
   cera: 'cera,wax,depilacion cera',
-  inbody: 'inbody,in body,composicion corporal',
+  inbody: 'inbody,in body,composicion corporal,bascula,morphoscan,morpho scan',
   indiba: 'indiba,radiofrecuencia,capacitiva,resistiva',
   laser: 'laser,láser,ipl,diodo,lumbar,dorsal,axila,pierna',
   lpg: 'lpg,endermologie,endermologie,maderoterapia',

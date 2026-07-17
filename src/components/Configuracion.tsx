@@ -31,6 +31,7 @@ import { InbodyCsvImportPanel } from './InbodyCsvImportPanel';
 import { TpvSettingsConfig } from './TpvSettingsConfig';
 import { StripeConfigPanel } from './StripeConfig';
 import { ServidoresMonitorPanel } from './ServidoresMonitorPanel';
+import { SmartPssEventsPanel } from './SmartPssEventsPanel';
 import { ConsentimientoPlantillasConfig } from './consentimiento/ConsentimientoPlantillasConfig';
 import { TabletUnlockConfig } from '@/components/tablet/TabletUnlockConfig';
 import { useWorkCenter } from '@/hooks/useWorkCenter';
@@ -48,6 +49,7 @@ const VALID_TABS = [
   'seguridad',
   'usuarios',
   'servidores',
+  'camaras',
 ] as const;
 
 type ConfigTab = (typeof VALID_TABS)[number];
@@ -184,6 +186,7 @@ export const Configuracion: React.FC = () => {
           <TabsTrigger value="seguridad">Seguridad</TabsTrigger>
           <TabsTrigger value="usuarios">Usuarios</TabsTrigger>
           <TabsTrigger value="servidores">Servidores</TabsTrigger>
+          <TabsTrigger value="camaras">Cámaras</TabsTrigger>
         </TabsList>
 
         <TabsContent value="general" className="space-y-4">
@@ -359,6 +362,10 @@ export const Configuracion: React.FC = () => {
 
         <TabsContent value="servidores" className="space-y-4">
           <ServidoresMonitorPanel />
+        </TabsContent>
+
+        <TabsContent value="camaras" className="space-y-4">
+          <SmartPssEventsPanel />
         </TabsContent>
       </Tabs>
     </div>

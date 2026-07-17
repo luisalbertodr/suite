@@ -192,7 +192,7 @@ export const ClienteDetailView: React.FC<Props> = ({
               compact ? 'text-[10px] px-1 py-1 h-7' : 'text-sm rounded-lg',
             )}
           >
-            InBody
+            Báscula
           </TabsTrigger>
           <TabsTrigger
             value="historial"

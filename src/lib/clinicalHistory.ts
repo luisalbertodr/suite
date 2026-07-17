@@ -185,6 +185,101 @@ export async function fetchClinicalHistoryByAppointment(
   return records[0] ?? null;
 }
 
+export function isConsultaRecord(record: ClinicalHistoryRecord): boolean {
+  // Las cabeceras de tracking usan tipo "tratamiento"; el resto (incl. legado) es consulta.
+  return record.tipo !== 'tratamiento';
+}
+
+export function filterConsultaRecords(records: ClinicalHistoryRecord[]): ClinicalHistoryRecord[] {
+  return records.filter(isConsultaRecord);
+}
+
+export function getAntecedentesText(record: ClinicalHistoryRecord): string {
+  return (record.antecedentes_personales ?? record.descripcion ?? '').trim();
+}
+
+export function sortClinicalHistoryAscending(
+  records: ClinicalHistoryRecord[],
+): ClinicalHistoryRecord[] {
+  return [...records].sort((a, b) => {
+    const byFecha = a.fecha.localeCompare(b.fecha);
+    if (byFecha !== 0) return byFecha;
+    return (a.created_at || '').localeCompare(b.created_at || '');
+  });
+}
+
+export type ClinicalHistoryVisitDiff = {
+  record: ClinicalHistoryRecord;
+  isFirst: boolean;
+  showAntecedentes: boolean;
+  antecedentesText: string | null;
+  motivo: string | null;
+  tratamiento: string | null;
+  aviso: string | null;
+};
+
+/** Diff no redundante: AP solo si cambió (o es la primera visita). Orden cronológico ascendente. */
+export function diffClinicalHistoryVisits(
+  records: ClinicalHistoryRecord[],
+): ClinicalHistoryVisitDiff[] {
+  const asc = sortClinicalHistoryAscending(filterConsultaRecords(records));
+  return asc.map((record, index) => {
+    const prev = index > 0 ? asc[index - 1] : null;
+    const ap = getAntecedentesText(record);
+    const prevAp = prev ? getAntecedentesText(prev) : '';
+    const showAntecedentes = Boolean(ap) && (index === 0 || ap !== prevAp);
+    const motivo = (record.motivo_consulta ?? '').trim() || null;
+    const tratamiento = (record.tratamiento ?? '').trim() || null;
+    const aviso = (record.aviso_text ?? '').trim() || null;
+    return {
+      record,
+      isFirst: index === 0,
+      showAntecedentes,
+      antecedentesText: showAntecedentes ? ap : null,
+      motivo,
+      tratamiento,
+      aviso,
+    };
+  });
+}
+
+export function diffClinicalHistoryVisitsDesc(
+  records: ClinicalHistoryRecord[],
+): ClinicalHistoryVisitDiff[] {
+  return [...diffClinicalHistoryVisits(records)].reverse();
+}
+
+export function latestAntecedentesText(records: ClinicalHistoryRecord[]): string | null {
+  const asc = sortClinicalHistoryAscending(filterConsultaRecords(records));
+  for (let i = asc.length - 1; i >= 0; i -= 1) {
+    const ap = getAntecedentesText(asc[i]);
+    if (ap) return ap;
+  }
+  return null;
+}
+
+export type AntecedentesHistoryEntry = {
+  fecha: string;
+  text: string;
+  recordId: string;
+  isInitial: boolean;
+};
+
+/** Versiones de AP con fecha (solo cuando el texto cambia respecto a la visita anterior). */
+export function buildAntecedentesHistory(
+  records: ClinicalHistoryRecord[],
+): AntecedentesHistoryEntry[] {
+  const diffs = diffClinicalHistoryVisits(records);
+  return diffs
+    .filter((d) => d.showAntecedentes && d.antecedentesText)
+    .map((d) => ({
+      fecha: d.record.fecha,
+      text: d.antecedentesText as string,
+      recordId: d.record.id,
+      isInitial: d.isFirst,
+    }));
+}
+
 export async function fetchClinicalHistoryList(customerId: string): Promise<ClinicalHistoryRecord[]> {
   const { data, error } = await supabase
     .from('historial_clinico')
@@ -193,7 +288,8 @@ export async function fetchClinicalHistoryList(customerId: string): Promise<Clin
     .order('fecha', { ascending: false })
     .order('created_at', { ascending: false });
   if (error) throw error;
-  return attachReviews((data ?? []).map((row) => mapRow(row as Record<string, unknown>)));
+  const mapped = (data ?? []).map((row) => mapRow(row as Record<string, unknown>));
+  return attachReviews(filterConsultaRecords(mapped));
 }
 
 export async function fetchLatestClinicalHistory(
@@ -206,16 +302,20 @@ export async function fetchLatestClinicalHistory(
     .eq('customer_id', customerId)
     .order('fecha', { ascending: false })
     .order('created_at', { ascending: false })
-    .limit(1);
+    .limit(40);
 
   if (excludeAppointmentId) {
     query = query.neq('appointment_id', excludeAppointmentId);
   }
 
-  const { data, error } = await query.maybeSingle();
+  const { data, error } = await query;
   if (error) throw error;
-  const records = data ? await attachReviews([mapRow(data as Record<string, unknown>)]) : [];
-  return records[0] ?? null;
+  const mapped = filterConsultaRecords(
+    (data ?? []).map((row) => mapRow(row as Record<string, unknown>)),
+  );
+  if (!mapped.length) return null;
+  const withReviews = await attachReviews([mapped[0]]);
+  return withReviews[0] ?? null;
 }
 
 export function clinicalHistoryToFormValues(
@@ -252,6 +352,7 @@ export function clinicalHistoryToFormValues(
   };
 }
 
+/** Precarga para visita nueva: copia AP y FN; deja motivo, tratamiento y aviso vacíos. */
 export function clinicalHistoryToPrefillValues(
   record: ClinicalHistoryRecord | null,
   birthDate: string | null,
@@ -263,6 +364,8 @@ export function clinicalHistoryToPrefillValues(
   const base = clinicalHistoryToFormValues(record, birthDate);
   return {
     ...base,
+    motivoConsulta: '',
+    tratamiento: '',
     proximaRevisionFecha: '',
     proximaRevisionDescripcion: '',
     revisiones: [],
@@ -343,6 +446,11 @@ export async function saveClinicalHistory(params: {
 
   const withReviews = await attachReviews([saved]);
   return withReviews[0] ?? saved;
+}
+
+export async function deleteClinicalHistory(recordId: string): Promise<void> {
+  const { error } = await supabase.from('historial_clinico').delete().eq('id', recordId);
+  if (error) throw error;
 }
 
 async function saveClinicalHistoryReviews(params: {

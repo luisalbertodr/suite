@@ -1,19 +1,32 @@
 import React, { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { CalendarDays, Pencil, Plus, Siren, Stethoscope } from 'lucide-react';
+import { Pencil, Plus, Stethoscope, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { ClinicalHistoryRecordDialog } from '@/components/clinical/ClinicalHistoryRecordDialog';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { ClinicalHistoryRecordDialog } from '@/components/clinical/ClinicalHistoryRecordDialog';
+import { ClinicalHistoryVisitTimeline } from '@/components/clinical/ClinicalHistoryVisitTimeline';
+import {
+  buildAntecedentesHistory,
   clinicalHistoryToPrefillValues,
-  clinicalHistoryOneLineSummary,
+  deleteClinicalHistory,
   fetchClinicalHistoryList,
   fetchCustomerBirthDate,
   type ClinicalHistoryRecord,
 } from '@/lib/clinicalHistory';
 import { formatAgeLabel } from '@/lib/patientAge';
+import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 
 interface Props {
@@ -37,8 +50,11 @@ export const ClienteHistorialClinicoTab: React.FC<Props> = ({
   customerName,
   compact,
 }) => {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [editorOpen, setEditorOpen] = useState(false);
   const [editRecord, setEditRecord] = useState<ClinicalHistoryRecord | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ClinicalHistoryRecord | null>(null);
 
   const { data: records = [], isLoading } = useQuery({
     queryKey: ['clinical_history_list', customerId],
@@ -55,6 +71,40 @@ export const ClienteHistorialClinicoTab: React.FC<Props> = ({
     [records, birthDate],
   );
 
+  const apHistory = useMemo(() => buildAntecedentesHistory(records), [records]);
+  const age = formatAgeLabel(birthDate);
+
+  const previousForDialog = useMemo(() => {
+    if (!editRecord?.id) return records;
+    return records.filter((r) => r.id !== editRecord.id);
+  }, [records, editRecord?.id]);
+
+  const deleteMutation = useMutation({
+    mutationFn: async (recordId: string) => deleteClinicalHistory(recordId),
+    onSuccess: (_data, recordId) => {
+      queryClient.invalidateQueries({ queryKey: ['clinical_history_list', customerId] });
+      queryClient.invalidateQueries({ queryKey: ['customer_detail', customerId] });
+      if (deleteTarget?.appointment_id) {
+        queryClient.invalidateQueries({
+          queryKey: ['clinical_history_appointment', deleteTarget.appointment_id],
+        });
+      }
+      if (editRecord?.id === recordId) {
+        setEditorOpen(false);
+        setEditRecord(null);
+      }
+      setDeleteTarget(null);
+      toast({ title: 'Consulta eliminada' });
+    },
+    onError: (err: Error) => {
+      toast({
+        title: 'No se pudo eliminar',
+        description: err.message,
+        variant: 'destructive',
+      });
+    },
+  });
+
   const openNew = () => {
     setEditRecord(null);
     setEditorOpen(true);
@@ -64,8 +114,6 @@ export const ClienteHistorialClinicoTab: React.FC<Props> = ({
     setEditRecord(record);
     setEditorOpen(true);
   };
-
-  const age = formatAgeLabel(birthDate);
 
   if (!companyId) {
     return (
@@ -79,8 +127,9 @@ export const ClienteHistorialClinicoTab: React.FC<Props> = ({
     <>
       <div className="flex items-center justify-between gap-2 mb-2">
         <p className={cn('text-xs text-muted-foreground', compact && 'text-[10px]')}>
-          Cada visita se guarda como una consulta independiente. Al crear una nueva se precargan
-          los datos de la última sesión para revisarlos o modificarlos.
+          Cada visita se guarda como consulta independiente. En visitas sucesivas verás el historial
+          completo y solo rellenarás lo de ese día (los antecedentes se precargan para ampliarlos si
+          hace falta).
         </p>
         <Button type="button" size="sm" className="h-8 shrink-0 gap-1" onClick={openNew}>
           <Plus className="w-3.5 h-3.5" />
@@ -107,107 +156,98 @@ export const ClienteHistorialClinicoTab: React.FC<Props> = ({
           </Button>
         </div>
       ) : (
-        <ul className={cn('space-y-3', compact && 'text-xs')}>
-          {records.map((r) => (
-            <li
-              key={r.id}
-              className="overflow-hidden rounded-xl border bg-card shadow-sm transition-colors hover:border-sky-200"
-            >
-              <div className="flex flex-col gap-3 p-4">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="space-y-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2.5 py-1 text-[11px] font-medium text-sky-700 dark:bg-sky-950/40 dark:text-sky-200">
-                        <CalendarDays className="h-3.5 w-3.5" />
-                        {formatDateYmd(r.fecha)}
-                      </span>
-                      <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 text-[11px] text-muted-foreground">
-                        <Stethoscope className="h-3.5 w-3.5" />
-                        Consulta
-                      </span>
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-semibold text-foreground">
-                        {clinicalHistoryOneLineSummary(r)}
-                      </h3>
-                      {birthDate && (
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          Fecha de nacimiento: {formatDateYmd(birthDate)}
-                          {age ? ` (${age})` : ''}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex justify-end">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="gap-1"
-                      onClick={() => openEdit(r)}
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                      Editar
-                    </Button>
-                  </div>
-                </div>
+        <div className="space-y-4">
+          <div
+            className={cn(
+              'sticky top-0 z-10 rounded-xl border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 p-4 space-y-3 shadow-sm',
+              compact && 'p-3 space-y-2',
+            )}
+          >
+            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              Perfil clínico
+            </p>
+            {(birthDate || age) && (
+              <p className="text-sm text-muted-foreground">
+                {birthDate ? `Nacimiento: ${formatDateYmd(birthDate)}` : null}
+                {birthDate && age ? ' · ' : null}
+                {age ? `Edad: ${age}` : null}
+              </p>
+            )}
+            <div className="space-y-2">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Antecedentes personales
+              </p>
+              {apHistory.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Sin antecedentes registrados</p>
+              ) : (
+                <ul className="space-y-2">
+                  {apHistory.map((entry, index) => {
+                    const isVigente = index === apHistory.length - 1;
+                    return (
+                      <li
+                        key={entry.recordId}
+                        className={cn(
+                          'rounded-lg border px-3 py-2 text-sm',
+                          isVigente
+                            ? 'border-sky-200 bg-sky-50/50 dark:border-sky-900/50 dark:bg-sky-950/20'
+                            : 'bg-muted/30',
+                        )}
+                      >
+                        <div className="flex flex-wrap items-center gap-2 mb-1">
+                          <span className="text-[11px] font-medium text-sky-700 dark:text-sky-300 tabular-nums">
+                            {formatDateYmd(entry.fecha)}
+                          </span>
+                          <span className="text-[11px] text-muted-foreground">
+                            {entry.isInitial ? 'Registro inicial' : 'Actualización'}
+                          </span>
+                          {isVigente && (
+                            <span className="text-[10px] font-medium uppercase tracking-wide text-sky-700 dark:text-sky-300">
+                              Vigente
+                            </span>
+                          )}
+                        </div>
+                        <p className="whitespace-pre-wrap text-sm">{entry.text}</p>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </div>
 
-                <div className="grid gap-3 md:grid-cols-3">
-                  <div className="rounded-lg border bg-muted/30 p-3">
-                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                      AP
-                    </p>
-                    <p className="mt-1 whitespace-pre-wrap text-sm">
-                      {r.antecedentes_personales || r.descripcion || 'Sin datos'}
-                    </p>
-                  </div>
-
-                  <div className="rounded-lg border bg-muted/30 p-3">
-                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                      Motivo de consulta
-                    </p>
-                    <p className="mt-1 whitespace-pre-wrap text-sm">
-                      {r.motivo_consulta || 'Sin datos'}
-                    </p>
-                  </div>
-
-                  <div className="rounded-lg border bg-muted/30 p-3">
-                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                      Tratamiento
-                    </p>
-                    <p className="mt-1 whitespace-pre-wrap text-sm">
-                      {r.tratamiento || 'Sin datos'}
-                    </p>
-                  </div>
-                </div>
-
-                {r.aviso_text && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50/80 p-3 dark:border-amber-900/70 dark:bg-amber-950/20">
-                    <div className="flex items-start gap-2">
-                      <Siren className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300" />
-                      <div>
-                        <p className="text-[11px] font-medium uppercase tracking-wide text-amber-800 dark:text-amber-200">
-                          Aviso a recepción
-                        </p>
-                        <p className="mt-1 whitespace-pre-wrap text-sm text-amber-950 dark:text-amber-50">
-                          {r.aviso_text}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {r.revisiones.length > 0 && (
-                  <div className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
-                    Este registro contiene revisiones antiguas guardadas dentro de la consulta.
-                    A partir de ahora las nuevas revisiones se registran creando una consulta nueva
-                    con el botón <span className="font-medium text-foreground">Nuevo</span>.
-                  </div>
-                )}
+          <ClinicalHistoryVisitTimeline
+            records={records}
+            order="asc"
+            compact={compact}
+            omitAntecedentes
+            title="Consultas"
+            renderActions={(diff) => (
+              <div className="flex items-center gap-1.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1"
+                  onClick={() => openEdit(diff.record)}
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                  Editar
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 w-8 p-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  aria-label="Eliminar consulta"
+                  title="Eliminar consulta"
+                  onClick={() => setDeleteTarget(diff.record)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
               </div>
-            </li>
-          ))}
-        </ul>
+            )}
+          />
+        </div>
       )}
 
       <ClinicalHistoryRecordDialog
@@ -222,7 +262,39 @@ export const ClienteHistorialClinicoTab: React.FC<Props> = ({
         defaultFecha={editRecord?.fecha}
         overlayClassName="z-[115]"
         initialValues={editRecord ? null : newRecordInitialValues}
+        previousRecords={previousForDialog}
       />
+
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => {
+          if (!open && !deleteMutation.isPending) setDeleteTarget(null);
+        }}
+      >
+        <AlertDialogContent className="z-[120]">
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar esta consulta?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget
+                ? `Se borrará la consulta del ${formatDateYmd(deleteTarget.fecha)}. Esta acción no se puede deshacer.`
+                : 'Esta acción no se puede deshacer.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteMutation.isPending}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deleteMutation.isPending || !deleteTarget}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={(e) => {
+                e.preventDefault();
+                if (deleteTarget) deleteMutation.mutate(deleteTarget.id);
+              }}
+            >
+              {deleteMutation.isPending ? 'Eliminando…' : 'Eliminar'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 };

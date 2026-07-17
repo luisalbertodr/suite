@@ -85,37 +85,22 @@ function parseMessageTime(m: WhatsappMessageRow): number {
   return Number.isNaN(t) ? 0 : t;
 }
 
+function parseCreatedAt(m: WhatsappMessageRow): number {
+  const t = Date.parse(m.created_at ?? '');
+  return Number.isNaN(t) ? 0 : t;
+}
+
+/** Orden cronológico estable: timestamp → created_at → id (sin preferir from_me). */
 function compareWhatsappMessages(a: WhatsappMessageRow, b: WhatsappMessageRow): number {
   const diff = parseMessageTime(a) - parseMessageTime(b);
   if (diff !== 0) return diff;
-  if (a.from_me === b.from_me) {
-    return (a.created_at ?? a.id).localeCompare(b.created_at ?? b.id);
-  }
-  return a.from_me ? -1 : 1;
+  const createdDiff = parseCreatedAt(a) - parseCreatedAt(b);
+  if (createdDiff !== 0) return createdDiff;
+  return a.id.localeCompare(b.id);
 }
 
-function fixTimelineOrder(rows: WhatsappMessageRow[]): WhatsappMessageRow[] {
-  if (rows.length < 2) return rows;
-  const sorted = [...rows].sort(compareWhatsappMessages);
-  for (let i = 0; i < sorted.length - 1; i++) {
-    const incoming = sorted[i];
-    const outgoing = sorted[i + 1];
-    if (incoming.from_me || !outgoing.from_me) continue;
-    const ti = parseMessageTime(incoming);
-    const to = parseMessageTime(outgoing);
-    if (ti >= to) {
-      sorted[i + 1] = {
-        ...outgoing,
-        timestamp: new Date(ti + 1).toISOString(),
-      };
-    } else {
-      sorted[i] = {
-        ...incoming,
-        timestamp: new Date(to + 1).toISOString(),
-      };
-    }
-  }
-  return sorted.sort(compareWhatsappMessages);
+function sortWhatsappMessages(rows: WhatsappMessageRow[]): WhatsappMessageRow[] {
+  return [...rows].sort(compareWhatsappMessages);
 }
 
 function dedupeWhatsappMessages(rows: WhatsappMessageRow[]): WhatsappMessageRow[] {
@@ -134,8 +119,11 @@ function dedupeWhatsappMessages(rows: WhatsappMessageRow[]): WhatsappMessageRow[
     }
     if (!prev.waha_message_id && m.waha_message_id) byKey.set(key, m);
   }
-  return fixTimelineOrder([...byKey.values()]);
+  return sortWhatsappMessages([...byKey.values()]);
 }
+
+/** Solo corrige desfase pequeño del proveedor (<3s); no reordena conversaciones reales. */
+const INCOMING_CLOCK_SKEW_MS = 3_000;
 
 function adjustIncomingBeforeAppend(
   list: WhatsappMessageRow[],
@@ -150,7 +138,8 @@ function adjustIncomingBeforeAppend(
   }
   if (lastOutgoingMs === 0) return incoming;
   const incMs = parseMessageTime(incoming);
-  if (incMs < lastOutgoingMs) {
+  const skew = lastOutgoingMs - incMs;
+  if (skew > 0 && skew <= INCOMING_CLOCK_SKEW_MS) {
     return { ...incoming, timestamp: new Date(lastOutgoingMs + 1).toISOString() };
   }
   return incoming;
@@ -274,6 +263,8 @@ export const useWhatsappMessages = (
         .eq('company_id', companyId)
         .in('chat_id', chatIds)
         .order('timestamp', { ascending: false })
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
         .limit(MESSAGE_PAGE_SIZE);
       if (error) throw error;
       const rows = (data ?? []) as WhatsappMessageRow[];

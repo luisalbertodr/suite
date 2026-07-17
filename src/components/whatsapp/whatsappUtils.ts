@@ -434,13 +434,18 @@ export function dayKey(iso: string | null | undefined): string {
 }
 
 /** Agrupa mensajes por día calendario (ordenados antes para no duplicar cabeceras). */
-export function groupMessagesByDay<T extends { timestamp: string }>(
-  messages: T[],
-): Array<{ day: string; iso: string; messages: T[] }> {
+export function groupMessagesByDay<
+  T extends { timestamp: string; created_at?: string | null; id?: string },
+>(messages: T[]): Array<{ day: string; iso: string; messages: T[] }> {
   const sorted = [...messages].sort((a, b) => {
     const ta = Date.parse(a.timestamp);
     const tb = Date.parse(b.timestamp);
-    return (Number.isNaN(ta) ? 0 : ta) - (Number.isNaN(tb) ? 0 : tb);
+    const td = (Number.isNaN(ta) ? 0 : ta) - (Number.isNaN(tb) ? 0 : tb);
+    if (td !== 0) return td;
+    const ca = Date.parse(a.created_at ?? '') || 0;
+    const cb = Date.parse(b.created_at ?? '') || 0;
+    if (ca !== cb) return ca - cb;
+    return (a.id ?? '').localeCompare(b.id ?? '');
   });
   const out: Array<{ day: string; iso: string; messages: T[] }> = [];
   for (const m of sorted) {

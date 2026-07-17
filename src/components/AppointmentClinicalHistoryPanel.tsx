@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ClinicalHistoryFormBody } from '@/components/clinical/ClinicalHistoryFormBody';
+import { ClinicalHistoryVisitTimeline } from '@/components/clinical/ClinicalHistoryVisitTimeline';
 import { AGENDA_CLINICAL_HISTORY_OVERLAY_Z } from '@/lib/agendaResourceColors';
 import { DOCK_CLEARANCE_BOTTOM } from '@/lib/dialogLayers';
 import { PanelAwareBodyPortal } from '@/components/PanelAwareBodyPortal';
@@ -15,8 +16,8 @@ import {
   clinicalHistoryToFormValues,
   emptyClinicalHistoryFormValues,
   fetchClinicalHistoryByAppointment,
+  fetchClinicalHistoryList,
   fetchCustomerBirthDate,
-  fetchLatestClinicalHistory,
   saveClinicalHistory,
   updateCustomerBirthDate,
   type ClinicalHistoryFormValues,
@@ -59,6 +60,7 @@ export const AppointmentClinicalHistoryPanel: React.FC<Props> = ({
   const queryClient = useQueryClient();
   const [form, setForm] = useState<ClinicalHistoryFormValues>(emptyClinicalHistoryFormValues());
   const [existingId, setExistingId] = useState<string | null>(null);
+  const [fechaConsulta, setFechaConsulta] = useState(appointmentDate);
 
   const defaultNotifyUserId = useMemo(
     () => defaultReceptionNotifyUserId(notifyRecipients),
@@ -69,18 +71,25 @@ export const AppointmentClinicalHistoryPanel: React.FC<Props> = ({
     queryKey: ['clinical_history_appointment', appointmentId, customerId],
     enabled: open && !!appointmentId && !!customerId,
     queryFn: async () => {
-      const [record, birthDate, previousRecord] = await Promise.all([
+      const [record, birthDate, allRecords] = await Promise.all([
         fetchClinicalHistoryByAppointment(appointmentId),
         fetchCustomerBirthDate(customerId),
-        fetchLatestClinicalHistory(customerId, appointmentId),
+        fetchClinicalHistoryList(customerId),
       ]);
-      return { record, birthDate, previousRecord };
+      const previousRecords = allRecords.filter((r) => {
+        if (record?.id && r.id === record.id) return false;
+        if (r.appointment_id && r.appointment_id === appointmentId) return false;
+        return true;
+      });
+      const previousRecord = previousRecords[0] ?? null;
+      return { record, birthDate, previousRecords, previousRecord };
     },
   });
 
   useEffect(() => {
     if (!open || isLoading || !data) return;
     setExistingId(data.record?.id ?? null);
+    setFechaConsulta(data.record?.fecha ?? appointmentDate);
     const baseValues = data.record
       ? clinicalHistoryToFormValues(data.record, data.birthDate)
       : clinicalHistoryToPrefillValues(data.previousRecord, data.birthDate);
@@ -88,7 +97,7 @@ export const AppointmentClinicalHistoryPanel: React.FC<Props> = ({
       ...baseValues,
       avisoNotifyUserId: defaultNotifyUserId,
     });
-  }, [open, isLoading, data, defaultNotifyUserId]);
+  }, [open, isLoading, data, defaultNotifyUserId, appointmentDate]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -99,7 +108,7 @@ export const AppointmentClinicalHistoryPanel: React.FC<Props> = ({
         customerId,
         companyId,
         appointmentId,
-        appointmentDate,
+        appointmentDate: fechaConsulta,
         employeeId,
         values: form,
         existingId,
@@ -109,7 +118,7 @@ export const AppointmentClinicalHistoryPanel: React.FC<Props> = ({
       const prevAviso = data?.record?.aviso_text?.trim() ?? '';
       const notifyTo = form.avisoNotifyUserId || defaultNotifyUserId;
       if (aviso && aviso !== prevAviso && notifyTo && user?.id) {
-        const msg = `${customerName} · ${format(parseISO(`${appointmentDate}T12:00:00`), 'dd/MM/yyyy', { locale: es })}: ${aviso}`;
+        const msg = `${customerName} · ${format(parseISO(`${fechaConsulta}T12:00:00`), 'dd/MM/yyyy', { locale: es })}: ${aviso}`;
         if (onNotify) {
           await onNotify(notifyTo, msg);
         } else {
@@ -118,7 +127,7 @@ export const AppointmentClinicalHistoryPanel: React.FC<Props> = ({
             fromUserId: user.id,
             recipientUserId: notifyTo,
             appointmentId,
-            appointmentDate,
+            appointmentDate: fechaConsulta,
             clientName: customerName,
             message: msg,
             titlePrefix: `Aviso recepción · ${customerName}`,
@@ -147,6 +156,8 @@ export const AppointmentClinicalHistoryPanel: React.FC<Props> = ({
 
   if (!open || typeof document === 'undefined') return null;
 
+  const previousRecords = data?.previousRecords ?? [];
+
   return (
     <PanelAwareBodyPortal open={open}>
     <div
@@ -159,7 +170,7 @@ export const AppointmentClinicalHistoryPanel: React.FC<Props> = ({
       aria-label="Historial clínico"
     >
       <div className="absolute inset-0 bg-black/55" aria-hidden onClick={onClose} />
-      <Card className="relative z-10 w-full max-w-lg max-h-[calc(100dvh-7rem)] overflow-y-auto shadow-xl">
+      <Card className="relative z-10 w-full max-w-6xl max-h-[calc(100dvh-7rem)] overflow-y-auto shadow-xl">
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between gap-2">
             <CardTitle className="text-base flex items-center gap-2">
@@ -178,22 +189,45 @@ export const AppointmentClinicalHistoryPanel: React.FC<Props> = ({
           {isLoading ? (
             <div className="space-y-3">
               <Skeleton className="h-8 w-full" />
-              <Skeleton className="h-20 w-full" />
-              <Skeleton className="h-20 w-full" />
+              <Skeleton className="h-40 w-full" />
+              <Skeleton className="h-40 w-full" />
             </div>
           ) : (
             <form
-              className="space-y-3"
+              className="space-y-4"
               onSubmit={(e) => {
                 e.preventDefault();
                 saveMutation.mutate();
               }}
             >
+              {previousRecords.length > 0 && (
+                <ClinicalHistoryVisitTimeline
+                  records={previousRecords}
+                  order="asc"
+                  compact
+                  maxHeightClassName="max-h-56"
+                  title={`Historial previo (${previousRecords.length} consulta${previousRecords.length === 1 ? '' : 's'})`}
+                />
+              )}
+
+              {previousRecords.length > 0 && (
+                <p className="text-xs font-medium text-foreground border-t pt-3">Esta visita</p>
+              )}
+
               <ClinicalHistoryFormBody
                 values={form}
                 onChange={setForm}
+                customerName={customerName}
+                showFechaConsulta
+                fechaConsulta={fechaConsulta}
+                onFechaConsultaChange={setFechaConsulta}
                 notifyRecipients={notifyRecipients}
                 defaultNotifyUserId={defaultNotifyUserId}
+                antecedentesHint={
+                  previousRecords.length > 0
+                    ? 'Se precargan los antecedentes de la última consulta; añade o corrige solo si hay novedades.'
+                    : null
+                }
               />
               <div className="flex justify-end gap-2 pt-1">
                 <Button type="button" variant="ghost" size="sm" onClick={onClose}>

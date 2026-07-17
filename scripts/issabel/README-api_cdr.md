@@ -5,7 +5,23 @@ Destino en Issabel: `/var/www/html_api/api_cdr.php`
 
 ## Despliegue manual
 
-En Issabel (`192.168.99.36`), como root:
+En Issabel (`192.168.99.36`), como root.
+
+### Instalación nueva (Issabel recién instalado)
+
+Desde Windows (PowerShell en el repo):
+
+```powershell
+$env:SUITE_ISSABEL_SSH_PASSWORD = '...'
+$env:ISSABEL_API_TOKEN = '...'   # mismo valor que ISSABEL_API_TOKEN en Supabase (110)
+.\scripts\deploy-issabel-api-cdr.ps1
+```
+
+El script crea `/var/www/html_api/api_cdr.php`, lee `AMPDBPASS` de Issabel, configura Apache en el puerto **8888** y hace un smoke test.
+
+Si no pasas `ISSABEL_API_TOKEN`, se genera uno aleatorio en Issabel: hay que copiarlo al `.env` de Supabase (`ISSABEL_API_TOKEN`) y reiniciar `supabase-edge-functions`.
+
+### Actualización (ya existe api_cdr.php)
 
 ```bash
 cp /var/www/html_api/api_cdr.php /var/www/html_api/api_cdr.php.bak.$(date +%Y%m%d)
@@ -16,7 +32,7 @@ Copia el contenido nuevo **conservando** al inicio del bloque de configuración:
 - `$api_token_valido` (el que ya usa Suite en `.env` del Supabase)
 - `$db_pass` real
 
-O edita solo las líneas marcadas `CAMBIAR_POR_*` antes de subir.
+O usa `.\scripts\deploy-issabel-api-cdr.ps1` (conserva token y credenciales del fichero remoto).
 
 ## Pruebas
 

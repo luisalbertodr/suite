@@ -91,5 +91,9 @@
     "typescript": "^5.5.3",
     "typescript-eslint": "^8.0.1",
     "vite": "^8.0.8"
+  },
+  "allowScripts": {
+    "core-js@3.49.0": true,
+    "supabase@2.91.3": true
   }
 }

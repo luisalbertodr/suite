@@ -30,12 +30,15 @@ export interface InbodyImpedanceFreq {
   left_leg?: number | null;
 }
 
+export type ScaleDevice = 'inbody' | 'morphoscan';
+
 export interface InbodyMeasurement {
   id: string;
   company_id: string;
   customer_id: string | null;
   inbody_user_id: string;
   measured_at: string;
+  device?: ScaleDevice | string | null;
   height_cm: number | null;
   age_years: number | null;
   sex: string | null;
@@ -69,16 +72,60 @@ export interface InbodyMeasurement {
   bmr_max_kcal: number | null;
   fat_control_kg: number | null;
   muscle_control_kg: number | null;
+  weight_control_kg?: number | null;
+  target_weight_kg?: number | null;
+  bone_mass_kg?: number | null;
+  protein_mass_kg?: number | null;
+  protein_pct?: number | null;
+  body_water_pct?: number | null;
+  visceral_fat_index?: number | null;
+  subcutaneous_fat_pct?: number | null;
+  metabolic_age?: number | null;
+  smi?: number | null;
+  body_type?: string | null;
+  heart_rate?: number | null;
   segmental_lean: InbodySegmentalLean;
   segmental_fat: InbodySegmentalFat;
   impedance: Record<string, InbodyImpedanceFreq>;
   edema: Record<string, number | null>;
   source: string;
   import_batch: string;
+  raw_payload?: Record<string, unknown>;
   bca?: Record<string, unknown>;
   lb?: Record<string, unknown>;
   imp?: Record<string, InbodyImpedanceFreq> | Record<string, unknown>;
   data_quality?: import('@/lib/inbodyQuality').InbodyDataQuality | null;
+}
+
+/** Etiqueta de dispositivo para el selector de sesiones (InBody / MorphoScan). */
+export function scaleDeviceFromMeasurement(m: Pick<InbodyMeasurement, 'device' | 'source'>): ScaleDevice {
+  const d = (m.device || '').toLowerCase().trim();
+  if (d === 'morphoscan') return 'morphoscan';
+  if (d === 'inbody') return 'inbody';
+  const src = (m.source || '').toLowerCase();
+  if (src.includes('morphoscan') || src.includes('renpho')) return 'morphoscan';
+  return 'inbody';
+}
+
+export function scaleDeviceLabel(device: ScaleDevice): string {
+  return device === 'morphoscan' ? 'MorphoScan' : 'InBody';
+}
+
+export function hasMorphoScanExtras(m: InbodyMeasurement): boolean {
+  return (
+    m.bone_mass_kg != null ||
+    m.protein_mass_kg != null ||
+    m.protein_pct != null ||
+    m.body_water_pct != null ||
+    m.visceral_fat_index != null ||
+    m.subcutaneous_fat_pct != null ||
+    m.metabolic_age != null ||
+    m.smi != null ||
+    (m.body_type != null && m.body_type !== '') ||
+    m.heart_rate != null ||
+    m.weight_control_kg != null ||
+    m.target_weight_kg != null
+  );
 }
 
 export type InbodyRangeStatus = 'low' | 'normal' | 'high' | 'unknown';

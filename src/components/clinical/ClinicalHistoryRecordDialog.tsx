@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { ClinicalHistoryFormBody } from '@/components/clinical/ClinicalHistoryFormBody';
+import { ClinicalHistoryVisitTimeline } from '@/components/clinical/ClinicalHistoryVisitTimeline';
 import {
   emptyClinicalHistoryFormValues,
   clinicalHistoryToFormValues,
@@ -39,6 +40,8 @@ type Props = {
   onNotify?: (recipientUserId: string, message: string) => Promise<void> | void;
   overlayClassName?: string;
   initialValues?: ClinicalHistoryFormValues | null;
+  /** Consultas anteriores a mostrar como contexto (todas menos la que se edita). */
+  previousRecords?: ClinicalHistoryRecord[];
 };
 
 export const ClinicalHistoryRecordDialog: React.FC<Props> = ({
@@ -56,6 +59,7 @@ export const ClinicalHistoryRecordDialog: React.FC<Props> = ({
   onNotify,
   overlayClassName = 'z-[110]',
   initialValues = null,
+  previousRecords = [],
 }) => {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -71,6 +75,11 @@ export const ClinicalHistoryRecordDialog: React.FC<Props> = ({
   const [fechaConsulta, setFechaConsulta] = useState(
     () => defaultFecha ?? format(new Date(), 'yyyy-MM-dd'),
   );
+
+  const contextRecords = useMemo(() => {
+    if (!record?.id) return previousRecords;
+    return previousRecords.filter((r) => r.id !== record.id);
+  }, [previousRecords, record?.id]);
 
   useEffect(() => {
     if (!open) return;
@@ -140,7 +149,10 @@ export const ClinicalHistoryRecordDialog: React.FC<Props> = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto" overlayClassName={overlayClassName}>
+      <DialogContent
+        className="w-[min(100%,72rem)] max-w-6xl max-h-[90vh] overflow-y-auto"
+        overlayClassName={overlayClassName}
+      >
         <DialogHeader>
           <DialogTitle className="text-base">
             {isEdit ? 'Editar historial clínico' : 'Nuevo registro clínico'}
@@ -152,20 +164,40 @@ export const ClinicalHistoryRecordDialog: React.FC<Props> = ({
           </DialogDescription>
         </DialogHeader>
         <form
-          className="space-y-3"
+          className="space-y-4"
           onSubmit={(e) => {
             e.preventDefault();
             saveMutation.mutate();
           }}
         >
+          {contextRecords.length > 0 && (
+            <ClinicalHistoryVisitTimeline
+              records={contextRecords}
+              order="asc"
+              compact
+              maxHeightClassName="max-h-56"
+              title={`Historial previo (${contextRecords.length} consulta${contextRecords.length === 1 ? '' : 's'})`}
+            />
+          )}
+
+          {contextRecords.length > 0 && (
+            <p className="text-xs font-medium text-foreground border-t pt-3">Esta visita</p>
+          )}
+
           <ClinicalHistoryFormBody
             values={form}
             onChange={setForm}
-            showFechaConsulta={!appointmentId}
+            customerName={customerName}
+            showFechaConsulta
             fechaConsulta={fechaConsulta}
             onFechaConsultaChange={setFechaConsulta}
             notifyRecipients={notifyRecipients}
             defaultNotifyUserId={defaultNotifyUserId}
+            antecedentesHint={
+              contextRecords.length > 0
+                ? 'Se precargan los antecedentes de la última consulta; añade o corrige solo si hay novedades.'
+                : null
+            }
           />
           <div className="flex justify-end gap-2 pt-1">
             <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)}>

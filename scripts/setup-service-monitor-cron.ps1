@@ -29,7 +29,16 @@ rm -f `$TMP
 crontab -l | grep suite-service-health
 "@
 
-ssh $SshTarget "grep -q 'SERVICE_MONITOR_CRON_SECRET:' /root/supabase-project/docker-compose.yml || sed -i '/ISSABEL_INTERNAL_EXTENSIONS_REGEX:/a\      SERVICE_MONITOR_CRON_SECRET: \${SERVICE_MONITOR_CRON_SECRET}' /root/supabase-project/docker-compose.yml"
+ssh $SshTarget "grep -q 'SERVICE_MONITOR_CRON_SECRET:' /root/supabase-project/docker-compose.yml || sed -i '/ISSABEL_INTERNAL_EXTENSIONS_REGEX:/a\      SERVICE_MONITOR_CRON_SECRET: \${SERVICE_MONITOR_CRON_SECRET}' /root/supabase-project/docker-compose.yml; python3 - <<'PY'
+from pathlib import Path
+import re
+path = Path('/root/supabase-project/docker-compose.yml')
+text = path.read_text(encoding='utf-8')
+for key in ('SERVICE_MONITOR_CRON_SECRET',):
+    want = f'      {key}: ${{{key}}}'
+    text = re.sub(rf'^(\s+{re.escape(key)}:\s*).*$', want, text, flags=re.M)
+path.write_text(text, encoding='utf-8')
+PY"
 
 Write-Host "Recreando contenedor edge..." -ForegroundColor Green
 ssh $SshTarget "cd /root/supabase-project && docker compose up -d --force-recreate functions && docker restart supabase-kong"

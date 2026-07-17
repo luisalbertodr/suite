@@ -14,7 +14,10 @@ import {
 import { useInbodyMeasurements } from '@/hooks/useInbodyMeasurements';
 import {
   formatInbodyNumber,
+  hasMorphoScanExtras,
   inbodySexLabel,
+  scaleDeviceFromMeasurement,
+  scaleDeviceLabel,
   type InbodyMeasurement,
 } from '@/lib/inbodyMeasurements';
 import { resolveInbodyDataQuality } from '@/lib/inbodyQuality';
@@ -28,6 +31,7 @@ import { InbodyReportExport } from './inbody/InbodyReportExport';
 import { InbodyNutritionPanel } from './inbody/InbodyNutritionPanel';
 import { InbodyMetricHelp, InbodySectionHelp } from './inbody/InbodyMetricHelp';
 import { InbodyCsvImportPanel } from '@/components/InbodyCsvImportPanel';
+import { Badge } from '@/components/ui/badge';
 
 interface Props {
   customerId: string;
@@ -93,12 +97,85 @@ function ImpedanceTable({ measurement }: { measurement: InbodyMeasurement }) {
 }
 
 function sessionLabel(m: InbodyMeasurement, index: number, total: number, all: InbodyMeasurement[]): string {
+  const device = scaleDeviceLabel(scaleDeviceFromMeasurement(m));
   const date = format(new Date(m.measured_at), 'dd/MM/yyyy HH:mm', { locale: es });
   const weight = m.weight_kg != null ? formatInbodyNumber(m.weight_kg, 1, ' kg') : 'sin peso';
   const pbf = m.pbf_pct != null ? ` · PGC ${formatInbodyNumber(m.pbf_pct, 1, '%')}` : '';
   const q = resolveInbodyDataQuality(m, all);
   const warn = q.needs_repeat ? ' ⚠' : '';
-  return `${total - index}. ${date} · ${weight}${pbf}${warn}`;
+  return `${total - index}. [${device}] ${date} · ${weight}${pbf}${warn}`;
+}
+
+function MorphoScanExtrasCard({ measurement }: { measurement: InbodyMeasurement }) {
+  if (!hasMorphoScanExtras(measurement)) return null;
+
+  const rows: { label: string; value: string }[] = [];
+  if (measurement.bone_mass_kg != null) {
+    rows.push({ label: 'Masa ósea', value: formatInbodyNumber(measurement.bone_mass_kg, 1, ' kg') });
+  }
+  if (measurement.protein_mass_kg != null) {
+    rows.push({ label: 'Proteína', value: formatInbodyNumber(measurement.protein_mass_kg, 1, ' kg') });
+  }
+  if (measurement.protein_pct != null) {
+    rows.push({ label: 'Proteína %', value: formatInbodyNumber(measurement.protein_pct, 1, '%') });
+  }
+  if (measurement.body_water_pct != null) {
+    rows.push({ label: 'Agua %', value: formatInbodyNumber(measurement.body_water_pct, 1, '%') });
+  }
+  if (measurement.visceral_fat_index != null) {
+    rows.push({
+      label: 'Grasa visceral',
+      value: formatInbodyNumber(measurement.visceral_fat_index, 0),
+    });
+  }
+  if (measurement.subcutaneous_fat_pct != null) {
+    rows.push({
+      label: 'Grasa subcutánea',
+      value: formatInbodyNumber(measurement.subcutaneous_fat_pct, 1, '%'),
+    });
+  }
+  if (measurement.metabolic_age != null) {
+    rows.push({ label: 'Edad metabólica', value: formatInbodyNumber(measurement.metabolic_age, 0) });
+  }
+  if (measurement.smi != null) {
+    rows.push({ label: 'SMI', value: formatInbodyNumber(measurement.smi, 1) });
+  }
+  if (measurement.heart_rate != null) {
+    rows.push({ label: 'FC', value: formatInbodyNumber(measurement.heart_rate, 0, ' lpm') });
+  }
+  if (measurement.target_weight_kg != null) {
+    rows.push({ label: 'Peso objetivo', value: formatInbodyNumber(measurement.target_weight_kg, 1, ' kg') });
+  }
+  if (measurement.weight_control_kg != null) {
+    rows.push({ label: 'Control peso', value: formatInbodyNumber(measurement.weight_control_kg, 1, ' kg') });
+  }
+  if (measurement.body_type) {
+    rows.push({ label: 'Tipo corporal', value: measurement.body_type });
+  }
+  if (!rows.length) return null;
+
+  return (
+    <Card className="border-sky-100/50 dark:border-sky-900/20">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm flex items-center gap-2">
+          MorphoScan — datos adicionales
+          <Badge variant="secondary" className="text-[10px] font-normal">
+            MorphoScan
+          </Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <dl className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-2 text-xs">
+          {rows.map((row) => (
+            <div key={row.label}>
+              <dt className="text-muted-foreground">{row.label}</dt>
+              <dd className="font-medium tabular-nums">{row.value}</dd>
+            </div>
+          ))}
+        </dl>
+      </CardContent>
+    </Card>
+  );
 }
 
 function MeasurementSessionBar({
@@ -113,6 +190,7 @@ function MeasurementSessionBar({
   compact?: boolean;
 }) {
   const measuredLabel = format(new Date(selected.measured_at), 'yyyy-MM-dd HH:mm:ss', { locale: es });
+  const deviceLabel = scaleDeviceLabel(scaleDeviceFromMeasurement(selected));
 
   return (
     <div className="space-y-2">
@@ -131,6 +209,9 @@ function MeasurementSessionBar({
 
       <div className={compact ? 'text-xs' : 'text-sm'}>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
+          <Badge variant="outline" className="text-[10px] font-medium">
+            {deviceLabel}
+          </Badge>
           <span className="font-medium text-foreground">{selected.inbody_user_id}</span>
           {selected.age_years != null && (
             <span>{formatInbodyNumber(selected.age_years, 0)} Edad</span>
@@ -242,6 +323,8 @@ function MeasurementReport({
 
       <InbodyNutritionPanel measurement={measurement} compact={compact} />
 
+      <MorphoScanExtrasCard measurement={measurement} />
+
       <ImpedanceTable measurement={measurement} />
     </div>
   );
@@ -281,7 +364,7 @@ export const ClienteInbodyTab: React.FC<Props> = ({ customerId, taxId, companyId
     return (
       <div className="space-y-4">
         <div className="text-center py-10 text-sm text-destructive">
-          No se pudieron cargar las mediciones InBody.
+          No se pudieron cargar las mediciones de báscula.
         </div>
         <InbodyCsvImportPanel
           embedded
@@ -298,11 +381,11 @@ export const ClienteInbodyTab: React.FC<Props> = ({ customerId, taxId, companyId
       <div className="space-y-4">
         <div className="text-center py-12 text-muted-foreground">
           <Activity className="h-10 w-10 mx-auto mb-3 opacity-30" />
-          <p className="font-medium text-foreground">Sin mediciones InBody</p>
+          <p className="font-medium text-foreground">Sin mediciones de báscula</p>
           <p className="text-sm mt-1 max-w-sm mx-auto">
             {taxId
-              ? 'No hay registros vinculados a este DNI. Importa un CSV de Lookin\'Body abajo.'
-              : 'Añade el DNI del cliente para vincular mediciones por ID de Lookin\'Body.'}
+              ? 'No hay registros vinculados a este DNI. Importa un CSV de Lookin\'Body o captura MorphoScan vía el puente BLE.'
+              : 'Añade el DNI del cliente para vincular mediciones InBody o MorphoScan.'}
           </p>
         </div>
         <InbodyCsvImportPanel
