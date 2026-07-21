@@ -1,934 +1,98 @@
 {
-  "apply": false,
-  "csv": "C:\\Users\\OportoW11\\Desktop\\Medicina Estética\\Fichas medicina.csv",
-  "blocks_total": 88,
-  "planned_records": 34,
-  "planned_reviews": 69,
-  "written_records": 0,
-  "written_reviews": 0,
-  "skipped_blocks": [
+  "apply": true,
+  "csv": "/tmp/medicina_import/Fichas_medicina.csv",
+  "company_id": "5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4",
+  "patients_approx": 90,
+  "visits_total": 258,
+  "planned_records": 254,
+  "written_records": 254,
+  "created_customers": 2,
+  "birth_dates_set": 0,
+  "linked_appointments": 185,
+  "skipped_visits": [
     {
-      "line": 26,
-      "name": "Amparo alonso",
-      "fecha": "2025-10-06",
-      "source_key": "medicina_estetica_csv:ff337bc155adf261",
-      "reason": "ambiguous_customer",
-      "candidates": [
-        {
-          "id": "1f055f85-a876-4949-a5ed-6979fccd588a",
-          "name": "Amparo Alonso",
-          "legacy_codcli": null
-        },
-        {
-          "id": "1b9acb24-14c7-49fd-98ab-eb7cfd11b49e",
-          "name": "Amparo Alonso",
-          "legacy_codcli": "000856"
-        }
-      ]
-    },
-    {
-      "line": 38,
-      "name": "Ana Diaz Marquez.",
-      "fecha": "2025-05-21",
-      "source_key": "medicina_estetica_csv:57c9f5d430182a60",
-      "reason": "ambiguous_customer",
-      "candidates": [
-        {
-          "id": "252fdea0-a561-4600-b22f-7984a84d5947",
-          "name": "Ana Diaz Marquez",
-          "legacy_codcli": null
-        },
-        {
-          "id": "f1a3d8e7-3215-4fc7-85bc-323df694708e",
-          "name": "Ana Diaz Marquez",
-          "legacy_codcli": "004752"
-        }
-      ]
-    },
-    {
-      "line": 98,
-      "name": "Aurora María Barahona Brao.",
-      "fecha": "2025-11-08",
-      "source_key": "medicina_estetica_csv:7665b3f34e7e59d2",
-      "reason": "ambiguous_customer",
-      "candidates": [
-        {
-          "id": "7c20560e-f9e4-410a-aba4-d554b2703e8b",
-          "name": "Aurora Maria Barahona Brao",
-          "legacy_codcli": null
-        },
-        {
-          "id": "90ee9396-fa51-4127-9a45-fe8c5895ae69",
-          "name": "Aurora Maria Barahona Brao",
-          "legacy_codcli": "002921"
-        }
-      ]
-    },
-    {
-      "line": 114,
-      "name": "Azucena rodriguez Dasilva",
-      "fecha": "2026-04-20",
-      "source_key": "medicina_estetica_csv:5ffdc85e861b203e",
-      "reason": "ambiguous_customer",
-      "candidates": [
-        {
-          "id": "c667e5a3-521c-41f4-8df6-5755de29ea84",
-          "name": "Azucena Rodriguez Dasilva",
-          "legacy_codcli": null
-        },
-        {
-          "id": "c1cb66c3-1e43-495a-95d3-44af363b71e1",
-          "name": "Azucena Rodriguez Dasilva",
-          "legacy_codcli": "008033"
-        }
-      ]
-    },
-    {
-      "line": 135,
-      "name": "Carmen Aldo Cedeira",
-      "fecha": "2025-04-23",
-      "source_key": "medicina_estetica_csv:8cce5ae34c470260",
-      "reason": "customer_not_found",
-      "candidates": [
-        {
-          "id": "78db38d9-254d-4f0a-845f-c08b48ee2b28",
-          "name": "Carmen Aldao Cedeira",
-          "legacy_codcli": "002582"
-        }
-      ]
-    },
-    {
-      "line": 194,
-      "name": "Carmen Fernández Rivera,",
-      "fecha": "2025-05-31",
-      "source_key": "medicina_estetica_csv:8040893f567232a7",
-      "reason": "ambiguous_customer",
-      "candidates": [
-        {
-          "id": "864cb850-ac4b-4cb9-8734-83f5d35afddb",
-          "name": "Carmen Fernandez Rivera",
-          "legacy_codcli": null
-        },
-        {
-          "id": "930c9f0f-9e90-45f4-ba99-bff6eb1a3272",
-          "name": "Carmen Fernandez Rivera",
-          "legacy_codcli": "000097"
-        }
-      ]
-    },
-    {
-      "line": 223,
-      "name": "Claudia cristina da silva.",
-      "fecha": "2025-11-17",
-      "source_key": "medicina_estetica_csv:60263246f6f6a8c9",
-      "reason": "customer_not_found",
-      "candidates": []
-    },
-    {
-      "line": 253,
-      "name": "Doris Benalcazar Mendoza",
-      "fecha": "2025-09-27",
-      "source_key": "medicina_estetica_csv:ff34e7fcb8ff0149",
-      "reason": "ambiguous_customer",
-      "candidates": [
-        {
-          "id": "14d0f7f2-e965-46f9-b082-c63a0cc8470c",
-          "name": "Doris Benalcazar Mendoza",
-          "legacy_codcli": null
-        },
-        {
-          "id": "73f9da7e-6703-43dc-90b2-21d90f4e41f1",
-          "name": "Doris Benalcazar Mendoza",
-          "legacy_codcli": "004187"
-        }
-      ]
-    },
-    {
-      "line": 274,
-      "name": "Estefanía vargas",
-      "fecha": "2025-12-09",
-      "source_key": "medicina_estetica_csv:e88782debc6749bb",
-      "reason": "customer_not_found",
-      "candidates": [
-        {
-          "id": "3e2ea257-dad5-4e31-8131-fd01673c5974",
-          "name": "Estefani Vargas",
-          "legacy_codcli": "007883"
-        },
-        {
-          "id": "deb61cec-7931-4415-ad7f-1daf7cce367e",
-          "name": "Estefania Varela",
-          "legacy_codcli": "004667"
-        }
-      ]
-    },
-    {
-      "line": 295,
-      "name": "Esther andrade antelo",
-      "fecha": "2025-08-22",
-      "source_key": "medicina_estetica_csv:fca073fd8220994a",
-      "reason": "ambiguous_customer",
-      "candidates": [
-        {
-          "id": "e18411cc-e5ed-4d4c-926c-1e690d3258ca",
-          "name": "Esther Andrade Antelo",
-          "legacy_codcli": null
-        },
-        {
-          "id": "87d7726b-b4b9-4a3a-ba3a-86c1f577b38e",
-          "name": "Esther Andrade Antelo",
-          "legacy_codcli": "003627"
-        }
-      ]
-    },
-    {
-      "line": 321,
-      "name": "Isabel Cabaleiro Maceda",
-      "fecha": "2025-05-07",
-      "source_key": "medicina_estetica_csv:489c8b27e16eb20a",
-      "reason": "customer_not_found",
-      "candidates": [
-        {
-          "id": "9e9015a0-ed81-40e8-8d45-c703313f3717",
-          "name": "Isabel Cabaleiro Maceira",
-          "legacy_codcli": null
-        },
-        {
-          "id": "3f65a48c-e684-45c7-a119-b0f9b8961655",
-          "name": "Isabel Cabaleiro Maceira",
-          "legacy_codcli": "006349"
-        }
-      ]
-    },
-    {
-      "line": 333,
-      "name": "Gloria Patricia Parra Pérez.",
-      "fecha": "2025-09-10",
-      "source_key": "medicina_estetica_csv:9504d6b583a5c1d0",
-      "reason": "ambiguous_customer",
-      "candidates": [
-        {
-          "id": "667d51a1-50de-4760-a785-7a80c1d8fdfb",
-          "name": "Gloria Patricia Parra Perez",
-          "legacy_codcli": null
-        },
-        {
-          "id": "f800a1ae-aa8b-447a-82a0-0afb4e41619d",
-          "name": "Gloria Patricia Parra Perez",
-          "legacy_codcli": "004394"
-        }
-      ]
-    },
-    {
-      "line": 346,
-      "name": "Hortencia Benedigto Ferreira",
-      "fecha": "2026-02-27",
-      "source_key": "medicina_estetica_csv:288163216a9a52f3",
-      "reason": "customer_not_found",
-      "candidates": [
-        {
-          "id": "0c95e903-7ffa-477f-a060-ca9e8b808855",
-          "name": "Hortencia Benedicto Fegeira",
-          "legacy_codcli": "005611"
-        }
-      ]
-    },
-    {
-      "line": 366,
-      "name": "Idalis Álvarez Toledo",
-      "fecha": "24/11/2925",
-      "source_key": "medicina_estetica_csv:f0d6412bbebc7ffe",
-      "issues": [
-        "invalid_date:24/11/2925"
-      ],
-      "reason": "customer_not_found",
-      "candidates": [
-        {
-          "id": "e172524d-9ac5-4c73-b12c-c84761abbc61",
-          "name": "Ydalis Alvarez Toledo",
-          "legacy_codcli": "006901"
-        }
-      ]
-    },
-    {
-      "line": 424,
-      "name": "Isabel Fernández Cabaleiro",
-      "fecha": "2025-06-11",
-      "source_key": "medicina_estetica_csv:540fd2c5f94d4f22",
-      "reason": "customer_not_found",
-      "candidates": [
-        {
-          "id": "cd9b1412-6ffe-4740-a91f-7a3172378dd5",
-          "name": "Isa Fernandez Cabaleiro",
-          "legacy_codcli": "006055"
-        }
-      ]
-    },
-    {
-      "line": 446,
-      "name": "",
-      "fecha": "2025-06-11",
-      "source_key": "medicina_estetica_csv:79109a769aa62594",
-      "issues": [
-        "missing_customer_name"
-      ],
-      "reason": "customer_not_found",
-      "candidates": []
-    },
-    {
-      "line": 499,
-      "name": "Jeylin garcía sanchez",
-      "fecha": "2026-02-02",
-      "source_key": "medicina_estetica_csv:4fb660a6e3094601",
-      "reason": "customer_not_found",
-      "candidates": [
-        {
-          "id": "e985296a-dc9f-48ac-a6a6-ca4530c0006a",
-          "name": "Jeilyn Garcia Sanchez",
-          "legacy_codcli": "007869"
-        }
-      ]
-    },
-    {
-      "line": 516,
-      "name": "Jorge González Veiga",
-      "fecha": "2026-02-18",
-      "source_key": "medicina_estetica_csv:905fd6cae5404220",
-      "reason": "ambiguous_customer",
-      "candidates": [
-        {
-          "id": "b8e74813-1d98-4cf2-a731-f8169c2af097",
-          "name": "Jorge Gonzalez Veiga",
-          "legacy_codcli": null
-        },
-        {
-          "id": "0b876e1e-1ccf-4c90-8b6f-44b645cf1dc0",
-          "name": "Jorge Gonzalez Veiga",
-          "legacy_codcli": "007946"
-        }
-      ]
-    },
-    {
-      "line": 528,
-      "name": "Jose Carlos Saa Ramos",
-      "fecha": "2025-10-08",
-      "source_key": "medicina_estetica_csv:bd239af13df319d2",
-      "reason": "ambiguous_customer",
-      "candidates": [
-        {
-          "id": "42438d43-a71c-4aa1-98ee-7951cc1e3e6e",
-          "name": "Jose Carlos Saa Ramos",
-          "legacy_codcli": null
-        },
-        {
-          "id": "a2d784a6-96a7-485c-822a-7034ef6d8f4e",
-          "name": "Jose Carlos Saa Ramos",
-          "legacy_codcli": "005304"
-        }
-      ]
-    },
-    {
-      "line": 548,
-      "name": "Josefina Cousillas Castro",
-      "fecha": "2025-07-08",
-      "source_key": "medicina_estetica_csv:ed5d324e82107936",
-      "reason": "customer_not_found",
-      "candidates": [
-        {
-          "id": "3af2c622-7951-4516-9d3b-8d52898cc2ad",
-          "name": "Fini Cousillas Castro",
-          "legacy_codcli": null
-        },
-        {
-          "id": "62405d0e-f30b-4538-b191-07a34df565b0",
-          "name": "Fini Cousillas Castro",
-          "legacy_codcli": "000702"
-        }
-      ]
-    },
-    {
-      "line": 596,
-      "name": "Laura Chacon García-Gasco",
-      "fecha": "2026-06-03",
-      "source_key": "medicina_estetica_csv:c431fd97342e2968",
-      "reason": "ambiguous_customer",
-      "candidates": [
-        {
-          "id": "0b816992-1374-48a2-8330-60ad5fac126d",
-          "name": "Laura Chacon Garcia-Gasco",
-          "legacy_codcli": null
-        },
-        {
-          "id": "6057431b-bd3e-4e29-affd-f45f0db356bd",
-          "name": "Laura Chacon Garcia-Gasco",
-          "legacy_codcli": "007611"
-        }
-      ]
-    },
-    {
-      "line": 641,
+      "line": 620,
       "name": "Layla Baamran Ezzarraoui",
       "fecha": null,
-      "source_key": "medicina_estetica_csv:4f102282511e9146",
+      "source_key": "medicina_estetica_csv_v2:3cd4921766315aef",
+      "is_first": true,
+      "motivo": "",
+      "reason": "missing_exam_date",
       "issues": [
         "missing_exam_date"
-      ],
-      "reason": "customer_not_found",
-      "candidates": []
-    },
-    {
-      "line": 658,
-      "name": "Lidia Escribano Ruiz",
-      "fecha": "2025-10-20",
-      "source_key": "medicina_estetica_csv:84144417bf2c35e3",
-      "reason": "ambiguous_customer",
-      "candidates": [
-        {
-          "id": "bc83e386-0c77-47b2-8392-cd208413caef",
-          "name": "Lidia Escribano Ruiz",
-          "legacy_codcli": null
-        },
-        {
-          "id": "cac5cec7-4dc1-4fb0-b478-c79933acde77",
-          "name": "Lidia Escribano Ruiz",
-          "legacy_codcli": "003120"
-        }
       ]
     },
     {
-      "line": 670,
-      "name": "Loreto Fernández Veres",
-      "fecha": "2025-08-06",
-      "source_key": "medicina_estetica_csv:e0985d163a9ef0cb",
-      "reason": "ambiguous_customer",
-      "candidates": [
-        {
-          "id": "3049a5d3-ea6b-438e-b5b6-8e21a6eba687",
-          "name": "Loreto Fernandez Veres",
-          "legacy_codcli": null
-        },
-        {
-          "id": "8314f3cf-48d9-43fc-9e9d-e6337c1bd829",
-          "name": "Loreto Fernandez Veres",
-          "legacy_codcli": "003133"
-        }
-      ]
-    },
-    {
-      "line": 685,
-      "name": "Luceli patiño",
-      "fecha": "2026-02-02",
-      "source_key": "medicina_estetica_csv:43ca3b6052187bf0",
-      "reason": "customer_not_found",
-      "candidates": []
-    },
-    {
-      "line": 709,
-      "name": "Magda liliana Sepulveda Torres",
-      "fecha": "2026-01-19",
-      "source_key": "medicina_estetica_csv:21cb6d9155ec9a3e",
-      "reason": "customer_not_found",
-      "candidates": [
-        {
-          "id": "6c9dfd6e-2eef-4830-a42a-47c4933d61c9",
-          "name": "Magda Liliana Selpuveda Torres",
-          "legacy_codcli": "007927"
-        }
-      ]
-    },
-    {
-      "line": 728,
-      "name": "Mar Lamas Pernas.",
-      "fecha": "2025-12-13",
-      "source_key": "medicina_estetica_csv:fb1e7f0c67e23ec7",
-      "reason": "customer_not_found",
-      "candidates": []
-    },
-    {
-      "line": 744,
-      "name": "",
-      "fecha": "2026-06-03",
-      "source_key": "medicina_estetica_csv:a805844600b291c4",
-      "issues": [
-        "missing_customer_name"
-      ],
-      "reason": "customer_not_found",
-      "candidates": []
-    },
-    {
-      "line": 756,
-      "name": "Mari Sánchez Expósito.",
-      "fecha": "2026-04-15",
-      "source_key": "medicina_estetica_csv:62ee7d22529bbc1e",
-      "reason": "ambiguous_customer",
-      "candidates": [
-        {
-          "id": "3b948c72-35e1-4f0f-a69a-69fe9998af2e",
-          "name": "Mari Sanchez Exposito",
-          "legacy_codcli": null
-        },
-        {
-          "id": "98f6060e-de24-4858-837d-91a7e8b66ab2",
-          "name": "Mari Sanchez Exposito",
-          "legacy_codcli": "003935"
-        }
-      ]
-    },
-    {
-      "line": 787,
-      "name": "Maria Cambon",
-      "fecha": "2026-05-13",
-      "source_key": "medicina_estetica_csv:e96cd304bc1955a4",
-      "reason": "customer_not_found",
-      "candidates": []
-    },
-    {
-      "line": 803,
-      "name": "Maria Cerduela Jimenez",
-      "fecha": "2025-12-17",
-      "source_key": "medicina_estetica_csv:4a0f7425837c338c",
-      "reason": "customer_not_found",
-      "candidates": [
-        {
-          "id": "51af8476-170a-4f78-8b53-0eb6409d1940",
-          "name": "Maria Gloria Cerreduela Jimenez",
-          "legacy_codcli": "007637"
-        }
-      ]
-    },
-    {
-      "line": 825,
-      "name": "Maria Concepción García Dabrio",
-      "fecha": "2025-12-22",
-      "source_key": "medicina_estetica_csv:198c6eb690cc22f9",
-      "reason": "customer_not_found",
-      "candidates": []
-    },
-    {
-      "line": 840,
-      "name": "Maria de los Angeles Mosquera Neira.",
-      "fecha": "2026-05-13",
-      "source_key": "medicina_estetica_csv:5cc074314c811736",
-      "reason": "customer_not_found",
-      "candidates": []
-    },
-    {
-      "line": 853,
+      "line": 832,
       "name": "Maria del Carmen Antelo",
       "fecha": null,
-      "source_key": "medicina_estetica_csv:67fbf358fb1fe1f9",
+      "source_key": "medicina_estetica_csv_v2:ff5c3447b657cc38",
+      "is_first": true,
+      "motivo": "",
+      "reason": "missing_exam_date",
       "issues": [
         "missing_exam_date"
-      ],
-      "reason": "customer_not_found",
-      "candidates": [
-        {
-          "id": "f724b000-4885-4946-b479-079199e37c7c",
-          "name": "Maria del Carmen Antelo Collazo",
-          "legacy_codcli": "008088"
-        },
-        {
-          "id": "6b361c1c-5f37-4bc7-95e4-72b00dcff9b7",
-          "name": "Maria Del Carmen Suarez",
-          "legacy_codcli": "000552"
-        }
       ]
     },
     {
-      "line": 909,
-      "name": "María Dolores Muiño Ribadeulla",
-      "fecha": "2026-03-30",
-      "source_key": "medicina_estetica_csv:d713edb668621b70",
-      "reason": "customer_not_found",
-      "candidates": [
-        {
-          "id": "f7f46264-5e50-4967-8c9c-d35cd8d32fa5",
-          "name": "Maria Dolores Muiña Ribadulla",
-          "legacy_codcli": "002087"
-        }
-      ]
-    },
-    {
-      "line": 922,
-      "name": "María Dolores Seonae Longueira",
-      "fecha": "2026-04-15",
-      "source_key": "medicina_estetica_csv:61579937a0ad628d",
-      "reason": "customer_not_found",
-      "candidates": [
-        {
-          "id": "bf242c76-9db5-4600-8f2c-42b39c46a902",
-          "name": "Maria Dolores Seoane Longueira",
-          "legacy_codcli": "008039"
-        }
-      ]
-    },
-    {
-      "line": 995,
-      "name": "Maria Muñiz Agrelo. 17/09/25",
-      "fecha": "2025-09-17",
-      "source_key": "medicina_estetica_csv:596a84a8463d033e",
-      "reason": "customer_not_found",
-      "candidates": []
-    },
-    {
-      "line": 1007,
-      "name": "María Pastora Gómez Vidal.",
-      "fecha": "2026-02-04",
-      "source_key": "medicina_estetica_csv:5960cdec43f8efbf",
-      "reason": "ambiguous_customer",
-      "candidates": [
-        {
-          "id": "4bf83b30-1a6b-4ff3-b526-d18fbad6479e",
-          "name": "Maria Pastora Gomez Vidal",
-          "legacy_codcli": null
-        },
-        {
-          "id": "e82528df-8d84-443c-9597-2122e38b875b",
-          "name": "Maria Pastora Gomez Vidal",
-          "legacy_codcli": "007459"
-        }
-      ]
-    },
-    {
-      "line": 1036,
-      "name": "María Varela Alma.",
-      "fecha": "2025-10-20",
-      "source_key": "medicina_estetica_csv:58ffc10b5f1908cf",
-      "reason": "customer_not_found",
-      "candidates": [
-        {
-          "id": "3265e7d6-cdb7-408b-9253-616877ee4262",
-          "name": "Maria Varela Lema",
-          "legacy_codcli": null
-        },
-        {
-          "id": "948fde2e-86df-4e69-afd3-5ca60f652572",
-          "name": "Maria Varela Lema",
-          "legacy_codcli": "007856"
-        }
-      ]
-    },
-    {
-      "line": 1063,
-      "name": "Marina Lorenzo",
-      "fecha": "2026-05-06",
-      "source_key": "medicina_estetica_csv:98819e3321c49093",
-      "reason": "customer_not_found",
-      "candidates": [
-        {
-          "id": "3c1bd91e-7abd-4346-b21b-fc12489d7c5a",
-          "name": "Marisa Lorenzo",
-          "legacy_codcli": "008040"
-        },
-        {
-          "id": "c67cf587-6628-4e36-b762-2c1a5a41e5c3",
-          "name": "Ana Lorenzo",
-          "legacy_codcli": "002942"
-        },
-        {
-          "id": "f140733b-03f6-40db-b197-59f27ff69428",
-          "name": "Marina Lorenzo Paz",
-          "legacy_codcli": "002019"
-        }
-      ]
-    },
-    {
-      "line": 1143,
-      "name": "Mary Aguiar Siso",
-      "fecha": "2025-10-13",
-      "source_key": "medicina_estetica_csv:58fa312dc7ccd766",
-      "reason": "customer_not_found",
-      "candidates": [
-        {
-          "id": "aea8230c-6c4e-4ad2-82de-375d8a1fcbef",
-          "name": "Mari Aguiar Siso",
-          "legacy_codcli": "006729"
-        }
-      ]
-    },
-    {
-      "line": 1171,
+      "line": 1152,
       "name": "",
       "fecha": "2025-05-09",
-      "source_key": "medicina_estetica_csv:05e88cfdac26cfd2",
-      "issues": [
-        "missing_customer_name"
-      ],
+      "source_key": "medicina_estetica_csv_v2:5a2018a4168d184b",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
       "reason": "customer_not_found",
       "candidates": []
     },
     {
-      "line": 1184,
-      "name": "",
-      "fecha": "2025-06-11",
-      "source_key": "medicina_estetica_csv:a6319854075fc2d6",
-      "issues": [
-        "missing_customer_name"
-      ],
-      "reason": "customer_not_found",
-      "candidates": []
-    },
-    {
-      "line": 1220,
-      "name": "Naiara Cerdeira Caldero",
-      "fecha": "2025-12-03",
-      "source_key": "medicina_estetica_csv:430249b0a20115f8",
-      "reason": "customer_not_found",
-      "candidates": [
-        {
-          "id": "c3004d6a-ae4d-4450-b7ae-0e998eb997ce",
-          "name": "Naiara Cerdeira Calero",
-          "legacy_codcli": null
-        },
-        {
-          "id": "09e8ef5f-5743-4c3f-9062-094b7e7fc8e8",
-          "name": "Naiara Cerdeira Calero",
-          "legacy_codcli": "006898"
-        }
-      ]
-    },
-    {
-      "line": 1293,
-      "name": "Pablo Fieira Costa.",
-      "fecha": "2025-11-08",
-      "source_key": "medicina_estetica_csv:ec187fea9d5a6203",
-      "reason": "customer_not_found",
-      "candidates": []
-    },
-    {
-      "line": 1308,
-      "name": "Paqui Fernández",
-      "fecha": "2026-04-26",
-      "source_key": "medicina_estetica_csv:8c60f998593c4436",
-      "reason": "customer_not_found",
-      "candidates": [
-        {
-          "id": "d0620b5a-1f9c-4684-8154-5757c8acd3df",
-          "name": "Paqui Fernandez Pombo",
-          "legacy_codcli": "008044"
-        },
-        {
-          "id": "c9722c92-9b09-409b-9c98-81191e2bf40b",
-          "name": "Raul Fernandez",
-          "legacy_codcli": "004252"
-        },
-        {
-          "id": "fea5fbb8-73db-4af7-bb4e-e9341ba72b5b",
-          "name": "Luis Fernandez",
-          "legacy_codcli": "006176"
-        }
-      ]
-    },
-    {
-      "line": 1371,
-      "name": "Paula Varela García.",
-      "fecha": "24/11/2925",
-      "source_key": "medicina_estetica_csv:bca08d1596ea9624",
-      "issues": [
-        "invalid_date:24/11/2925"
-      ],
-      "reason": "ambiguous_customer",
-      "candidates": [
-        {
-          "id": "50f5fb7c-1dbf-4dd8-9000-dd01c96610c2",
-          "name": "Paula Varela Garcia",
-          "legacy_codcli": null
-        },
-        {
-          "id": "cdfe749d-a56d-475d-9374-5623edf4fabb",
-          "name": "Paula Varela Garcia",
-          "legacy_codcli": "007376"
-        }
-      ]
-    },
-    {
-      "line": 1397,
+      "line": 1376,
       "name": "Pilar Toja Vazquez",
       "fecha": null,
-      "source_key": "medicina_estetica_csv:bd945d3ff957eb71",
+      "source_key": "medicina_estetica_csv_v2:21c215175e444a2a",
+      "is_first": true,
+      "motivo": "",
+      "reason": "missing_exam_date",
       "issues": [
         "missing_exam_date"
-      ],
-      "reason": "customer_not_found",
-      "candidates": []
-    },
-    {
-      "line": 1469,
-      "name": "Raquel quintana seoane",
-      "fecha": "2026-02-16",
-      "source_key": "medicina_estetica_csv:974565853464abf2",
-      "reason": "ambiguous_customer",
-      "candidates": [
-        {
-          "id": "6eaa3905-a986-47dd-9473-c3db746b2e36",
-          "name": "Raquel Quintana Seoane",
-          "legacy_codcli": null
-        },
-        {
-          "id": "dfe59632-45b8-4f33-b244-e2054d26465d",
-          "name": "Raquel Quintana Seoane",
-          "legacy_codcli": "001761"
-        }
-      ]
-    },
-    {
-      "line": 1542,
-      "name": "Maria Jesus García Duran .",
-      "fecha": "2026-01-21",
-      "source_key": "medicina_estetica_csv:23fbd4f7e5ead461",
-      "reason": "customer_not_found",
-      "candidates": [
-        {
-          "id": "190359c0-f21d-432f-bea4-090222978998",
-          "name": "Maria Jesus (Chus) Garcia Duran",
-          "legacy_codcli": null
-        },
-        {
-          "id": "df59aaaa-fdf9-45e9-8989-d32e5998df7a",
-          "name": "Maria Jesus (Chus) Garcia Duran",
-          "legacy_codcli": "007684"
-        },
-        {
-          "id": "b4dd1542-8435-4364-a853-30c7ca8c2eab",
-          "name": "Maria Jesus Garcia Dapena",
-          "legacy_codcli": "001769"
-        },
-        {
-          "id": "9fe9087f-9286-4ff2-94e4-28e515c52610",
-          "name": "Maria Jesus Garcia Perez",
-          "legacy_codcli": "000470"
-        },
-        {
-          "id": "310c50d5-b419-447f-be5d-0f911681a268",
-          "name": "Maria Jesus Garcia Santiago",
-          "legacy_codcli": "006036"
-        }
-      ]
-    },
-    {
-      "line": 1552,
-      "name": "Sandra Ledo Lorenzo.",
-      "fecha": "2025-10-08",
-      "source_key": "medicina_estetica_csv:bd5e08d15de23274",
-      "reason": "ambiguous_customer",
-      "candidates": [
-        {
-          "id": "c1faaada-87d2-4d84-93a9-bc2f6b670414",
-          "name": "Sandra Ledo Lorenzo",
-          "legacy_codcli": null
-        },
-        {
-          "id": "e977eb58-dd60-4cd3-8f1d-560a99c3a7e6",
-          "name": "Sandra Ledo Lorenzo",
-          "legacy_codcli": "001998"
-        }
-      ]
-    },
-    {
-      "line": 1583,
-      "name": "Sira Flecha Conde",
-      "fecha": "2025-11-12",
-      "source_key": "medicina_estetica_csv:f45fff055370289f",
-      "reason": "customer_not_found",
-      "candidates": [
-        {
-          "id": "47e59b9d-2447-4061-88ea-23b20bcc49ed",
-          "name": "Shyra Flecha Conde",
-          "legacy_codcli": null
-        },
-        {
-          "id": "090ae0e2-02ca-4b9b-85b8-887eae904b71",
-          "name": "Shyra Flecha Conde",
-          "legacy_codcli": null
-        },
-        {
-          "id": "ace99356-a764-4c3d-b0fa-871e741cda1d",
-          "name": "Shyra Flecha Conde",
-          "legacy_codcli": "006817"
-        }
-      ]
-    },
-    {
-      "line": 1612,
-      "name": "Tatiana Seoane Otero",
-      "fecha": "2026-06-03",
-      "source_key": "medicina_estetica_csv:adf21d3c021a5ecb",
-      "reason": "ambiguous_customer",
-      "candidates": [
-        {
-          "id": "87c28f18-e0ab-4a92-b2d5-bfe64ac679cf",
-          "name": "Tatiana Seoane Otero",
-          "legacy_codcli": null
-        },
-        {
-          "id": "fdeac2c1-41ba-4f13-9f0f-e6ac75cbdf18",
-          "name": "Tatiana Seoane Otero",
-          "legacy_codcli": "007034"
-        }
-      ]
-    },
-    {
-      "line": 1625,
-      "name": "Teresa Montoto Casal",
-      "fecha": "2025-06-18",
-      "source_key": "medicina_estetica_csv:4d3b6c2649597295",
-      "reason": "customer_not_found",
-      "candidates": [
-        {
-          "id": "8054e07f-0807-4833-997f-fc9dd333d0d8",
-          "name": "Tere Montoto Casal",
-          "legacy_codcli": null
-        },
-        {
-          "id": "bbc705db-6ad2-40ab-954b-e9dcddf0c915",
-          "name": "Tere Montoto Casal",
-          "legacy_codcli": "006877"
-        }
       ]
     }
   ],
   "warnings": [
     {
-      "line": 51,
-      "name": "Ana María Carballeira Carballeira",
-      "fecha": "2025-12-29",
-      "source_key": "medicina_estetica_csv:d3c219c39d92a511",
-      "reason": "review_appointment_not_found",
-      "review_line": 65,
-      "review_date": "2025-02-16",
+      "line": 47,
+      "name": "Ana Diaz Marquez",
+      "fecha": "2024-06-18",
+      "source_key": "medicina_estetica_csv_v2:ce29e18f996daf88",
+      "is_first": true,
+      "motivo": "Revisión",
+      "reason": "appointment_not_found",
       "appointments": []
     },
     {
-      "line": 79,
-      "name": "Ana Rouco Anello.",
-      "fecha": "2025-12-31",
-      "source_key": "medicina_estetica_csv:0a4d9f56e4e97613",
-      "issues": [
-        "invalid_date:14/01/16"
-      ],
-      "reason": "review_invalid_date",
-      "review_line": 91,
-      "review_date": "14/01/16"
+      "line": 65,
+      "name": "Ana María Carballeira Carballeira",
+      "fecha": "2025-02-16",
+      "source_key": "medicina_estetica_csv_v2:a3a7dfe9bfd0e6ce",
+      "is_first": true,
+      "motivo": "Revisión",
+      "reason": "appointment_not_found",
+      "appointments": []
     },
     {
-      "line": 79,
-      "name": "Ana Rouco Anello.",
-      "fecha": "2025-12-31",
-      "source_key": "medicina_estetica_csv:0a4d9f56e4e97613",
-      "issues": [
-        "invalid_date:14/01/16"
-      ],
-      "reason": "review_ambiguous_appointment",
-      "review_line": 93,
-      "review_date": "2026-05-13",
+      "line": 93,
+      "name": "Ana Rouco Anello",
+      "fecha": "2026-05-13",
+      "source_key": "medicina_estetica_csv_v2:c219b6c3ca703c6f",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "ambiguous_appointment_picked_first",
       "appointments": [
         {
           "id": "6c978147-9bec-42e4-8b50-5743b6ea590f",
           "customer_id": "742ff40e-f9ff-49ec-b4db-777402cfd782",
           "client_name": "Ana Rouco Anello",
-          "legacy_codcli": "007578",
+          "legacy_codcli": "7578",
           "appointment_date": "2026-05-13",
-          "start_date": null,
           "start_time": "10:00",
           "status": "confirmed"
         },
@@ -936,9 +100,8 @@
           "id": "180783ba-6b05-4845-a59d-74fad70d8f65",
           "customer_id": "742ff40e-f9ff-49ec-b4db-777402cfd782",
           "client_name": "Ana Rouco Anello",
-          "legacy_codcli": "007578",
+          "legacy_codcli": "7578",
           "appointment_date": "2026-05-13",
-          "start_date": null,
           "start_time": "16:45",
           "status": "confirmed"
         },
@@ -946,255 +109,1232 @@
           "id": "07959549-135a-488c-9b9d-0ff32fbf9e93",
           "customer_id": "742ff40e-f9ff-49ec-b4db-777402cfd782",
           "client_name": "Ana Rouco Anello",
-          "legacy_codcli": "007578",
+          "legacy_codcli": "7578",
           "appointment_date": "2026-05-13",
-          "start_date": null,
           "start_time": "17:15",
           "status": "confirmed"
         }
       ]
     },
     {
-      "line": 79,
-      "name": "Ana Rouco Anello.",
-      "fecha": "2025-12-31",
-      "source_key": "medicina_estetica_csv:0a4d9f56e4e97613",
-      "issues": [
-        "invalid_date:14/01/16"
-      ],
-      "reason": "review_ambiguous_appointment",
-      "review_line": 95,
-      "review_date": "2026-05-27",
+      "line": 95,
+      "name": "Ana Rouco Anello",
+      "fecha": "2026-05-27",
+      "source_key": "medicina_estetica_csv_v2:4127ec3b30d2b8c4",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "ambiguous_appointment_picked_first",
       "appointments": [
         {
-          "id": "d8431da6-5cec-4815-b1f8-3f6faa308653",
+          "id": "57df846e-8e5a-4356-8137-12ae23cb9b52",
           "customer_id": "742ff40e-f9ff-49ec-b4db-777402cfd782",
           "client_name": "Ana Rouco Anello",
-          "legacy_codcli": "007578",
+          "legacy_codcli": "7578",
           "appointment_date": "2026-05-27",
-          "start_date": null,
           "start_time": "15:45",
           "status": "confirmed"
         },
         {
-          "id": "95a3561d-8e20-4fa4-8612-30281d29daa4",
+          "id": "464bf0a1-264c-4f98-a474-ccbe6f068d77",
           "customer_id": "742ff40e-f9ff-49ec-b4db-777402cfd782",
           "client_name": "Ana Rouco Anello",
-          "legacy_codcli": "007578",
+          "legacy_codcli": "7578",
           "appointment_date": "2026-05-27",
-          "start_date": null,
           "start_time": "16:30",
           "status": "confirmed"
         }
       ]
     },
     {
-      "line": 156,
+      "line": 1770,
+      "name": "Azucena rodriguez Dasilva",
+      "fecha": "2026-04-20",
+      "source_key": "medicina_estetica_csv_v2:d64003f91f310489",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "reason": "appointment_already_linked"
+    },
+    {
+      "line": 1791,
+      "name": "Azucena rodriguez Dasilva",
+      "fecha": "2026-06-22",
+      "source_key": "medicina_estetica_csv_v2:3eeba45ea2ab489c",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "ambiguous_appointment_picked_first",
+      "appointments": [
+        {
+          "id": "1ac22106-1baa-40e7-8819-48ff86270480",
+          "customer_id": null,
+          "client_name": "Azucena Rodriguez Dasilva",
+          "legacy_codcli": "8033",
+          "appointment_date": "2026-06-22",
+          "start_time": "16:30",
+          "status": "confirmed"
+        },
+        {
+          "id": "fdf5d958-b795-4c3a-8c0d-e9a8c962c172",
+          "customer_id": null,
+          "client_name": "Azucena Rodriguez Dasilva",
+          "legacy_codcli": "8033",
+          "appointment_date": "2026-06-22",
+          "start_time": "16:30",
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "line": 157,
       "name": "Carmen Aldao Cedeira",
       "fecha": "2025-04-23",
-      "source_key": "medicina_estetica_csv:54eaa4867711cbdb",
-      "reason": "review_appointment_not_found",
-      "review_line": 181,
-      "review_date": "2026-11-12",
+      "source_key": "medicina_estetica_csv_v2:ba618e0b9da11d27",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "reason": "appointment_already_linked"
+    },
+    {
+      "line": 1999,
+      "name": "Carmen Aldao Cedeira",
+      "fecha": "2026-11-12",
+      "source_key": "medicina_estetica_csv_v2:455e79fcb2d34489",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "appointment_not_found",
       "appointments": []
     },
     {
-      "line": 392,
-      "name": "Irma photis.",
-      "fecha": "2025-05-12",
-      "source_key": "medicina_estetica_csv:fe20196ee23d9a94",
-      "reason": "review_ambiguous_appointment",
-      "review_line": 413,
-      "review_date": "2025-07-30",
+      "line": 195,
+      "name": "Carmen Fernández Rivera,",
+      "fecha": "2025-05-31",
+      "source_key": "medicina_estetica_csv_v2:d718adfaba0d6cb3",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 255,
+      "name": "Doris Benalcazar Mendoza",
+      "fecha": "2025-09-27",
+      "source_key": "medicina_estetica_csv_v2:6e87a2c26ec4fa55",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 330,
+      "name": "Isabel Cabaleiro Maceda",
+      "fecha": "2025-05-31",
+      "source_key": "medicina_estetica_csv_v2:27a2bfc86e5c50bf",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 347,
+      "name": "Hortencia Benedigto Ferreira",
+      "fecha": "2026-02-27",
+      "source_key": "medicina_estetica_csv_v2:96a2e8526718a241",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "reason": "appointment_already_linked"
+    },
+    {
+      "line": 413,
+      "name": "Irma photis",
+      "fecha": "2025-07-30",
+      "source_key": "medicina_estetica_csv_v2:68de46493376d7be",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "ambiguous_appointment_picked_first",
       "appointments": [
         {
-          "id": "262c2cd7-1a08-40cd-9d2d-886793d48952",
+          "id": "4c0a4ba4-ef87-41a6-abcc-30b285722003",
           "customer_id": "dbac3f8b-9142-414c-8a1a-121c045e2a21",
           "client_name": "Irma Photis",
-          "legacy_codcli": "007715",
+          "legacy_codcli": "7715",
           "appointment_date": "2025-07-30",
-          "start_date": null,
           "start_time": "17:15",
           "status": "confirmed"
         },
         {
-          "id": "d9a4dc5e-bf5e-444a-8104-6ddfbd9bdad0",
+          "id": "96e56770-54d8-461a-a42d-b9b28aeb869b",
           "customer_id": "dbac3f8b-9142-414c-8a1a-121c045e2a21",
           "client_name": "Irma Photis",
-          "legacy_codcli": "007715",
+          "legacy_codcli": "7715",
           "appointment_date": "2025-07-30",
-          "start_date": null,
           "start_time": "17:15",
           "status": "confirmed"
         }
       ]
     },
     {
-      "line": 479,
+      "line": 1847,
+      "name": "Isabel Fernández Cabaleiro",
+      "fecha": "2025-06-11",
+      "source_key": "medicina_estetica_csv_v2:031910599dbbef4c",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 1858,
+      "name": "Isabel Fernández Cabaleiro",
+      "fecha": "2025-06-25",
+      "source_key": "medicina_estetica_csv_v2:2a4009553a336f5b",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 1859,
+      "name": "Isabel Fernández Cabaleiro",
+      "fecha": "2025-12-01",
+      "source_key": "medicina_estetica_csv_v2:a925c10c51336a5b",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 1862,
+      "name": "Isabel Fernández Cabaleiro",
+      "fecha": "2025-12-29",
+      "source_key": "medicina_estetica_csv_v2:b5d5076cbba7e868",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 1863,
+      "name": "Isabel Fernández Cabaleiro",
+      "fecha": "2026-06-15",
+      "source_key": "medicina_estetica_csv_v2:c9e2e7198557356f",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 1867,
+      "name": "Isabel Fernández Cabaleiro",
+      "fecha": "2026-07-01",
+      "source_key": "medicina_estetica_csv_v2:a7b32c487bab9224",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 445,
+      "name": "Isabel Mon Diaz",
+      "fecha": "2026-01-19",
+      "source_key": "medicina_estetica_csv_v2:29dd76fe9e714413",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "reason": "appointment_already_linked"
+    },
+    {
+      "line": 476,
       "name": "Isabel Morales Pérez",
-      "fecha": "2025-07-09",
-      "source_key": "medicina_estetica_csv:74a8c242f45b774f",
-      "reason": "review_appointment_not_found",
-      "review_line": 497,
-      "review_date": "2026-05-12",
+      "fecha": "2026-05-12",
+      "source_key": "medicina_estetica_csv_v2:836ea37ebed166a2",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "appointment_not_found",
       "appointments": []
     },
     {
-      "line": 773,
-      "name": "Maria Baldomir García",
-      "fecha": "2026-11-12",
-      "source_key": "medicina_estetica_csv:d8547e08dcc0d4b5",
-      "reason": "main_appointment_not_found",
-      "appointments": []
+      "line": 479,
+      "name": "Jeylin garcía sanchez",
+      "fecha": "2026-02-02",
+      "source_key": "medicina_estetica_csv_v2:c1c1cba4fe7a6957",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "reason": "appointment_already_linked"
     },
     {
-      "line": 935,
-      "name": "María Jose Cano blanco.",
-      "fecha": "2026-05-27",
-      "source_key": "medicina_estetica_csv:bd6539d4df859791",
-      "reason": "main_appointment_not_found",
-      "appointments": []
+      "line": 496,
+      "name": "Jorge González Veiga",
+      "fecha": "2026-02-18",
+      "source_key": "medicina_estetica_csv_v2:ccd534f850c19e6f",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "reason": "appointment_already_linked"
     },
     {
-      "line": 1087,
-      "name": "Marisa Lorenzo",
-      "fecha": "2026-04-29",
-      "source_key": "medicina_estetica_csv:526acde6ce1e4678",
-      "reason": "review_appointment_not_found",
-      "review_line": 1100,
-      "review_date": "2026-05-31",
-      "appointments": []
-    },
-    {
-      "line": 1087,
-      "name": "Marisa Lorenzo",
-      "fecha": "2026-04-29",
-      "source_key": "medicina_estetica_csv:526acde6ce1e4678",
-      "reason": "review_appointment_not_found",
-      "review_line": 1104,
-      "review_date": "2026-06-03",
-      "appointments": []
-    },
-    {
-      "line": 1107,
-      "name": "Marta Simón Martín.",
-      "fecha": "2025-06-09",
-      "source_key": "medicina_estetica_csv:af9c4d2a03437c18",
-      "reason": "review_ambiguous_appointment",
-      "review_line": 1124,
-      "review_date": "2025-11-03",
+      "line": 519,
+      "name": "Jose Carlos Saa Ramos",
+      "fecha": "2025-11-08",
+      "source_key": "medicina_estetica_csv_v2:d27cd4a4f910c673",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "ambiguous_appointment_picked_first",
       "appointments": [
         {
-          "id": "f9788605-a021-45b3-ba28-f283bf985113",
+          "id": "98c6e6e3-461d-4b9f-8c75-826195b5f25f",
+          "customer_id": "a2d784a6-96a7-485c-822a-7034ef6d8f4e",
+          "client_name": "Jose Carlos Saa Ramos",
+          "legacy_codcli": "5304",
+          "appointment_date": "2025-11-08",
+          "start_time": "10:00",
+          "status": "confirmed"
+        },
+        {
+          "id": "3db64e75-9d0b-483f-ad1c-260f2830deed",
+          "customer_id": "a2d784a6-96a7-485c-822a-7034ef6d8f4e",
+          "client_name": "Jose Carlos Saa Ramos",
+          "legacy_codcli": "5304",
+          "appointment_date": "2025-11-08",
+          "start_time": "10:15",
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "line": 1729,
+      "name": "Josefina Cousillas Castro",
+      "fecha": "2025-07-08",
+      "source_key": "medicina_estetica_csv_v2:5c5993735644e527",
+      "is_first": true,
+      "motivo": "Calidad de piel.",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 1733,
+      "name": "Josefina Cousillas Castro",
+      "fecha": "2025-09-29",
+      "source_key": "medicina_estetica_csv_v2:fe7fb64f92a63586",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "ambiguous_appointment_picked_first",
+      "appointments": [
+        {
+          "id": "2bfed6ff-8d0f-4f62-836e-b04cb68d2fee",
+          "customer_id": "62405d0e-f30b-4538-b191-07a34df565b0",
+          "client_name": "Fini Cousillas Castro",
+          "legacy_codcli": "702",
+          "appointment_date": "2025-09-29",
+          "start_time": "17:00",
+          "status": "confirmed"
+        },
+        {
+          "id": "ff30d884-694f-4632-b187-40ccf7e493b2",
+          "customer_id": "62405d0e-f30b-4538-b191-07a34df565b0",
+          "client_name": "Fini Cousillas Castro",
+          "legacy_codcli": "702",
+          "appointment_date": "2025-09-29",
+          "start_time": "17:00",
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "line": 1745,
+      "name": "Josefina Cousillas Castro",
+      "fecha": "2025-11-24",
+      "source_key": "medicina_estetica_csv_v2:d4d5fe5cd9263e7a",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "ambiguous_appointment_picked_first",
+      "appointments": [
+        {
+          "id": "d1072b03-b90f-4ac2-8d0a-680b4e1333a1",
+          "customer_id": "62405d0e-f30b-4538-b191-07a34df565b0",
+          "client_name": "Fini Cousillas Castro",
+          "legacy_codcli": "702",
+          "appointment_date": "2025-11-24",
+          "start_time": "17:00",
+          "status": "confirmed"
+        },
+        {
+          "id": "1915a27e-3b41-48d3-b955-b670589c3c50",
+          "customer_id": "62405d0e-f30b-4538-b191-07a34df565b0",
+          "client_name": "Fini Cousillas Castro",
+          "legacy_codcli": "702",
+          "appointment_date": "2025-11-24",
+          "start_time": "18:00",
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "line": 576,
+      "name": "Laura Chacon García-Gasco",
+      "fecha": "2026-06-03",
+      "source_key": "medicina_estetica_csv_v2:a78f977ae0b05a63",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "reason": "appointment_already_linked"
+    },
+    {
+      "line": 595,
+      "name": "Laura Rodriguez Otero",
+      "fecha": "2026-01-26",
+      "source_key": "medicina_estetica_csv_v2:fac7434d6565a0d0",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "reason": "appointment_already_linked"
+    },
+    {
+      "line": 689,
+      "name": "Magda liliana Sepulveda Torres",
+      "fecha": "2026-01-19",
+      "source_key": "medicina_estetica_csv_v2:1f6527a999c70b05",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "reason": "appointment_already_linked"
+    },
+    {
+      "line": 719,
+      "name": "Mar Lamas Pernas",
+      "fecha": "2025-12-13",
+      "source_key": "medicina_estetica_csv_v2:ab28bccfa1349100",
+      "is_first": true,
+      "motivo": "hidratación.",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 736,
+      "name": "Mari Sánchez Expósito",
+      "fecha": "2026-04-15",
+      "source_key": "medicina_estetica_csv_v2:2f0a43517d2ecd2d",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "reason": "appointment_already_linked"
+    },
+    {
+      "line": 753,
+      "name": "Maria Baldomir García",
+      "fecha": "2026-11-12",
+      "source_key": "medicina_estetica_csv_v2:abe8f6d3d50d2b14",
+      "is_first": false,
+      "motivo": "Consulta medicina estética",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 767,
+      "name": "Maria Cambon",
+      "fecha": "2026-05-13",
+      "source_key": "medicina_estetica_csv_v2:279dce8d9992a5df",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "reason": "created_despite_fuzzy_candidates",
+      "best_ratio": 0.818,
+      "candidates": [
+        "Maria Añon",
+        "Maria Gabin"
+      ]
+    },
+    {
+      "line": 767,
+      "name": "Maria Cambon",
+      "fecha": "2026-05-13",
+      "source_key": "medicina_estetica_csv_v2:279dce8d9992a5df",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 801,
+      "name": "Maria Cerduela Jimenez",
+      "fecha": "2026-03-15",
+      "source_key": "medicina_estetica_csv_v2:50f27650cc5467b2",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 799,
+      "name": "Maria Cerduela Jimenez",
+      "fecha": "2026-04-16",
+      "source_key": "medicina_estetica_csv_v2:fdcd3036f3e02b94",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 805,
+      "name": "Maria Concepción García Dabrio",
+      "fecha": "2025-12-22",
+      "source_key": "medicina_estetica_csv_v2:5d68acb922c2d7fa",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 820,
+      "name": "Maria de los Angeles Mosquera Neira",
+      "fecha": "2026-05-13",
+      "source_key": "medicina_estetica_csv_v2:a353892e48b13ed8",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 849,
+      "name": "María del Carmen Castro Seoane",
+      "fecha": "2026-05-25",
+      "source_key": "medicina_estetica_csv_v2:769b0c9e9f267185",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "reason": "appointment_already_linked"
+    },
+    {
+      "line": 902,
+      "name": "María Dolores Seonae Longueira",
+      "fecha": "2026-04-15",
+      "source_key": "medicina_estetica_csv_v2:c90e60cff0361115",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "reason": "ambiguous_appointment_picked_first",
+      "appointments": [
+        {
+          "id": "7c9caf6d-21ec-4e10-939f-3662fcf9c953",
+          "customer_id": "bf242c76-9db5-4600-8f2c-42b39c46a902",
+          "client_name": "Maria Dolores Seoane Longueira",
+          "legacy_codcli": "8039",
+          "appointment_date": "2026-04-15",
+          "start_time": "17:15",
+          "status": "confirmed"
+        },
+        {
+          "id": "abddab1a-f04f-45a8-a475-21ed6471cc17",
+          "customer_id": "bf242c76-9db5-4600-8f2c-42b39c46a902",
+          "client_name": "Maria Dolores Seoane Longueira",
+          "legacy_codcli": "8039",
+          "appointment_date": "2026-04-15",
+          "start_time": "17:30",
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "line": 1694,
+      "name": "María Jose Cano blanco",
+      "fecha": "2026-05-27",
+      "source_key": "medicina_estetica_csv_v2:1a9e28c95ed62aec",
+      "is_first": false,
+      "motivo": "Consulta medicina estética",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 960,
+      "name": "Maria Matos Iglesias",
+      "fecha": "2026-03-18",
+      "source_key": "medicina_estetica_csv_v2:78efea05c850e1bc",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "reason": "appointment_already_linked"
+    },
+    {
+      "line": 987,
+      "name": "María Pastora Gómez Vidal",
+      "fecha": "2026-02-04",
+      "source_key": "medicina_estetica_csv_v2:d4375703f39ae557",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "reason": "ambiguous_appointment_picked_first",
+      "appointments": [
+        {
+          "id": "04fcd1e0-b7be-4342-9f10-3d9924d2f67b",
+          "customer_id": "e82528df-8d84-443c-9597-2122e38b875b",
+          "client_name": "Maria Pastora Gomez Vidal",
+          "legacy_codcli": "7459",
+          "appointment_date": "2026-02-04",
+          "start_time": "17:45",
+          "status": "confirmed"
+        },
+        {
+          "id": "f059fe3d-10de-40e6-a20d-237f4a49d6c5",
+          "customer_id": "e82528df-8d84-443c-9597-2122e38b875b",
+          "client_name": "Maria Pastora Gomez Vidal",
+          "legacy_codcli": "7459",
+          "appointment_date": "2026-02-04",
+          "start_time": "18:30",
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "line": 2032,
+      "name": "Marina Lorenzo",
+      "fecha": "2026-05-06",
+      "source_key": "medicina_estetica_csv_v2:c07b180b8f455c21",
+      "is_first": true,
+      "motivo": "tercio medio y frente",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 2035,
+      "name": "Marina Lorenzo",
+      "fecha": "2026-05-27",
+      "source_key": "medicina_estetica_csv_v2:5498c3fcd81b18fe",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 2040,
+      "name": "Marina Lorenzo",
+      "fecha": "2026-06-17",
+      "source_key": "medicina_estetica_csv_v2:a3081b4482b6a1cc",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 1799,
+      "name": "Marisa Lorenzo",
+      "fecha": "2026-04-29",
+      "source_key": "medicina_estetica_csv_v2:f132ca38ccffe330",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "reason": "appointment_already_linked"
+    },
+    {
+      "line": 1811,
+      "name": "Marisa Lorenzo",
+      "fecha": "2026-05-31",
+      "source_key": "medicina_estetica_csv_v2:5b7ad4a9dbe8e12c",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 1815,
+      "name": "Marisa Lorenzo",
+      "fecha": "2026-06-03",
+      "source_key": "medicina_estetica_csv_v2:d63357961a77a016",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "appointment_already_linked"
+    },
+    {
+      "line": 1817,
+      "name": "Marisa Lorenzo",
+      "fecha": "2027-06-22",
+      "source_key": "medicina_estetica_csv_v2:9fa5512fd4da1d11",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 1103,
+      "name": "Marta Simón Martín",
+      "fecha": "2025-11-03",
+      "source_key": "medicina_estetica_csv_v2:4c7aaa7c780351f3",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "ambiguous_appointment_picked_first",
+      "appointments": [
+        {
+          "id": "efbe4f01-733c-49df-8b51-e7686c7993f4",
           "customer_id": "31f4693b-6df9-4ed5-a2af-986130585b2c",
           "client_name": "Marta Simon Martin",
-          "legacy_codcli": "004986",
+          "legacy_codcli": "4986",
           "appointment_date": "2025-11-03",
-          "start_date": null,
           "start_time": "16:00",
           "status": "confirmed"
         },
         {
-          "id": "6103bfa3-2017-4fcb-8ce7-316a928e36b8",
+          "id": "6e831fad-982c-491b-886d-f783750702e0",
           "customer_id": "31f4693b-6df9-4ed5-a2af-986130585b2c",
           "client_name": "Marta Simon Martin",
-          "legacy_codcli": "004986",
+          "legacy_codcli": "4986",
           "appointment_date": "2025-11-03",
-          "start_date": null,
           "start_time": "16:30",
           "status": "confirmed"
         }
       ]
     },
     {
-      "line": 1250,
+      "line": 1113,
+      "name": "Marta Simón Martín",
+      "fecha": "2026-02-04",
+      "source_key": "medicina_estetica_csv_v2:77030e2704c770fc",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "ambiguous_appointment_picked_first",
+      "appointments": [
+        {
+          "id": "d642e556-6e32-46b9-9939-4c2e9849dfb7",
+          "customer_id": "31f4693b-6df9-4ed5-a2af-986130585b2c",
+          "client_name": "Marta Simon Martin",
+          "legacy_codcli": "4986",
+          "appointment_date": "2026-02-04",
+          "start_time": "17:15",
+          "status": "confirmed"
+        },
+        {
+          "id": "20317a4c-2f40-413f-ba9a-e5f31d9fae49",
+          "customer_id": "31f4693b-6df9-4ed5-a2af-986130585b2c",
+          "client_name": "Marta Simon Martin",
+          "legacy_codcli": "4986",
+          "appointment_date": "2026-02-04",
+          "start_time": "17:45",
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "line": 1136,
+      "name": "Mary Aguiar Siso",
+      "fecha": "2025-11-03",
+      "source_key": "medicina_estetica_csv_v2:e5d8abefe9e6a272",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 1140,
+      "name": "Mary Aguiar Siso",
+      "fecha": "2025-11-25",
+      "source_key": "medicina_estetica_csv_v2:c7d2d430437d4a67",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 1172,
+      "name": "Mónica Marquez Diaz",
+      "fecha": "2025-06-18",
+      "source_key": "medicina_estetica_csv_v2:08f1b8df70203137",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "ambiguous_appointment_picked_first",
+      "appointments": [
+        {
+          "id": "dbc4fe54-1591-4219-82c8-657a058c3c61",
+          "customer_id": "9772d733-e2ec-40db-861e-7f8cebd3932c",
+          "client_name": "Monica Marquer Diaz",
+          "legacy_codcli": "4545",
+          "appointment_date": "2025-06-18",
+          "start_time": "10:00",
+          "status": "confirmed"
+        },
+        {
+          "id": "b8908dc5-ab61-4cfb-868e-97047bcfa6b4",
+          "customer_id": "9772d733-e2ec-40db-861e-7f8cebd3932c",
+          "client_name": "Monica Marquer Diaz",
+          "legacy_codcli": "4545",
+          "appointment_date": "2025-06-18",
+          "start_time": "18:30",
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "line": 1174,
+      "name": "Mónica Marquez Diaz",
+      "fecha": "2025-07-03",
+      "source_key": "medicina_estetica_csv_v2:ba48c853ea51b36c",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 1177,
+      "name": "MÓNICA FERNÁNDEZ COUSO",
+      "fecha": "2026-05-18",
+      "source_key": "medicina_estetica_csv_v2:05339f59212dff84",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "reason": "appointment_already_linked"
+    },
+    {
+      "line": 1945,
       "name": "Norma Fariña Couselo",
       "fecha": "2026-04-29",
-      "source_key": "medicina_estetica_csv:4157847c589804f8",
-      "reason": "review_appointment_not_found",
-      "review_line": 1269,
-      "review_date": "2026-12-25",
+      "source_key": "medicina_estetica_csv_v2:45be61aaf8865543",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "reason": "appointment_already_linked"
+    },
+    {
+      "line": 1248,
+      "name": "Norma Fariña Couselo",
+      "fecha": "2026-12-25",
+      "source_key": "medicina_estetica_csv_v2:3707f444036b4f64",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 1266,
+      "name": "Nuria rivera alvarez",
+      "fecha": "2026-02-02",
+      "source_key": "medicina_estetica_csv_v2:04c0df8fd842064b",
+      "is_first": true,
+      "motivo": "labios. Manchitas.",
+      "reason": "appointment_already_linked"
+    },
+    {
+      "line": 1269,
+      "name": "Nuria rivera alvarez",
+      "fecha": "2026-02-17",
+      "source_key": "medicina_estetica_csv_v2:142a1ba634cb8e50",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "appointment_not_found",
       "appointments": []
     },
     {
       "line": 1273,
-      "name": "Nuria rivera alvarez",
-      "fecha": "2026-02-02",
-      "source_key": "medicina_estetica_csv:c27052717b282911",
-      "reason": "review_appointment_not_found",
-      "review_line": 1290,
-      "review_date": "2026-02-17",
+      "name": "Pablo Fieira Costa",
+      "fecha": "2025-11-08",
+      "source_key": "medicina_estetica_csv_v2:c9dd4eb9b979d98e",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "reason": "appointment_not_found",
       "appointments": []
     },
     {
-      "line": 1347,
+      "line": 1309,
+      "name": "Paqui Fernández",
+      "fecha": "2026-03-25",
+      "source_key": "medicina_estetica_csv_v2:132693b29443ddd2",
+      "is_first": true,
+      "motivo": "reducción de grasa localizada. Flancos.",
+      "reason": "created_despite_fuzzy_candidates",
+      "best_ratio": 0.833,
+      "candidates": [
+        "Paqui Fernandez Pombo",
+        "Raul Fernandez",
+        "Luis Fernandez",
+        "Agustin Fernandez",
+        "Pablo Fernandez"
+      ]
+    },
+    {
+      "line": 1309,
+      "name": "Paqui Fernández",
+      "fecha": "2026-03-25",
+      "source_key": "medicina_estetica_csv_v2:132693b29443ddd2",
+      "is_first": true,
+      "motivo": "reducción de grasa localizada. Flancos.",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 2085,
+      "name": "Paqui Fernández",
+      "fecha": "2026-04-26",
+      "source_key": "medicina_estetica_csv_v2:7235ac6c541ee2c5",
+      "is_first": false,
+      "motivo": "Consulta medicina estética",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 2097,
+      "name": "Paqui Fernández",
+      "fecha": "2026-04-30",
+      "source_key": "medicina_estetica_csv_v2:f7cfd6783b3b74b6",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 1318,
+      "name": "Paqui Fernández",
+      "fecha": "2026-05-04",
+      "source_key": "medicina_estetica_csv_v2:b53fb360c66b503f",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 2100,
+      "name": "Paqui Fernández",
+      "fecha": "2026-05-18",
+      "source_key": "medicina_estetica_csv_v2:95118e654e2aa16c",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 1320,
+      "name": "Paqui Fernández",
+      "fecha": "2026-05-20",
+      "source_key": "medicina_estetica_csv_v2:5fd4fbeba623feb5",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 1305,
+      "name": "Paqui Fernández",
+      "fecha": "2026-06-03",
+      "source_key": "medicina_estetica_csv_v2:042399193adfe5c9",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 2098,
+      "name": "Paqui Fernández",
+      "fecha": "2027-05-31",
+      "source_key": "medicina_estetica_csv_v2:82318c6ceeee8328",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 1680,
       "name": "Paula Cristobo -Rodriguez",
       "fecha": "2025-05-25",
-      "source_key": "medicina_estetica_csv:57ad78aad4079e0d",
-      "reason": "main_appointment_not_found",
+      "source_key": "medicina_estetica_csv_v2:52c7e601abf472c9",
+      "is_first": true,
+      "motivo": "ojeras , arrugas de expresión e hidratación labial.",
+      "reason": "appointment_not_found",
       "appointments": []
     },
     {
-      "line": 1347,
+      "line": 1689,
       "name": "Paula Cristobo -Rodriguez",
-      "fecha": "2025-05-25",
-      "source_key": "medicina_estetica_csv:57ad78aad4079e0d",
-      "reason": "review_appointment_not_found",
-      "review_line": 1369,
-      "review_date": "2027-05-18",
+      "fecha": "2027-05-18",
+      "source_key": "medicina_estetica_csv_v2:980953b5319db301",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "appointment_not_found",
       "appointments": []
     },
     {
-      "line": 1423,
-      "name": "Raquel Fariña Couselo.",
-      "fecha": "2026-02-16",
-      "source_key": "medicina_estetica_csv:2b216caa30d09a00",
-      "reason": "review_appointment_not_found",
-      "review_line": 1438,
-      "review_date": "2026-03-23",
+      "line": 1690,
+      "name": "Paula Cristobo -Rodriguez",
+      "fecha": "2027-06-15",
+      "source_key": "medicina_estetica_csv_v2:ceacf3661a0ce1ca",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "appointment_not_found",
       "appointments": []
     },
     {
-      "line": 1423,
-      "name": "Raquel Fariña Couselo.",
-      "fecha": "2026-02-16",
-      "source_key": "medicina_estetica_csv:2b216caa30d09a00",
-      "reason": "review_ambiguous_appointment",
-      "review_line": 1440,
-      "review_date": "2026-04-29",
+      "line": 2062,
+      "name": "Raquel Casais Rodriguez",
+      "fecha": "2026-07-08",
+      "source_key": "medicina_estetica_csv_v2:c52b18388747ba7c",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "ambiguous_appointment_picked_first",
+      "appointments": [
+        {
+          "id": "ccfd64da-3a1e-4af2-9d9d-67a839c2c912",
+          "customer_id": "698cd9a2-6f00-4c2a-87cc-0b300c2da9b8",
+          "client_name": "Raquel Casais Rodriguez",
+          "legacy_codcli": "005546",
+          "appointment_date": "2026-07-08",
+          "start_time": "18:30",
+          "status": "confirmed"
+        },
+        {
+          "id": "275aa8a5-73da-4e6e-918d-66d0d025785a",
+          "customer_id": "698cd9a2-6f00-4c2a-87cc-0b300c2da9b8",
+          "client_name": "Raquel Casais Rodriguez",
+          "legacy_codcli": "005546",
+          "appointment_date": "2026-07-08",
+          "start_time": "18:45",
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "line": 1419,
+      "name": "Raquel Fariña Couselo",
+      "fecha": "2026-04-29",
+      "source_key": "medicina_estetica_csv_v2:736ff8f5eeb6d864",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "ambiguous_appointment_picked_first",
       "appointments": [
         {
           "id": "8b78ed0f-c283-4553-a80c-84a8dc150539",
           "customer_id": "b6b2d156-4416-412f-9a18-76dbea686203",
           "client_name": "Raquel Fariña Couselo",
-          "legacy_codcli": "007133",
+          "legacy_codcli": "7133",
           "appointment_date": "2026-04-29",
-          "start_date": null,
           "start_time": "15:45",
           "status": "confirmed"
         },
         {
-          "id": "ca2d3a8a-048e-43fd-b2d6-09b56d604f74",
+          "id": "b94d4ee2-deb3-4f1f-a095-862117f281a4",
           "customer_id": "b6b2d156-4416-412f-9a18-76dbea686203",
           "client_name": "Raquel Fariña Couselo",
-          "legacy_codcli": "007133",
+          "legacy_codcli": "7133",
           "appointment_date": "2026-04-29",
-          "start_date": null,
           "start_time": "15:45",
           "status": "confirmed"
         }
       ]
     },
     {
-      "line": 1483,
-      "name": "Remedios Mateo Fernández",
-      "fecha": "2025-04-21",
-      "source_key": "medicina_estetica_csv:95dc831312fee0c1",
-      "reason": "review_appointment_not_found",
-      "review_line": 1518,
-      "review_date": "2025-12-03",
+      "line": 1449,
+      "name": "Raquel quintana seoane",
+      "fecha": "2026-02-16",
+      "source_key": "medicina_estetica_csv_v2:4772bab03a274a50",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "reason": "appointment_already_linked"
+    },
+    {
+      "line": 1822,
+      "name": "Silvia Sanandres Caamaño",
+      "fecha": "2026-01-21",
+      "source_key": "medicina_estetica_csv_v2:6b2467d58f83f8af",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "reason": "appointment_already_linked"
+    },
+    {
+      "line": 1563,
+      "name": "Sira Flecha Conde",
+      "fecha": "2025-11-12",
+      "source_key": "medicina_estetica_csv_v2:203eebf1dd536849",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 1580,
+      "name": "Sira Flecha Conde",
+      "fecha": "2025-11-26",
+      "source_key": "medicina_estetica_csv_v2:0f617e267fac026e",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "appointment_not_found",
+      "appointments": []
+    },
+    {
+      "line": 1592,
+      "name": "Tatiana Seoane Otero",
+      "fecha": "2026-06-03",
+      "source_key": "medicina_estetica_csv_v2:2a8ac67fe39a6cc5",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "reason": "appointment_already_linked"
+    },
+    {
+      "line": 1928,
+      "name": "María Dolores Muiña Rivadulla",
+      "fecha": "2026-03-30",
+      "source_key": "medicina_estetica_csv_v2:bbd31e0603ab9144",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "reason": "appointment_already_linked"
+    },
+    {
+      "line": 1937,
+      "name": "María Dolores Muiña Rivadulla",
+      "fecha": "2026-04-15",
+      "source_key": "medicina_estetica_csv_v2:16d6a1828aa0ae20",
+      "is_first": false,
+      "motivo": "Revisión",
+      "reason": "appointment_already_linked"
+    },
+    {
+      "line": 2068,
+      "name": "Santiago Rojo Martinez",
+      "fecha": "2026-07-13",
+      "source_key": "medicina_estetica_csv_v2:fd4da10e4a46d8f2",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "reason": "appointment_not_found",
       "appointments": []
     }
   ],
-  "customers_loaded": 7341
+  "sample_visits": [
+    {
+      "line": 2,
+      "name": "Alba alvarez meijon",
+      "fecha": "2025-12-13",
+      "source_key": "medicina_estetica_csv_v2:c62b9c9a320c395f",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "customer_id": "f2863e4e-1231-484a-915c-a3463f632da3",
+      "customer_name": "Alba Alvarez Meijon",
+      "appointment_id": "4fe1e8d3-76ef-4bd6-97ae-3507e4acad6a",
+      "antecedentes_preview": "",
+      "tratamiento_preview": "Nombre y fecha: 13/12/25\nEdad: 30\nAP: No AMC.\nHipotiroidismo.\nH tiroideas en ultima analítica ok.\nEnfermedad de Distrofi"
+    },
+    {
+      "line": 16,
+      "name": "Alfonso Rodríguez Fernández",
+      "fecha": "2025-07-30",
+      "source_key": "medicina_estetica_csv_v2:3bad9d7e2490461a",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "customer_id": "42e20d30-95cd-48a3-940d-cf101b63a4ac",
+      "customer_name": "Alfonso Rodriguez Fernandez",
+      "appointment_id": "ba917e43-6bb0-4db4-8608-74b104b6cedb",
+      "antecedentes_preview": "",
+      "tratamiento_preview": "Nombre y fecha: 30/07/25\nEdad: 45\nAP:Polen etc, no medicamentos.\nNo enfermedades. No tto.\nNo problem AL.\nCicatriz ok.\nMe"
+    },
+    {
+      "line": 28,
+      "name": "Amparo alonso",
+      "fecha": "2025-10-06",
+      "source_key": "medicina_estetica_csv_v2:d60b7bf1826391c1",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "customer_id": "1b9acb24-14c7-49fd-98ab-eb7cfd11b49e",
+      "customer_name": "Amparo Alonso",
+      "appointment_id": "bc7c1524-dc74-4d5a-9667-c2f8cba72d52",
+      "antecedentes_preview": "",
+      "tratamiento_preview": "Nombre y fecha: 6/10/25\nEdad: 69\nAP: Nno MAC\nHTA a tto con losartan,\nRosácea.\nMotivo de consulta:  manchas\nTratamiento: "
+    },
+    {
+      "line": 47,
+      "name": "Ana Diaz Marquez",
+      "fecha": "2024-06-18",
+      "source_key": "medicina_estetica_csv_v2:ce29e18f996daf88",
+      "is_first": true,
+      "motivo": "Revisión",
+      "customer_id": "f1a3d8e7-3215-4fc7-85bc-323df694708e",
+      "customer_name": "Ana Diaz Marquez",
+      "appointment_id": null,
+      "antecedentes_preview": "",
+      "tratamiento_preview": "ck4 con RHA4 lot 2402R3L1 cad 25/12, fecetem lot S1M424009 cad3/27en espacio preauricular y premandibular diluido con li"
+    },
+    {
+      "line": 39,
+      "name": "Ana Diaz Marquez",
+      "fecha": "2025-05-21",
+      "source_key": "medicina_estetica_csv_v2:6f7fc2b711fb5e0e",
+      "is_first": false,
+      "motivo": "Consulta medicina estética",
+      "customer_id": "f1a3d8e7-3215-4fc7-85bc-323df694708e",
+      "customer_name": "Ana Diaz Marquez",
+      "appointment_id": "2b2c5091-535d-4407-8f51-0054a5c0b987",
+      "antecedentes_preview": "",
+      "tratamiento_preview": "Nombre y fecha: Ana Diaz Marquez 21/05/25\nEdad:76\nAP: HTA, DM e hipertiroidismo controlado. Intolerancia a Penicilina. N"
+    },
+    {
+      "line": 49,
+      "name": "Ana Diaz Marquez",
+      "fecha": "2025-06-25",
+      "source_key": "medicina_estetica_csv_v2:88c3721c5c495426",
+      "is_first": false,
+      "motivo": "Revisión",
+      "customer_id": "f1a3d8e7-3215-4fc7-85bc-323df694708e",
+      "customer_name": "Ana Diaz Marquez",
+      "appointment_id": "8ae8e55c-6fe5-4270-922c-58f8f5c1d07b",
+      "antecedentes_preview": "",
+      "tratamiento_preview": "Definición mandibular posterior con Lyft ( lot 22185-1 cad 26 en arco posterior bolo 0,5 y restylane con cánula en rama "
+    },
+    {
+      "line": 65,
+      "name": "Ana María Carballeira Carballeira",
+      "fecha": "2025-02-16",
+      "source_key": "medicina_estetica_csv_v2:a3a7dfe9bfd0e6ce",
+      "is_first": true,
+      "motivo": "Revisión",
+      "customer_id": "7ace05bd-1c43-4e2f-8338-3c831f9eb145",
+      "customer_name": "Ana Maria Carballeira Carballeira",
+      "appointment_id": null,
+      "antecedentes_preview": "",
+      "tratamiento_preview": "Se retocan acrocordones del cuello y se recomienda crema.\nCita en 1 semana para fórmula magistral."
+    },
+    {
+      "line": 52,
+      "name": "Ana María Carballeira Carballeira",
+      "fecha": "2025-12-29",
+      "source_key": "medicina_estetica_csv_v2:796e9ec8576fc4a4",
+      "is_first": false,
+      "motivo": "Consulta medicina estética",
+      "customer_id": "7ace05bd-1c43-4e2f-8338-3c831f9eb145",
+      "customer_name": "Ana Maria Carballeira Carballeira",
+      "appointment_id": "fd427dac-838a-4d00-a29f-7e5b7fcbf3b9",
+      "antecedentes_preview": "",
+      "tratamiento_preview": "Nombre y fecha: 29/12/25\nEdad: 50 años.\nAP: No AMC.\nNo enfermedad.\nRosácea.\nOrfidal para dormir.\nNo problemas con AL.\nQu"
+    },
+    {
+      "line": 69,
+      "name": "Ana María Carballeira Carballeira",
+      "fecha": "2026-02-23",
+      "source_key": "medicina_estetica_csv_v2:5e77c5bf1b796bd9",
+      "is_first": false,
+      "motivo": "Revisión",
+      "customer_id": "7ace05bd-1c43-4e2f-8338-3c831f9eb145",
+      "customer_name": "Ana Maria Carballeira Carballeira",
+      "appointment_id": "0e4f831e-2e96-4acc-8f8c-a2eb35a023bb",
+      "antecedentes_preview": "",
+      "tratamiento_preview": "Se le entrega receta para fórmula. Cita en 10 días."
+    },
+    {
+      "line": 73,
+      "name": "Ana María Carballeira Carballeira",
+      "fecha": "2026-03-30",
+      "source_key": "medicina_estetica_csv_v2:1cd4be915037cdfc",
+      "is_first": false,
+      "motivo": "Revisión",
+      "customer_id": "7ace05bd-1c43-4e2f-8338-3c831f9eb145",
+      "customer_name": "Ana Maria Carballeira Carballeira",
+      "appointment_id": "ac499e29-24af-46e6-a509-d1489bb60e9e",
+      "antecedentes_preview": "",
+      "tratamiento_preview": "Franca mejoría de la piel. Se le recomienda terminar fórmula y cita. IPL dos veces al año."
+    },
+    {
+      "line": 75,
+      "name": "Ana María Carballeira Carballeira",
+      "fecha": "2026-05-20",
+      "source_key": "medicina_estetica_csv_v2:485487e470783c63",
+      "is_first": false,
+      "motivo": "Revisión",
+      "customer_id": "7ace05bd-1c43-4e2f-8338-3c831f9eb145",
+      "customer_name": "Ana Maria Carballeira Carballeira",
+      "appointment_id": "5b76b5d6-cd15-40e7-9dd9-e0bab9c56da4",
+      "antecedentes_preview": "",
+      "tratamiento_preview": "Mejoría clara. Se le cambia fórmula por retinol y pauta de IPL nov/feb"
+    },
+    {
+      "line": 80,
+      "name": "Ana Rouco Anello",
+      "fecha": "2025-12-31",
+      "source_key": "medicina_estetica_csv_v2:12793109499123f4",
+      "is_first": true,
+      "motivo": "Consulta medicina estética",
+      "customer_id": "742ff40e-f9ff-49ec-b4db-777402cfd782",
+      "customer_name": "Ana Rouco Anello",
+      "appointment_id": "1522f96f-ae4f-47b6-b3d4-a654de4289d5",
+      "antecedentes_preview": "",
+      "tratamiento_preview": "Nombre y fecha:  Ana Rouco Anello. 31/12/25\nEdad: 33\nAP: NO AMC\nNo de interés\nMotivo de consulta:  Toxina.\nTratamiento:\n"
+    }
+  ],
+  "created_customer_names": [
+    "Maria Cambon",
+    "Paqui Fernández"
+  ],
+  "assignments_loaded": 0,
+  "customers_loaded": 7383
 }

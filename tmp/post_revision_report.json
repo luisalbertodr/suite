@@ -1,0 +1,156 @@
+{
+  "apply": true,
+  "merges": [
+    {
+      "loser_id": "55905ced-bbb7-4f80-8d0d-5ea3420d027e",
+      "loser_code": "10000071",
+      "loser_name": "Maria Cambon",
+      "winner_id": "98238632-5426-4a27-8fef-86e5ba845d22",
+      "winner_code": "008142",
+      "winner_name": "Maria Cambon Bellon",
+      "rename": "Maria Cambon Bellón",
+      "renamed": "Maria Cambon Bellón",
+      "moved": {
+        "historial_clinico": 1
+      },
+      "field_updates": []
+    },
+    {
+      "loser_id": "1c1065fa-0cb3-48da-bcea-abd41f0a7f58",
+      "loser_code": "10000068",
+      "loser_name": "Mar Lamas Pernas",
+      "winner_id": "f9b582ea-3e64-4284-ab1f-b550c40ef85c",
+      "winner_code": "000330",
+      "winner_name": "Maria del Mar Lamas Pernas",
+      "rename": "María del Mar Lamas Pernas",
+      "renamed": "María del Mar Lamas Pernas",
+      "moved": {
+        "historial_clinico": 1
+      },
+      "field_updates": []
+    },
+    {
+      "loser_id": "4906aa1f-2755-4012-b9ed-cd34ee917473",
+      "loser_code": "10000072",
+      "loser_name": "Paqui Fernández",
+      "winner_id": "d0620b5a-1f9c-4684-8154-5757c8acd3df",
+      "winner_code": "008044",
+      "winner_name": "Paqui Fernandez Pombo",
+      "rename": null,
+      "moved": {
+        "historial_clinico": 8
+      },
+      "field_updates": []
+    }
+  ],
+  "antelo_merge": {
+    "winner": {
+      "id": "f724b000-4885-4946-b479-079199e37c7c",
+      "code": "008088",
+      "name": "Maria del Carmen Antelo Collazo"
+    },
+    "losers": [
+      {
+        "loser_id": "299ce4a0-4008-4560-b11f-102f46de3584",
+        "loser_code": "004674",
+        "loser_name": "Mari Carmen Antelo Collazo",
+        "winner_id": "f724b000-4885-4946-b479-079199e37c7c",
+        "winner_code": "008088",
+        "winner_name": "Maria del Carmen Antelo Collazo",
+        "rename": "Maria del Carmen Antelo Collazo",
+        "moved": {},
+        "field_updates": []
+      }
+    ]
+  },
+  "repairs": {
+    "scanned": 256,
+    "changed": 75,
+    "samples": [
+      {
+        "id": "b9163a3d-8039-4ffc-b45c-55a2db97d3ee",
+        "fecha": "2025-04-23",
+        "before_tto": "Nombre y fecha: 23/04/25\nEdad:70\nAP:  No refiere alergias conocidas. Comenta que cicatriza bien y no",
+        "after_tto": "Se aplica toxina relfydess lote 23310-2 exp 6/26.  en glabela, corrugadores, piramidal, orbicular y ",
+        "before_motivo": "Consulta medicina estética",
+        "after_motivo": "flacidez y arrugas de expresión."
+      },
+      {
+        "id": "da104d46-17ea-4bf7-b017-f96e77b19dbd",
+        "fecha": "2025-05-07",
+        "before_tto": "Nombre y fecha: 7/05/25\nEdad: 69\nAP: Alérgica a Pirazolonas y betasulfitos. Hepatitis\nbotox hace 1 a",
+        "after_tto": "Fimar CI para botox en frontal, piramidal, corrugador y orbicular. No incidencias. Relfydess Lot 233",
+        "before_motivo": "Consulta medicina estética",
+        "after_motivo": "Labio y tercio superior"
+      },
+      {
+        "id": "b5d8b323-88fd-42b2-b169-82d58d0ffe68",
+        "fecha": "2025-05-12",
+        "before_tto": "Nombre y fecha:12/05/25\nEdad: 55\nAP:\nIntolerante a AAS.\nNo enfermedades imp. Ansiolítico, Topamax.\nc",
+        "after_tto": "Se retira Hialurónico migrado de labio sup 1500\nlot:29831/0113 oct 27 sin incidencia.\nCita en 15 día",
+        "before_motivo": "Consulta medicina estética",
+        "after_motivo": "Botox."
+      },
+      {
+        "id": "67a5abee-9879-4f8d-b196-9b56f7f1cfef",
+        "fecha": "2025-05-21",
+        "before_tto": "Nombre y fecha: Ana Diaz Marquez 21/05/25\nEdad:76\nAP: HTA, DM e hipertiroidismo controlado. Intolera",
+        "after_tto": "firma CI de hialurónico, se aplica Voluma lot 1000673293 en temporal medio vial por lado y artfiller",
+        "before_motivo": "Consulta medicina estética",
+        "after_motivo": "Flacidez."
+      },
+      {
+        "id": "b2ce6b1a-bedf-496b-9b45-247e6409fe55",
+        "fecha": "2025-05-21",
+        "before_tto": "Nombre y fecha:Sonia Velo Villaverde  21/05/25\nEdad:51\nAP: No AMC ni antecedentes médico quirúrgicos",
+        "after_tto": "Firma CI de plexr. Exéresis de lesiones sin incidencias. SE hacen recomendaciones. Para párpado se r",
+        "before_motivo": "Consulta medicina estética",
+        "after_motivo": "lesiones benignas en tronco. Párpado laxitud."
+      },
+      {
+        "id": "8c289510-9dc7-49c5-b84a-ae00a893fb26",
+        "fecha": "2025-05-31",
+        "before_tto": "Carmen Fernández Rivera, 31/05/25\nNombre y fecha:Carmen Fernández Rivera, 31/05/25\nEdad:72.\nAP: No A",
+        "after_tto": "exéresis. Firma CI. Se hacen recomendaciones.",
+        "before_motivo": "Consulta medicina estética",
+        "after_motivo": "lesiones en cara y cuello benigna"
+      },
+      {
+        "id": "48c936f9-0213-49dd-a2c1-d3ad89b29b2d",
+        "fecha": "2025-06-09",
+        "before_tto": "Nombre y fecha:9/06/25\nEdad:51\nAP: No AMC.\nNo alergias.\nCicatriz bien y no problems con AL. No tto.\n",
+        "after_tto": "hialurónico voluma en temporal y tercio medio, medio vial en cada lado lote 1001556516 exp 26/02. fi",
+        "before_motivo": "Consulta medicina estética",
+        "after_motivo": "flacidez en tercio inferior."
+      },
+      {
+        "id": "337cf104-85d0-4b7b-b558-fb83333a485b",
+        "fecha": "2025-06-11",
+        "before_tto": "Nombre y fecha:11/6/25\nEdad: 52\nAP: No AMC.\nNo enfermedades ni problemas con cicatriz ni AL. Noctami",
+        "after_tto": "se le comenta necesidad de blefaro y Iq para flacidez en cuello. SE decide hialurónico 2 viales, har",
+        "before_motivo": "Consulta medicina estética",
+        "after_motivo": "flacidez"
+      }
+    ]
+  },
+  "skipped_imports": [
+    {
+      "customer": "Maria del Carmen Antelo Collazo",
+      "customer_id": "f724b000-4885-4946-b479-079199e37c7c",
+      "fecha": "2026-05-18",
+      "source_key": "medicina_estetica_csv_v2:antelo:2026-05-18",
+      "existing": true,
+      "action": "updated",
+      "id": "31477497-1b74-4b62-aba2-8afef88dd5e8"
+    },
+    {
+      "customer": "Layla Baamran Ezzarraoui",
+      "customer_id": "765ddd01-74cf-404a-91bd-3910c1d53123",
+      "fecha": "2025-05-21",
+      "source_key": "medicina_estetica_csv_v2:layla:2025-05-21",
+      "existing": true,
+      "action": "updated",
+      "id": "5435fdb9-0c31-4cd3-a3ac-5c6645b1110f"
+    }
+  ]
+}
