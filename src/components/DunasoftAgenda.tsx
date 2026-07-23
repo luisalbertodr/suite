@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { format, addDays, subDays, parse, isValid } from 'date-fns';
 import { es } from 'date-fns/locale';
 import {
@@ -19,7 +20,10 @@ import {
   DunasoftAppointmentForm,
   type DunasoftAppointmentFormValues,
 } from '@/components/DunasoftAppointmentForm';
-import { useDunasoftAgendaDay } from '@/hooks/useDunasoftAgendaDay';
+import {
+  fetchDunasoftDayAppointments,
+  useDunasoftAgendaDay,
+} from '@/hooks/useDunasoftAgendaDay';
 import { useDunasoftAppointmentMutations } from '@/hooks/useDunasoftAppointmentMutations';
 import { useDunasoftSyncStatus } from '@/hooks/useDunasoftSyncStatus';
 import { useStyleSyncAgentStatus } from '@/hooks/useStyleSyncAgentStatus';
@@ -29,6 +33,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { usePermissionGuard } from '@/hooks/usePermissionGuard';
 import { useRegisterTopBarContent } from '@/components/TopBarContentContext';
+import { useRoutePanelActive } from '@/contexts/RoutePanelContext';
 import {
   loadInitialAgendaDateYmd,
   loadAgendaViewPersisted,
@@ -83,6 +88,8 @@ export const DunasoftAgenda: React.FC = () => {
   const { requireOrToast: requirePermissionOrToast, can: canPermission } = usePermissionGuard();
   const navigate = useNavigate();
   const location = useLocation();
+  const queryClient = useQueryClient();
+  const panelActive = useRoutePanelActive();
 
   const [selectedDate, setSelectedDate] = useState(() => {
     const params = new URLSearchParams(location.search);
@@ -137,18 +144,65 @@ export const DunasoftAgenda: React.FC = () => {
     saveAgendaViewPersisted(user.id, mergePersistedLastDate(prev, selectedDateYmd));
   }, [user?.id, selectedDateYmd]);
 
-  const { data, isLoading, isError, error, refetch, isFetching, isDayLoading, isDayRefreshing } =
-    useDunasoftAgendaDay(selectedDateYmd, companyId);
-  useAgendaInboundSyncRefetch(companyId, refetch, selectedDateYmd);
+  const {
+    data,
+    isLoading,
+    isError,
+    error,
+    refetch,
+    refetchDay,
+    isFetching,
+    isDayLoading,
+    isDayRefreshing,
+  } = useDunasoftAgendaDay(selectedDateYmd, companyId, { enabled: panelActive });
+  useAgendaInboundSyncRefetch(companyId, refetchDay, selectedDateYmd, { enabled: panelActive });
   const showInitialSkeleton = isLoading && !data;
   const { createMutation, updateMutation, deleteMutation } = useDunasoftAppointmentMutations(selectedDateYmd);
-  const { data: syncStatus } = useDunasoftSyncStatus(20_000);
-  const { data: styleSync } = useStyleSyncAgentStatus(companyId, 25_000);
+  const { data: syncStatus } = useDunasoftSyncStatus(20_000, { enabled: panelActive });
+  const { data: styleSync } = useStyleSyncAgentStatus(companyId, 25_000, { enabled: panelActive });
 
   const syncBadge = useMemo(
     () => buildAgendaSyncBadge(syncStatus, styleSync),
     [syncStatus, styleSync],
   );
+
+  // Prefetch ±1 día para navegación casi instantánea
+  useEffect(() => {
+    if (!panelActive || !data?.employees?.length) return;
+    const base = parse(selectedDateYmd, 'yyyy-MM-dd', new Date());
+    if (!isValid(base)) return;
+    const employees = data.employees;
+    const prefetchDay = (ymd: string) => {
+      void queryClient.prefetchQuery({
+        queryKey: ['dunasoft-agenda-day', ymd, companyId],
+        queryFn: () => fetchDunasoftDayAppointments(ymd, companyId, employees),
+        staleTime: 30_000,
+      });
+    };
+    prefetchDay(format(subDays(base, 1), 'yyyy-MM-dd'));
+    prefetchDay(format(addDays(base, 1), 'yyyy-MM-dd'));
+  }, [companyId, data?.employees, panelActive, queryClient, selectedDateYmd]);
+
+  const handleRefresh = useCallback(async () => {
+    await refetch();
+    await Promise.all([
+      queryClient.refetchQueries({ queryKey: ['dunasoft-sync-status'] }),
+      queryClient.refetchQueries({
+        queryKey: ['style-sync-agent-status', companyId ?? 'default'],
+      }),
+    ]);
+    const badge = buildAgendaSyncBadge(
+      queryClient.getQueryData(['dunasoft-sync-status']),
+      queryClient.getQueryData(['style-sync-agent-status', companyId ?? 'default']),
+    );
+    if (badge.tone !== 'ok') {
+      toast({
+        title: badge.label,
+        description: badge.title,
+        variant: badge.tone === 'error' ? 'destructive' : 'default',
+      });
+    }
+  }, [companyId, queryClient, refetch, toast]);
 
   const employees = data?.employees ?? [];
   const appointments = data?.appointments ?? [];
@@ -241,8 +295,18 @@ export const DunasoftAgenda: React.FC = () => {
           size="sm"
           className="h-7 px-2 text-xs shrink-0"
           onClick={() => {
-            selectAgendaDate(new Date());
+            const today = new Date();
+            const todayYmd = format(today, 'yyyy-MM-dd');
+            selectAgendaDate(today);
             setGoToTodayRequestId((n) => n + 1);
+            // Hoy operativo: forzar datos frescos aunque ya estemos en el día.
+            if (todayYmd === selectedDateYmd) void refetchDay();
+            else {
+              // Tras cambiar de fecha, el efecto de query cargará; forzar refetch al montar key nueva.
+              void queryClient.invalidateQueries({
+                queryKey: ['dunasoft-agenda-day', todayYmd, companyId],
+              });
+            }
           }}
         >
           <Clock className="w-3.5 h-3.5 mr-1" /> Hoy
@@ -263,14 +327,25 @@ export const DunasoftAgenda: React.FC = () => {
           variant="ghost"
           size="sm"
           className="h-7 px-2 text-xs shrink-0 text-muted-foreground"
-          onClick={() => void refetch()}
+          onClick={() => void handleRefresh()}
           disabled={isFetching}
         >
           Actualizar
         </Button>
       </>
     ),
-    [datePickerOpen, isFetching, refetch, selectAgendaDate, selectedDate, syncBadge],
+    [
+      companyId,
+      datePickerOpen,
+      handleRefresh,
+      isFetching,
+      queryClient,
+      refetchDay,
+      selectAgendaDate,
+      selectedDate,
+      selectedDateYmd,
+      syncBadge,
+    ],
   );
 
   useRegisterTopBarContent(

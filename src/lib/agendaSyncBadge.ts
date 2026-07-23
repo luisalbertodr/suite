@@ -82,8 +82,11 @@ export function buildAgendaSyncBadge(
   if (agentStale && tickAge != null) {
     parts.push(`agente sin tick (${formatAge(tickAge)})`);
   }
+  // La grid lee dunasoft.plan2009 en Postgres; el DBF Style puede ir segundos detrás (Suite→Style).
   const title =
-    parts.length > 0 ? parts.join(' · ') : 'Sincronización al día con Style / DBF';
+    parts.length > 0
+      ? `${parts.join(' · ')} · Vista Suite = Postgres (no DBF en vivo)`
+      : 'Sincronización al día · Vista Suite = Postgres (DBF Style puede ir segundos detrás)';
 
   const tone: AgendaSyncBadge['tone'] =
     errors > 0 || styleSync?.inbound_worker_status === 'stopped' || agentStale

@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import { dunasoftSupabase } from '@/lib/dunasoftSupabase';
 import {
@@ -14,7 +14,10 @@ import {
   type DunasoftPlan2009Row,
   type DunasoftPlanArtRow,
 } from '@/lib/dunasoftAgendaMap';
-import { resolveCustomerIdsByLegacyCodcli } from '@/lib/appointmentCustomerResolve';
+import {
+  CUSTOMER_CODCLI_MAP_QUERY_KEY,
+  resolveCustomerIdsByLegacyCodcli,
+} from '@/lib/appointmentCustomerResolve';
 import type { Appointment, Employee } from '@/types/agenda';
 import type { AgendaDayHoursMap, AgendaUnavailabilityEntry } from '@/lib/agendaHours';
 
@@ -31,7 +34,9 @@ export type DunasoftAgendaDayData = {
 const EMPLOYEE_SELECT =
   'codemp,nomemp,ape1emp,ape2emp,verplan,ordplan,obsoleto,colorpf,colorpl,lunes,martes,miercoles,jueves,viernes,sabado,domingo,dia1a,dia1b,dia1c,dia1d,dia2a,dia2b,dia2c,dia2d,dia3a,dia3b,dia3c,dia3d,dia4a,dia4b,dia4c,dia4d,dia5a,dia5b,dia5c,dia5d,dia6a,dia6b,dia6c,dia6d,dia7a,dia7b,dia7c,dia7d';
 
-async function fetchDunasoftEmployees(): Promise<{
+const EMPLOYEES_STALE_MS = 10 * 60_000;
+
+export async function fetchDunasoftEmployees(): Promise<{
   employees: Employee[];
   rawEmployees: DunasoftEmpleadoRow[];
   employeeAgendaById: DunasoftAgendaDayData['employeeAgendaById'];
@@ -53,7 +58,7 @@ async function fetchDunasoftEmployees(): Promise<{
   return { employees, rawEmployees, employeeAgendaById };
 }
 
-async function fetchDunasoftDayAppointments(
+export async function fetchDunasoftDayAppointments(
   dateYmd: string,
   companyId: string | null,
   employees: Employee[],
@@ -135,25 +140,33 @@ async function fetchDunasoftDayAppointments(
   return { appointments };
 }
 
-export function useDunasoftAgendaEmployees() {
+export function useDunasoftAgendaEmployees(opts?: { enabled?: boolean }) {
+  const enabled = opts?.enabled ?? true;
   return useQuery({
     queryKey: ['dunasoft-agenda-employees'],
     queryFn: fetchDunasoftEmployees,
-    staleTime: 10 * 60_000,
+    enabled,
+    staleTime: EMPLOYEES_STALE_MS,
     gcTime: 30 * 60_000,
   });
 }
 
-export function useDunasoftAgendaDay(dateYmd: string, companyId: string | null) {
-  const employeesQuery = useDunasoftAgendaEmployees();
+export function useDunasoftAgendaDay(
+  dateYmd: string,
+  companyId: string | null,
+  opts?: { enabled?: boolean },
+) {
+  const panelActive = opts?.enabled ?? true;
+  const queryClient = useQueryClient();
+  const employeesQuery = useDunasoftAgendaEmployees({ enabled: panelActive && !!dateYmd });
 
   const dayQuery = useQuery({
     queryKey: ['dunasoft-agenda-day', dateYmd, companyId],
     queryFn: () =>
       fetchDunasoftDayAppointments(dateYmd, companyId, employeesQuery.data?.employees ?? []),
-    enabled: !!dateYmd && !!employeesQuery.data,
+    enabled: panelActive && !!dateYmd && !!employeesQuery.data,
     staleTime: 30_000,
-    refetchInterval: 60_000,
+    refetchInterval: panelActive ? 60_000 : false,
     refetchIntervalInBackground: false,
     // Solo conservar datos previos al refrescar el mismo día; al cambiar de fecha no mezclar citas.
     placeholderData: (previousData, previousQuery) =>
@@ -171,9 +184,18 @@ export function useDunasoftAgendaDay(dateYmd: string, companyId: string | null) 
 
   const refetchEmployees = employeesQuery.refetch;
   const refetchDay = dayQuery.refetch;
+
+  /** Actualizar operativo: día siempre; empleados solo si stale (>10 min). */
   const refetch = useCallback(async () => {
-    await Promise.all([refetchEmployees(), refetchDay()]);
-  }, [refetchEmployees, refetchDay]);
+    const empUpdatedAt = employeesQuery.dataUpdatedAt ?? 0;
+    const employeesStale = !empUpdatedAt || Date.now() - empUpdatedAt > EMPLOYEES_STALE_MS;
+    const tasks: Array<Promise<unknown>> = [refetchDay()];
+    if (employeesStale) tasks.push(refetchEmployees());
+    if (companyId) {
+      void queryClient.invalidateQueries({ queryKey: [CUSTOMER_CODCLI_MAP_QUERY_KEY, companyId] });
+    }
+    await Promise.all(tasks);
+  }, [companyId, employeesQuery.dataUpdatedAt, queryClient, refetchDay, refetchEmployees]);
 
   return {
     data: mergedData,
@@ -181,8 +203,11 @@ export function useDunasoftAgendaDay(dateYmd: string, companyId: string | null) 
     isError: employeesQuery.isError || dayQuery.isError,
     error: employeesQuery.error ?? dayQuery.error,
     refetch,
+    refetchDay,
+    refetchEmployees,
     isFetching: employeesQuery.isFetching || dayQuery.isFetching,
     isDayLoading: dayQuery.isFetching && !dayQuery.data,
     isDayRefreshing: dayQuery.isFetching && !!dayQuery.data,
+    employeesDataUpdatedAt: employeesQuery.dataUpdatedAt,
   };
 }

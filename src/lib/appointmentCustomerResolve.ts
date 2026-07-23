@@ -16,6 +16,19 @@ export function legacyCodcliMatches(a: string, b: string): boolean {
   return normLegacyCodcli(x) === normLegacyCodcli(y);
 }
 
+/** Variantes tipicas Style/Suite (con y sin ceros a la izquierda, pad 6). */
+export function legacyCodcliLookupVariants(code: string): string[] {
+  const raw = code.trim();
+  if (!raw) return [];
+  const norm = normLegacyCodcli(raw);
+  const variants = new Set<string>([raw, norm]);
+  if (/^\d+$/.test(norm)) {
+    variants.add(norm.padStart(6, '0'));
+    if (norm.length < 8) variants.add(norm.padStart(8, '0'));
+  }
+  return [...variants];
+}
+
 export function resolveAppointmentClientPick(
   clientName: string,
   customers: CustomerSearchRow[],
@@ -48,7 +61,10 @@ export function resolveAppointmentClientPick(
   return null;
 }
 
-/** Resuelve UUID de cliente Suite a partir de códigos legacy Style (codcli). */
+/**
+ * Resuelve UUID de cliente Suite a partir de códigos legacy Style (codcli).
+ * Solo consulta los códigos pedidos (variantes pad), no toda la empresa.
+ */
 export async function resolveCustomerIdsByLegacyCodcli(
   companyId: string,
   legacyCodes: string[],
@@ -56,20 +72,40 @@ export async function resolveCustomerIdsByLegacyCodcli(
   const unique = [...new Set(legacyCodes.map((c) => c.trim()).filter(Boolean))];
   if (!unique.length) return new Map();
 
-  const { data, error } = await supabase
-    .from('customers')
-    .select('id, legacy_codcli')
-    .eq('company_id', companyId)
-    .not('legacy_codcli', 'is', null);
-  if (error) throw error;
+  const lookup = new Set<string>();
+  for (const code of unique) {
+    for (const v of legacyCodcliLookupVariants(code)) lookup.add(v);
+  }
+  const lookupList = [...lookup];
+  if (!lookupList.length) return new Map();
 
   const out = new Map<string, string>();
-  for (const code of unique) {
-    const match = (data ?? []).find((row) =>
-      legacyCodcliMatches(code, String(row.legacy_codcli ?? '')),
-    );
-    if (match?.id) out.set(normLegacyCodcli(code), match.id as string);
+  const chunkSize = 80;
+  for (let i = 0; i < lookupList.length; i += chunkSize) {
+    const chunk = lookupList.slice(i, i + chunkSize);
+    const { data, error } = await supabase
+      .from('customers')
+      .select('id, legacy_codcli')
+      .eq('company_id', companyId)
+      .is('archived_at', null)
+      .in('legacy_codcli', chunk);
+    if (error) throw error;
+
+    for (const row of data ?? []) {
+      const rowCode = String(row.legacy_codcli ?? '').trim();
+      if (!rowCode || !row.id) continue;
+      const key = normLegacyCodcli(rowCode);
+      if (!out.has(key)) out.set(key, row.id as string);
+    }
   }
+
+  // Asegurar claves pedidas aunque el match fuera por variante pad
+  for (const code of unique) {
+    const key = normLegacyCodcli(code);
+    if (out.has(key)) continue;
+    // Ya cubierto por el bucle anterior si hubo match
+  }
+
   return out;
 }
 
@@ -82,3 +118,5 @@ export async function resolveCustomerIdByLegacyCodcli(
   const map = await resolveCustomerIdsByLegacyCodcli(companyId, [code]);
   return map.get(normLegacyCodcli(code)) ?? null;
 }
+
+export const CUSTOMER_CODCLI_MAP_QUERY_KEY = 'customer-codcli-map' as const;
