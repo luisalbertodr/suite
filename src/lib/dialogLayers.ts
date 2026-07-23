@@ -1,6 +1,15 @@
 /** z-index de banners de aviso (parte superior, por debajo del dock). */
 export const SUITE_TOP_BANNER_Z = 'z-[280]';
 
+/**
+ * Diálogos / toasts que deben quedar por encima del banner de aviso
+ * (p. ej. perfil «Pesar ahora» o errores de guardado) y por debajo del dock.
+ */
+export const ABOVE_TOP_BANNER_Z = 'z-[290]';
+
+/** Menús portaled (Select/Popover) sobre diálogos elevados. */
+export const ABOVE_DIALOG_PORTAL_Z = 'z-[295]';
+
 /** z-index del DockBar: por encima de modales y popovers para poder cambiar de pestaña. */
 export const DOCK_BAR_Z = 'z-[300]';
 

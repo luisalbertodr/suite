@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { primaryCustomerPhone, formatCustomerPhoneLabels } from '@/lib/legacyCustomerPhones';
 import { usePermissions } from '@/hooks/usePermissions';
+import { repairStyleText } from '@/lib/styleTextEncoding';
 
 interface Props {
   customer: any;
@@ -31,6 +32,8 @@ export const ClienteProfileHeader: React.FC<Props> = ({ customer, isLoading, onO
 
   if (!customer) return null;
 
+  const displayName = repairStyleText(customer.name) || customer.name;
+
   const handleCall = () => {
     const tel = primaryCustomerPhone(customer);
     if (tel) window.open(`tel:${tel}`);
@@ -44,7 +47,7 @@ export const ClienteProfileHeader: React.FC<Props> = ({ customer, isLoading, onO
     if (canUseWhatsapp) {
       const params = new URLSearchParams();
       params.set('phone', customerPhone);
-      if (customer.name) params.set('name', customer.name);
+      if (displayName) params.set('name', displayName);
       navigate(`/whatsapp?${params.toString()}`);
     } else {
       const cleaned = customerPhone.replace(/\D/g, '');
@@ -59,7 +62,7 @@ export const ClienteProfileHeader: React.FC<Props> = ({ customer, isLoading, onO
         {customer.photo_url ? (
           <img
             src={customer.photo_url}
-            alt={customer.name}
+            alt={displayName}
             className="w-20 h-20 rounded-full object-cover ring-4 ring-white dark:ring-gray-800 shadow-lg"
           />
         ) : (
@@ -74,7 +77,7 @@ export const ClienteProfileHeader: React.FC<Props> = ({ customer, isLoading, onO
       {/* Info */}
       <div className="flex-1 min-w-0">
         <h2 className="text-2xl font-bold text-foreground tracking-tight truncate">
-          {customer.name}
+          {displayName}
         </h2>
         {customer.tax_id && (
           <p className="text-sm text-muted-foreground mt-0.5">DNI/CIF: {customer.tax_id}</p>

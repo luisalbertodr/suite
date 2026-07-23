@@ -9,6 +9,7 @@ import { WhatsappForwardDialog } from './WhatsappForwardDialog';
 import { WhatsappLinkPopover } from './WhatsappLinkPopover';
 import { WhatsappSendDepositLinkButton } from './WhatsappSendDepositLinkButton';
 import { WhatsappSendCampaignAudioButton } from './WhatsappSendCampaignAudioButton';
+import { WhatsappSendNotesButton } from './WhatsappSendNotesButton';
 import { WhatsappConfirmDepositPaidButton } from './WhatsappConfirmDepositPaidButton';
 import {
   AlertDialog,
@@ -400,15 +401,24 @@ export const WhatsappChatView: React.FC<Props> = ({
         </div>
         <div className="flex items-center gap-1">
           {showCampaignAudio ? (
-            <WhatsappSendCampaignAudioButton
-              chatId={chat.chat_id}
-              chatDisplayName={crmContactName ?? displayName}
-              marketingLeadId={effectiveMarketingLeadId}
-              customerId={effectiveCustomerId}
-              leadMeta={leadMeta}
-              messages={messages}
-              onSent={() => refreshFromWaha.mutate('recent')}
-            />
+            <>
+              <WhatsappSendNotesButton
+                chatDisplayName={crmContactName ?? displayName}
+                customerId={effectiveCustomerId}
+                onSendText={async (text) => {
+                  await onSend({ type: 'text', text });
+                }}
+              />
+              <WhatsappSendCampaignAudioButton
+                chatId={chat.chat_id}
+                chatDisplayName={crmContactName ?? displayName}
+                marketingLeadId={effectiveMarketingLeadId}
+                customerId={effectiveCustomerId}
+                leadMeta={leadMeta}
+                messages={messages}
+                onSent={() => refreshFromWaha.mutate('recent')}
+              />
+            </>
           ) : null}
           {!isGroup && !isSystemChatJid(chat.chat_id) && showDepositActions ? (
             <>

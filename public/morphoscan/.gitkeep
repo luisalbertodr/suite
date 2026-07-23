@@ -1,0 +1,5 @@
+# Plantilla JPG/PNG del informe MorphoScan ( Renpho-like ).
+# Coloca aquí el archivo en blanco y actualiza:
+#   - MORPHOSCAN_REPORT_TEMPLATE_URL / VERSION en src/lib/morphoscanReportExport.ts
+#   - MORPHOSCAN_REPORT_TEMPLATE_READY = true
+#   - REGIONS calibradas en px

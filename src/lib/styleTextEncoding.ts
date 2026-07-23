@@ -20,6 +20,25 @@ const MOJIBAKE_REPLACEMENTS: ReadonlyArray<[string, string]> = [
   ['Â¡', '¡'],
 ];
 
+/** Topónimos / patrones donde Style sustituyó Ñ por Q/C (p. ej. CORUQA, EspaC1a). */
+const Q_FOR_N_LITERALS: ReadonlyArray<[RegExp, string]> = [
+  [/\bCORUQA\b/g, 'CORUÑA'],
+  [/\bCoruqa\b/g, 'Coruña'],
+  [/\bcoruqa\b/g, 'coruña'],
+  [/\bCORUCA\b/g, 'CORUÑA'],
+  [/\bCoruca\b/g, 'Coruña'],
+  [/\bcoruca\b/g, 'coruña'],
+  [/\bLA CORUQA\b/g, 'LA CORUÑA'],
+  [/\bLa Coruqa\b/g, 'La Coruña'],
+  [/\bLA CORUCA\b/g, 'LA CORUÑA'],
+  [/\bLa Coruca\b/g, 'La Coruña'],
+  [/\bRACAS\b/g, 'RAÑAS'],
+  [/\bRacas\b/g, 'Rañas'],
+  [/\bracas\b/g, 'rañas'],
+  [/EspaC1a/gi, 'España'],
+  [/ESPAC1A/g, 'ESPAÑA'],
+];
+
 function decodeLatin1CodeUnits(text: string): string {
   try {
     const bytes = Uint8Array.from(text, (ch) => ch.charCodeAt(0) & 0xff);
@@ -27,6 +46,14 @@ function decodeLatin1CodeUnits(text: string): string {
   } catch {
     return text;
   }
+}
+
+function repairStyleEnieAsQ(text: string): string {
+  let out = text;
+  for (const [re, good] of Q_FOR_N_LITERALS) {
+    out = out.replace(re, good);
+  }
+  return out;
 }
 
 export function repairStyleText(value: string | null | undefined): string {
@@ -41,6 +68,8 @@ export function repairStyleText(value: string | null | undefined): string {
   if (/[\u0080-\u00ff]/.test(text)) {
     text = decodeLatin1CodeUnits(text);
   }
+
+  text = repairStyleEnieAsQ(text);
 
   return text;
 }

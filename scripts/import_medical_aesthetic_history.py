@@ -659,7 +659,8 @@ def appointment_already_linked(cur: Any, appointment_id: str, current_history_id
     return bool(cur.fetchone())
 
 
-def find_existing_history(cur: Any, customer_id: str, source_key: str) -> dict[str, Any] | None:
+def find_existing_history(cur: Any, customer_id: str, source_key: str, fecha: str | None = None) -> dict[str, Any] | None:
+    """Busca por import_key exacto; si no, por misma fecha de import medicina (evita v1/v2 dup)."""
     cur.execute(
         """
         SELECT id::text, appointment_id::text
@@ -670,6 +671,30 @@ def find_existing_history(cur: Any, customer_id: str, source_key: str) -> dict[s
         LIMIT 1
         """,
         (customer_id, f"%import_key={source_key}%"),
+    )
+    row = cur.fetchone()
+    if row:
+        return dict(row)
+    if not fecha:
+        return None
+    cur.execute(
+        """
+        SELECT id::text, appointment_id::text
+        FROM public.historial_clinico
+        WHERE customer_id = %s
+          AND fecha = %s::date
+          AND observaciones LIKE %s
+        ORDER BY
+          CASE WHEN observaciones LIKE %s THEN 0 ELSE 1 END,
+          created_at DESC NULLS LAST
+        LIMIT 1
+        """,
+        (
+            customer_id,
+            fecha,
+            "%Fichas medicina.csv%",
+            "%medicina_estetica_csv_v2:%",
+        ),
     )
     row = cur.fetchone()
     return dict(row) if row else None
@@ -712,7 +737,7 @@ def upsert_visit(
     customer: dict[str, Any],
     appointment_id: str | None,
 ) -> str:
-    existing = find_existing_history(cur, customer["id"], visit.source_key)
+    existing = find_existing_history(cur, customer["id"], visit.source_key, visit.fecha)
     observaciones = f"Importado de {SOURCE_LABEL}; import_key={visit.source_key}"
     payload = {
         "customer_id": customer["id"],
@@ -942,7 +967,7 @@ def run_import(args: argparse.Namespace) -> dict[str, Any]:
                 existing = None
                 appointment_id = None
                 if not str(customer["id"]).startswith("new:"):
-                    existing = find_existing_history(cur, customer["id"], visit.source_key)
+                    existing = find_existing_history(cur, customer["id"], visit.source_key, visit.fecha)
                     appointment_id, appts, appt_issue = find_appointment(
                         cur, args.company_id, customer, visit.fecha
                     )

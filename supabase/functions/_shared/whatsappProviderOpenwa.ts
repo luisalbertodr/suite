@@ -4,7 +4,7 @@ import {
   type WhatsappProviderConfig,
 } from './whatsappProviderTypes.ts';
 import { OPENWA_CHATS_TIMEOUT_MS, PROVIDER_MEDIA_TIMEOUT_MS, providerJson, WhatsappProviderError } from './whatsappProviderClient.ts';
-import { sanitizeWhatsappMessageType } from './whatsappMessageType.ts';
+import { sanitizeWhatsappMessageType, inferWhatsappMediaFromRaw, isWeakWhatsappMessageType } from './whatsappMessageType.ts';
 
 export type OpenwaMediaMeta = {
   media_url: string | null;
@@ -356,6 +356,15 @@ export function openwaExtractMediaMeta(msg: Record<string, unknown>): OpenwaMedi
       media_size: typeof m.size === 'number' ? m.size : null,
     };
   }
+  const inferred = inferWhatsappMediaFromRaw(msg);
+  if (inferred) {
+    return {
+      media_url: inferred.mediaUrl,
+      media_mime_type: inferred.mediaMime,
+      media_filename: sanitizeMediaFilename(inferred.mediaFilename, inferred.type),
+      media_size: inferred.mediaSize,
+    };
+  }
   const isMediaType = ['image', 'video', 'sticker', 'audio', 'document', 'ptt', 'voice'].includes(
     type,
   );
@@ -598,16 +607,29 @@ export function buildOpenwaMessageUpsertRow(
   raw: Record<string, unknown>,
   chatId: string,
   companyId: string,
+  timestampIso?: string,
 ): Record<string, unknown> {
   const m = normalizeOpenwaMessageToWahaShape(raw, chatId);
   const id = openwaMessageSerializedId(raw) ||
     String((m.id as { _serialized?: string })?._serialized ?? '');
   const tsNum = Number(m.timestamp ?? raw.timestamp ?? 0);
+  const inferred = inferWhatsappMediaFromRaw(raw);
   const media = openwaExtractMediaMeta(raw);
-  const msgType = sanitizeWhatsappMessageType(raw.type ?? m.type, {
-    mime: media.media_mime_type,
-    filename: media.media_filename,
-  });
+  const declaredType = String(raw.type ?? m.type ?? 'text');
+  const msgType = sanitizeWhatsappMessageType(
+    isWeakWhatsappMessageType(declaredType) && inferred
+      ? inferred.type
+      : declaredType,
+    {
+      mime: media.media_mime_type ?? inferred?.mediaMime,
+      filename: media.media_filename ?? inferred?.mediaFilename,
+    },
+  );
+  const caption =
+    (typeof raw.caption === 'string' ? raw.caption : null) ??
+    (typeof m.caption === 'string' ? m.caption : null) ??
+    inferred?.caption ??
+    null;
   return {
     company_id: companyId,
     chat_id: chatId,
@@ -616,18 +638,20 @@ export function buildOpenwaMessageUpsertRow(
     from_jid: String(raw.from ?? m.from ?? chatId),
     from_me: openwaMessageFromMe(raw),
     type: msgType,
-    body: typeof raw.body === 'string' ? raw.body : (typeof m.body === 'string' ? m.body : null),
-    caption: typeof m.caption === 'string' ? m.caption : null,
-    media_url: media.media_url,
-    media_mime_type: media.media_mime_type,
-    media_filename: media.media_filename,
-    media_size: media.media_size,
+    body: typeof raw.body === 'string'
+      ? raw.body
+      : (typeof m.body === 'string' ? m.body : null) ?? inferred?.body ?? null,
+    caption,
+    media_url: media.media_url ?? inferred?.mediaUrl ?? null,
+    media_mime_type: media.media_mime_type ?? inferred?.mediaMime ?? null,
+    media_filename: media.media_filename ?? inferred?.mediaFilename ?? null,
+    media_size: media.media_size ?? inferred?.mediaSize ?? null,
     ack: 0,
     quoted_message_id: null,
-    timestamp: tsNum
-      ? new Date(tsNum * 1000).toISOString()
-      : new Date().toISOString(),
-    raw: m as unknown,
+    timestamp: timestampIso ??
+      (tsNum ? new Date(tsNum * 1000).toISOString() : new Date().toISOString()),
+    // Conservar el mensaje OpenWA original (_data.imageMessage, etc.).
+    raw: raw,
   };
 }
 

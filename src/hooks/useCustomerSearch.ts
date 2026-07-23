@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import {
@@ -9,7 +9,13 @@ import {
 
 const DEBOUNCE_MS = 300;
 
-export function useCustomerSearch(companyId: string | null | undefined, rawQuery: string) {
+export type CustomerListMode = 'active' | 'archived';
+
+export function useCustomerSearch(
+  companyId: string | null | undefined,
+  rawQuery: string,
+  mode: CustomerListMode = 'active',
+) {
   const [debouncedQuery, setDebouncedQuery] = useState(rawQuery.trim());
 
   useEffect(() => {
@@ -17,13 +23,27 @@ export function useCustomerSearch(companyId: string | null | undefined, rawQuery
     return () => clearTimeout(t);
   }, [rawQuery]);
 
-  const ready = Boolean(companyId) && isCustomerSearchQueryReady(debouncedQuery);
+  const queryReady =
+    mode === 'archived'
+      ? Boolean(companyId)
+      : Boolean(companyId) && isCustomerSearchQueryReady(debouncedQuery);
 
   const query = useQuery({
-    queryKey: ['customers-search', companyId, debouncedQuery],
-    enabled: ready,
+    queryKey: ['customers-search', mode, companyId, debouncedQuery],
+    enabled: queryReady,
     queryFn: async () => {
       const q = debouncedQuery.trim();
+      if (mode === 'archived') {
+        const { data, error } = await supabase.rpc('search_archived_customers', {
+          p_catalog_company_id: companyId!,
+          p_query: q || null,
+          p_limit: 100,
+        });
+        if (error) throw error;
+        const rows = (data ?? []) as CustomerSearchRow[];
+        return q ? filterCustomersBySearch(rows, q) : rows;
+      }
+
       if (!isCustomerSearchQueryReady(q)) return [];
       const { data, error } = await supabase.rpc('search_customers', {
         p_catalog_company_id: companyId!,
@@ -37,10 +57,10 @@ export function useCustomerSearch(companyId: string | null | undefined, rawQuery
   });
 
   return {
-    customers: ready ? (query.data ?? []) : [],
-    isLoading: ready && query.isLoading,
-    isFetching: ready && query.isFetching,
-    isReady: ready,
+    customers: queryReady ? (query.data ?? []) : [],
+    isLoading: queryReady && query.isLoading,
+    isFetching: queryReady && query.isFetching,
+    isReady: queryReady,
     debouncedQuery,
   };
 }

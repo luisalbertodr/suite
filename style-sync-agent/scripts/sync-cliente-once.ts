@@ -66,6 +66,10 @@ const { data, error } = await supabase.schema("dunasoft").rpc("style_clientes_ap
   p_fecnac: null,
   p_obsoleto: str(src, "obsoleto").toUpperCase() === "SI",
   p_sync_version: 0,
+  p_altura: (() => {
+    const n = Number(str(src, "altura"));
+    return Number.isFinite(n) && n >= 100 && n <= 230 ? Math.round(n) : null;
+  })(),
 });
 if (error) throw error;
 console.log(JSON.stringify(data, null, 2));

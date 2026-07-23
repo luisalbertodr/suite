@@ -64,8 +64,45 @@ export function ymdFromVfpDbfDateRaw(raw: string): string | null {
   return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
 }
 
+/** True si el buffer parece UTF-8 occidental (C2/C3…) y no CP1252 puro (p. ej. F1=ñ). */
+function looksLikeUtf8Payload(raw: Buffer): boolean {
+  if (raw.length === 0) return false;
+  let hasWestern = false;
+  for (let i = 0; i < raw.length - 1; i++) {
+    const b = raw[i]!;
+    if ((b === 0xc2 || b === 0xc3) && (raw[i + 1]! & 0xc0) === 0x80) {
+      hasWestern = true;
+      break;
+    }
+  }
+  if (!hasWestern) return false;
+  try {
+    const text = raw.toString("utf8");
+    if (text.includes("\uFFFD")) return false;
+    const again = Buffer.from(text, "utf8");
+    if (!again.equals(raw)) return false;
+    // Si al pasar a latin1/cp1252-ish se acorta, era UTF-8 multi-byte.
+    let single = 0;
+    for (const ch of text) {
+      const cp = ch.codePointAt(0)!;
+      single += cp <= 0xff ? 1 : 2;
+    }
+    return single < raw.length;
+  } catch {
+    return false;
+  }
+}
+
 function decodeDbfFieldChars(buf: Buffer, start: number, len: number): string {
-  return buf.slice(start, start + len).toString('latin1').replace(/\0/g, '').trim();
+  const slice = buf.slice(start, start + len);
+  let end = slice.length;
+  while (end > 0 && (slice[end - 1] === 0x00 || slice[end - 1] === 0x20)) end -= 1;
+  const raw = slice.subarray(0, end);
+  // Suite→Style escribió UTF-8 en campos CP1252: leer como UTF-8 evita Ã± en Postgres.
+  if (looksLikeUtf8Payload(raw)) {
+    return raw.toString("utf8").replace(/\0/g, "").trim();
+  }
+  return raw.toString("latin1").replace(/\0/g, "").trim();
 }
 
 function readRawFieldAt(buf: Buffer, layout: DbfLayout, recOff: number, fieldName: string): string {

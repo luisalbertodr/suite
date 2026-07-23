@@ -1,0 +1,41 @@
+version: 1
+ble:
+  # Vacío = auto-discovery. Lista permitida en .env → SCALE_MACS=mac1,mac2
+  # (así el bridge escucha cualquiera de las MorphoScan de la clínica).
+  # scale_mac: "60:30:F2:74:26:E2"
+  adapter: "hci0"
+users:
+  - name: "default"
+    slug: "default"
+    height: 170
+    birth_date: "2000-01-01"
+    gender: "male"
+    is_athlete: false
+    weight_range:
+      min: 1
+      max: 300
+    exporters:
+      - type: webhook
+        url: "https://supabase.lipoout.com/functions/v1/scale-ingest"
+        method: POST
+        headers:
+          X-Scale-Ingest-Secret: "${SCALE_INGEST_SECRET}"
+          X-Suite-Company-Id: "${SUITE_COMPANY_ID}"
+          # scale-id dinámico lo manda el adapter (MAC conectada) en el JSON
+        timeout: 15000
+scale:
+  weight_unit: kg
+  height_unit: cm
+global_exporters:
+  - type: webhook
+    url: "https://supabase.lipoout.com/functions/v1/scale-ingest"
+    method: POST
+    headers:
+      X-Scale-Ingest-Secret: "${SCALE_INGEST_SECRET}"
+      X-Suite-Company-Id: "${SUITE_COMPANY_ID}"
+    timeout: 15000
+runtime:
+  continuous_mode: true
+  scan_cooldown: 5
+  dry_run: false
+  debug: false

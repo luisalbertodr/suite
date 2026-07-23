@@ -218,7 +218,56 @@ export type ClinicalHistoryVisitDiff = {
   aviso: string | null;
 };
 
-/** Diff no redundante: AP solo si cambió (o es la primera visita). Orden cronológico ascendente. */
+export type AntecedentesHistoryEntry = {
+  fecha: string;
+  text: string;
+  /** Texto completo de AP en esa fecha (para auditoría); en UI usamos `text` (delta). */
+  fullText: string;
+  recordId: string;
+  isInitial: boolean;
+};
+
+function normalizeApPhrase(value: string): string {
+  return value.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+/** Parte el AP en frases/líneas para comparar igualdad exacta (tras normalizar espacios). */
+export function splitAntecedentesPhrases(text: string): string[] {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const phrases: string[] = [];
+  for (const line of lines) {
+    const parts = line
+      .split(/(?<=[.!?…;])\s+/)
+      .map((part) => part.trim())
+      .filter(Boolean);
+    if (parts.length > 1) phrases.push(...parts);
+    else phrases.push(line);
+  }
+  return phrases;
+}
+
+/**
+ * Devuelve solo las frases de `current` que no estaban ya en `previous`
+ * (comparación exacta normalizando espacios/mayúsculas).
+ */
+export function diffAntecedentesAddedText(previous: string, current: string): string {
+  const prev = previous.trim();
+  const curr = current.trim();
+  if (!curr) return '';
+  if (!prev) return curr;
+  if (normalizeApPhrase(prev) === normalizeApPhrase(curr)) return '';
+
+  const prevSet = new Set(splitAntecedentesPhrases(prev).map(normalizeApPhrase));
+  const added = splitAntecedentesPhrases(curr).filter(
+    (phrase) => !prevSet.has(normalizeApPhrase(phrase)),
+  );
+  return added.join('\n').trim();
+}
+
+/** Diff no redundante: AP solo si cambió; tras la 1ª visita solo frases nuevas. */
 export function diffClinicalHistoryVisits(
   records: ClinicalHistoryRecord[],
 ): ClinicalHistoryVisitDiff[] {
@@ -227,7 +276,9 @@ export function diffClinicalHistoryVisits(
     const prev = index > 0 ? asc[index - 1] : null;
     const ap = getAntecedentesText(record);
     const prevAp = prev ? getAntecedentesText(prev) : '';
-    const showAntecedentes = Boolean(ap) && (index === 0 || ap !== prevAp);
+    const changed = Boolean(ap) && (index === 0 || normalizeApPhrase(ap) !== normalizeApPhrase(prevAp));
+    const delta = index === 0 ? ap : diffAntecedentesAddedText(prevAp, ap);
+    const showAntecedentes = changed && Boolean(delta);
     const motivo = (record.motivo_consulta ?? '').trim() || null;
     const tratamiento = (record.tratamiento ?? '').trim() || null;
     const aviso = (record.aviso_text ?? '').trim() || null;
@@ -235,7 +286,7 @@ export function diffClinicalHistoryVisits(
       record,
       isFirst: index === 0,
       showAntecedentes,
-      antecedentesText: showAntecedentes ? ap : null,
+      antecedentesText: showAntecedentes ? delta : null,
       motivo,
       tratamiento,
       aviso,
@@ -258,26 +309,31 @@ export function latestAntecedentesText(records: ClinicalHistoryRecord[]): string
   return null;
 }
 
-export type AntecedentesHistoryEntry = {
-  fecha: string;
-  text: string;
-  recordId: string;
-  isInitial: boolean;
-};
-
-/** Versiones de AP con fecha (solo cuando el texto cambia respecto a la visita anterior). */
+/** Versiones de AP con fecha: la primera completa; después solo texto nuevo. */
 export function buildAntecedentesHistory(
   records: ClinicalHistoryRecord[],
 ): AntecedentesHistoryEntry[] {
-  const diffs = diffClinicalHistoryVisits(records);
-  return diffs
-    .filter((d) => d.showAntecedentes && d.antecedentesText)
-    .map((d) => ({
-      fecha: d.record.fecha,
-      text: d.antecedentesText as string,
-      recordId: d.record.id,
-      isInitial: d.isFirst,
-    }));
+  const asc = sortClinicalHistoryAscending(filterConsultaRecords(records));
+  const entries: AntecedentesHistoryEntry[] = [];
+  let previousFull = '';
+
+  for (let index = 0; index < asc.length; index += 1) {
+    const record = asc[index];
+    const full = getAntecedentesText(record);
+    if (!full) continue;
+    const isInitial = entries.length === 0;
+    const delta = isInitial ? full : diffAntecedentesAddedText(previousFull, full);
+    previousFull = full;
+    if (!delta) continue;
+    entries.push({
+      fecha: record.fecha,
+      text: delta,
+      fullText: full,
+      recordId: record.id,
+      isInitial,
+    });
+  }
+  return entries;
 }
 
 export async function fetchClinicalHistoryList(customerId: string): Promise<ClinicalHistoryRecord[]> {

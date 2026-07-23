@@ -10,6 +10,7 @@ import { writeDeadLetter } from "./deadLetter.js";
 import { dbfDateFromJsDate } from "./dbfSource.js";
 import { isRetryableFsError, withFsRetry } from "./fsRetry.js";
 import { maybeTriggerInboundWorker } from "./inboundWorkerTrigger.js";
+import { writeVfpJsonFile } from "./vfpJsonFile.js";
 import { resolveVersion, serviciosJsonToLegacy } from "./servicios.js";
 import {
   drainOutboxAcks,
@@ -497,7 +498,7 @@ async function pollInboundToJson(): Promise<void> {
 
     await withFsRetry(
       () => {
-        fs.writeFileSync(out, JSON.stringify(toVfpPullShape(row), null, 2), "utf8");
+        writeVfpJsonFile(out, toVfpPullShape(row));
       },
       { label: `write ${out}`, onRetry: (a, e) => logFsRetry("inbound_write", a, e) },
     );

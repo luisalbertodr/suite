@@ -112,11 +112,20 @@ def load_customers(cur: Any, company_id: str | None) -> list[dict[str, Any]]:
     columns = ", ".join(SELECT_COLUMNS)
     if company_id:
         cur.execute(
-            f"SELECT {columns} FROM public.customers WHERE company_id = %s",
+            f"""
+            SELECT {columns} FROM public.customers
+            WHERE company_id = %s
+              AND archived_at IS NULL
+            """,
             (company_id,),
         )
     else:
-        cur.execute(f"SELECT {columns} FROM public.customers")
+        cur.execute(
+            f"""
+            SELECT {columns} FROM public.customers
+            WHERE archived_at IS NULL
+            """
+        )
     return [dict(row) for row in cur.fetchall()]
 
 
@@ -128,6 +137,43 @@ def group_duplicates(customers: list[dict[str, Any]]) -> dict[tuple[str, str], l
             continue
         groups.setdefault(key, []).append(customer)
     return {key: members for key, members in groups.items() if len(members) > 1}
+
+
+def codcli_num(value: Any) -> int | None:
+    if not has_value(value):
+        return None
+    text = str(value).strip()
+    if not re.fullmatch(r"[0-9]+", text):
+        return None
+    return int(text)
+
+
+def is_suite_auto_codcli(value: Any) -> bool:
+    n = codcli_num(value)
+    return n is not None and n >= 10_000_000
+
+
+def is_style_codcli(value: Any) -> bool:
+    n = codcli_num(value)
+    return n is not None and n < 10_000_000
+
+
+def phone_digits(customer: dict[str, Any]) -> str | None:
+    for field in ("phone_mobile", "phone", "phone_home"):
+        raw = customer.get(field)
+        if not has_value(raw):
+            continue
+        digits = re.sub(r"\D+", "", str(raw))
+        if len(digits) >= 9:
+            return digits
+    return None
+
+
+def dni_key(customer: dict[str, Any]) -> str | None:
+    raw = customer.get("tax_id")
+    if not has_value(raw):
+        return None
+    return re.sub(r"[^0-9A-Za-z]", "", str(raw)).upper() or None
 
 
 def plan_merges(groups: dict[tuple[str, str], list[dict[str, Any]]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -143,26 +189,97 @@ def plan_merges(groups: dict[tuple[str, str], list[dict[str, Any]]]) -> tuple[li
                     "company_id": company_id,
                     "normalized_name": norm,
                     "name": sample_name,
+                    "reason": "single_codcli",
                     "winner": with_code[0],
                     "losers": without_code,
                 }
             )
-        else:
-            skipped.append(
+            continue
+
+        style_members = [m for m in members if is_style_codcli(m.get("legacy_codcli"))]
+        suite_autos = [m for m in members if is_suite_auto_codcli(m.get("legacy_codcli"))]
+        if len(style_members) == 1 and suite_autos:
+            merges.append(
                 {
                     "company_id": company_id,
-                    "name": sample_name,
                     "normalized_name": norm,
-                    "reason": "multiple_with_code" if len(with_code) > 1 else "no_code_in_group",
-                    "members": [
-                        {"id": m["id"], "name": m["name"], "legacy_codcli": m.get("legacy_codcli")}
-                        for m in members
-                    ],
+                    "name": sample_name,
+                    "reason": "style_vs_suite_auto_unique_name",
+                    "winner": style_members[0],
+                    "losers": suite_autos,
                 }
             )
+            continue
+
+        skipped.append(
+            {
+                "company_id": company_id,
+                "name": sample_name,
+                "normalized_name": norm,
+                "reason": "multiple_with_code" if len(with_code) > 1 else "no_code_in_group",
+                "members": [
+                    {"id": m["id"], "name": m["name"], "legacy_codcli": m.get("legacy_codcli")}
+                    for m in members
+                ],
+            }
+        )
     merges.sort(key=lambda m: m["name"].lower())
     skipped.sort(key=lambda m: m["name"].lower())
     return merges, skipped
+
+
+def plan_cross_merges(customers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Une suite-auto (legacy_codcli >= 10M) con Style por DNI o teléfono únicos."""
+    by_id = {c["id"]: c for c in customers}
+    claimed_losers: set[str] = set()
+    merges: list[dict[str, Any]] = []
+
+    styles = [c for c in customers if is_style_codcli(c.get("legacy_codcli"))]
+    autos = [c for c in customers if is_suite_auto_codcli(c.get("legacy_codcli"))]
+
+    def index_unique(items: list[dict[str, Any]], key_fn) -> dict[str, dict[str, Any]]:
+        buckets: dict[str, list[dict[str, Any]]] = {}
+        for item in items:
+            key = key_fn(item)
+            if not key:
+                continue
+            buckets.setdefault(key, []).append(item)
+        return {k: v[0] for k, v in buckets.items() if len(v) == 1}
+
+    style_by_dni = index_unique(styles, dni_key)
+    style_by_phone = index_unique(styles, phone_digits)
+
+    for auto in autos:
+        if auto["id"] in claimed_losers:
+            continue
+        winner = None
+        reason = None
+        dni = dni_key(auto)
+        if dni and dni in style_by_dni:
+            winner = style_by_dni[dni]
+            reason = "style_vs_suite_auto_dni"
+        else:
+            phone = phone_digits(auto)
+            if phone and phone in style_by_phone:
+                winner = style_by_phone[phone]
+                reason = "style_vs_suite_auto_phone"
+        if not winner or winner["id"] == auto["id"]:
+            continue
+        if winner["company_id"] != auto["company_id"]:
+            continue
+        claimed_losers.add(auto["id"])
+        merges.append(
+            {
+                "company_id": auto["company_id"],
+                "normalized_name": normalize_name(auto["name"]),
+                "name": auto["name"],
+                "reason": reason,
+                "winner": by_id[winner["id"]],
+                "losers": [auto],
+            }
+        )
+    merges.sort(key=lambda m: m["name"].lower())
+    return merges
 
 
 def compute_field_updates(winner: dict[str, Any], loser: dict[str, Any], include_phones: bool) -> dict[str, Any]:
@@ -262,12 +379,21 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 report["customers_loaded"] = len(customers)
                 groups = group_duplicates(customers)
                 merges, skipped = plan_merges(groups)
+                # DNI/teléfono: cubre InBody y altas Suite sin nombre único Style.
+                name_loser_ids = {loser["id"] for m in merges for loser in m["losers"]}
+                cross = [
+                    m
+                    for m in plan_cross_merges(customers)
+                    if all(loser["id"] not in name_loser_ids for loser in m["losers"])
+                ]
+                merges.extend(cross)
             report["skipped_groups"] = skipped
 
             for merge in merges:
                 winner = merge["winner"]
                 merge_entry: dict[str, Any] = {
                     "name": merge["name"],
+                    "reason": merge.get("reason"),
                     "winner": {
                         "id": winner["id"],
                         "name": winner["name"],

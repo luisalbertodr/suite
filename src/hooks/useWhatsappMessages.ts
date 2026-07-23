@@ -21,7 +21,7 @@ type SyncChatHistoryResponse = {
 export type WhatsappSyncMode = 'auto' | 'full' | 'recent';
 
 const MESSAGE_LIST_COLUMNS =
-  'id,company_id,chat_id,waha_message_id,from_jid,from_me,type,body,caption,media_url,media_mime_type,media_filename,media_size,ack,quoted_message_id,timestamp,created_at,updated_at';
+  'id,company_id,chat_id,waha_message_id,from_jid,from_me,type,body,caption,media_url,media_mime_type,media_filename,media_size,ack,quoted_message_id,timestamp,created_at,updated_at,raw';
 
 /** Mensajes recientes en BD (rápido). Historial completo se pagina aparte. */
 const MESSAGE_PAGE_SIZE = 100;
@@ -122,25 +122,22 @@ function dedupeWhatsappMessages(rows: WhatsappMessageRow[]): WhatsappMessageRow[
   return sortWhatsappMessages([...byKey.values()]);
 }
 
-/** Solo corrige desfase pequeño del proveedor (<3s); no reordena conversaciones reales. */
-const INCOMING_CLOCK_SKEW_MS = 3_000;
+/** Solo corrige desfase ≤1s al append en vivo (mismo segundo / reloj). */
+const INCOMING_CLOCK_SKEW_MS = 1_000;
 
 function adjustIncomingBeforeAppend(
   list: WhatsappMessageRow[],
   incoming: WhatsappMessageRow,
 ): WhatsappMessageRow {
-  if (incoming.from_me) return incoming;
-  let lastOutgoingMs = 0;
+  let maxMs = 0;
   for (const m of list) {
-    if (m.from_me || m.id.startsWith('pending-')) {
-      lastOutgoingMs = Math.max(lastOutgoingMs, parseMessageTime(m));
-    }
+    maxMs = Math.max(maxMs, parseMessageTime(m));
   }
-  if (lastOutgoingMs === 0) return incoming;
+  if (maxMs === 0) return incoming;
   const incMs = parseMessageTime(incoming);
-  const skew = lastOutgoingMs - incMs;
-  if (skew > 0 && skew <= INCOMING_CLOCK_SKEW_MS) {
-    return { ...incoming, timestamp: new Date(lastOutgoingMs + 1).toISOString() };
+  const skew = maxMs - incMs;
+  if (skew >= 0 && skew <= INCOMING_CLOCK_SKEW_MS) {
+    return { ...incoming, timestamp: new Date(maxMs + 1).toISOString() };
   }
   return incoming;
 }
@@ -397,13 +394,13 @@ export const useWhatsappMessages = (
     const tick = () => {
       if (document.visibilityState !== 'visible') return;
       if (refreshFromWaha.isPending) return;
-      const cached = queryClient.getQueryData<WhatsappMessageRow[]>(key);
-      if (shouldSkipRecentProviderSync(cached, historySyncedAt, lastMessageAt)) return;
+      // Siempre reconsultar al proveedor con el chat abierto: si el realtime
+      // se cae (p. ej. reinicio de Kong), la UI no se queda desfasada.
       refreshFromWaha.mutate('recent', { onError: () => undefined });
     };
     const timer = window.setInterval(tick, RECENT_POLL_MS);
     return () => window.clearInterval(timer);
-  }, [enabled, chatIds.join('|'), historySyncedAt, lastMessageAt, isOpenwa]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [enabled, chatIds.join('|'), isOpenwa]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sendMessage = useMutation({
     mutationFn: async (input: SendMessageInput) => {

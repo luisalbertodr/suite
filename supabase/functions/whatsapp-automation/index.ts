@@ -7,6 +7,10 @@ import {
   runAppointmentRemindersForCompany,
   sendAutomatedWhatsapp,
 } from '../_shared/whatsappAutomationDispatch.ts';
+import {
+  resolveTreatmentReminderTemplate,
+  type AppointmentReminderCategory,
+} from '../_shared/appointmentReminderTemplates.ts';
 import { runMarketingLeadRemindersForCompany } from '../_shared/marketingWhatsappAutomation.ts';
 import {
   runMarketingWhatsappQueueForCompany,
@@ -24,6 +28,7 @@ type Body = {
   action?: 'run_reminders' | 'test_send';
   company_id?: string;
   test_type?: 'day_before' | 'hour_before';
+  treatment_category?: string;
 };
 
 const json = (body: unknown, status = 200) =>
@@ -148,18 +153,28 @@ serve(async (req) => {
   if (action === 'test_send') {
     const settings = await loadAutomationSettings(admin, companyId);
     const testPhone = settings.test_phone || '667435503';
-    const sampleDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
-    const template =
-      body.test_type === 'hour_before'
+    const kind = body.test_type === 'hour_before' ? 'hour_before' : 'day_before';
+    const categoryRaw = String(body.treatment_category ?? 'otros');
+    const category = (
+      ['laser_fotodepilacion', 'micropigmentacion', 'medicina', 'otros'].includes(categoryRaw)
+        ? categoryRaw
+        : 'otros'
+    ) as AppointmentReminderCategory;
+    const template = resolveTreatmentReminderTemplate(
+      settings.appointment_reminder_templates,
+      category,
+      kind,
+      kind === 'hour_before'
         ? settings.appointment_reminder_hour_before_message ?? defaultHourBeforeMessage()
-        : settings.appointment_reminder_day_before_message ?? defaultDayBeforeMessage();
+        : settings.appointment_reminder_day_before_message ?? defaultDayBeforeMessage(),
+    );
     const text = template
       .replace(/\{nombre\}/g, 'María')
       .replace(/\{nombre_completo\}/g, 'María García')
       .replace(/\{fecha_cita\}/g, 'mañana 15 de junio')
       .replace(/\{hora_cita\}/g, '11:00')
       .replace(/\{titulo\}/g, 'Consulta')
-      .replace(/\{profesional\}/g, 'Ana')
+      .replace(/\{profesional\}/g, 'la Dra. Delgado')
       .replace(/\{cita\}/g, 'mañana 15 de junio 11:00');
 
     const res = await sendAutomatedWhatsapp(admin, companyId, testPhone, text, {

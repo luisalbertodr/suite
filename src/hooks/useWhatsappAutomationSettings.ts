@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import type { AppointmentReminderTemplates } from '@/lib/appointmentReminderTemplates';
+import { DEFAULT_TREATMENT_REMINDER_TEMPLATES } from '@/lib/appointmentReminderTemplates';
 
 export type WhatsappAutomationSettings = {
   company_id: string;
@@ -12,6 +14,7 @@ export type WhatsappAutomationSettings = {
   appointment_reminder_hour_before_enabled: boolean;
   appointment_reminder_hour_before_message: string | null;
   appointment_reminder_send_hour_start: number;
+  appointment_reminder_templates?: AppointmentReminderTemplates | null;
   marketing_queue_hour_start: number;
   marketing_queue_hour_end: number;
   phone_missed_whatsapp_enabled: boolean;
@@ -19,9 +22,9 @@ export type WhatsappAutomationSettings = {
 };
 
 export const DEFAULT_DAY_BEFORE =
-  'Hola {nombre}, te recordamos tu cita mañana {fecha_cita} a las {hora_cita} en Lipoout. Si necesitas cambiarla, responde a este mensaje.';
+  DEFAULT_TREATMENT_REMINDER_TEMPLATES.otros.day_before;
 export const DEFAULT_HOUR_BEFORE =
-  'Hola {nombre}, tu cita es dentro de 1 hora ({hora_cita}). Te esperamos en Lipoout.';
+  DEFAULT_TREATMENT_REMINDER_TEMPLATES.otros.hour_before;
 
 export function useWhatsappAutomationSettings() {
   const { companyId, loading: companyLoading } = useCompanyFilter();
@@ -78,14 +81,18 @@ export function useWhatsappAutomationSettings() {
   });
 
   const sendTest = useMutation({
-    mutationFn: async (testType: 'day_before' | 'hour_before') => {
+    mutationFn: async (input: {
+      testType: 'day_before' | 'hour_before';
+      treatmentCategory?: string;
+    }) => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Sin sesión');
       const { data, error } = await supabase.functions.invoke('whatsapp-automation', {
         body: {
           action: 'test_send',
           company_id: companyId,
-          test_type: testType,
+          test_type: input.testType,
+          treatment_category: input.treatmentCategory ?? 'otros',
         },
         headers: { Authorization: `Bearer ${session.access_token}` },
       });

@@ -1,2 +1,7 @@
-SELECT dunasoft.style_price_scale('5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4'::uuid) AS est_scale,
-       dunasoft.style_price_scale('816af484-92a0-4f65-a5a7-1c907aa4bb3d'::uuid) AS med_scale;
+SELECT measured_at, device, weight_kg, customer_id IS NOT NULL AS linked,
+       bone_mass_kg, body_water_pct, visceral_fat_index, metabolic_age, source,
+       left(raw_payload::text, 120) AS raw_preview
+FROM inbody_measurements
+WHERE device = 'morphoscan' OR source ILIKE '%ble%' OR source ILIKE '%scale%'
+ORDER BY measured_at DESC
+LIMIT 8;

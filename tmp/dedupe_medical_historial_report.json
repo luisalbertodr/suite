@@ -1,0 +1,440 @@
+{
+  "apply": true,
+  "dup_groups": 79,
+  "keep": 85,
+  "delete_planned": 77,
+  "deleted": 77,
+  "samples": [
+    {
+      "customer_id": "df59aaaa-fdf9-45e9-8989-d32e5998df7a",
+      "fecha": "2026-01-21",
+      "keep": [
+        "6fa0098b-42b9-43dd-8563-b60b14c76b58"
+      ],
+      "delete": [
+        "f1058267-a8ae-460a-9f15-650f8f2ce668"
+      ],
+      "motivos": [
+        "Lesiones en párpados.",
+        "Lesiones en párpados."
+      ]
+    },
+    {
+      "customer_id": "698cd9a2-6f00-4c2a-87cc-0b300c2da9b8",
+      "fecha": "2026-05-13",
+      "keep": [
+        "1951573f-83f3-4856-a38a-e532d560670f"
+      ],
+      "delete": [
+        "2ec2994c-d3f9-4d4d-920e-fda7dcb25cdd"
+      ],
+      "motivos": [
+        "grasa periumbilical.",
+        "grasa periumbilical."
+      ]
+    },
+    {
+      "customer_id": "89051aaa-d16d-4f06-895b-69cc4f6493e9",
+      "fecha": "2025-05-25",
+      "keep": [
+        "97670ed4-2bde-4d08-a45d-279caa794877"
+      ],
+      "delete": [
+        "fd47192a-0df0-46ef-bab0-c3ef31fe3797"
+      ],
+      "motivos": [
+        "ojeras , arrugas de expresión e hidratación labial.",
+        "ojeras , arrugas de expresión e hidratación labial."
+      ]
+    },
+    {
+      "customer_id": "f9b582ea-3e64-4284-ab1f-b550c40ef85c",
+      "fecha": "2025-12-13",
+      "keep": [
+        "09815c69-0933-40b0-8a33-7d2c94b4d1c1"
+      ],
+      "delete": [
+        "aa031cd6-0a13-4947-a8b5-2d3ce38aeafd"
+      ],
+      "motivos": [
+        "hidratación.",
+        "hidratación."
+      ]
+    },
+    {
+      "customer_id": "2e0fed44-535d-4cd1-95eb-071cddd27a30",
+      "fecha": "2025-11-24",
+      "keep": [
+        "cbe38884-ff0c-4e82-abe1-1b407daaad29"
+      ],
+      "delete": [
+        "cf94a148-38dd-4edb-b26b-d0bab891f1fb"
+      ],
+      "motivos": [
+        "lesiones  benignas en escote cuello cara y abdomen.",
+        "lesiones  benignas en escote cuello cara y abdomen."
+      ]
+    },
+    {
+      "customer_id": "fcfc0a39-9fad-4686-8810-9026e323dfcb",
+      "fecha": "2026-05-18",
+      "keep": [
+        "9e0e323a-252a-494e-bd34-c07e50989d06"
+      ],
+      "delete": [
+        "6280e74a-c2a6-4e0e-bbd1-3382a18d3780"
+      ],
+      "motivos": [
+        "deseo de mejoría concretamente de párpado caído. No le molestan demasiado las arrugas.  No desea tratamiento demasiado invasivos.",
+        "deseo de mejoría concretamente de párpado caído. No le molestan demasiado las arrugas.  No desea tratamiento demasiado invasivos."
+      ]
+    },
+    {
+      "customer_id": "858a6e0c-ac4d-473d-ac02-023863b5203e",
+      "fecha": "2026-04-29",
+      "keep": [
+        "75865760-16ad-4f5e-8236-4166b29449d8"
+      ],
+      "delete": [
+        "f4f93795-3e74-44b4-b869-7e9111b75014"
+      ],
+      "motivos": [
+        "grasa localizada lateral de pierna,",
+        "grasa localizada lateral de pierna,"
+      ]
+    },
+    {
+      "customer_id": "233ba9f8-fdf0-4705-9fbf-f05d88b5ebd0",
+      "fecha": "2026-05-25",
+      "keep": [
+        "6fd6ed44-1d61-4ecf-ab9d-45fbc6e41771"
+      ],
+      "delete": [
+        "c2416664-6496-4fe6-b7f7-d7082c6ec1da"
+      ],
+      "motivos": [
+        "cuello",
+        "cuello"
+      ]
+    },
+    {
+      "customer_id": "09e8ef5f-5743-4c3f-9062-094b7e7fc8e8",
+      "fecha": "2025-12-03",
+      "keep": [
+        "1b25fb69-9eca-41f0-9721-bbe3545e0689"
+      ],
+      "delete": [
+        "f45bfd10-e14b-4dd2-8ff0-4769d79f378b"
+      ],
+      "motivos": [
+        "Toxina",
+        "Toxina"
+      ]
+    },
+    {
+      "customer_id": "f7f46264-5e50-4967-8c9c-d35cd8d32fa5",
+      "fecha": "2026-03-30",
+      "keep": [
+        "f835ce81-0ce0-4b38-b452-dae9f7d208ec"
+      ],
+      "delete": [
+        "288c57c9-e7cb-4624-80f6-6fc21fc764f2",
+        "974a21a2-9901-4ec8-ae3c-5b9455e6b28a"
+      ],
+      "motivos": [
+        "lesiones benignas",
+        "lesiones benignas",
+        "lesiones benignas"
+      ]
+    },
+    {
+      "customer_id": "3c1bd91e-7abd-4346-b21b-fc12489d7c5a",
+      "fecha": "2026-04-29",
+      "keep": [
+        "b0b2a9bd-c111-4277-8b00-3bdb7b5681f2"
+      ],
+      "delete": [
+        "235e0caf-73a0-4236-a8d0-667053264396"
+      ],
+      "motivos": [
+        "peribucal",
+        "peribucal"
+      ]
+    },
+    {
+      "customer_id": "04ecdde8-6308-4b66-8061-fc6624fc2b19",
+      "fecha": "2025-12-29",
+      "keep": [
+        "ba726e80-9381-43bd-811c-2e326e745b28"
+      ],
+      "delete": [
+        "75ea093d-3f62-445d-8155-ed3d6ccda86f"
+      ],
+      "motivos": [
+        "toxina en entrecejo.",
+        "toxina en entrecejo."
+      ]
+    },
+    {
+      "customer_id": "98f6060e-de24-4858-837d-91a7e8b66ab2",
+      "fecha": "2026-04-15",
+      "keep": [
+        "1d406371-0290-4140-a60d-e2f82f6aef97"
+      ],
+      "delete": [
+        "b7d0a2d3-6369-40d6-9151-88f1d405c278"
+      ],
+      "motivos": [
+        "flacidez.",
+        "flacidez."
+      ]
+    },
+    {
+      "customer_id": "0c165187-4bee-41c0-9d53-b1a2ffff6f33",
+      "fecha": "2026-02-02",
+      "keep": [
+        "af138da3-c5db-4bb2-ab95-ff323ca2d558"
+      ],
+      "delete": [
+        "28fa2cc4-cb7f-49d9-9fb8-79ec4fb35b09"
+      ],
+      "motivos": [
+        "lesión benigna hemicara derecha.",
+        "lesión benigna hemicara derecha."
+      ]
+    },
+    {
+      "customer_id": "87d7726b-b4b9-4a3a-ba3a-86c1f577b38e",
+      "fecha": "2025-08-22",
+      "keep": [
+        "0a66385c-4d98-4fae-a23e-2b01e0c558b4"
+      ],
+      "delete": [
+        "d965af15-f073-4c46-981f-2735cfeea792"
+      ],
+      "motivos": [
+        "arrugas",
+        "arrugas"
+      ]
+    },
+    {
+      "customer_id": "73e14c03-317f-4f30-a92a-450d1cf40f88",
+      "fecha": "2026-01-21",
+      "keep": [
+        "a861775d-c132-4e11-8f5b-5cce5d11cdb8"
+      ],
+      "delete": [
+        "8917f03c-3db0-47e1-a14e-7ae8da9497cf"
+      ],
+      "motivos": [
+        "neuromoduladores",
+        "neuromoduladores"
+      ]
+    },
+    {
+      "customer_id": "d0620b5a-1f9c-4684-8154-5757c8acd3df",
+      "fecha": "2026-04-26",
+      "keep": [
+        "e0be75c2-490b-4703-8361-03ccbe8a54b3"
+      ],
+      "delete": [
+        "7dfc69cc-12ee-4233-9109-c226417b0e0d"
+      ],
+      "motivos": [
+        "skinbooster ha325d602 cada 5/28",
+        "skinbooster ha325d602 cada 5/28"
+      ]
+    },
+    {
+      "customer_id": "90ee9396-fa51-4127-9a45-fe8c5895ae69",
+      "fecha": "2025-11-08",
+      "keep": [
+        "29eea9c3-c3a8-478e-b4ed-5337c2dff093"
+      ],
+      "delete": [
+        "451e1524-55d4-46e0-9cb9-01e52c0f0a0f"
+      ],
+      "motivos": [
+        "arrugas dinámicas.",
+        "arrugas dinámicas."
+      ]
+    },
+    {
+      "customer_id": "d8a844ef-6369-487c-bb8c-d6328820b9b5",
+      "fecha": "2026-06-03",
+      "keep": [
+        "24cefa0f-11e2-45c3-ab30-162b02f39343"
+      ],
+      "delete": [
+        "d8f78459-4b06-4b37-818e-0f17df7162a2"
+      ],
+      "motivos": [
+        "lesiones en párpado inf derecho y mentón derecho y pecho izq",
+        "lesiones en párpado inf derecho y mentón derecho y pecho izq"
+      ]
+    },
+    {
+      "customer_id": "37abfbf3-9723-4051-8365-6a9ee25559d7",
+      "fecha": "2025-11-17",
+      "keep": [
+        "f66f7eb9-761f-4076-a3a4-6061870cd72f"
+      ],
+      "delete": [
+        "917ed82e-9e52-4ff5-b6c7-60d70fe9dece"
+      ],
+      "motivos": [
+        "bajada de peso aumento con la menopausia",
+        "bajada de peso aumento con la menopausia"
+      ]
+    },
+    {
+      "customer_id": "3f65a48c-e684-45c7-a119-b0f9b8961655",
+      "fecha": "2025-05-07",
+      "keep": [
+        "da104d46-17ea-4bf7-b017-f96e77b19dbd"
+      ],
+      "delete": [
+        "a13df612-c9f7-4edc-9b8d-780170d2a0ef"
+      ],
+      "motivos": [
+        "Labio y tercio superior",
+        "Labio y tercio superior"
+      ]
+    },
+    {
+      "customer_id": "cdfe749d-a56d-475d-9374-5623edf4fabb",
+      "fecha": "2025-11-24",
+      "keep": [
+        "b43c630d-eb03-45f3-a208-2545e3a019d7"
+      ],
+      "delete": [
+        "10191338-57e5-48d2-9685-a745a7795954"
+      ],
+      "motivos": [
+        "deseo de mejoría de tercio inferior fundamentalmente y definición mandibular. No le preocupan especialmente las arrugas en tercio superior.\nExploración:  No presenta arruga estática en tercio superior ni pata de gallo, gesticula poco, buena calidad de piel. No presenta mala estructura en tercio medio pero sí considero que se beneficiaría de puntos de soporte profundo de cara a descargar tercio inferior. Mala definición mandibular, que es lo que más le preocupa y le gustaría mejorar.",
+        "deseo de mejoría de tercio inferior fundamentalmente y definición mandibular. No le preocupan especialmente las arrugas en tercio superior.\nExploración:  No presenta arruga estática en tercio superior ni pata de gallo, gesticula poco, buena calidad de piel. No presenta mala estructura en tercio medio pero sí considero que se beneficiaría de puntos de soporte profundo de cara a descargar tercio inferior. Mala definición mandibular, que es lo que más le preocupa y le gustaría mejorar."
+      ]
+    },
+    {
+      "customer_id": "cd9b1412-6ffe-4740-a91f-7a3172378dd5",
+      "fecha": "2025-06-11",
+      "keep": [
+        "86baa3bb-c8da-4f9d-94f4-0d213ecd3ba7"
+      ],
+      "delete": [
+        "473ca5cf-f405-498e-92ee-86fb169f3f18"
+      ],
+      "motivos": [
+        "arrugas",
+        "arrugas"
+      ]
+    },
+    {
+      "customer_id": "bb024549-9dc7-4933-abb5-501ef0f4cfb2",
+      "fecha": "2025-05-21",
+      "keep": [
+        "b2ce6b1a-bedf-496b-9b45-247e6409fe55"
+      ],
+      "delete": [
+        "252be48d-7c7b-4e5b-8672-36a0c70a02a6"
+      ],
+      "motivos": [
+        "lesiones benignas en tronco. Párpado laxitud.",
+        "lesiones benignas en tronco. Párpado laxitud."
+      ]
+    },
+    {
+      "customer_id": "8314f3cf-48d9-43fc-9e9d-e6337c1bd829",
+      "fecha": "2025-08-06",
+      "keep": [
+        "157df352-9dcd-4c9c-a87b-3d671c55ce18"
+      ],
+      "delete": [
+        "f5e45250-c15e-4279-bed2-66598e6a2ada"
+      ],
+      "motivos": [
+        "Cola de la ceja. Región periocular. Flacidez, calidad de piel y labios.",
+        "Cola de la ceja. Región periocular. Flacidez, calidad de piel y labios."
+      ]
+    }
+  ],
+  "delete_ids": [
+    "f1058267-a8ae-460a-9f15-650f8f2ce668",
+    "2ec2994c-d3f9-4d4d-920e-fda7dcb25cdd",
+    "fd47192a-0df0-46ef-bab0-c3ef31fe3797",
+    "aa031cd6-0a13-4947-a8b5-2d3ce38aeafd",
+    "cf94a148-38dd-4edb-b26b-d0bab891f1fb",
+    "6280e74a-c2a6-4e0e-bbd1-3382a18d3780",
+    "f4f93795-3e74-44b4-b869-7e9111b75014",
+    "c2416664-6496-4fe6-b7f7-d7082c6ec1da",
+    "f45bfd10-e14b-4dd2-8ff0-4769d79f378b",
+    "288c57c9-e7cb-4624-80f6-6fc21fc764f2",
+    "974a21a2-9901-4ec8-ae3c-5b9455e6b28a",
+    "235e0caf-73a0-4236-a8d0-667053264396",
+    "75ea093d-3f62-445d-8155-ed3d6ccda86f",
+    "b7d0a2d3-6369-40d6-9151-88f1d405c278",
+    "28fa2cc4-cb7f-49d9-9fb8-79ec4fb35b09",
+    "d965af15-f073-4c46-981f-2735cfeea792",
+    "8917f03c-3db0-47e1-a14e-7ae8da9497cf",
+    "7dfc69cc-12ee-4233-9109-c226417b0e0d",
+    "451e1524-55d4-46e0-9cb9-01e52c0f0a0f",
+    "d8f78459-4b06-4b37-818e-0f17df7162a2",
+    "917ed82e-9e52-4ff5-b6c7-60d70fe9dece",
+    "a13df612-c9f7-4edc-9b8d-780170d2a0ef",
+    "10191338-57e5-48d2-9685-a745a7795954",
+    "473ca5cf-f405-498e-92ee-86fb169f3f18",
+    "252be48d-7c7b-4e5b-8672-36a0c70a02a6",
+    "f5e45250-c15e-4279-bed2-66598e6a2ada",
+    "96c01171-8232-435b-bb34-1c6e2616ab28",
+    "7695a512-9839-4ff6-a889-057d6237960b",
+    "f6a65c41-566e-47fc-acfc-35ba1ed90e76",
+    "a1704156-8067-4427-9174-3e85155d3593",
+    "e81d4ad0-456f-4277-adb8-3ddf332c2c9d",
+    "54b8c5ba-a422-4f08-864e-c9a990d21057",
+    "6b7366ae-f2cb-4b96-b583-6dc57c253ce2",
+    "f30b6182-7ef1-4c5a-ac19-cfcc037453ee",
+    "4d877f43-ba84-4703-add8-76c5a05fd2c8",
+    "d12a54cd-50c8-4713-bb0a-d18e4411d97f",
+    "cd577a8e-bd4c-4541-ba92-80f8b5e3ae0c",
+    "ea5f6286-6676-499a-901d-31239668f180",
+    "648d1f9f-dc22-4d60-ba4a-6646ad0f0ca1",
+    "2da7e71d-243d-4915-930a-3f19d293b08a",
+    "cac56942-e222-45e6-bd55-db07ff517428",
+    "07bf31d0-e0e0-4150-84a3-fefb4ea70ffd",
+    "2fdeba8a-1914-4898-add9-4eda38cfc73f",
+    "c261dc3c-6e76-4fea-8130-dc8c537410db",
+    "fe088d81-48b6-41bb-b64e-7ca6afaffc9d",
+    "31185a2d-723e-420d-b02b-1c9853aff572",
+    "5273e372-02b7-4289-a8e4-832cc9e9c834",
+    "33c4461b-4853-4819-904b-5f4015da6040",
+    "b9e48562-9092-47bb-8d40-4abeda40bfa9",
+    "1d27b1f6-6365-4c1c-ab73-546e408b4f6a",
+    "9f9bdbbc-96c6-4d59-a729-5186859226ff",
+    "55a8e318-fd8e-4326-932d-96de8ed75ffc",
+    "407bcc5f-0cfc-4252-8ea3-4ab0414e594f",
+    "41ad1b66-476c-4a6b-944f-4d0a9da51a69",
+    "be369296-a4c0-4a1b-89b3-a46f94fb7a64",
+    "919a2255-f832-4634-928a-ed6dd76cc125",
+    "1675f7e1-18a0-4500-84e6-7ec49abe5e9a",
+    "08e5137a-dca7-4c85-9d72-9900f9f2c57d",
+    "3806af24-3c03-4e9d-b7e0-fc3820565027",
+    "e941298f-2d67-4a7f-ad4a-368efb55f66e",
+    "b03bc830-5170-43bf-af57-4b425e5f47e6",
+    "5335858c-1223-40f2-8ee6-91d1994e1299",
+    "0d66b280-ecf5-4447-b442-2135182213d3",
+    "577ef604-7002-4093-beae-306fcb185cab",
+    "b2b5bd19-86bf-4413-9e5e-a936176df890",
+    "57886f03-d08f-4b0f-a8b7-b61a55d29be5",
+    "1acad7c2-f253-4d87-9761-8ee9e35e15d3",
+    "5840cc31-cfee-4551-8e25-4f5978feb1f5",
+    "6ec3b146-2692-489e-9d01-b70a7e6363e6",
+    "2e08e763-f390-4832-9cc5-e01c6fe6a6ca",
+    "2fe10693-40ec-4174-b5aa-c9a771b5e0a9",
+    "1ec229be-fe1b-48ca-b75e-1631cb6e76cd",
+    "bcd3e174-a848-4e1e-b575-05d87b2f6113",
+    "5c78848f-7d89-4e75-ab84-9d8114ff92fb",
+    "c0229221-c6d1-422c-9fe8-0d69c3921a09",
+    "33d2c439-a63f-4fb0-9cd1-e911ec71b367",
+    "4d805d11-dbbd-42dc-a4b8-54c010ebe4e2"
+  ]
+}

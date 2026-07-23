@@ -136,10 +136,12 @@ function LeanCallout({
   segment,
   kg,
   evalPct,
+  standardKg,
 }: {
   segment: InbodySegmentKey;
   kg?: number | null;
   evalPct?: number | null;
+  standardKg?: number | null;
 }) {
   const anchor = INBODY_CALLOUT_ANCHORS[segment];
   const meta = INBODY_SEGMENT_LABELS[segment];
@@ -155,9 +157,14 @@ function LeanCallout({
       style={calloutStyle(segment)}
     >
       <div className="text-[9px] text-foreground/70 font-medium mb-0.5">{meta.side}</div>
-      <div className="font-bold tabular-nums text-foreground text-sm">{formatEs(kg, 1, ' kg')}</div>
+      <div className="font-bold tabular-nums text-foreground text-sm">{formatEs(kg, 2, ' kg')}</div>
       {evalPct != null && (
-        <div className="tabular-nums text-[10px] text-muted-foreground">{formatEs(evalPct, 1, ' %')}</div>
+        <div className="tabular-nums text-[10px] text-sky-700 dark:text-sky-300">{formatEs(evalPct, 1, '%')}</div>
+      )}
+      {standardKg != null && (
+        <div className="tabular-nums text-[10px] text-emerald-700 dark:text-emerald-300">
+          {formatEs(standardKg, 2, ' kg')}
+        </div>
       )}
       <StatusBadge pct={evalPct} />
     </div>
@@ -168,10 +175,12 @@ function FatCallout({
   segment,
   kg,
   pbfPct,
+  standardKg,
 }: {
   segment: InbodySegmentKey;
   kg?: number | null;
   pbfPct?: number | null;
+  standardKg?: number | null;
 }) {
   const anchor = INBODY_CALLOUT_ANCHORS[segment];
   const meta = INBODY_SEGMENT_LABELS[segment];
@@ -187,8 +196,32 @@ function FatCallout({
       style={calloutStyle(segment)}
     >
       <div className="text-[9px] text-foreground/70 font-medium">{meta.side}</div>
-      <div className="font-bold tabular-nums text-foreground">{formatEs(pbfPct, 1, ' %')}</div>
-      <div className="tabular-nums text-foreground/90">{formatEs(kg, 1, ' kg')}</div>
+      <div className="font-bold tabular-nums text-foreground">{formatEs(kg, 2, ' kg')}</div>
+      {pbfPct != null && (
+        <div className="tabular-nums text-[10px] text-sky-700 dark:text-sky-300">{formatEs(pbfPct, 1, '%')}</div>
+      )}
+      {standardKg != null && (
+        <div className="tabular-nums text-[10px] text-emerald-700 dark:text-emerald-300">
+          {formatEs(standardKg, 2, ' kg')}
+        </div>
+      )}
+      <StatusBadge pct={pbfPct} />
+    </div>
+  );
+}
+
+function SegmentalThreeLineLegend() {
+  return (
+    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[9px] leading-snug">
+      <span className="font-semibold text-foreground">Masa (kg)</span>
+      <span className="text-muted-foreground/50" aria-hidden>
+        ·
+      </span>
+      <span className="text-sky-700 dark:text-sky-300">% vs estándar</span>
+      <span className="text-muted-foreground/50" aria-hidden>
+        ·
+      </span>
+      <span className="text-emerald-700 dark:text-emerald-300">Estándar (kg)</span>
     </div>
   );
 }
@@ -305,15 +338,7 @@ export const InbodySegmentalSilhouette: React.FC<Props> = ({
             sideLabelRight="Izquierdo"
             silhouetteSrc={silhouetteSrc}
             silhouetteSex={silhouetteSex}
-            legend={
-              <>
-                <InbodySectionHelp
-                  metricId="segment_lean_eval"
-                  title="Masa magra · Evaluación (% normal)"
-                  className="text-[9px] font-normal normal-case tracking-normal text-muted-foreground"
-                />
-              </>
-            }
+            legend={<SegmentalThreeLineLegend />}
           >
             {segments.map((key) => (
               <LeanCallout
@@ -321,6 +346,7 @@ export const InbodySegmentalSilhouette: React.FC<Props> = ({
                 segment={key}
                 kg={lean[key]?.kg}
                 evalPct={segmentLeanEvalPct(lean[key])}
+                standardKg={lean[key]?.standard_kg}
               />
             ))}
           </SegmentPanel>
@@ -332,22 +358,15 @@ export const InbodySegmentalSilhouette: React.FC<Props> = ({
             sideLabelRight="Izquierdo"
             silhouetteSrc={silhouetteSrc}
             silhouetteSex={silhouetteSex}
-            legend={
-              <>
-                <InbodySectionHelp
-                  metricId="segment_fat_pbf"
-                  title="PGC segmental · Masa grasa"
-                  className="text-[9px] font-normal normal-case tracking-normal text-muted-foreground"
-                />
-              </>
-            }
+            legend={<SegmentalThreeLineLegend />}
           >
             {segments.map((key) => (
               <FatCallout
                 key={key}
                 segment={key}
                 kg={fat[key]?.kg}
-                pbfPct={fat[key]?.pct}
+                pbfPct={fat[key]?.pct ?? fat[key]?.eval_pct}
+                standardKg={fat[key]?.standard_kg}
               />
             ))}
           </SegmentPanel>

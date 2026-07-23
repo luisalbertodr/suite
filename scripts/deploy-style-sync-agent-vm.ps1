@@ -92,6 +92,10 @@ OUTBOUND_MAX_RETRIES=5
 INBOUND_ACK_MAX_RETRIES=5
 ENTITY_POLL_MS=120000
 ENTITY_BATCH=15
+# Red de seguridad: detectar cambios en plan2009.dbf aunque Style no encole en cola_sincro.
+PLAN2009_POLL_ENABLED=1
+PLAN2009_POLL_MS=2500
+PLAN2009_BATCH=100
 # Barrido DBF completo (clientes/faccab/…): solo cuando Style está cerrado.
 # Durante horario de uso la cola_sincro basta para cambios en tiempo real.
 DBF_ENTITY_POLL_ENABLED=1
