@@ -39,6 +39,9 @@ type DiscoverCandidate = {
   rssi: number;
 };
 
+/** MorphoScan advertises briefly — poll faster when an allowlist is set. */
+const ALLOWLIST_POLL_MS = 500;
+
 async function readDeviceRssi(dev: Device): Promise<number | undefined> {
   try {
     const rssi = await helperOf(dev).prop('RSSI');
@@ -56,9 +59,15 @@ export async function autoDiscover(
   const deadline = Date.now() + DISCOVERY_TIMEOUT_MS;
   let heartbeat = 0;
   const allow = allowedScaleMacs();
+  const pollMs = allow ? ALLOWLIST_POLL_MS : DISCOVERY_POLL_MS;
+  const renphoFallback =
+    adapters.find((a) => /r-msc04/i.test(a.name)) ??
+    adapters.find((a) => /renpho/i.test(a.name)) ??
+    null;
   if (allow) {
     bleLog.info(
-      `Auto-discovery allowlist: ${[...allow].map((m) => m.match(/.{1,2}/g)?.join(':') ?? m).join(', ')}`,
+      `Auto-discovery allowlist: ${[...allow].map((m) => m.match(/.{1,2}/g)?.join(':') ?? m).join(', ')} ` +
+        `(poll ${pollMs}ms)`,
     );
   }
 
@@ -68,6 +77,26 @@ export async function autoDiscover(
     }
     const addresses: string[] = await btAdapter.devices();
     const fresh: DiscoverCandidate[] = [];
+    const staleAllowlisted: string[] = [];
+
+    // Drop LE noise so MorphoScan public MACs are not starved on CSR dongles.
+    if (allow && heartbeat > 0 && heartbeat % 20 === 0) {
+      let pruned = 0;
+      for (const addr of addresses) {
+        const mac = normalizeMac(addr);
+        if (allow.has(mac)) continue;
+        if (pruned >= 25) break;
+        try {
+          await removeDevice(btAdapter, addr);
+          pruned += 1;
+        } catch {
+          /* ignore */
+        }
+      }
+      if (pruned > 0) {
+        bleLog.info(`Auto-discovery: pruned ${pruned} non-allowlisted BLE device(s)`);
+      }
+    }
 
     for (const addr of addresses) {
       try {
@@ -79,22 +108,28 @@ export async function autoDiscover(
         }
 
         const dev = await btAdapter.getDevice(addr);
-        const name = await dev.getName().catch(() => '');
-        if (!name) continue;
+        const name = (await dev.getName().catch(() => '')) || '';
 
-        const info: BleDeviceInfo = { localName: name, serviceUuids: [] };
-        const matched = resolveAdapter(info, adapters);
+        let matched: ScaleAdapter | null = null;
+        if (name) {
+          const info: BleDeviceInfo = { localName: name, serviceUuids: [] };
+          matched = resolveAdapter(info, adapters);
+        }
+        // MorphoScan often appears MAC-only (empty Name) for the first ads.
+        if (!matched && allow?.has(mac) && renphoFallback) {
+          matched = renphoFallback;
+        }
         if (!matched) continue;
 
         // Idle MorphoScan siblings stay in BlueZ cache without a live RSSI.
         // Only connect to peers that are advertising now (person on the scale).
         const rssi = await readDeviceRssi(dev);
         if (rssi === undefined || rssi === RSSI_UNAVAILABLE) {
-          bleLog.debug(`Skipping ${addr} (no live RSSI — cached/idle)`);
+          staleAllowlisted.push(`${name || matched.name}[${addr}]`);
           continue;
         }
 
-        fresh.push({ addr, name, device: dev, adapter: matched, rssi });
+        fresh.push({ addr, name: name || matched.name, device: dev, adapter: matched, rssi });
       } catch {
         /* device may have gone away */
       }
@@ -116,11 +151,17 @@ export async function autoDiscover(
       return { device: best.device, adapter: best.adapter, mac: best.addr };
     }
 
-    heartbeat++;
-    if (heartbeat % 5 === 0) {
-      bleLog.info('Still scanning...');
+    if (staleAllowlisted.length > 0 && heartbeat % 10 === 0) {
+      bleLog.info(
+        `Allowlisted scales cached but not advertising: ${staleAllowlisted.join(', ')}`,
+      );
     }
-    await sleep(DISCOVERY_POLL_MS);
+
+    heartbeat++;
+    if (heartbeat % 10 === 0) {
+      bleLog.info(`Still scanning... (${addresses.length} BLE devices in BlueZ)`);
+    }
+    await sleep(pollMs);
   }
 
   throw new Error(`No recognized scale found within ${DISCOVERY_TIMEOUT_MS / 1000}s`);

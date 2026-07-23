@@ -245,6 +245,68 @@ describe('RenphoMsc04Adapter', () => {
       // markHandshakeReady alone does not auto-flush; onConnected does.
     });
 
+    it('falls back to noResponse when withResponse handshake write hangs', async () => {
+      const writes: Array<{ withResponse?: boolean }> = [];
+      const adapter = new RenphoMsc04Adapter();
+      const ctx = {
+        profile: defaultProfile(),
+        deviceAddress: 'AA',
+        availableChars: new Set<string>([uuid16(0x2a11)]),
+        write: vi.fn(async (_uuid: string, _data: number[] | Buffer, withResponse?: boolean) => {
+          writes.push({ withResponse });
+          if (withResponse) {
+            await new Promise(() => {
+              /* never resolves — simulates BlueZ hang */
+            });
+          }
+        }),
+        read: vi.fn(),
+        subscribe: vi.fn(),
+      } as unknown as ConnectionContext;
+
+      await adapter.onConnected(ctx);
+      expect(writes.length).toBe(8); // 4 cmds × (withResponse hang + noResponse ok)
+      expect(writes.filter((w) => w.withResponse === true)).toHaveLength(4);
+      expect(writes.filter((w) => w.withResponse === false)).toHaveLength(4);
+    }, 20_000);
+
+    it('replays orphaned body-comp after a hung handshake on the next connect', async () => {
+      const adapter = new RenphoMsc04Adapter();
+      const assembled = bodyComp25(59.35, 22.4);
+      // Race: body-comp arrives before handshakeReady
+      expect(adapter.parseCharNotification(uuid16(0x2a12), assembled)).toBeNull();
+
+      const hangCtx = {
+        profile: defaultProfile(),
+        deviceAddress: 'AA',
+        availableChars: new Set<string>([uuid16(0x2a11)]),
+        write: vi.fn(async (_u: string, _d: number[] | Buffer, withResponse?: boolean) => {
+          if (withResponse) {
+            await new Promise(() => {
+              /* hang */
+            });
+          }
+          // noResponse also hangs → handshake aborted
+          await new Promise(() => {
+            /* hang */
+          });
+        }),
+        read: vi.fn(),
+        subscribe: vi.fn(),
+      } as unknown as ConnectionContext;
+
+      await expect(adapter.onConnected(hangCtx)).rejects.toThrow(/timed out/);
+      expect(adapter.takePostHandshakeReading()).toBeNull();
+
+      // Next connect succeeds and must replay the orphaned 0x25
+      const writes: unknown[] = [];
+      await adapter.onConnected(mockCtx(writes));
+      const r = adapter.takePostHandshakeReading();
+      expect(r).not.toBeNull();
+      expect(r!.weight).toBeCloseTo(59.35, 2);
+      expect(adapter.isComplete(r!)).toBe(true);
+    }, 25_000);
+
     it('recovers Renpho composition from real 0x25 hex via FFM (muscle+bone)', () => {
       const adapter = makeAdapter();
       // Gemma 2026-07-22: Renpho 53.00 kg / 12.3% / muscle 43.41 / smm 25.81 / bone 3.10

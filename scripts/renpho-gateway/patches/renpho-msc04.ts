@@ -36,6 +36,10 @@ const FRAG_LAST = 0xaf;
 const FRAME_OVERHEAD = 6;
 const HANDSHAKE_GAP_MS = 400;
 const HANDSHAKE_GAP_RECONNECT_MS = 200;
+/** Per-frame GATT write budget; BlueZ can hang forever on withResponse. */
+const HANDSHAKE_WRITE_TIMEOUT_MS = 2_000;
+/** Keep early 0x25/0x26 across a hung/dropped handshake for the next connect. */
+const ORPHAN_BODY_COMP_MAX_AGE_MS = 120_000;
 /** After this many reconnects without body-comp, export weight-only. */
 const WEIGHT_ONLY_AFTER_SESSIONS = 3;
 /** Accept a stored 0x26 as this weigh-in when age < this and weight matches. */
@@ -72,6 +76,39 @@ type CachedComp = ScaleBodyComp & {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+function handshakeCmdLabel(frame: number[] | Buffer): string {
+  const cmd = Array.isArray(frame) ? frame[2] : frame[2];
+  return cmd != null ? cmd.toString(16) : '?';
+}
+
+async function writeWithTimeout(
+  write: ConnectionContext['write'],
+  uuid: string,
+  data: number[] | Buffer,
+  withResponse: boolean,
+  timeoutMs: number,
+  label: string,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      write(uuid, data, withResponse),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(
+            new Error(
+              `handshake write 0x${label} timed out after ${timeoutMs}ms ` +
+                `(${withResponse ? 'withResponse' : 'noResponse'})`,
+            ),
+          );
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 /** Build a checksummed 55AA frame: cmd + payload. */
@@ -396,8 +433,14 @@ export class RenphoMsc04Adapter
    * replay after handshake (FFM-derived fat is still usable; joelr fat is not).
    */
   private handshakeReady = false;
-  /** Assembled 0x25/0x26 frames that arrived before handshake finished. */
+  /** Assembled 0x25/0x26 frames that arrived before handshake finished (this session). */
   private earlyBodyComp: Buffer[] = [];
+  /**
+   * Cross-session stash: body-comp that arrived while handshake hung or the link
+   * dropped before b3→b8 finished. Replayed on the next successful handshake.
+   */
+  private orphanedBodyComp: Buffer[] = [];
+  private orphanedAtMs = 0;
   /** Complete reading recovered from early body-comp, consumed by shared.ts. */
   private postHandshakeReading: ScaleReading | null = null;
 
@@ -420,10 +463,18 @@ export class RenphoMsc04Adapter
     this.fragBuf = Buffer.alloc(0);
     this.cachedComp = {};
     this.handshakeReady = false;
+    // Keep orphans from a previous hung handshake; only reset this-session queue.
     this.earlyBodyComp = [];
     this.lastDeviceMac = (ctx.deviceAddress || '').replace(/[^a-fA-F0-9]/g, '').toUpperCase();
     if (this.lastDeviceMac) {
       bleLog.info(`Renpho R-MSC04: connected MAC ${this.lastDeviceMac}`);
+    }
+    this.pruneOrphans();
+    if (this.orphanedBodyComp.length > 0) {
+      bleLog.info(
+        `Renpho R-MSC04: ${this.orphanedBodyComp.length} orphaned body-comp frame(s) ` +
+          `pending replay after handshake`,
+      );
     }
 
     // Drop stale expect from a previous person / abandoned session (>15 min).
@@ -471,10 +522,21 @@ export class RenphoMsc04Adapter
         : HANDSHAKE_GAP_MS;
     const handshake = [HS_B3, HS_B2, nameFrame, profileFrame];
 
-    for (const frame of handshake) {
-      await ctx.write(CHR_WRITE, frame, true);
-      await sleep(gap);
+    try {
+      for (const frame of handshake) {
+        await this.writeHandshakeFrame(ctx, frame);
+        await sleep(gap);
+      }
+    } catch (e) {
+      // earlyBodyComp frames were already stashed on buffer; refresh TTL if any remain.
+      if (this.earlyBodyComp.length > 0) {
+        this.orphanedAtMs = Date.now();
+      }
+      const msg = e instanceof Error ? e.message : String(e);
+      bleLog.info(`Renpho R-MSC04: handshake aborted — ${msg}`);
+      throw e;
     }
+
     this.handshakeReady = true;
     bleLog.info(
       `Renpho R-MSC04: handshake sent ` +
@@ -483,12 +545,19 @@ export class RenphoMsc04Adapter
         `${!Number.isNaN(this.expectKg) ? `; expect ${this.expectKg.toFixed(2)} kg` : ''})`,
     );
 
-    // Replay body-comp that arrived during the subscribe→handshake race.
-    // Stash a complete reading for takePostHandshakeReading() so shared.ts can
-    // finish the wait even if the scale hangs up before another notify.
+    // Replay body-comp that arrived during the subscribe→handshake race, then
+    // any orphans left from a previous hung connect (deduped by hex).
     this.postHandshakeReading = null;
-    if (this.earlyBodyComp.length > 0) {
-      const queued = this.earlyBodyComp.splice(0);
+    const queued: Buffer[] = [];
+    const seen = new Set<string>();
+    for (const frame of [...this.earlyBodyComp.splice(0), ...this.orphanedBodyComp.splice(0)]) {
+      const hex = frame.toString('hex');
+      if (seen.has(hex)) continue;
+      seen.add(hex);
+      queued.push(frame);
+    }
+    this.orphanedAtMs = 0;
+    if (queued.length > 0) {
       bleLog.info(`Renpho R-MSC04: replaying ${queued.length} early body-comp frame(s)`);
       for (const frame of queued) {
         const r = this.decodeBodyCompFrame(frame);
@@ -497,6 +566,77 @@ export class RenphoMsc04Adapter
           break;
         }
       }
+    }
+  }
+
+  /** GATT write with timeout; falls back to no-response if withResponse hangs. */
+  private async writeHandshakeFrame(
+    ctx: ConnectionContext,
+    frame: number[],
+  ): Promise<void> {
+    const label = handshakeCmdLabel(frame);
+    const t0 = Date.now();
+    try {
+      await writeWithTimeout(
+        ctx.write,
+        CHR_WRITE,
+        frame,
+        true,
+        HANDSHAKE_WRITE_TIMEOUT_MS,
+        label,
+      );
+      bleLog.info(
+        `Renpho R-MSC04: handshake write 0x${label} ok (${Date.now() - t0}ms, withResponse)`,
+      );
+      return;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      bleLog.info(
+        `Renpho R-MSC04: handshake write 0x${label} failed (${msg}); retry without response`,
+      );
+    }
+    await writeWithTimeout(
+      ctx.write,
+      CHR_WRITE,
+      frame,
+      false,
+      HANDSHAKE_WRITE_TIMEOUT_MS,
+      label,
+    );
+    bleLog.info(
+      `Renpho R-MSC04: handshake write 0x${label} ok (${Date.now() - t0}ms, noResponse)`,
+    );
+  }
+
+  private pruneOrphans(): void {
+    if (this.orphanedBodyComp.length === 0) return;
+    if (Date.now() - this.orphanedAtMs > ORPHAN_BODY_COMP_MAX_AGE_MS) {
+      bleLog.info(
+        `Renpho R-MSC04: dropping ${this.orphanedBodyComp.length} stale orphaned body-comp frame(s)`,
+      );
+      this.orphanedBodyComp = [];
+      this.orphanedAtMs = 0;
+    }
+  }
+
+  private stashOrphans(frames: Buffer[]): void {
+    if (frames.length === 0) return;
+    const existing = new Set(this.orphanedBodyComp.map((b) => b.toString('hex')));
+    let added = 0;
+    for (const f of frames) {
+      const hex = f.toString('hex');
+      if (existing.has(hex)) continue;
+      existing.add(hex);
+      this.orphanedBodyComp.push(Buffer.from(f));
+      added += 1;
+    }
+    while (this.orphanedBodyComp.length > 4) this.orphanedBodyComp.shift();
+    this.orphanedAtMs = Date.now();
+    if (added > 0) {
+      bleLog.info(
+        `Renpho R-MSC04: stashed ${added} body-comp frame(s) for next handshake ` +
+          `(orphan queue=${this.orphanedBodyComp.length})`,
+      );
     }
   }
 
@@ -646,6 +786,8 @@ export class RenphoMsc04Adapter
     if (!this.handshakeReady) {
       this.earlyBodyComp.push(Buffer.from(data));
       if (this.earlyBodyComp.length > 4) this.earlyBodyComp.shift();
+      // Also stash cross-session so a hung withResponse write cannot lose the frame.
+      this.stashOrphans([data]);
       bleLog.info(
         `Renpho R-MSC04: buffer body-comp 0x${cmd.toString(16)} before handshake ` +
           `(will replay after b3→b8; guest fat % ignored via FFM)`,

@@ -9,6 +9,9 @@
  * Multi-scale fix: BlueZ keeps idle MorphoScan entries in its device cache.
  * Prefer peers that currently advertise (RSSI present and not 127), picking the
  * strongest RSSI so the scale in use wins over a stale sibling.
+ *
+ * MorphoScan often shows up in BlueZ as MAC-only (empty Name) for the first ads;
+ * allowlisted MACs fall back to the Renpho R-MSC04 adapter without waiting for Name.
  */
 import type { Adapter, Device } from 'node-ble';
 import type { BleDeviceInfo, ScaleAdapter } from '../../interfaces/scale-adapter.js';
@@ -45,6 +48,8 @@ type Candidate = {
 /** Soft skip after empty sessions so the sibling MorphoScan gets a turn. */
 const failCooldownUntil = new Map<string, number>();
 const FAIL_COOLDOWN_MS = 45_000;
+/** MorphoScan advertises briefly — poll faster when an allowlist is set. */
+const ALLOWLIST_POLL_MS = 500;
 
 export function noteScaleSessionFailed(mac: string): void {
   const n = normalizeMac(mac);
@@ -85,6 +90,10 @@ function inFailCooldown(mac: string): boolean {
   return Date.now() < until;
 }
 
+function formatMacColons(mac: string): string {
+  return mac.match(/.{1,2}/g)?.join(':') ?? mac;
+}
+
 export async function autoDiscover(
   btAdapter: Adapter,
   adapters: ScaleAdapter[],
@@ -93,9 +102,15 @@ export async function autoDiscover(
   const deadline = Date.now() + DISCOVERY_TIMEOUT_MS;
   let heartbeat = 0;
   const allow = allowedScaleMacs();
+  const pollMs = allow ? ALLOWLIST_POLL_MS : DISCOVERY_POLL_MS;
+  const renphoFallback =
+    adapters.find((a) => /r-msc04/i.test(a.name)) ??
+    adapters.find((a) => /renpho/i.test(a.name)) ??
+    null;
   if (allow) {
     bleLog.info(
-      `Auto-discovery allowlist: ${[...allow].map((m) => m.match(/.{1,2}/g)?.join(':')).join(', ')}`,
+      `Auto-discovery allowlist: ${[...allow].map((m) => formatMacColons(m)).join(', ')} ` +
+        `(poll ${pollMs}ms)`,
     );
   }
 
@@ -120,22 +135,35 @@ export async function autoDiscover(
         }
 
         const dev = await btAdapter.getDevice(addr);
-        const name = await dev.getName().catch(() => '');
-        if (!name) continue;
+        const name = (await dev.getName().catch(() => '')) || '';
 
-        const info: BleDeviceInfo = { localName: name, serviceUuids: [] };
-        const matched = resolveAdapter(info, adapters);
+        let matched: ScaleAdapter | null = null;
+        if (name) {
+          const info: BleDeviceInfo = { localName: name, serviceUuids: [] };
+          matched = resolveAdapter(info, adapters);
+        }
+        // Allowlisted MorphoScan often appears MAC-only before Name is filled.
+        if (!matched && allow?.has(mac) && renphoFallback) {
+          matched = renphoFallback;
+        }
         if (!matched) continue;
 
         const rssi = await readRssi(dev);
         // Only connect to peers that are advertising now. Cached idle MorphoScan
         // entries often have no RSSI or the 127 "unavailable" sentinel.
         if (rssi === undefined || rssi === RSSI_UNAVAILABLE) {
-          staleAllowlisted.push(`${name}[${addr}]`);
+          staleAllowlisted.push(`${name || matched.name}[${formatMacColons(mac)}]`);
           continue;
         }
 
-        fresh.push({ addr, mac, name, device: dev, adapter: matched, rssi });
+        fresh.push({
+          addr,
+          mac,
+          name: name || matched.name,
+          device: dev,
+          adapter: matched,
+          rssi,
+        });
       } catch {
         /* device may have gone away */
       }
@@ -157,17 +185,17 @@ export async function autoDiscover(
       return { device: best.device, adapter: best.adapter, mac: best.addr };
     }
 
-    if (staleAllowlisted.length > 0 && heartbeat % 5 === 0) {
-      bleLog.debug(
+    if (staleAllowlisted.length > 0 && heartbeat % 10 === 0) {
+      bleLog.info(
         `Allowlisted scales cached but not advertising: ${staleAllowlisted.join(', ')}`,
       );
     }
 
     heartbeat++;
-    if (heartbeat % 5 === 0) {
-      bleLog.info('Still scanning...');
+    if (heartbeat % 10 === 0) {
+      bleLog.info(`Still scanning... (${addresses.length} BLE devices in BlueZ)`);
     }
-    await sleep(DISCOVERY_POLL_MS);
+    await sleep(pollMs);
   }
 
   throw new Error(`No recognized scale found within ${DISCOVERY_TIMEOUT_MS / 1000}s`);
