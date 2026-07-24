@@ -71,6 +71,7 @@ El contenedor escribe inbound como JSON en:
 | JSON huérfanos >24h | Movidos a `sync/archive/failed/` |
 | Microcorte CIFS | Reintentos con backoff (`FS_RETRY_*`); el contenedor no crashea |
 | `cola_sincro.dbf` bloqueado | Mismo backoff al leer (VFP en `APPEND BLANK`) |
+| Agenda Style abierta | Spawn inbound espaciado (`INBOUND_WORKER_MIN_INTERVAL_WHILE_STYLE_MS`, default 60s); worker con `REPROCESS` corto |
 | Worker VFP caído | `heartbeat.txt` >5 min → `inbound_worker_status='stopped'` |
 | N fallos RPC | `sync/deadletter/{outbound|inbound}/` → revisión manual |
 
