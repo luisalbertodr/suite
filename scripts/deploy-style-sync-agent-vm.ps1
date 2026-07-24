@@ -81,6 +81,8 @@ INBOUND_POLL_MS=3000
 INBOUND_BATCH=50
 INBOUND_WORKER_TRIGGER=1
 INBOUND_WORKER_MIN_INTERVAL_MS=8000
+# Con agenda Style abierta: spawn cada 60s (no cada 8s) para evitar RLOCK/pausas.
+INBOUND_WORKER_MIN_INTERVAL_WHILE_STYLE_MS=60000
 INBOUND_DIR=$syncRoot\sync\inbound
 INBOUND_ACK_DIR=$syncRoot\sync\inbound_ack
 ARCHIVE_DIR=$syncRoot\sync\archive

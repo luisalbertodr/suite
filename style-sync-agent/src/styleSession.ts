@@ -13,7 +13,11 @@ const STYLE_UI_PROCESS_NAMES = (process.env.STYLE_UI_PROCESS_NAMES ??
 /** Tras escribir DBFs de agenda, omitir polls pesados (ms). */
 const STYLE_DEFER_AFTER_WRITE_MS = Number(process.env.STYLE_DEFER_AFTER_WRITE_MS ?? "90000");
 
+/** Cache de tasklist: evitar execSync en cada tick (contiende CPU con la UI). */
+const STYLE_PROCESS_CACHE_MS = Number(process.env.STYLE_PROCESS_CACHE_MS ?? "5000");
+
 let lastDeferLogAt = 0;
+let styleProcessCache: { at: number; running: boolean } | null = null;
 
 function dbfRecentlyWritten(styleRoot: string, table: string): boolean {
   const planPath = resolveDbfPath(styleRoot, table);
@@ -44,11 +48,22 @@ function tasklistHasProcess(targets: string[]): boolean {
 }
 
 export function isStyleProcessRunning(): boolean {
-  if (process.platform === "win32") {
-    return tasklistHasProcess(STYLE_UI_PROCESS_NAMES);
+  if (process.platform !== "win32") {
+    // En Linux/Docker no hay Duna.exe; no usar tasklist (ensucia logs y falla siempre).
+    return false;
   }
-  // En Linux/Docker no hay Duna.exe; no usar tasklist (ensucia logs y falla siempre).
-  return false;
+  const now = Date.now();
+  if (styleProcessCache && now - styleProcessCache.at < STYLE_PROCESS_CACHE_MS) {
+    return styleProcessCache.running;
+  }
+  const running = tasklistHasProcess(STYLE_UI_PROCESS_NAMES);
+  styleProcessCache = { at: now, running };
+  return running;
+}
+
+/** Invalida cache (tests / tras spawn inbound). */
+export function clearStyleProcessCache(): void {
+  styleProcessCache = null;
 }
 
 function plan2009RecentlyWritten(styleRoot: string): boolean {
@@ -76,6 +91,16 @@ export function shouldDeferHeavyPoll(styleRoot: string): boolean {
  * No usa plan2009/cola_sincro: el inbound puede escribir plan2009 sin bloquear clientes.dbf.
  */
 export function shouldDeferEntityDbfPoll(styleRoot: string): boolean {
+  if (isStyleProcessRunning()) return true;
+  if (dbfRecentlyWritten(styleRoot, "plantmp")) return true;
+  return false;
+}
+
+/**
+ * UI Style abierta o agenda activa → espaciar spawn del worker inbound
+ * (RLOCK sobre plan2009/planart congela la agenda si se dispara cada 8s).
+ */
+export function shouldThrottleInboundWorker(styleRoot: string): boolean {
   if (isStyleProcessRunning()) return true;
   if (dbfRecentlyWritten(styleRoot, "plantmp")) return true;
   return false;
