@@ -67,7 +67,8 @@ ENDFUNC
 FUNCTION SuiteEntityApplyCliente
  PARAMETER toMsg
  LOCAL lcCodcli, lcNom, lcApe1, lcTel1, lcTel2, lcEmail, lcDni, lcDir
- LOCAL lcCodpos, lcPob, lcPro, lcPais, lcPercon, lcObs, lcFecnac, ldFecnac
+ LOCAL lcCodpos, lcPob, lcPro, lcPais, lcPercon, lcObs, lcFecnac, ldFecnac, llApplied
+ llApplied = .F.
  IF  .NOT. SuiteInboundOpenTable("clientes")
     RETURN ""
  ENDIF
@@ -104,6 +105,8 @@ FUNCTION SuiteEntityApplyCliente
        APPEND BLANK
        REPLACE codcli WITH lcCodcli
        UNLOCK IN clientes
+    ELSE
+       RETURN ""
     ENDIF
  ENDIF
 
@@ -149,15 +152,17 @@ FUNCTION SuiteEntityApplyCliente
        REPLACE fecnac WITH ldFecnac
     ENDIF
     UNLOCK IN clientes
+    llApplied = .T.
  ENDIF
 
- RETURN lcCodcli
+ RETURN IIF(llApplied, lcCodcli, "")
 ENDFUNC
 **
 FUNCTION SuiteEntityApplyArticulo
  * Suite -> Style: alta/edicion de articulo nativo Suite (solo si trae codart).
  PARAMETER toMsg
- LOCAL lcCodart, lcDes, lcFam, lnPvpa, lnCoste, lnStock, lnIva, llObs
+ LOCAL lcCodart, lcDes, lcFam, lnPvpa, lnCoste, lnStock, lnIva, llObs, llApplied
+ llApplied = .F.
  IF  .NOT. SuiteInboundOpenTable("articulos")
     RETURN ""
  ENDIF
@@ -180,6 +185,8 @@ FUNCTION SuiteEntityApplyArticulo
        APPEND BLANK
        REPLACE codart WITH lcCodart
        UNLOCK IN articulos
+    ELSE
+       RETURN ""
     ENDIF
  ENDIF
  IF RLOCK("articulos")
@@ -205,8 +212,9 @@ FUNCTION SuiteEntityApplyArticulo
        REPLACE obsoleto WITH llObs
     ENDIF
     UNLOCK IN articulos
+    llApplied = .T.
  ENDIF
- RETURN lcCodart
+ RETURN IIF(llApplied, lcCodart, "")
 ENDFUNC
 **
 FUNCTION SuiteEntityApplyLineasAlblin
@@ -363,7 +371,8 @@ ENDFUNC
 FUNCTION SuiteEntityApplyBono
  * Suite -> Style: actualiza saldo/consumo de un bono de cliente.
  PARAMETER toMsg
- LOCAL lcCodboncli, lnSes, lnCons, llObs
+ LOCAL lcCodboncli, lnSes, lnCons, llObs, llApplied
+ llApplied = .F.
  IF  .NOT. SuiteInboundOpenTable("bonoscli")
     RETURN ""
  ENDIF
@@ -406,8 +415,9 @@ FUNCTION SuiteEntityApplyBono
        REPLACE obsoleto WITH llObs
     ENDIF
     UNLOCK IN bonoscli
+    llApplied = .T.
  ENDIF
- RETURN lcCodboncli
+ RETURN IIF(llApplied, lcCodboncli, "")
 ENDFUNC
 **
 FUNCTION SuiteEntityNextNum
@@ -434,7 +444,8 @@ ENDFUNC
 FUNCTION SuiteEntityApplyVenta
  * Suite -> Style: alta de ticket TPV en albcab (cabecera). Lineas alblin en iteracion posterior.
  PARAMETER toMsg
- LOCAL lcCodcli, lnTotal, ldFecha, lcFechaIso, lnNumalb
+ LOCAL lcCodcli, lnTotal, ldFecha, lcFechaIso, lnNumalb, llApplied
+ llApplied = .F.
  IF  .NOT. SuiteInboundOpenTable("albcab")
     RETURN ""
  ENDIF
@@ -466,6 +477,10 @@ FUNCTION SuiteEntityApplyVenta
        REPLACE totalalb WITH lnTotal
     ENDIF
     UNLOCK IN albcab
+    llApplied = .T.
+ ENDIF
+ IF  .NOT. llApplied
+    RETURN ""
  ENDIF
  = SuiteEntityApplyLineasAlblin(lnNumalb, toMsg)
  RETURN ALLTRIM(STR(lnNumalb))
@@ -474,7 +489,8 @@ ENDFUNC
 FUNCTION SuiteEntityApplyFactura
  * Suite -> Style: alta de factura en faccab (cabecera + faclin).
  PARAMETER toMsg
- LOCAL lcCodcli, lnBase, lnIva, lnTotal, ldFecha, lcFechaIso, lnNumfac
+ LOCAL lcCodcli, lnBase, lnIva, lnTotal, ldFecha, lcFechaIso, lnNumfac, llApplied
+ llApplied = .F.
  IF  .NOT. SuiteInboundOpenTable("faccab")
     RETURN ""
  ENDIF
@@ -514,6 +530,10 @@ FUNCTION SuiteEntityApplyFactura
        REPLACE totalfac WITH lnTotal
     ENDIF
     UNLOCK IN faccab
+    llApplied = .T.
+ ENDIF
+ IF  .NOT. llApplied
+    RETURN ""
  ENDIF
  = SuiteEntityApplyLineasFaclin(lnNumfac, toMsg)
  RETURN ALLTRIM(STR(lnNumfac))
@@ -522,7 +542,8 @@ ENDFUNC
 FUNCTION SuiteEntityApplyCierre
  * Suite -> Style: cierre de caja en ciecab (cabecera).
  PARAMETER toMsg
- LOCAL lnEfec, lnTarj, lnTotal, ldFecha, lcFechaIso, lnNumcie
+ LOCAL lnEfec, lnTarj, lnTotal, ldFecha, lcFechaIso, lnNumcie, llApplied
+ llApplied = .F.
  IF  .NOT. SuiteInboundOpenTable("ciecab")
     RETURN ""
  ENDIF
@@ -564,44 +585,65 @@ FUNCTION SuiteEntityApplyCierre
        REPLACE totalcie WITH lnTotal
     ENDIF
     UNLOCK IN ciecab
+    llApplied = .T.
+ ENDIF
+ IF  .NOT. llApplied
+    RETURN ""
  ENDIF
  RETURN ALLTRIM(STR(lnNumcie))
 ENDFUNC
 **
 PROCEDURE SuiteEntityApplyOne
  PARAMETER toMsg, tcInboundFile, tcAckDir
- LOCAL lcType, lnOutboxId, lcKey, llOk, lcErr
+ LOCAL lcType, lnOutboxId, lcKey, llOk, lcErr, lcRepNum, lcRepUnit
  lcType = LOWER(ALLTRIM(SuiteGetObj(toMsg, "entity_type", "")))
  lnOutboxId = VAL(ALLTRIM(SuiteGetObj(toMsg, "outbox_id", "0")))
  lcKey = ""
  llOk = .T.
  lcErr = ""
 
- DO CASE
-    CASE lcType == "customer"
-       lcKey = SuiteEntityApplyCliente(toMsg)
-       llOk = ( .NOT. EMPTY(lcKey))
-    CASE lcType == "article"
-       lcKey = SuiteEntityApplyArticulo(toMsg)
-       llOk = ( .NOT. EMPTY(lcKey))
-    CASE lcType == "bono"
-       lcKey = SuiteEntityApplyBono(toMsg)
-       llOk = ( .NOT. EMPTY(lcKey))
-    CASE lcType == "sale"
-       lcKey = SuiteEntityApplyVenta(toMsg)
-       llOk = ( .NOT. EMPTY(lcKey))
-    CASE lcType == "invoice"
-       lcKey = SuiteEntityApplyFactura(toMsg)
-       llOk = ( .NOT. EMPTY(lcKey))
-    CASE lcType == "cash_session"
-       lcKey = SuiteEntityApplyCierre(toMsg)
-       llOk = ( .NOT. EMPTY(lcKey))
-    OTHERWISE
-       * Entidad aun no implementada en inbound: ack OK para no bloquear la cola.
-       DO SuiteInboundLog WITH "entity inbound sin handler: " + lcType
-       lcKey = ALLTRIM(SuiteGetObj(toMsg, "style_key", ""))
-       llOk = .T.
- ENDCASE
+ * Acotar la espera de lock al escribir en los DBF de Style. Con REPROCESS=0 (defecto)
+ * los IF RLOCK(...) de los handlers reintentan el lock de forma indefinida si la tabla
+ * esta ocupada por la sesion de Style (p. ej. formulario de cliente abierto), colgando
+ * el worker. Con espera acotada RLOCK devuelve .F., el handler devuelve "" -> ack ok=0
+ * y el agente reintenta el inbound (misma semantica de fallo que ya existia; sin cuelgue
+ * ni perdida del cambio). REPROCESS se restaura via FINALLY (aunque haya error).
+ lcRepNum = SET("REPROCESS")
+ lcRepUnit = SET("REPROCESS", 2)
+ SET REPROCESS TO 3 SECONDS
+ TRY
+    DO CASE
+       CASE lcType == "customer"
+          lcKey = SuiteEntityApplyCliente(toMsg)
+          llOk = ( .NOT. EMPTY(lcKey))
+       CASE lcType == "article"
+          lcKey = SuiteEntityApplyArticulo(toMsg)
+          llOk = ( .NOT. EMPTY(lcKey))
+       CASE lcType == "bono"
+          lcKey = SuiteEntityApplyBono(toMsg)
+          llOk = ( .NOT. EMPTY(lcKey))
+       CASE lcType == "sale"
+          lcKey = SuiteEntityApplyVenta(toMsg)
+          llOk = ( .NOT. EMPTY(lcKey))
+       CASE lcType == "invoice"
+          lcKey = SuiteEntityApplyFactura(toMsg)
+          llOk = ( .NOT. EMPTY(lcKey))
+       CASE lcType == "cash_session"
+          lcKey = SuiteEntityApplyCierre(toMsg)
+          llOk = ( .NOT. EMPTY(lcKey))
+       OTHERWISE
+          * Entidad aun no implementada en inbound: ack OK para no bloquear la cola.
+          DO SuiteInboundLog WITH "entity inbound sin handler: " + lcType
+          lcKey = ALLTRIM(SuiteGetObj(toMsg, "style_key", ""))
+          llOk = .T.
+    ENDCASE
+ FINALLY
+    IF UPPER(ALLTRIM(TRANSFORM(lcRepUnit))) == "SECONDS"
+       SET REPROCESS TO VAL(TRANSFORM(lcRepNum)) SECONDS
+    ELSE
+       SET REPROCESS TO VAL(TRANSFORM(lcRepNum))
+    ENDIF
+ ENDTRY
 
  DO SuiteEntityWriteAck WITH lnOutboxId, lcKey, llOk, lcErr, tcAckDir
 
