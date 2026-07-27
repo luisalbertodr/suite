@@ -21,7 +21,13 @@ import { ENTITY_HANDLERS } from "./handlers.js";
 import { readColaRows } from "./colaDbf.js";
 import { pollDbfEntityChanges } from "./dbfPoll.js";
 import { pollPlan2009FromDbf, pollPlan2009Lightweight } from "./plan2009Poll.js";
-import { logDeferHeavyPoll, logDeferEntityDbfPoll, shouldDeferEntityDbfPoll, shouldDeferHeavyPoll } from "./styleSession.js";
+import {
+  isStyleProcessRunning,
+  logDeferHeavyPoll,
+  logDeferEntityDbfPoll,
+  shouldDeferEntityDbfPoll,
+  shouldDeferHeavyPoll,
+} from "./styleSession.js";
 import { resolveDbfPath } from "./dbfSource.js";
 import {
   dbfBool,
@@ -851,6 +857,15 @@ async function entityOutboundTick(): Promise<void> {
     },
     { label: "ensure entity dirs" },
   );
+  // Con Style abierto, NO empujar maestros (clientes/articulos/…) al worker.
+  // SuiteEntityApplyCliente hace RLOCK("0","clientes") (lock de append); el alta en
+  // Style tambien hace APPEND BLANK. Con REPROCESS=0 se cuelgan entre si y Duna.exe
+  // se queda congelado hasta forzar cierre. Las citas (plan2009) siguen por su canal.
+  if (isStyleProcessRunning()) {
+    log("entity outbound diferido (UI Style abierta) — outbox queda pendiente");
+    await drainOutboxAcks(deps);
+    return;
+  }
   const wrote = await pollOutboxToInbound(deps, ENTITY_HANDLERS, INBOUND_BATCH);
   if (wrote > 0) {
     maybeTriggerInboundWorker(
