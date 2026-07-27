@@ -10,8 +10,9 @@ export function AgendaFullViewportShell({ children }: { children: React.ReactNod
   const panelActive = useRoutePanelActive();
   useLockPageScroll(panelActive);
 
-  return (    <div
-      className="fixed inset-x-0 top-14 z-[1] flex flex-col overflow-hidden px-4 sm:px-6"
+  return (
+    <div
+      className="fixed inset-x-0 top-14 z-[1] flex flex-col overflow-hidden px-1.5 sm:px-4 md:px-6"
       style={{ height: AGENDA_VIEWPORT_HEIGHT, maxHeight: AGENDA_VIEWPORT_HEIGHT }}
     >
       {children}

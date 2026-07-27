@@ -70,8 +70,35 @@ interface AgendaGridProps {
 /** Ancho de la columna «Hora» (px); debe coincidir con gridTemplateColumns. */
 const TIME_GUTTER_PX = 96;
 
+/** Ancho mínimo por columna de empleada (px) para poder desplazar en móvil. */
+const EMP_COL_MIN_PX = 120;
+
 /** Ancho mínimo de la zona de empleadas (sin columna hora). */
 const GRID_MIN_EMPLOYEES_PX = 900 - TIME_GUTTER_PX;
+
+function agendaEmployeesMinWidthPx(employeeCount: number): number {
+  return Math.max(GRID_MIN_EMPLOYEES_PX, Math.max(1, employeeCount) * EMP_COL_MIN_PX);
+}
+
+function agendaGridMinWidthPx(employeeCount: number): number {
+  return TIME_GUTTER_PX + agendaEmployeesMinWidthPx(employeeCount);
+}
+
+function agendaEmployeeColumnsTemplate(employeeCount: number): string {
+  const n = Math.max(1, employeeCount);
+  return `${TIME_GUTTER_PX}px repeat(${n}, minmax(${EMP_COL_MIN_PX}px, 1fr))`;
+}
+
+function agendaEmployeeOnlyColumnsTemplate(employeeCount: number): string {
+  const n = Math.max(1, employeeCount);
+  return `repeat(${n}, minmax(${EMP_COL_MIN_PX}px, 1fr))`;
+}
+
+/** HTML5 drag bloquea el pan táctil en iOS; solo en puntero fino. */
+function canUseHtml5AppointmentDrag(): boolean {
+  if (typeof window === 'undefined') return true;
+  return window.matchMedia('(pointer: fine)').matches;
+}
 
 /** Mitad aproximada de la pastilla de etiqueta horaria (px). */
 const HOUR_LABEL_HALF_PX = 8;
@@ -283,6 +310,7 @@ type AgendaAppointmentBlockProps = {
   lockedByPayment: boolean;
   slotDesc: string | null;
   outerRecursoStyle: ReturnType<typeof segmentStyleFromHex>;
+  allowHtml5Drag: boolean;
   onDragStart: (e: React.DragEvent, appointment: Appointment) => void;
   onDragEnd: (e: React.DragEvent) => void;
 };
@@ -298,10 +326,12 @@ const AgendaAppointmentBlock = React.memo(function AgendaAppointmentBlock({
   lockedByPayment,
   slotDesc,
   outerRecursoStyle,
+  allowHtml5Drag,
   onDragStart,
   onDragEnd,
 }: AgendaAppointmentBlockProps) {
   const segments = appointment.timeSegments ?? [];
+  const draggable = allowHtml5Drag && !lockedByPayment;
 
   return (
     <div
@@ -316,7 +346,7 @@ const AgendaAppointmentBlock = React.memo(function AgendaAppointmentBlock({
             }
           : undefined
       }
-      draggable={!lockedByPayment}
+      draggable={draggable}
       onDragStart={(e) => onDragStart(e, appointment)}
       onDragEnd={onDragEnd}
     >
@@ -412,6 +442,7 @@ type AgendaAppointmentItemProps = {
   onAppointmentClick?: (appointment: Appointment) => void;
   onAppointmentCopy?: (appointment: Appointment) => void;
   onAppointmentCut?: (appointment: Appointment) => void;
+  allowHtml5Drag: boolean;
   onDragStart: (e: React.DragEvent, appointment: Appointment) => void;
   onDragEnd: (e: React.DragEvent) => void;
   onDragOver: (e: React.DragEvent, employeeId: string, time: string) => void;
@@ -433,6 +464,7 @@ const AgendaAppointmentItem = React.memo(function AgendaAppointmentItem({
   onAppointmentClick,
   onAppointmentCopy,
   onAppointmentCut,
+  allowHtml5Drag,
   onDragStart,
   onDragEnd,
   onDragOver,
@@ -494,6 +526,7 @@ const AgendaAppointmentItem = React.memo(function AgendaAppointmentItem({
             lockedByPayment={lockedByPayment}
             slotDesc={slotDesc}
             outerRecursoStyle={outerRecursoStyle}
+            allowHtml5Drag={allowHtml5Drag}
             onDragStart={onDragStart}
             onDragEnd={onDragEnd}
           />
@@ -549,7 +582,7 @@ function EmployeeNamesRow({
       <div
         className="grid gap-0"
         style={{
-          gridTemplateColumns: `repeat(${employees.length}, minmax(0, 1fr))`,
+          gridTemplateColumns: agendaEmployeeOnlyColumnsTemplate(employees.length),
           minHeight: EMPLOYEE_NAMES_ROW_MIN_H,
         }}
       >
@@ -562,7 +595,7 @@ function EmployeeNamesRow({
     <div
       className="grid gap-0"
       style={{
-        gridTemplateColumns: `${TIME_GUTTER_PX}px repeat(${employees.length}, minmax(0, 1fr))`,
+        gridTemplateColumns: agendaEmployeeColumnsTemplate(employees.length),
         minHeight: EMPLOYEE_NAMES_ROW_MIN_H,
       }}
     >
@@ -613,6 +646,9 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
   const lastHandledPersistedAnchorRef = React.useRef<string | null>(null);
   const scrollSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [nowLineTick, setNowLineTick] = React.useState(0);
+  const allowHtml5Drag = React.useMemo(() => canUseHtml5AppointmentDrag(), []);
+  const employeesMinWidthPx = agendaEmployeesMinWidthPx(employees.length);
+  const gridMinWidthPx = agendaGridMinWidthPx(employees.length);
 
   const [draggedAppointment, setDraggedAppointment] = React.useState<string | null>(null);
   const [dragOverSlot, setDragOverSlot] = React.useState<{ employeeId: string; time: string } | null>(null);
@@ -928,21 +964,87 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
     return () => ro.disconnect();
   }, [employees.length, timeSlots.length]);
 
-  /** Sincroniza scroll horizontal entre encabezado, cuadrícula y pie. */
+  /** Sincroniza scroll horizontal entre encabezado, cuadrícula y pie (bidireccional). */
   React.useEffect(() => {
     const body = scrollRootRef.current;
     const header = headerScrollRef.current;
     const footer = footerScrollRef.current;
     if (!body) return;
-    const syncFromBody = () => {
-      const left = body.scrollLeft;
-      if (header && header.scrollLeft !== left) header.scrollLeft = left;
-      if (footer && footer.scrollLeft !== left) footer.scrollLeft = left;
+
+    let lock = false;
+    const applyLeft = (left: number, source: 'body' | 'header' | 'footer') => {
+      if (lock) return;
+      lock = true;
+      if (source !== 'body' && body.scrollLeft !== left) body.scrollLeft = left;
+      if (header && source !== 'header' && header.scrollLeft !== left) header.scrollLeft = left;
+      if (footer && source !== 'footer' && footer.scrollLeft !== left) footer.scrollLeft = left;
+      lock = false;
     };
-    body.addEventListener('scroll', syncFromBody, { passive: true });
-    syncFromBody();
-    return () => body.removeEventListener('scroll', syncFromBody);
+
+    const onBody = () => applyLeft(body.scrollLeft, 'body');
+    const onHeader = () => {
+      if (!header) return;
+      applyLeft(header.scrollLeft, 'header');
+    };
+    const onFooter = () => {
+      if (!footer) return;
+      applyLeft(footer.scrollLeft, 'footer');
+    };
+
+    body.addEventListener('scroll', onBody, { passive: true });
+    header?.addEventListener('scroll', onHeader, { passive: true });
+    footer?.addEventListener('scroll', onFooter, { passive: true });
+    onBody();
+    return () => {
+      body.removeEventListener('scroll', onBody);
+      header?.removeEventListener('scroll', onHeader);
+      footer?.removeEventListener('scroll', onFooter);
+    };
   }, [employees.length]);
+
+  /**
+   * iOS a menudo ignora el pan horizontal en un mismo nodo con overflow-x+y.
+   * Si el gesto es claramente horizontal, movemos scrollLeft a mano.
+   */
+  React.useEffect(() => {
+    const el = scrollRootRef.current;
+    if (!el) return;
+
+    let startX = 0;
+    let startY = 0;
+    let startLeft = 0;
+    let axis: 'h' | 'v' | null = null;
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      startX = e.touches[0]!.clientX;
+      startY = e.touches[0]!.clientY;
+      startLeft = el.scrollLeft;
+      axis = null;
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      const dx = e.touches[0]!.clientX - startX;
+      const dy = e.touches[0]!.clientY - startY;
+      if (axis === null) {
+        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+        axis = Math.abs(dx) > Math.abs(dy) * 1.15 ? 'h' : 'v';
+      }
+      if (axis !== 'h') return;
+      const maxLeft = Math.max(0, el.scrollWidth - el.clientWidth);
+      if (maxLeft <= 0) return;
+      el.scrollLeft = Math.max(0, Math.min(maxLeft, startLeft - dx));
+      e.preventDefault();
+    };
+
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+    };
+  }, [employees.length, gridMinWidthPx]);
 
   const edgeRowPad = { paddingRight: scrollbarWidth };
 
@@ -957,10 +1059,10 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
         </div>
         <div
           ref={headerScrollRef}
-          className="overflow-x-auto overflow-y-hidden [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+          className="overflow-x-auto overflow-y-hidden overscroll-x-contain touch-pan-x [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
           style={{ marginLeft: TIME_GUTTER_PX, ...edgeRowPad }}
         >
-          <div style={{ minWidth: GRID_MIN_EMPLOYEES_PX }}>
+          <div style={{ minWidth: employeesMinWidthPx }}>
             <EmployeeNamesRow employees={employees} edge="top" variant="names-only" />
           </div>
         </div>
@@ -969,12 +1071,12 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
       <div className="relative min-h-0 h-full overflow-hidden">
       <div
         ref={scrollRootRef}
-        className="h-full min-h-0 overflow-x-auto overflow-y-scroll"
+        className="h-full min-h-0 overflow-x-auto overflow-y-scroll overscroll-contain [-webkit-overflow-scrolling:touch] [touch-action:pan-x_pan-y]"
       >
-        <div className="min-w-[900px] relative">
+        <div className="relative" style={{ minWidth: gridMinWidthPx }}>
         <div
           className="grid relative gap-0"
-          style={{ gridTemplateColumns: `${TIME_GUTTER_PX}px repeat(${employees.length}, minmax(0, 1fr))` }}
+          style={{ gridTemplateColumns: agendaEmployeeColumnsTemplate(employees.length) }}
         >
           {/* Renderizar las citas como elementos posicionados absolutamente */}
           {appointments.map((appointment) => {
@@ -997,6 +1099,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
                 onAppointmentClick={onAppointmentClick}
                 onAppointmentCopy={onAppointmentCopy}
                 onAppointmentCut={onAppointmentCut}
+                allowHtml5Drag={allowHtml5Drag}
                 onDragStart={handleDragStart}
                 onDragEnd={handleDragEnd}
                 onDragOver={handleDragOver}
@@ -1192,10 +1295,10 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
         </div>
         <div
           ref={footerScrollRef}
-          className="overflow-x-auto overflow-y-hidden [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+          className="overflow-x-auto overflow-y-hidden overscroll-x-contain touch-pan-x [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
           style={{ marginLeft: TIME_GUTTER_PX, ...edgeRowPad }}
         >
-          <div style={{ minWidth: GRID_MIN_EMPLOYEES_PX }}>
+          <div style={{ minWidth: employeesMinWidthPx }}>
             <EmployeeNamesRow employees={employees} edge="bottom" variant="names-only" />
           </div>
         </div>

@@ -80,6 +80,7 @@ import {
 import { buildAgendaPrefillFromLead } from '@/lib/marketingLeadAgendaPrefill';
 import { buildCustomerHistoryUrl } from '@/lib/agendaCustomerNavigation';
 import { BillingEntityToggle } from '@/components/BillingEntityToggle';
+import { AgendaTopBarFitExtras } from '@/components/AgendaTopBarFitExtras';
 import {
   filterEmployeesForAgendaView,
   loadAgendaBillingView,
@@ -853,38 +854,40 @@ export const Agenda: React.FC = () => {
           />
         </PopoverContent>
       </Popover>
-      <Button
-        variant="outline"
-        size="sm"
-        className="h-7 px-2 text-xs shrink-0"
-        onClick={() => {
-          selectAgendaDate(new Date());
-          setGoToTodayRequestId((n) => n + 1);
-        }}
-      >
-        <Clock className="w-3.5 h-3.5 mr-1" /> Hoy
-      </Button>
-      <span
-        className={`inline-flex h-7 shrink-0 items-center rounded-md border px-2 text-[11px] font-medium tabular-nums ${
-          syncBadge.tone === 'error'
-            ? 'border-destructive/40 bg-destructive/10 text-destructive'
-            : syncBadge.tone === 'pending'
-              ? 'border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300'
-              : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300'
-        }`}
-        title={syncBadge.title}
-      >
-        {syncBadge.label}
-      </span>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-7 px-2 text-xs shrink-0 text-muted-foreground"
-        onClick={() => void refetchAppointments()}
-        disabled={appointmentsFetching}
-      >
-        Actualizar
-      </Button>
+      <AgendaTopBarFitExtras>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 px-2 text-xs shrink-0"
+          onClick={() => {
+            selectAgendaDate(new Date());
+            setGoToTodayRequestId((n) => n + 1);
+          }}
+        >
+          <Clock className="w-3.5 h-3.5 mr-1" /> Hoy
+        </Button>
+        <span
+          className={`inline-flex h-7 shrink-0 items-center rounded-md border px-2 text-[11px] font-medium tabular-nums ${
+            syncBadge.tone === 'error'
+              ? 'border-destructive/40 bg-destructive/10 text-destructive'
+              : syncBadge.tone === 'pending'
+                ? 'border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300'
+                : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300'
+          }`}
+          title={syncBadge.title}
+        >
+          {syncBadge.label}
+        </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2 text-xs shrink-0 text-muted-foreground"
+          onClick={() => void refetchAppointments()}
+          disabled={appointmentsFetching}
+        >
+          Actualizar
+        </Button>
+      </AgendaTopBarFitExtras>
       <BillingEntityToggle
         showAll
         value={agendaBillingView}
