@@ -27,6 +27,10 @@ export interface AgendaAppointment {
   legacy_planinc_id?: number | null;
   /** IDPLAN Dunasoft: identifica la cita lógica (historial en planinc). */
   legacy_idplan?: string | null;
+  client_name?: string | null;
+  appointment_date?: string | null;
+  legacy_codemp?: string | null;
+  legacy_codcli?: string | null;
 }
 
 type CreateAppointmentInput = {

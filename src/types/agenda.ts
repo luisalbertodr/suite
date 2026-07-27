@@ -41,6 +41,8 @@ export interface Appointment {
   serviceName?: string;
   legacyEmployeeCode?: string;
   legacyClientCode?: string;
+  /** IDPLAN Style / plan2009 (dual-sync). */
+  legacyIdPlan?: string | null;
   legacyPlanincId?: number | null;
   legacyHourInText?: string;
   startTime: string; // formato HH:mm

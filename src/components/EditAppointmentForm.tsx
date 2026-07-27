@@ -59,6 +59,8 @@ interface Appointment {
   clientName: string;
   customerId?: string | null;
   legacyClientCode?: string | null;
+  legacyEmployeeCode?: string | null;
+  legacyIdPlan?: string | null;
   description: string;
   startTime: string;
   endTime: string;
@@ -452,6 +454,22 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
               <X className="w-4 h-4" />
             </Button>
           </div>
+          {(appointment.legacyIdPlan ||
+            appointment.legacyClientCode ||
+            appointment.legacyEmployeeCode) && (
+            <p className="mt-1.5 text-[11px] text-muted-foreground tabular-nums truncate" title="Códigos Style / dual-sync">
+              {[
+                appointment.legacyIdPlan ? `IDPLAN ${appointment.legacyIdPlan}` : null,
+                appointment.legacyClientCode ? `cli ${appointment.legacyClientCode}` : null,
+                appointment.legacyEmployeeCode ? `emp ${appointment.legacyEmployeeCode}` : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+              {paymentStatus === 'paid' || paymentStatus === 'invoiced'
+                ? ' · Facturado Style/TPV'
+                : null}
+            </p>
+          )}
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-3">

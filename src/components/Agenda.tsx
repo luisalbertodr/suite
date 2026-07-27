@@ -19,8 +19,12 @@ import { AppointmentForm, type AppointmentFormInitialPrefill } from './Appointme
 import { EditAppointmentForm } from './EditAppointmentForm';
 import { AppointmentResourceConflictDialog } from './AppointmentResourceConflictDialog';
 import { fetchAgendaAppointmentsForDay } from '@/lib/agendaAppointmentsQuery';
+import { fetchAgendaDayPaymentStatusMap } from '@/lib/agendaDayPaymentStatus';
+import { buildAgendaSyncBadge } from '@/lib/agendaSyncBadge';
 import { useAgendaAppointments } from '@/hooks/useAgendaAppointments';
 import { useAgendaInboundSyncRefetch } from '@/hooks/useAgendaInboundSyncRefetch';
+import { useDunasoftSyncStatus } from '@/hooks/useDunasoftSyncStatus';
+import { useStyleSyncAgentStatus } from '@/hooks/useStyleSyncAgentStatus';
 import { useCabinas, useRecursos } from '@/hooks/useRecursosCabinas';
 import { format, addDays, subDays, parse, isValid } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -411,7 +415,14 @@ export const Agenda: React.FC = () => {
     updateAppointment,
     refetch: refetchAppointments,
   } = useAgendaAppointments(selectedDateYmd);
-  useAgendaInboundSyncRefetch(opCompanyId, refetchAppointments);
+  useAgendaInboundSyncRefetch(opCompanyId, refetchAppointments, selectedDateYmd);
+
+  const { data: syncStatus } = useDunasoftSyncStatus(20_000);
+  const { data: styleSync } = useStyleSyncAgentStatus(opCompanyId, 25_000);
+  const syncBadge = useMemo(
+    () => buildAgendaSyncBadge(syncStatus, styleSync),
+    [syncStatus, styleSync],
+  );
 
   useEffect(() => {
     if (!opCompanyId || !selectedDateYmd) return;
@@ -432,11 +443,8 @@ export const Agenda: React.FC = () => {
     () => dbAppointments.map((a) => a.id).filter(Boolean),
     [dbAppointments],
   );
-  const shouldLoadDayItems =
-    showAppointmentForm ||
-    showEditForm ||
-    Boolean(clipboard) ||
-    (isMultiEntity && agendaBillingView !== 'all');
+  /** Ítems en segundo plano siempre: grilla más útil sin bloquear el primer pintado. */
+  const shouldLoadDayItems = !!opCompanyId && agendaAppointmentIds.length > 0;
 
   const { cabinas } = useCabinas();
   const { recursos } = useRecursos();
@@ -519,6 +527,29 @@ export const Agenda: React.FC = () => {
   };
 
   const appointmentIds = useMemo(() => dbAppointments.map((a) => a.id), [dbAppointments]);
+
+  const paymentStatusRows = useMemo(
+    () =>
+      dbAppointments.map((a) => ({
+        id: a.id,
+        legacy_idplan: a.legacy_idplan,
+        status: a.status,
+      })),
+    [dbAppointments],
+  );
+
+  const { data: dayPaymentStatusMap } = useQuery({
+    queryKey: [
+      'agenda-day-payment-status',
+      selectedDateYmd,
+      opCompanyId,
+      paymentStatusRows.map((r) => `${r.id}:${r.legacy_idplan ?? ''}:${r.status}`).join('|'),
+    ],
+    enabled: !!opCompanyId && !!selectedDateYmd && paymentStatusRows.length > 0,
+    staleTime: 45_000,
+    refetchOnWindowFocus: false,
+    queryFn: () => fetchAgendaDayPaymentStatusMap(paymentStatusRows, selectedDateYmd),
+  });
 
   const { data: appointmentItemsPayload = { grouped: {}, articleHints: new Map<string, ArticleResourceHint>(), billingIdsByAppt: {} as Record<string, string[]> } } = useQuery({
     queryKey: ['appointment-time-segments', companyId, appointmentIds.join('|'), familyRecords.length],
@@ -666,6 +697,7 @@ export const Agenda: React.FC = () => {
       .map((it) => (it.label || '').trim())
       .filter(Boolean);
     const aptStatus = (['confirmed', 'pending', 'cancelled'].includes(row.status) ? row.status : 'pending') as Appointment['status'];
+    const enrichedPayment = dayPaymentStatusMap?.get(row.id);
     return {
       id: row.id,
       employeeId: row.employee_id || '',
@@ -676,6 +708,7 @@ export const Agenda: React.FC = () => {
       serviceName: parsedService.service,
       legacyEmployeeCode: row.legacy_codemp || undefined,
       legacyClientCode: row.legacy_codcli || undefined,
+      legacyIdPlan: row.legacy_idplan != null ? String(row.legacy_idplan).trim() || null : null,
       legacyPlanincId: row.legacy_planinc_id ?? null,
       legacyHourInText: parsedService.hourInText || undefined,
       startTime,
@@ -686,7 +719,10 @@ export const Agenda: React.FC = () => {
       date: normalizeDate(row.start_time, row.appointment_date),
       color: row.color || '#3B82F6',
       totalAmount: undefined,
-      paymentStatus: aptStatus === 'cancelled' ? 'none' : undefined,
+      paymentStatus:
+        aptStatus === 'cancelled'
+          ? 'none'
+          : enrichedPayment ?? undefined,
       status: aptStatus,
       attachments: undefined,
     };
@@ -828,6 +864,27 @@ export const Agenda: React.FC = () => {
       >
         <Clock className="w-3.5 h-3.5 mr-1" /> Hoy
       </Button>
+      <span
+        className={`inline-flex h-7 shrink-0 items-center rounded-md border px-2 text-[11px] font-medium tabular-nums ${
+          syncBadge.tone === 'error'
+            ? 'border-destructive/40 bg-destructive/10 text-destructive'
+            : syncBadge.tone === 'pending'
+              ? 'border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300'
+              : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300'
+        }`}
+        title={syncBadge.title}
+      >
+        {syncBadge.label}
+      </span>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-7 px-2 text-xs shrink-0 text-muted-foreground"
+        onClick={() => void refetchAppointments()}
+        disabled={appointmentsFetching}
+      >
+        Actualizar
+      </Button>
       <BillingEntityToggle
         showAll
         value={agendaBillingView}
@@ -852,7 +909,17 @@ export const Agenda: React.FC = () => {
         </div>
       ) : null}
     </>
-  ), [agendaBillingView, clipboard, clearClipboard, datePickerOpen, selectAgendaDate, selectedDate]);
+  ), [
+    agendaBillingView,
+    appointmentsFetching,
+    clipboard,
+    clearClipboard,
+    datePickerOpen,
+    refetchAppointments,
+    selectAgendaDate,
+    selectedDate,
+    syncBadge,
+  ]);
 
   useEffect(() => {
     if (!clipboard) return;
@@ -1278,6 +1345,7 @@ export const Agenda: React.FC = () => {
         await queryClient.invalidateQueries({ queryKey: appointmentItemsQueryKey(created.id) });
         await queryClient.invalidateQueries({ queryKey: ['appointment-time-segments'] });
         await queryClient.invalidateQueries({ queryKey: ['appointment-item-totals'] });
+        await queryClient.invalidateQueries({ queryKey: ['agenda-day-payment-status'] });
         await queryClient.invalidateQueries({ queryKey: ['customer-active-bonos'] });
         await queryClient.invalidateQueries({ queryKey: ['bonos'] });
         await registerAppointmentHistory(data.customerId ?? null, dateStr, items, created.id);
@@ -1354,6 +1422,7 @@ export const Agenda: React.FC = () => {
         await queryClient.invalidateQueries({ queryKey: appointmentItemsQueryKey(updated.id) });
         await queryClient.invalidateQueries({ queryKey: ['appointment-time-segments'] });
         await queryClient.invalidateQueries({ queryKey: ['appointment-item-totals'] });
+        await queryClient.invalidateQueries({ queryKey: ['agenda-day-payment-status'] });
         await queryClient.invalidateQueries({ queryKey: ['customer-active-bonos'] });
         await queryClient.invalidateQueries({ queryKey: ['bonos'] });
         await registerAppointmentHistory(updated.customerId ?? null, updated.date, items, updated.id);
@@ -1433,6 +1502,7 @@ export const Agenda: React.FC = () => {
 
       await queryClient.invalidateQueries({ queryKey: ['agenda-appointments'] });
       await queryClient.invalidateQueries({ queryKey: ['appointment-sales', appointmentId] });
+      await queryClient.invalidateQueries({ queryKey: ['agenda-day-payment-status'] });
       await queryClient.invalidateQueries({ queryKey: ['audit_events'] });
 
       const items = appointmentItemsByAppt[appointmentId] ?? (await fetchAppointmentItems(appointmentId, companyId || undefined));
