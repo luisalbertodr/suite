@@ -15,8 +15,21 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 $Vfp = Join-Path $RepoRoot "vfp"
 $StyleRoot = [IO.Path]::GetFullPath($StyleRoot.TrimEnd('\'))
 
+# Si desplegamos por SMB (\\host\c$\...), el worker en la VM debe usar C:\...
+# Abrir el mismo DBF por UNC y por letra rompe el CDX y cuelga el alta de cliente.
+function ConvertTo-LocalStyleRoot([string]$Root) {
+    if ($Root -match '^\\\\[^\\]+\\([A-Za-z])\$\\?(.*)$') {
+        $drive = $Matches[1].ToUpperInvariant()
+        $rest = ($Matches[2] -replace '/', '\').TrimStart('\')
+        return ("{0}:\{1}" -f $drive, $rest).TrimEnd('\')
+    }
+    return $Root.TrimEnd('\')
+}
+$LocalStyleRoot = ConvertTo-LocalStyleRoot $StyleRoot
+
 Write-Host "=== deploy-style-sync-runtime ===" -ForegroundColor Cyan
 Write-Host "Destino: $StyleRoot"
+Write-Host "Ruta local worker: $LocalStyleRoot"
 
 $copyRoot = @(
     "ensure-style-sync.ps1",
@@ -84,18 +97,37 @@ $vfpExe = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual FoxPro 9\vfp9.exe
 $onceSrc = Join-Path $Vfp "_inbound_once.prg"
 if (Test-Path $onceSrc) {
     $once = Get-Content $onceSrc -Raw -Encoding UTF8
-    $once = $once -replace 'C:\\Duna\\Style-Suite-Test\\', ($StyleRoot.TrimEnd('\') + '\')
+    # Plantilla ya resuelve STYLE_HOME / cwd; no incrustar UNC de despliegue.
 } else {
     $once = @"
 * Wrapper scheduler: cwd + SAFETY OFF + cierra VFP sin dialogos de error.
-LOCAL lcWorker
+LOCAL lcWorker, lcFxp, lcEnv, lcRoot, lnSlash, lcShare, lcRest
 SET SAFETY OFF
 SET ESCAPE OFF
 SET NOTIFY OFF
 ON ERROR DO InboundOnceError
 _SCREEN.Visible = .F.
 PUBLIC pcSuiteStyleRoot
-pcSuiteStyleRoot = "$StyleRoot\"
+lcEnv = ALLTRIM(GETENV("STYLE_HOME"))
+IF .NOT. EMPTY(lcEnv)
+   lcRoot = ADDBS(lcEnv)
+ELSE
+   lcRoot = ADDBS(SYS(5)+SYS(2003))
+ENDIF
+IF LEFT(lcRoot, 2) == "\\"
+   lnSlash = AT(SUBSTR(lcRoot, 3), "\")
+   IF lnSlash > 0
+      lcShare = SUBSTR(lcRoot, 3 + lnSlash, 2)
+      IF LEN(lcShare) = 2 .AND. SUBSTR(lcShare, 2, 1) = "$" .AND. ISALPHA(LEFT(lcShare, 1))
+         lcRest = SUBSTR(lcRoot, 3 + lnSlash + 2)
+         IF LEFT(lcRest, 1) = "\"
+            lcRest = SUBSTR(lcRest, 2)
+         ENDIF
+         lcRoot = ADDBS(UPPER(LEFT(lcShare, 1)) + ":\" + lcRest)
+      ENDIF
+   ENDIF
+ENDIF
+pcSuiteStyleRoot = lcRoot
 SET DEFAULT TO (pcSuiteStyleRoot)
 lcWorker = pcSuiteStyleRoot + "PROGS\suite_inbound_worker_sync.prg"
 IF .NOT. FILE(lcWorker)
