@@ -220,7 +220,7 @@ ENDFUNC
 **
 FUNCTION SuiteEnqueueCola
  PARAMETER tcTabla, tcIdRegistro, tcAccion
- LOCAL lcalias, lnId, lcacc
+ LOCAL lcalias, lnId, lcacc, lcRepNum, lcRepUnit, llOk
  IF EMPTY(tcTabla)
     RETURN .F.
  ENDIF
@@ -236,20 +236,43 @@ FUNCTION SuiteEnqueueCola
        lcacc = "UPD"
  ENDCASE
  lcalias = SELECT()
- DO SuiteEnsureColaSincro
- SELECT cola_sincro
- lnId = 0
- IF RECCOUNT("cola_sincro") > 0
-    GO BOTTOM
-    lnId = cola_sincro.id
- ENDIF
- APPEND BLANK
- REPLACE id WITH lnId+1, tabla WITH tcTabla, id_reg WITH tcIdRegistro, ;
-         accion WITH lcacc, procesado WITH .F., creado WITH DATETIME()
- IF  .NOT. EMPTY(lcalias)
-    SELECT (lcalias)
- ENDIF
- RETURN .T.
+ llOk = .F.
+ * Escribir en cola_sincro NUNCA debe congelar la UI de Style. Con el REPROCESS por
+ * defecto (0 = reintento de lock indefinido), si la cola esta ocupada (agente Node
+ * leyendo, otra sesion, microcorte CIFS) el APPEND BLANK espera para siempre y el alta
+ * de cliente/articulo/bono "se queda colgada y se cierra". Acotamos la espera de lock;
+ * si no se consigue, se omite el encolado y el agente reconcilia por resync de entidad.
+ * (Las citas usan SuiteEnqueuePlan2009 y no pasan por aqui.)
+ lcRepNum = SET("REPROCESS")
+ lcRepUnit = SET("REPROCESS", 2)
+ SET REPROCESS TO 3 SECONDS
+ TRY
+    DO SuiteEnsureColaSincro
+    IF USED("cola_sincro")
+       SELECT cola_sincro
+       lnId = 0
+       IF RECCOUNT("cola_sincro") > 0
+          GO BOTTOM
+          lnId = cola_sincro.id
+       ENDIF
+       APPEND BLANK
+       REPLACE id WITH lnId+1, tabla WITH tcTabla, id_reg WITH tcIdRegistro, ;
+               accion WITH lcacc, procesado WITH .F., creado WITH DATETIME()
+       llOk = .T.
+    ENDIF
+ CATCH
+    llOk = .F.
+ FINALLY
+    IF UPPER(ALLTRIM(TRANSFORM(lcRepUnit))) == "SECONDS"
+       SET REPROCESS TO VAL(TRANSFORM(lcRepNum)) SECONDS
+    ELSE
+       SET REPROCESS TO VAL(TRANSFORM(lcRepNum))
+    ENDIF
+    IF  .NOT. EMPTY(lcalias)
+       SELECT (lcalias)
+    ENDIF
+ ENDTRY
+ RETURN llOk
 ENDFUNC
 **
 FUNCTION SuiteColaIsV2Active
