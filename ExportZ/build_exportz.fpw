@@ -1,0 +1,4 @@
+SCREEN=ON
+RESOURCE=OFF
+DEFAULT=C:\Duna\ExportZ
+COMMAND=DO PROGS\VfpHeadlessBuild.prg
