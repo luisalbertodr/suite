@@ -1,0 +1,4 @@
+OPEN PROJECT mscomctl
+Error in line 9: Syntax error.
+OPEN PROJECT (FULLPATH("mscomctl.pjx"))
+Error in line 19: Syntax error.
