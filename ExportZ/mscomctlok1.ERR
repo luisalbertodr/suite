@@ -1,0 +1,22 @@
+Program c:\duna\exportz\progs\general.prg has the following errors:
+    Application CONTA - Undefined
+
+Program c:\duna\exportz\progs\funciones.prg has the following errors:
+    Application CONTA - Undefined
+
+Visual Class Library c:\duna\exportz\vcx\http.vcx has the following errors:
+    Unknown LAARRAYCLIENTESOK - Undefined
+    Unknown LAARRAYARTICULOSOK - Undefined
+    Unknown LAARRAYREGISTROSOK - Undefined
+    Unknown LAARRAYCONTACTOSOK - Undefined
+
+Form c:\duna\exportz\scx\mantremesas.scx has the following errors:
+    Application CONTA - Undefined
+
+Visual Class Library c:\duna\exportz\vcx\graficos.vcx has the following errors:
+    Application SYSTEM - Undefined
+
+Program c:\duna\exportz\progs\foxypreviewer.prg has the following errors:
+    Application REPORTPREVIEW - Undefined
+    Application REPORTOUTPUT - Undefined
+

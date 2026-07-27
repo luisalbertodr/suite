@@ -1,0 +1,6 @@
+OPEN PROJECT (lcStem) EXCLUSIVE
+Error in line 15: Syntax error.
+OPEN PROJECT (lcName) EXCLUSIVE
+Error in line 28: Syntax error.
+OPEN PROJECT (lcName + ".pjx") EXCLUSIVE
+Error in line 39: Syntax error.
