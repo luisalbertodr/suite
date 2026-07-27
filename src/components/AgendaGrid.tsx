@@ -80,8 +80,9 @@ function agendaEmployeesMinWidthPx(employeeCount: number): number {
   return Math.max(GRID_MIN_EMPLOYEES_PX, Math.max(1, employeeCount) * EMP_COL_MIN_PX);
 }
 
-function agendaGridMinWidthPx(employeeCount: number): number {
-  return TIME_GUTTER_PX + agendaEmployeesMinWidthPx(employeeCount);
+function agendaEmployeeOnlyColumnsTemplate(employeeCount: number): string {
+  const n = Math.max(1, employeeCount);
+  return `repeat(${n}, minmax(${EMP_COL_MIN_PX}px, 1fr))`;
 }
 
 function agendaEmployeeColumnsTemplate(employeeCount: number): string {
@@ -89,19 +90,11 @@ function agendaEmployeeColumnsTemplate(employeeCount: number): string {
   return `${TIME_GUTTER_PX}px repeat(${n}, minmax(${EMP_COL_MIN_PX}px, 1fr))`;
 }
 
-function agendaEmployeeOnlyColumnsTemplate(employeeCount: number): string {
-  const n = Math.max(1, employeeCount);
-  return `repeat(${n}, minmax(${EMP_COL_MIN_PX}px, 1fr))`;
-}
-
 /** HTML5 drag bloquea el pan táctil en iOS; solo en puntero fino. */
 function canUseHtml5AppointmentDrag(): boolean {
   if (typeof window === 'undefined') return true;
   return window.matchMedia('(pointer: fine)').matches;
 }
-
-/** Mitad aproximada de la pastilla de etiqueta horaria (px). */
-const HOUR_LABEL_HALF_PX = 8;
 
 /** Franjas fuera de horario en columna hora (fondo transparente para no tapar etiquetas). */
 const UNAVAILABLE_TIME_GUTTER_TRANSPARENT =
@@ -491,8 +484,9 @@ const AgendaAppointmentItem = React.memo(function AgendaAppointmentItem({
   const height = Math.max(((endMin - startMin) / slotMinutes) * cellHeight, cellHeight * 0.5);
 
   const colFrac = overlap.total > 0 ? overlap.index / overlap.total : 0;
-  const left = `calc(${TIME_GUTTER_PX}px + (100% - ${TIME_GUTTER_PX}px) * ${employeeIndex / employeeCount} + (100% - ${TIME_GUTTER_PX}px) / ${employeeCount} * ${colFrac})`;
-  const width = `calc((100% - ${TIME_GUTTER_PX}px) / ${employeeCount} / ${overlap.total})`;
+  /** Coordenadas relativas a la zona de empleadas (sin columna Hora). */
+  const left = `calc(100% * ${employeeIndex / employeeCount} + 100% / ${employeeCount} * ${colFrac})`;
+  const width = `calc(100% / ${employeeCount} / ${overlap.total})`;
   const slotDesc = visibleFields.description ? slotDescriptionText(appointment) : null;
   const lockedByPayment = appointment.paymentStatus === 'paid' || appointment.paymentStatus === 'invoiced';
   const singleSegmentColor = segments.length === 1 ? segments[0]?.recursoColor ?? null : null;
@@ -635,11 +629,11 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
   },
 }) {
   const scrollRootRef = React.useRef<HTMLDivElement>(null);
+  /** Scroll horizontal de columnas (eje separado del vertical; necesario en iOS). */
+  const hScrollRootRef = React.useRef<HTMLDivElement>(null);
   const headerScrollRef = React.useRef<HTMLDivElement>(null);
   const footerScrollRef = React.useRef<HTMLDivElement>(null);
   const [scrollbarWidth, setScrollbarWidth] = React.useState(0);
-  const [scrollTop, setScrollTop] = React.useState(0);
-  const [viewportHeight, setViewportHeight] = React.useState(0);
   const lastScrollTopRef = React.useRef(0);
   const lastHandledGoTodayRef = React.useRef(0);
   const lastHandledScrollToTimeRef = React.useRef(0);
@@ -648,7 +642,6 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
   const [nowLineTick, setNowLineTick] = React.useState(0);
   const allowHtml5Drag = React.useMemo(() => canUseHtml5AppointmentDrag(), []);
   const employeesMinWidthPx = agendaEmployeesMinWidthPx(employees.length);
-  const gridMinWidthPx = agendaGridMinWidthPx(employees.length);
 
   const [draggedAppointment, setDraggedAppointment] = React.useState<string | null>(null);
   const [dragOverSlot, setDragOverSlot] = React.useState<{ employeeId: string; time: string } | null>(null);
@@ -661,13 +654,6 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
   const timeSlots = React.useMemo(
     () => generateAgendaSlots(envStart, envEnd, slotMinutes) as TimeSlot[],
     [envStart, envEnd, slotMinutes],
-  );
-  const hourMarkPositions = React.useMemo(
-    () =>
-      timeSlots
-        .map((slot, idx) => ({ slot, y: idx * cellHeight }))
-        .filter(({ slot }) => slot.minute === 0),
-    [timeSlots, cellHeight],
   );
   const gridStartMin = timeSlots.length ? timeToMinutes(timeSlots[0].time) : envStart;
   const gridEndMin = timeSlots.length ? timeToMinutes(timeSlots[timeSlots.length - 1].time) + slotMinutes : envEnd;
@@ -911,18 +897,9 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
   React.useEffect(() => {
     const el = scrollRootRef.current;
     if (!el) return;
-    const syncViewport = () => {
-      setScrollTop(el.scrollTop);
-      setViewportHeight(el.clientHeight);
-    };
-    syncViewport();
-    const ro = new ResizeObserver(syncViewport);
-    ro.observe(el);
-
     const onScroll = () => {
       if (!scrollRootRef.current) return;
       lastScrollTopRef.current = scrollRootRef.current.scrollTop;
-      setScrollTop(scrollRootRef.current.scrollTop);
       if (persistUserId && viewDateYmd) {
         if (scrollSaveTimerRef.current) clearTimeout(scrollSaveTimerRef.current);
         scrollSaveTimerRef.current = setTimeout(() => flushScrollToStorage(), 220);
@@ -942,7 +919,6 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
     document.addEventListener('visibilitychange', onHide);
 
     return () => {
-      ro.disconnect();
       el.removeEventListener('scroll', onScroll);
       window.removeEventListener('pagehide', onPageHide);
       document.removeEventListener('visibilitychange', onHide);
@@ -964,24 +940,24 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
     return () => ro.disconnect();
   }, [employees.length, timeSlots.length]);
 
-  /** Sincroniza scroll horizontal entre encabezado, cuadrícula y pie (bidireccional). */
+  /** Sincroniza scroll horizontal entre encabezado, zona de columnas y pie. */
   React.useEffect(() => {
-    const body = scrollRootRef.current;
+    const bodyH = hScrollRootRef.current;
     const header = headerScrollRef.current;
     const footer = footerScrollRef.current;
-    if (!body) return;
+    if (!bodyH) return;
 
     let lock = false;
     const applyLeft = (left: number, source: 'body' | 'header' | 'footer') => {
       if (lock) return;
       lock = true;
-      if (source !== 'body' && body.scrollLeft !== left) body.scrollLeft = left;
+      if (source !== 'body' && bodyH.scrollLeft !== left) bodyH.scrollLeft = left;
       if (header && source !== 'header' && header.scrollLeft !== left) header.scrollLeft = left;
       if (footer && source !== 'footer' && footer.scrollLeft !== left) footer.scrollLeft = left;
       lock = false;
     };
 
-    const onBody = () => applyLeft(body.scrollLeft, 'body');
+    const onBody = () => applyLeft(bodyH.scrollLeft, 'body');
     const onHeader = () => {
       if (!header) return;
       applyLeft(header.scrollLeft, 'header');
@@ -991,35 +967,41 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
       applyLeft(footer.scrollLeft, 'footer');
     };
 
-    body.addEventListener('scroll', onBody, { passive: true });
+    bodyH.addEventListener('scroll', onBody, { passive: true });
     header?.addEventListener('scroll', onHeader, { passive: true });
     footer?.addEventListener('scroll', onFooter, { passive: true });
     onBody();
     return () => {
-      body.removeEventListener('scroll', onBody);
+      bodyH.removeEventListener('scroll', onBody);
       header?.removeEventListener('scroll', onHeader);
       footer?.removeEventListener('scroll', onFooter);
     };
-  }, [employees.length]);
+  }, [employees.length, employeesMinWidthPx]);
+
+  const edgeRowPad = { paddingRight: scrollbarWidth };
+  const gridBodyHeightPx = timeSlots.length * cellHeight;
 
   /**
-   * iOS a menudo ignora el pan horizontal en un mismo nodo con overflow-x+y.
-   * Si el gesto es claramente horizontal, movemos scrollLeft a mano.
+   * Puente táctil en la zona de columnas: iOS no encadena bien vertical
+   * desde un hijo overflow-x hacia el padre overflow-y (y viceversa).
    */
   React.useEffect(() => {
-    const el = scrollRootRef.current;
-    if (!el) return;
+    const hEl = hScrollRootRef.current;
+    const vEl = scrollRootRef.current;
+    if (!hEl || !vEl) return;
 
     let startX = 0;
     let startY = 0;
     let startLeft = 0;
+    let startTop = 0;
     let axis: 'h' | 'v' | null = null;
 
     const onTouchStart = (e: TouchEvent) => {
       if (e.touches.length !== 1) return;
       startX = e.touches[0]!.clientX;
       startY = e.touches[0]!.clientY;
-      startLeft = el.scrollLeft;
+      startLeft = hEl.scrollLeft;
+      startTop = vEl.scrollTop;
       axis = null;
     };
 
@@ -1028,25 +1010,31 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
       const dx = e.touches[0]!.clientX - startX;
       const dy = e.touches[0]!.clientY - startY;
       if (axis === null) {
-        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
-        axis = Math.abs(dx) > Math.abs(dy) * 1.15 ? 'h' : 'v';
+        if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+        axis = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v';
       }
-      if (axis !== 'h') return;
-      const maxLeft = Math.max(0, el.scrollWidth - el.clientWidth);
-      if (maxLeft <= 0) return;
-      el.scrollLeft = Math.max(0, Math.min(maxLeft, startLeft - dx));
+      if (axis === 'h') {
+        const maxLeft = Math.max(0, hEl.scrollWidth - hEl.clientWidth);
+        if (maxLeft <= 0) return;
+        const nextLeft = Math.max(0, Math.min(maxLeft, startLeft - dx));
+        hEl.scrollLeft = nextLeft;
+        if (headerScrollRef.current) headerScrollRef.current.scrollLeft = nextLeft;
+        if (footerScrollRef.current) footerScrollRef.current.scrollLeft = nextLeft;
+        e.preventDefault();
+        return;
+      }
+      const maxTop = Math.max(0, vEl.scrollHeight - vEl.clientHeight);
+      vEl.scrollTop = Math.max(0, Math.min(maxTop, startTop - dy));
       e.preventDefault();
     };
 
-    el.addEventListener('touchstart', onTouchStart, { passive: true });
-    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    hEl.addEventListener('touchstart', onTouchStart, { passive: true });
+    hEl.addEventListener('touchmove', onTouchMove, { passive: false });
     return () => {
-      el.removeEventListener('touchstart', onTouchStart);
-      el.removeEventListener('touchmove', onTouchMove);
+      hEl.removeEventListener('touchstart', onTouchStart);
+      hEl.removeEventListener('touchmove', onTouchMove);
     };
-  }, [employees.length, gridMinWidthPx]);
-
-  const edgeRowPad = { paddingRight: scrollbarWidth };
+  }, [employees.length, employeesMinWidthPx, gridBodyHeightPx]);
 
   return (
     <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] bg-card">
@@ -1069,220 +1057,213 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
       </div>
 
       <div className="relative min-h-0 h-full overflow-hidden">
-      <div
-        ref={scrollRootRef}
-        className="h-full min-h-0 overflow-x-auto overflow-y-scroll overscroll-contain [-webkit-overflow-scrolling:touch] [touch-action:pan-x_pan-y]"
-      >
-        <div className="relative" style={{ minWidth: gridMinWidthPx }}>
+        {/*
+          Vertical afuera / horizontal solo en columnas.
+          iOS no hace pan fiable en un nodo con overflow-x+y a la vez.
+          El gutter de hora queda fuera del eje X.
+        */}
         <div
-          className="grid relative gap-0"
-          style={{ gridTemplateColumns: agendaEmployeeColumnsTemplate(employees.length) }}
+          ref={scrollRootRef}
+          className="h-full min-h-0 overflow-x-hidden overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch]"
         >
-          {/* Renderizar las citas como elementos posicionados absolutamente */}
-          {appointments.map((appointment) => {
-            const employeeIndex = employeeIndexById.get(appointment.employeeId);
-            if (employeeIndex === undefined) return null;
-
-            return (
-              <AgendaAppointmentItem
-                key={appointment.id}
-                appointment={appointment}
-                employeeIndex={employeeIndex}
-                employeeCount={employees.length}
-                employeeColor={employees[employeeIndex]?.color ?? ''}
-                overlap={overlapMap[appointment.id] || { index: 0, total: 1 }}
-                gridStartMin={gridStartMin}
-                gridEndMin={gridEndMin}
-                slotMinutes={slotMinutes}
-                cellHeight={cellHeight}
-                visibleFields={visibleFields}
-                onAppointmentClick={onAppointmentClick}
-                onAppointmentCopy={onAppointmentCopy}
-                onAppointmentCut={onAppointmentCut}
-                allowHtml5Drag={allowHtml5Drag}
-                onDragStart={handleDragStart}
-                onDragEnd={handleDragEnd}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-              />
-            );
-          })}
-
-          {isTodayView && (() => {
-            const d = new Date();
-            const nowDec = d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60;
-            const clamped = Math.max(gridStartMin, Math.min(gridEndMin, nowDec));
-            const topPx = ((clamped - gridStartMin) / slotMinutes) * cellHeight;
-            return (
-              <div
-                key={`agenda-now-line-${nowLineTick}`}
-                className="pointer-events-none absolute left-0 right-0 z-[25]"
-                style={{
-                  top: `${topPx}px`,
-                  height: 0,
-                  borderTop: '2px solid rgb(220 38 38)',
-                  boxShadow: '0 0 0 1px rgba(255,255,255,0.6)',
-                }}
-                aria-hidden
-              />
-            );
-          })()}
-
-          {/* Renderizar todas las celdas del grid */}
-          {timeSlots.map((slot) => {
-            const isHourMark = slot.minute === 0;
-            const dateKey = viewDateYmd ?? format(new Date(), 'yyyy-MM-dd');
-            const slotS = timeToMinutes(slot.time);
-            const slotE = slotS + slotMinutes;
-            const { centerOpen } = slotBookableForAgenda(dateKey, slotS, slotE, centerHours, null, []);
-            const timeShade = !centerOpen;
-
-            return (
-              <div key={slot.time} className="contents">
-                {/* Columna de tiempo — etiqueta sobre la línea del slot */}
-                <div
-                  className={`sticky left-0 z-[26] relative overflow-visible border-r border-border ${
-                    isHourMark ? 'border-t-2 border-border bg-transparent' : 'border-t border-border bg-transparent'
-                  } ${timeShade ? UNAVAILABLE_TIME_GUTTER_TRANSPARENT : ''}`}
-                  style={{ height: `${cellHeight}px`, minHeight: `${cellHeight}px` }}
-                >
-                  {!isHourMark ? (
+          <div className="flex w-full min-w-0 max-w-full" style={{ height: gridBodyHeightPx, minHeight: gridBodyHeightPx }}>
+            <div
+              className="shrink-0 border-r border-border bg-card"
+              style={{ width: TIME_GUTTER_PX }}
+            >
+              {timeSlots.map((slot) => {
+                const isHourMark = slot.minute === 0;
+                const dateKey = viewDateYmd ?? format(new Date(), 'yyyy-MM-dd');
+                const slotS = timeToMinutes(slot.time);
+                const slotE = slotS + slotMinutes;
+                const { centerOpen } = slotBookableForAgenda(dateKey, slotS, slotE, centerHours, null, []);
+                const timeShade = !centerOpen;
+                return (
+                  <div
+                    key={`gutter-${slot.time}`}
+                    className={`relative overflow-visible ${
+                      isHourMark ? 'border-t-2 border-border' : 'border-t border-border'
+                    } ${timeShade ? UNAVAILABLE_TIME_GUTTER_TRANSPARENT : 'bg-transparent'}`}
+                    style={{ height: `${cellHeight}px`, minHeight: `${cellHeight}px` }}
+                  >
                     <span
-                      className={`absolute left-0 right-0 top-0 z-[1] -translate-y-1/2 text-center leading-none px-2.5 text-xs font-medium text-muted-foreground dark:text-foreground/75 tabular-nums ${
-                        timeShade ? '!text-neutral-700 dark:!text-neutral-300' : ''
-                      }`}
+                      className={`absolute left-0 right-0 top-0 z-[1] -translate-y-1/2 text-center leading-none px-1.5 text-xs font-medium text-muted-foreground dark:text-foreground/75 tabular-nums ${
+                        isHourMark ? 'text-sm font-semibold text-foreground' : ''
+                      } ${timeShade ? '!text-neutral-700 dark:!text-neutral-300' : ''}`}
                     >
                       <span
-                        className={`inline-block rounded-sm px-1.5 bg-card/80 ring-1 ring-border/30 ${
-                          timeShade ? 'bg-card/90 dark:bg-card/85' : ''
+                        className={`inline-block rounded-sm px-1.5 bg-card/90 ring-1 ring-border/30 ${
+                          isHourMark ? 'shadow-sm ring-border/50' : ''
                         }`}
                       >
                         {slot.time}
                       </span>
                     </span>
-                  ) : null}
-                </div>
-
-                {/* Columnas de empleados - siempre renderizar todas las celdas */}
-                {employees.map((employee) => {
-                  const isOccupied = isSlotOccupiedByAppointment(employee.id, slot.time);
-                  const isHighlighted = isSlotHighlighted(employee.id, slot.time);
-                  const meta = employeeAgendaById[employee.id] ?? { weekly: null, blocks: [] };
-                  const { bookable, blocked, schedulingAllowed } = slotBookableForAgenda(
-                    dateKey,
-                    slotS,
-                    slotE,
-                    centerHours,
-                    meta.weekly,
-                    meta.blocks,
-                  );
-                  const shade = !bookable && !isOccupied;
-                  const canSchedule = !isOccupied && schedulingAllowed;
-                  const canPaste = canSchedule && !!appointmentClipboard && !!onSlotPaste;
-                  const pasteHint = canPaste
-                    ? appointmentClipboard!.mode === 'cut'
-                      ? 'Clic para mover la cita aquí (Mayús+clic = nueva cita)'
-                      : 'Clic para pegar la cita (Mayús+clic = nueva cita)'
-                    : undefined;
-
-                  const slotCell = (
-                    <div
-                      className={`relative border-r border-border transition-colors ${
-                        isHourMark ? 'border-t-2 border-border' : 'border-t border-border'
-                      } ${
-                        isOccupied
-                          ? 'bg-muted/50'
-                          : shade
-                            ? blocked
-                              ? UNAVAILABLE_CELL_BLOCKED
-                              : `${UNAVAILABLE_CELL} cursor-pointer hover:bg-accent/50`
-                            : 'bg-card cursor-pointer hover:bg-accent/40'
-                      } ${isHighlighted ? 'bg-blue-100 dark:bg-blue-950/40 border-blue-300 dark:border-blue-700' : ''} ${
-                        canPaste ? 'ring-1 ring-inset ring-emerald-400/50 dark:ring-emerald-600/40' : ''
-                      }`}
-                      style={{ height: `${cellHeight}px` }}
-                      title={
-                        pasteHint ??
-                        (shade && canSchedule
-                          ? 'Fuera del horario habitual — clic para cita excepcional'
-                          : blocked
-                            ? 'No disponible (bloqueo de agenda)'
-                            : undefined)
-                      }
-                      onClick={(e) => {
-                        if (!canSchedule) return;
-                        onSlotClick(employee.id, slot.time, { forceNew: e.shiftKey });
-                      }}
-                      onDragOver={(e) => canSchedule && handleDragOver(e, employee.id, slot.time)}
-                      onDragLeave={handleDragLeave}
-                      onDrop={(e) => canSchedule && handleDrop(e, employee.id, slot.time)}
-                    />
-                  );
-
-                  if (!canPaste) {
-                    return <React.Fragment key={`${employee.id}-${slot.time}`}>{slotCell}</React.Fragment>;
-                  }
-
-                  return (
-                    <ContextMenu key={`${employee.id}-${slot.time}`}>
-                      <ContextMenuTrigger asChild>{slotCell}</ContextMenuTrigger>
-                      <ContextMenuContent className="z-[130]">
-                        <ContextMenuItem
-                          className="gap-2"
-                          onClick={() => onSlotPaste!(employee.id, slot.time)}
-                        >
-                          <ClipboardPaste className="h-3.5 w-3.5" />
-                          {appointmentClipboard!.mode === 'cut' ? 'Pegar (mover)' : 'Pegar'}
-                        </ContextMenuItem>
-                        <ContextMenuSeparator />
-                        <ContextMenuItem onClick={() => onSlotClick(employee.id, slot.time, { forceNew: true })}>
-                          Nueva cita vacía
-                        </ContextMenuItem>
-                      </ContextMenuContent>
-                    </ContextMenu>
-                  );
-                })}
-              </div>
-            );
-          })}
-        </div>
-        </div>
-      </div>
-
-      <div
-        className="pointer-events-none absolute left-0 top-0 z-[55] overflow-hidden"
-        style={{ width: TIME_GUTTER_PX, height: viewportHeight || undefined }}
-        aria-hidden
-      >
-        {hourMarkPositions.map(({ slot, y }) => {
-          const yViewport = y - scrollTop;
-          if (yViewport < -HOUR_LABEL_HALF_PX || yViewport > viewportHeight + HOUR_LABEL_HALF_PX) {
-            return null;
-          }
-          const top = Math.max(2, yViewport - HOUR_LABEL_HALF_PX);
-          const dateKey = viewDateYmd ?? format(new Date(), 'yyyy-MM-dd');
-          const slotS = timeToMinutes(slot.time);
-          const slotE = slotS + slotMinutes;
-          const { centerOpen } = slotBookableForAgenda(dateKey, slotS, slotE, centerHours, null, []);
-          const timeShade = !centerOpen;
-          return (
-            <div
-              key={`hour-label-${slot.time}`}
-              className="absolute left-0 right-0 flex justify-center"
-              style={{ top }}
-            >
-              <span
-                className={`inline-block rounded-sm px-1.5 text-sm font-semibold text-foreground tabular-nums leading-none bg-card shadow-sm ring-1 ring-border/50 ${
-                  timeShade ? 'text-neutral-700 dark:text-neutral-300' : ''
-                }`}
-              >
-                {slot.time}
-              </span>
+                  </div>
+                );
+              })}
             </div>
-          );
-        })}
-      </div>
+
+            <div
+              ref={hScrollRootRef}
+              className="min-w-0 max-w-full flex-1 overflow-x-auto overflow-y-hidden overscroll-x-contain [-webkit-overflow-scrolling:touch]"
+              style={{ height: gridBodyHeightPx, WebkitOverflowScrolling: 'touch' }}
+            >
+              <div
+                className="relative"
+                style={{ width: employeesMinWidthPx, minWidth: employeesMinWidthPx, height: gridBodyHeightPx }}
+              >
+                <div
+                  className="grid relative gap-0"
+                  style={{
+                    gridTemplateColumns: agendaEmployeeOnlyColumnsTemplate(employees.length),
+                    width: employeesMinWidthPx,
+                  }}
+                >
+                  {appointments.map((appointment) => {
+                    const employeeIndex = employeeIndexById.get(appointment.employeeId);
+                    if (employeeIndex === undefined) return null;
+
+                    return (
+                      <AgendaAppointmentItem
+                        key={appointment.id}
+                        appointment={appointment}
+                        employeeIndex={employeeIndex}
+                        employeeCount={employees.length}
+                        employeeColor={employees[employeeIndex]?.color ?? ''}
+                        overlap={overlapMap[appointment.id] || { index: 0, total: 1 }}
+                        gridStartMin={gridStartMin}
+                        gridEndMin={gridEndMin}
+                        slotMinutes={slotMinutes}
+                        cellHeight={cellHeight}
+                        visibleFields={visibleFields}
+                        onAppointmentClick={onAppointmentClick}
+                        onAppointmentCopy={onAppointmentCopy}
+                        onAppointmentCut={onAppointmentCut}
+                        allowHtml5Drag={allowHtml5Drag}
+                        onDragStart={handleDragStart}
+                        onDragEnd={handleDragEnd}
+                        onDragOver={handleDragOver}
+                        onDragLeave={handleDragLeave}
+                        onDrop={handleDrop}
+                      />
+                    );
+                  })}
+
+                  {isTodayView && (() => {
+                    const d = new Date();
+                    const nowDec = d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60;
+                    const clamped = Math.max(gridStartMin, Math.min(gridEndMin, nowDec));
+                    const topPx = ((clamped - gridStartMin) / slotMinutes) * cellHeight;
+                    return (
+                      <div
+                        key={`agenda-now-line-${nowLineTick}`}
+                        className="pointer-events-none absolute left-0 right-0 z-[25]"
+                        style={{
+                          top: `${topPx}px`,
+                          height: 0,
+                          borderTop: '2px solid rgb(220 38 38)',
+                          boxShadow: '0 0 0 1px rgba(255,255,255,0.6)',
+                        }}
+                        aria-hidden
+                      />
+                    );
+                  })()}
+
+                  {timeSlots.map((slot) => {
+                    const isHourMark = slot.minute === 0;
+                    const dateKey = viewDateYmd ?? format(new Date(), 'yyyy-MM-dd');
+                    const slotS = timeToMinutes(slot.time);
+                    const slotE = slotS + slotMinutes;
+
+                    return (
+                      <div key={slot.time} className="contents">
+                        {employees.map((employee) => {
+                          const isOccupied = isSlotOccupiedByAppointment(employee.id, slot.time);
+                          const isHighlighted = isSlotHighlighted(employee.id, slot.time);
+                          const meta = employeeAgendaById[employee.id] ?? { weekly: null, blocks: [] };
+                          const { bookable, blocked, schedulingAllowed } = slotBookableForAgenda(
+                            dateKey,
+                            slotS,
+                            slotE,
+                            centerHours,
+                            meta.weekly,
+                            meta.blocks,
+                          );
+                          const shade = !bookable && !isOccupied;
+                          const canSchedule = !isOccupied && schedulingAllowed;
+                          const canPaste = canSchedule && !!appointmentClipboard && !!onSlotPaste;
+                          const pasteHint = canPaste
+                            ? appointmentClipboard!.mode === 'cut'
+                              ? 'Clic para mover la cita aquí (Mayús+clic = nueva cita)'
+                              : 'Clic para pegar la cita (Mayús+clic = nueva cita)'
+                            : undefined;
+
+                          const slotCell = (
+                            <div
+                              className={`relative border-r border-border transition-colors ${
+                                isHourMark ? 'border-t-2 border-border' : 'border-t border-border'
+                              } ${
+                                isOccupied
+                                  ? 'bg-muted/50'
+                                  : shade
+                                    ? blocked
+                                      ? UNAVAILABLE_CELL_BLOCKED
+                                      : `${UNAVAILABLE_CELL} cursor-pointer hover:bg-accent/50`
+                                    : 'bg-card cursor-pointer hover:bg-accent/40'
+                              } ${isHighlighted ? 'bg-blue-100 dark:bg-blue-950/40 border-blue-300 dark:border-blue-700' : ''} ${
+                                canPaste ? 'ring-1 ring-inset ring-emerald-400/50 dark:ring-emerald-600/40' : ''
+                              }`}
+                              style={{ height: `${cellHeight}px` }}
+                              title={
+                                pasteHint ??
+                                (shade && canSchedule
+                                  ? 'Fuera del horario habitual — clic para cita excepcional'
+                                  : blocked
+                                    ? 'No disponible (bloqueo de agenda)'
+                                    : undefined)
+                              }
+                              onClick={(e) => {
+                                if (!canSchedule) return;
+                                onSlotClick(employee.id, slot.time, { forceNew: e.shiftKey });
+                              }}
+                              onDragOver={(e) => canSchedule && handleDragOver(e, employee.id, slot.time)}
+                              onDragLeave={handleDragLeave}
+                              onDrop={(e) => canSchedule && handleDrop(e, employee.id, slot.time)}
+                            />
+                          );
+
+                          if (!canPaste) {
+                            return <React.Fragment key={`${employee.id}-${slot.time}`}>{slotCell}</React.Fragment>;
+                          }
+
+                          return (
+                            <ContextMenu key={`${employee.id}-${slot.time}`}>
+                              <ContextMenuTrigger asChild>{slotCell}</ContextMenuTrigger>
+                              <ContextMenuContent className="z-[130]">
+                                <ContextMenuItem
+                                  className="gap-2"
+                                  onClick={() => onSlotPaste!(employee.id, slot.time)}
+                                >
+                                  <ClipboardPaste className="h-3.5 w-3.5" />
+                                  {appointmentClipboard!.mode === 'cut' ? 'Pegar (mover)' : 'Pegar'}
+                                </ContextMenuItem>
+                                <ContextMenuSeparator />
+                                <ContextMenuItem onClick={() => onSlotClick(employee.id, slot.time, { forceNew: true })}>
+                                  Nueva cita vacía
+                                </ContextMenuItem>
+                              </ContextMenuContent>
+                            </ContextMenu>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="relative shrink-0 border-t border-border shadow-[0_-2px_4px_rgba(0,0,0,0.04)]">
