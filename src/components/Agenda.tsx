@@ -597,13 +597,20 @@ export const Agenda: React.FC = () => {
   const agendaArticleHints = appointmentItemsPayload.articleHints;
   const billingIdsByAppt = appointmentItemsPayload.billingIdsByAppt;
 
-  // Map DB employees to grid employees with proper colors
-  const allEmployees: Employee[] = dbEmployees.map((emp, idx) => ({
-    id: emp.id,
-    name: emp.name,
-    color: hexToTailwindBg(emp.color || '#3B82F6', idx),
-    billing_company_id: emp.billing_company_id ?? null,
-  }));
+  // Map DB employees to grid employees with proper colors. Memoizado: se
+  // recalculaba en cada render del padre (p. ej. al abrir/cerrar diálogos)
+  // aunque `dbEmployees` no cambiara, generando nuevas referencias que
+  // invalidaban memos/comparadores aguas abajo (AgendaGrid, filtros).
+  const allEmployees: Employee[] = useMemo(
+    () =>
+      dbEmployees.map((emp, idx) => ({
+        id: emp.id,
+        name: emp.name,
+        color: hexToTailwindBg(emp.color || '#3B82F6', idx),
+        billing_company_id: emp.billing_company_id ?? null,
+      })),
+    [dbEmployees],
+  );
 
   const employees = useMemo(
     () =>
@@ -743,16 +750,28 @@ export const Agenda: React.FC = () => {
     );
   }, [appointments, location.pathname, location.search, navigate]);
 
-  const effectiveSelectedIds = preferences.visibleEmployeeIds.length
-    ? preferences.visibleEmployeeIds
-    : employees.map((e) => e.id);
-  const filteredEmployees = employees.filter((e) => effectiveSelectedIds.includes(e.id));
-  const filteredAppointments = appointments.filter((apt) => {
-    if (!effectiveSelectedIds.includes(apt.employeeId)) return false;
-    if (!isMultiEntity || agendaBillingView === 'all') return true;
-    const billingIds = billingIdsByAppt[apt.id] ?? [];
-    return appointmentVisibleInBillingView(billingIds, agendaBillingView);
-  });
+  // Memoizados: sin esto, cada render del padre (drag over, hover, toasts...)
+  // recreaba `filteredAppointments`/`filteredEmployees` con nueva identidad y
+  // obligaba a `AgendaGrid` a recomputar su firma de citas aunque los datos
+  // reales del día no hubieran cambiado.
+  const effectiveSelectedIds = useMemo(
+    () => (preferences.visibleEmployeeIds.length ? preferences.visibleEmployeeIds : employees.map((e) => e.id)),
+    [preferences.visibleEmployeeIds, employees],
+  );
+  const filteredEmployees = useMemo(
+    () => employees.filter((e) => effectiveSelectedIds.includes(e.id)),
+    [employees, effectiveSelectedIds],
+  );
+  const filteredAppointments = useMemo(
+    () =>
+      appointments.filter((apt) => {
+        if (!effectiveSelectedIds.includes(apt.employeeId)) return false;
+        if (!isMultiEntity || agendaBillingView === 'all') return true;
+        const billingIds = billingIdsByAppt[apt.id] ?? [];
+        return appointmentVisibleInBillingView(billingIds, agendaBillingView);
+      }),
+    [appointments, effectiveSelectedIds, isMultiEntity, agendaBillingView, billingIdsByAppt],
+  );
 
   const topBarActions = useMemo(() => (
     <>
