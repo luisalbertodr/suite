@@ -1050,7 +1050,12 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
           className="overflow-x-auto overflow-y-hidden overscroll-x-contain touch-pan-x [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
           style={{ marginLeft: TIME_GUTTER_PX, ...edgeRowPad }}
         >
-          <div style={{ minWidth: employeesMinWidthPx }}>
+          <div
+            style={{
+              minWidth: employeesMinWidthPx,
+              width: `max(100%, ${employeesMinWidthPx}px)`,
+            }}
+          >
             <EmployeeNamesRow employees={employees} edge="top" variant="names-only" />
           </div>
         </div>
@@ -1110,14 +1115,18 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
               style={{ height: gridBodyHeightPx, WebkitOverflowScrolling: 'touch' }}
             >
               <div
-                className="relative"
-                style={{ width: employeesMinWidthPx, minWidth: employeesMinWidthPx, height: gridBodyHeightPx }}
+                className="relative h-full min-w-full"
+                style={{
+                  minWidth: employeesMinWidthPx,
+                  width: `max(100%, ${employeesMinWidthPx}px)`,
+                  height: gridBodyHeightPx,
+                }}
               >
                 <div
-                  className="grid relative gap-0"
+                  className="grid relative gap-0 w-full"
                   style={{
                     gridTemplateColumns: agendaEmployeeOnlyColumnsTemplate(employees.length),
-                    width: employeesMinWidthPx,
+                    minWidth: employeesMinWidthPx,
                   }}
                 >
                   {appointments.map((appointment) => {
@@ -1279,7 +1288,12 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
           className="overflow-x-auto overflow-y-hidden overscroll-x-contain touch-pan-x [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
           style={{ marginLeft: TIME_GUTTER_PX, ...edgeRowPad }}
         >
-          <div style={{ minWidth: employeesMinWidthPx }}>
+          <div
+            style={{
+              minWidth: employeesMinWidthPx,
+              width: `max(100%, ${employeesMinWidthPx}px)`,
+            }}
+          >
             <EmployeeNamesRow employees={employees} edge="bottom" variant="names-only" />
           </div>
         </div>
