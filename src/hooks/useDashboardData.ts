@@ -15,6 +15,7 @@ import {
   writeDashboardQueryCache,
 } from '@/lib/dashboardQueryCache';
 import { fetchReportFamilyNames } from '@/lib/reportCatalogScope';
+import { scaleDeviceFromMeasurement, scaleDeviceLabel } from '@/lib/inbodyMeasurements';
 import { repairStyleText } from '@/lib/styleTextEncoding';
 import {
   comparisonPeriodCacheKey,
@@ -52,7 +53,7 @@ async function fetchDashboardFamilyNames(
 }
 
 export type DashboardRecentActivity = {
-  type: 'factura' | 'cita' | 'cliente';
+  type: 'factura' | 'cita' | 'cliente' | 'bascula';
   description: string;
   time: string;
   createdAt: string;
@@ -260,11 +261,18 @@ export const useDashboardData = (
       if (!companyId || !opCompanyId) return [] as DashboardRecentActivity[];
       const activities: DashboardRecentActivity[] = [];
 
-      const [invRes, cusRes] = await Promise.all([
+      const [invRes, cusRes, scaleRes] = await Promise.all([
         supabase.from('invoices').select('id, number, created_at').eq('company_id', companyId)
           .order('created_at', { ascending: false }).limit(3),
         supabase.from('customers').select('id, name, created_at').eq('company_id', opCompanyId)
           .order('created_at', { ascending: false }).limit(3),
+        supabase
+          .from('inbody_measurements')
+          .select('id, customer_id, measured_at, weight_kg, pbf_pct, device, source, customers(name)')
+          .eq('company_id', opCompanyId)
+          .not('customer_id', 'is', null)
+          .order('measured_at', { ascending: false })
+          .limit(3),
       ]);
 
       let aptRows: Array<{
@@ -325,6 +333,22 @@ export const useDashboardData = (
         createdAt: c.created_at,
         href: buildCustomerProfileUrl(c.id),
       }));
+      scaleRes.data?.forEach((m) => {
+        if (!m.customer_id) return;
+        const customer = m.customers as { name?: string | null } | null;
+        const name = repairStyleText(customer?.name ?? 'Cliente');
+        const device = scaleDeviceLabel(scaleDeviceFromMeasurement(m));
+        const peso = m.weight_kg != null ? `${m.weight_kg} kg` : '';
+        const grasa = m.pbf_pct != null ? ` · ${m.pbf_pct}% grasa` : '';
+        const metrics = peso ? ` — ${peso}${grasa}` : '';
+        activities.push({
+          type: 'bascula',
+          description: `Báscula ${device}: ${name}${metrics}`,
+          time: getTimeAgo(m.measured_at),
+          createdAt: m.measured_at,
+          href: buildCustomerProfileUrl(m.customer_id, 'inbody'),
+        });
+      });
 
       return activities
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())

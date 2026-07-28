@@ -141,6 +141,7 @@ export const InbodyCsvImportPanel: React.FC<InbodyCsvImportPanelProps> = ({
   ) => {
     const count = await upsertInbodyCsvRows(rows);
     await queryClient.invalidateQueries({ queryKey: ['inbody_measurements'] });
+    await queryClient.invalidateQueries({ queryKey: ['dashboard-recent-activity'] });
     await queryClient.invalidateQueries({ queryKey: ['customers-search'] });
 
     const extras: string[] = [];

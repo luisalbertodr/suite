@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Users, Calendar, Receipt, TrendingUp,
+  Users, Calendar, Receipt, TrendingUp, Scale,
   Loader2, AlertCircle, RefreshCw, CreditCard, BarChart3, Activity, Calculator,
 } from 'lucide-react';
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
@@ -752,10 +752,12 @@ export const Dashboard: React.FC = () => {
                     <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${
                       a.type === 'factura' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600' :
                       a.type === 'cita' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600' :
+                      a.type === 'bascula' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600' :
                       'bg-pink-100 dark:bg-pink-900/30 text-pink-600'
                     }`}>
                       {a.type === 'factura' && <Receipt className="w-4 h-4" />}
                       {a.type === 'cita' && <Calendar className="w-4 h-4" />}
+                      {a.type === 'bascula' && <Scale className="w-4 h-4" />}
                       {a.type === 'cliente' && <Users className="w-4 h-4" />}
                     </div>
                     <div className="flex-1 min-w-0">
