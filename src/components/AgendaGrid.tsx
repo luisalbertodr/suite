@@ -1017,7 +1017,6 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
     }),
     [employeesContentWidthPx],
   );
-  const maxHOffset = Math.max(0, employeesContentWidthPx - Math.max(employeesViewportPx, 1));
 
   const paintHOffset = React.useCallback((offset: number) => {
     const tx = `translate3d(${-offset}px,0,0)`;
