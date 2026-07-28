@@ -70,8 +70,8 @@ interface AgendaGridProps {
 /** Ancho de la columna «Hora» (px); debe coincidir con gridTemplateColumns. */
 const TIME_GUTTER_PX = 96;
 
-/** Ancho mínimo por columna de empleada (px) para poder desplazar en móvil. */
-const EMP_COL_MIN_PX = 148;
+/** Ancho mínimo por columna de empleada (px) — fuerza overflow en móvil con ≥3 empleadas. */
+const EMP_COL_MIN_PX = 160;
 
 /**
  * Layout horizontal de columnas.
@@ -953,19 +953,33 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
     };
   }, [employees.length, timeSlots.length, persistUserId, viewDateYmd, flushScrollToStorage]);
 
-  /** Mide scrollbar vertical y ancho REAL del recorte (no el del contenido). */
+  /**
+   * Viewport de columnas = clientWidth del scroll vertical − gutter.
+   * NUNCA medir el clip: en iOS el flex/absoluto puede reportar el ancho del
+   * contenido y entonces maxOffset=0 (flechas ocultas) aunque solo se vean 2–3 columnas.
+   */
   React.useLayoutEffect(() => {
     const vEl = scrollRootRef.current;
-    const clip = bodyClipRef.current;
-    if (!vEl || !clip) return;
+    if (!vEl) return;
     const measure = () => {
       setScrollbarWidth(Math.max(0, vEl.offsetWidth - vEl.clientWidth));
-      // clientWidth del clip con flex-basis:0 — no debe crecer con el slide.
-      setEmployeesViewportPx(Math.max(0, Math.round(clip.clientWidth)));
+      const vp = Math.max(0, Math.round(vEl.clientWidth - TIME_GUTTER_PX));
+      setEmployeesViewportPx(vp);
+      if (bodyClipRef.current) {
+        bodyClipRef.current.style.width = `${vp}px`;
+        bodyClipRef.current.style.maxWidth = `${vp}px`;
+      }
+      if (headerClipRef.current) {
+        headerClipRef.current.style.width = `${vp}px`;
+        headerClipRef.current.style.maxWidth = `${vp}px`;
+      }
+      if (footerClipRef.current) {
+        footerClipRef.current.style.width = `${vp}px`;
+        footerClipRef.current.style.maxWidth = `${vp}px`;
+      }
     };
     measure();
     const ro = new ResizeObserver(measure);
-    ro.observe(clip);
     ro.observe(vEl);
     return () => ro.disconnect();
   }, [employees.length, timeSlots.length]);
@@ -984,7 +998,8 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
 
   const applyHOffset = React.useCallback(
     (next: number) => {
-      const viewport = bodyClipRef.current?.clientWidth || employeesViewportPx || 1;
+      // Usar el viewport medido del scrollRoot, no clip.clientWidth (hinchado en iOS).
+      const viewport = Math.max(employeesViewportPx, 1);
       const max = Math.max(0, employeesContentWidthPx - viewport);
       const clamped = Math.max(0, Math.min(max, next));
       hOffsetRef.current = clamped;
@@ -1099,10 +1114,12 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
 
   const canPanHorizontal = maxHOffset > 1;
   const stepH = Math.max(EMP_COL_MIN_PX, Math.round(Math.max(employeesViewportPx, 160) * 0.75));
+  const frameWidthPx =
+    employeesViewportPx > 0 ? TIME_GUTTER_PX + employeesViewportPx : undefined;
 
   return (
     <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] bg-card">
-      <div className="relative shrink-0 border-b border-border shadow-sm">
+      <div className="relative shrink-0 border-b border-border shadow-sm overflow-hidden">
         <div
           className="pointer-events-none absolute left-0 top-0 z-[55] flex items-center justify-center border-r border-border bg-card px-3 py-1 text-center text-xs font-semibold leading-tight text-foreground"
           style={{ width: TIME_GUTTER_PX, minHeight: EMPLOYEE_NAMES_ROW_MIN_H }}
@@ -1112,7 +1129,13 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
         <div
           ref={headerClipRef}
           className="overflow-hidden"
-          style={{ marginLeft: TIME_GUTTER_PX, touchAction: 'pan-y', ...edgeRowPad }}
+          style={{
+            marginLeft: TIME_GUTTER_PX,
+            width: employeesViewportPx > 0 ? employeesViewportPx : undefined,
+            maxWidth: employeesViewportPx > 0 ? employeesViewportPx : undefined,
+            touchAction: 'pan-y',
+            ...edgeRowPad,
+          }}
         >
           <div
             ref={headerSlideRef}
@@ -1134,8 +1157,8 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
 
       <div className="relative min-h-0 h-full overflow-hidden">
         {/*
-          Vertical nativo. Horizontal: translate3d sobre franja de columnas.
-          flex:1 1 0% + width:0 evita que el clip crezca al ancho del contenido (bug iOS).
+          Viewport H = scrollRoot.clientWidth − gutter (medido en JS).
+          Clip de columnas con width px fijo + position absolute — sin flex que se hinche.
         */}
         <div
           ref={scrollRootRef}
@@ -1143,17 +1166,17 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
           style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-y' }}
         >
           <div
-            className="flex"
+            className="relative overflow-hidden"
             style={{
-              width: '100%',
+              width: frameWidthPx ?? '100%',
               maxWidth: '100%',
               height: gridBodyHeightPx,
               minHeight: gridBodyHeightPx,
             }}
           >
             <div
-              className="shrink-0 border-r border-border bg-card z-[20]"
-              style={{ width: TIME_GUTTER_PX, minWidth: TIME_GUTTER_PX, maxWidth: TIME_GUTTER_PX }}
+              className="absolute left-0 top-0 z-[20] border-r border-border bg-card"
+              style={{ width: TIME_GUTTER_PX, height: gridBodyHeightPx }}
             >
               {timeSlots.map((slot) => {
                 const isHourMark = slot.minute === 0;
@@ -1190,12 +1213,11 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
 
             <div
               ref={bodyClipRef}
-              className="relative overflow-hidden"
+              className="absolute top-0 overflow-hidden"
               style={{
-                flex: '1 1 0%',
-                width: 0,
-                minWidth: 0,
-                maxWidth: '100%',
+                left: TIME_GUTTER_PX,
+                width: employeesViewportPx > 0 ? employeesViewportPx : `calc(100% - ${TIME_GUTTER_PX}px)`,
+                maxWidth: employeesViewportPx > 0 ? employeesViewportPx : undefined,
                 height: gridBodyHeightPx,
                 touchAction: 'pan-y',
               }}
@@ -1396,7 +1418,13 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
         <div
           ref={footerClipRef}
           className="overflow-hidden"
-          style={{ marginLeft: TIME_GUTTER_PX, touchAction: 'pan-y', ...edgeRowPad }}
+          style={{
+            marginLeft: TIME_GUTTER_PX,
+            width: employeesViewportPx > 0 ? employeesViewportPx : undefined,
+            maxWidth: employeesViewportPx > 0 ? employeesViewportPx : undefined,
+            touchAction: 'pan-y',
+            ...edgeRowPad,
+          }}
         >
           <div
             ref={footerSlideRef}
