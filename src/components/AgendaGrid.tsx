@@ -12,8 +12,17 @@ import {
 import { AppointmentAttachmentIcons } from '@/components/AppointmentAttachmentIcons';
 import { hasAttachmentHints } from '@/lib/appointmentAttachmentHints';
 import { Employee, Appointment, TimeSlot } from '@/types/agenda';
-import { slotOverlapsOccupiedTime } from '@/lib/agendaAppointmentItems';
 import { segmentAppearance, segmentStyleFromHex } from '@/lib/agendaResourceColors';
+import {
+  buildAgendaAvailability,
+  buildAgendaOccupancyIndex,
+  buildAgendaOccupiedSlotKeys,
+  isAgendaRangeOccupied,
+  SLOT_FLAG_BOOKABLE,
+  SLOT_FLAG_BLOCKED,
+  type AgendaAvailability,
+  type AgendaOccupancyIndex,
+} from '@/lib/agendaSlotAvailability';
 import {
   anchorTimeFromScrollTop,
   loadAgendaViewPersisted,
@@ -25,7 +34,6 @@ import {
   generateAgendaSlots,
   getAgendaGridEnvelopeMinutes,
   hhmmToMinutes,
-  slotBookableForAgenda,
   type AgendaDayHoursMap,
   type AgendaUnavailabilityEntry,
 } from '@/lib/agendaHours';
@@ -134,34 +142,6 @@ const agendaEmployeeShortName = (name: string): string => {
 
 type AgendaVisibleFields = NonNullable<AgendaGridProps['visibleFields']>;
 
-function buildOccupiedSlotKeySet(
-  appointments: Appointment[],
-  timeSlots: TimeSlot[],
-  slotMinutes: number,
-): Set<string> {
-  const occupied = new Set<string>();
-  if (!timeSlots.length) return occupied;
-
-  for (const apt of appointments) {
-    for (const slot of timeSlots) {
-      const slotStart = timeToMinutes(slot.time);
-      const slotEnd = slotStart + slotMinutes;
-      if (
-        slotOverlapsOccupiedTime(
-          slotStart,
-          slotEnd,
-          apt.startTime,
-          apt.timeSegments,
-          apt.occupiedEndTime || apt.endTime,
-        )
-      ) {
-        occupied.add(`${apt.employeeId}|${slot.time}`);
-      }
-    }
-  }
-  return occupied;
-}
-
 function visibleFieldsEqual(a?: AgendaVisibleFields, b?: AgendaVisibleFields): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
@@ -205,6 +185,17 @@ function appointmentsSignature(appointments: Appointment[]): string {
     .join('\x1e');
 }
 
+const appointmentsSignatureCache = new WeakMap<Appointment[], string>();
+
+function getAppointmentsSignature(appointments: Appointment[]): string {
+  let sig = appointmentsSignatureCache.get(appointments);
+  if (!sig) {
+    sig = appointmentsSignature(appointments);
+    appointmentsSignatureCache.set(appointments, sig);
+  }
+  return sig;
+}
+
 function agendaGridPropsAreEqual(prev: AgendaGridProps, next: AgendaGridProps): boolean {
   if (prev.employees.length !== next.employees.length) return false;
   for (let i = 0; i < prev.employees.length; i++) {
@@ -215,7 +206,7 @@ function agendaGridPropsAreEqual(prev: AgendaGridProps, next: AgendaGridProps): 
     }
   }
 
-  if (appointmentsSignature(prev.appointments) !== appointmentsSignature(next.appointments)) {
+  if (getAppointmentsSignature(prev.appointments) !== getAppointmentsSignature(next.appointments)) {
     return false;
   }
 
@@ -574,6 +565,442 @@ function EmployeeNamesRow({
   );
 }
 
+const VIRTUAL_ROW_OVERSCAN = 4;
+
+function useAgendaScrollViewport(scrollRootRef: React.RefObject<HTMLDivElement | null>) {
+  const [scrollTop, setScrollTop] = React.useState(0);
+  const [viewportHeight, setViewportHeight] = React.useState(0);
+  const rafRef = React.useRef<number | null>(null);
+
+  React.useEffect(() => {
+    const el = scrollRootRef.current;
+    if (!el) return;
+
+    const sync = () => {
+      setScrollTop(el.scrollTop);
+      setViewportHeight(el.clientHeight);
+    };
+
+    const scheduleSync = () => {
+      if (rafRef.current !== null) return;
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = null;
+        sync();
+      });
+    };
+
+    sync();
+    const ro = new ResizeObserver(scheduleSync);
+    ro.observe(el);
+    el.addEventListener('scroll', scheduleSync, { passive: true });
+
+    return () => {
+      ro.disconnect();
+      el.removeEventListener('scroll', scheduleSync);
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    };
+  }, [scrollRootRef]);
+
+  return { scrollTop, viewportHeight };
+}
+
+type AgendaHourLabelsOverlayProps = {
+  scrollRootRef: React.RefObject<HTMLDivElement | null>;
+  hourMarkPositions: { slot: TimeSlot; y: number; slotIdx: number }[];
+  centerOpen: Uint8Array;
+};
+
+function AgendaHourLabelsOverlay({
+  scrollRootRef,
+  hourMarkPositions,
+  centerOpen,
+}: AgendaHourLabelsOverlayProps) {
+  const { scrollTop, viewportHeight } = useAgendaScrollViewport(scrollRootRef);
+
+  return (
+    <div
+      className="pointer-events-none absolute left-0 top-0 z-[55] overflow-hidden"
+      style={{ width: TIME_GUTTER_PX, height: viewportHeight || undefined }}
+      aria-hidden
+    >
+      {hourMarkPositions.map(({ slot, y, slotIdx }) => {
+        const yViewport = y - scrollTop;
+        if (yViewport < -HOUR_LABEL_HALF_PX || yViewport > viewportHeight + HOUR_LABEL_HALF_PX) {
+          return null;
+        }
+        const top = Math.max(2, yViewport - HOUR_LABEL_HALF_PX);
+        const timeShade = centerOpen[slotIdx] !== 1;
+        return (
+          <div
+            key={`hour-label-${slot.time}`}
+            className="absolute left-0 right-0 flex justify-center"
+            style={{ top }}
+          >
+            <span
+              className={`inline-block rounded-sm px-1.5 text-sm font-semibold text-foreground tabular-nums leading-none bg-card shadow-sm ring-1 ring-border/50 ${
+                timeShade ? 'text-neutral-700 dark:text-neutral-300' : ''
+              }`}
+            >
+              {slot.time}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+type AgendaNowLineProps = {
+  isTodayView: boolean;
+  gridStartMin: number;
+  gridEndMin: number;
+  slotMinutes: number;
+  cellHeight: number;
+};
+
+function AgendaNowLine({
+  isTodayView,
+  gridStartMin,
+  gridEndMin,
+  slotMinutes,
+  cellHeight,
+}: AgendaNowLineProps) {
+  const [nowLineTick, setNowLineTick] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!isTodayView) return;
+    const bump = () => setNowLineTick((t) => t + 1);
+    const id = setInterval(bump, 30_000);
+    const onVis = () => {
+      if (document.visibilityState === 'visible') bump();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [isTodayView]);
+
+  if (!isTodayView) return null;
+
+  const d = new Date();
+  const nowDec = d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60;
+  const clamped = Math.max(gridStartMin, Math.min(gridEndMin, nowDec));
+  const topPx = ((clamped - gridStartMin) / slotMinutes) * cellHeight;
+
+  return (
+    <div
+      key={`agenda-now-line-${nowLineTick}`}
+      className="pointer-events-none absolute left-0 right-0 z-[25]"
+      style={{
+        top: `${topPx}px`,
+        height: 0,
+        borderTop: '2px solid rgb(220 38 38)',
+        boxShadow: '0 0 0 1px rgba(255,255,255,0.6)',
+      }}
+      aria-hidden
+    />
+  );
+}
+
+function appointmentViewportBounds(
+  appointment: Appointment,
+  gridStartMin: number,
+  gridEndMin: number,
+  slotMinutes: number,
+  cellHeight: number,
+): { top: number; bottom: number } | null {
+  const segments = appointment.timeSegments ?? [];
+  let startMin = timeToMinutes(appointment.startTime);
+  const storedEndMin = timeToMinutes(appointment.endTime);
+  const occupiedEndMin = segments.length
+    ? timeToMinutes(segments[segments.length - 1]!.endTime)
+    : timeToMinutes(appointment.occupiedEndTime || appointment.endTime);
+  let endMin = Math.max(storedEndMin, occupiedEndMin);
+  if (endMin <= startMin && segments.length) {
+    endMin = occupiedEndMin;
+  }
+  if (endMin <= startMin) return null;
+  if (endMin <= gridStartMin || startMin >= gridEndMin) return null;
+  if (startMin < gridStartMin) startMin = gridStartMin;
+  if (endMin > gridEndMin) endMin = gridEndMin;
+
+  const top = ((startMin - gridStartMin) / slotMinutes) * cellHeight;
+  const height = Math.max(((endMin - startMin) / slotMinutes) * cellHeight, cellHeight * 0.5);
+  return { top, bottom: top + height };
+}
+
+type AgendaGridVirtualRowsProps = {
+  scrollRootRef: React.RefObject<HTMLDivElement | null>;
+  timeSlots: TimeSlot[];
+  cellHeight: number;
+  employees: Employee[];
+  availability: AgendaAvailability;
+  occupancyIndex: AgendaOccupancyIndex;
+  occupiedSlotKeys: Set<string>;
+  appointments: Appointment[];
+  overlapMap: Record<string, { index: number; total: number }>;
+  employeeIndexById: Map<string, number>;
+  gridStartMin: number;
+  gridEndMin: number;
+  slotMinutes: number;
+  isTodayView: boolean;
+  visibleFields: AgendaVisibleFields;
+  appointmentClipboard?: { mode: 'copy' | 'cut' } | null;
+  onSlotClick: (employeeId: string, time: string, opts?: AgendaSlotClickOptions) => void;
+  onSlotPaste?: (employeeId: string, time: string) => void;
+  onAppointmentClick?: (appointment: Appointment) => void;
+  onAppointmentCopy?: (appointment: Appointment) => void;
+  onAppointmentCut?: (appointment: Appointment) => void;
+  onDragStart: (e: React.DragEvent, appointment: Appointment) => void;
+  onDragEnd: (e: React.DragEvent) => void;
+  onDragOver: (e: React.DragEvent, employeeId: string, time: string) => void;
+  onDragLeave: (e: React.DragEvent) => void;
+  onDrop: (e: React.DragEvent, employeeId: string, time: string) => void;
+  isSlotHighlighted: (employeeId: string, time: string) => boolean;
+};
+
+function AgendaGridVirtualRows({
+  scrollRootRef,
+  timeSlots,
+  cellHeight,
+  employees,
+  availability,
+  occupancyIndex,
+  occupiedSlotKeys,
+  appointments,
+  overlapMap,
+  employeeIndexById,
+  gridStartMin,
+  gridEndMin,
+  slotMinutes,
+  isTodayView,
+  visibleFields,
+  appointmentClipboard = null,
+  onSlotClick,
+  onSlotPaste,
+  onAppointmentClick,
+  onAppointmentCopy,
+  onAppointmentCut,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  isSlotHighlighted,
+}: AgendaGridVirtualRowsProps) {
+  const { scrollTop, viewportHeight } = useAgendaScrollViewport(scrollRootRef);
+  const totalHeight = timeSlots.length * cellHeight;
+  const useOccupiedKeys = occupiedSlotKeys.size > 0;
+
+  const { startRow, endRow } = React.useMemo(() => {
+    const firstVisible = Math.floor(scrollTop / cellHeight);
+    const lastVisible = Math.ceil((scrollTop + Math.max(viewportHeight, cellHeight)) / cellHeight);
+    return {
+      startRow: Math.max(0, firstVisible - VIRTUAL_ROW_OVERSCAN),
+      endRow: Math.min(timeSlots.length - 1, lastVisible + VIRTUAL_ROW_OVERSCAN),
+    };
+  }, [scrollTop, viewportHeight, cellHeight, timeSlots.length]);
+
+  const visibleAppointments = React.useMemo(() => {
+    const overscanPx = VIRTUAL_ROW_OVERSCAN * cellHeight;
+    const viewTop = Math.max(0, scrollTop - overscanPx);
+    const viewBottom = scrollTop + viewportHeight + overscanPx;
+    if (viewportHeight <= 0) return appointments;
+
+    return appointments.filter((apt) => {
+      const bounds = appointmentViewportBounds(apt, gridStartMin, gridEndMin, slotMinutes, cellHeight);
+      if (!bounds) return false;
+      return bounds.bottom >= viewTop && bounds.top <= viewBottom;
+    });
+  }, [
+    appointments,
+    scrollTop,
+    viewportHeight,
+    cellHeight,
+    gridStartMin,
+    gridEndMin,
+    slotMinutes,
+  ]);
+
+  const visibleSlotIndices = React.useMemo(() => {
+    const indices: number[] = [];
+    for (let i = startRow; i <= endRow; i += 1) indices.push(i);
+    return indices;
+  }, [startRow, endRow]);
+
+  const isSlotOccupied = React.useCallback(
+    (employeeId: string, slotTime: string, slotS: number, slotE: number): boolean => {
+      if (useOccupiedKeys) return occupiedSlotKeys.has(`${employeeId}|${slotTime}`);
+      return isAgendaRangeOccupied(occupancyIndex, employeeId, slotS, slotE);
+    },
+    [useOccupiedKeys, occupiedSlotKeys, occupancyIndex],
+  );
+
+  return (
+    <div className="min-w-[900px] relative">
+      <div className="relative" style={{ height: totalHeight, minHeight: totalHeight }}>
+        <div className="absolute inset-0">
+          {visibleAppointments.map((appointment) => {
+            const employeeIndex = employeeIndexById.get(appointment.employeeId);
+            if (employeeIndex === undefined) return null;
+
+            return (
+              <AgendaAppointmentItem
+                key={appointment.id}
+                appointment={appointment}
+                employeeIndex={employeeIndex}
+                employeeCount={employees.length}
+                employeeColor={employees[employeeIndex]?.color ?? ''}
+                overlap={overlapMap[appointment.id] || { index: 0, total: 1 }}
+                gridStartMin={gridStartMin}
+                gridEndMin={gridEndMin}
+                slotMinutes={slotMinutes}
+                cellHeight={cellHeight}
+                visibleFields={visibleFields}
+                onAppointmentClick={onAppointmentClick}
+                onAppointmentCopy={onAppointmentCopy}
+                onAppointmentCut={onAppointmentCut}
+                onDragStart={onDragStart}
+                onDragEnd={onDragEnd}
+                onDragOver={onDragOver}
+                onDragLeave={onDragLeave}
+                onDrop={onDrop}
+              />
+            );
+          })}
+
+          <AgendaNowLine
+            isTodayView={isTodayView}
+            gridStartMin={gridStartMin}
+            gridEndMin={gridEndMin}
+            slotMinutes={slotMinutes}
+            cellHeight={cellHeight}
+          />
+
+          {visibleSlotIndices.map((slotIdx) => {
+            const slot = timeSlots[slotIdx]!;
+            const isHourMark = slot.minute === 0;
+            const slotS = timeToMinutes(slot.time);
+            const slotE = slotS + slotMinutes;
+            const centerOpen = availability.centerOpen[slotIdx] === 1;
+            const timeShade = !centerOpen;
+            const rowTop = slotIdx * cellHeight;
+
+            return (
+              <div
+                key={slot.time}
+                className="absolute left-0 right-0 grid gap-0"
+                style={{
+                  top: rowTop,
+                  height: cellHeight,
+                  gridTemplateColumns: `${TIME_GUTTER_PX}px repeat(${employees.length}, minmax(0, 1fr))`,
+                }}
+              >
+                <div
+                  className={`sticky left-0 z-[26] relative overflow-visible border-r border-border ${
+                    isHourMark ? 'border-t-2 border-border bg-transparent' : 'border-t border-border bg-transparent'
+                  } ${timeShade ? UNAVAILABLE_TIME_GUTTER_TRANSPARENT : ''}`}
+                  style={{ height: `${cellHeight}px`, minHeight: `${cellHeight}px` }}
+                >
+                  {!isHourMark ? (
+                    <span
+                      className={`absolute left-0 right-0 top-0 z-[1] -translate-y-1/2 text-center leading-none px-2.5 text-xs font-medium text-muted-foreground dark:text-foreground/75 tabular-nums ${
+                        timeShade ? '!text-neutral-700 dark:!text-neutral-300' : ''
+                      }`}
+                    >
+                      <span
+                        className={`inline-block rounded-sm px-1.5 bg-card/80 ring-1 ring-border/30 ${
+                          timeShade ? 'bg-card/90 dark:bg-card/85' : ''
+                        }`}
+                      >
+                        {slot.time}
+                      </span>
+                    </span>
+                  ) : null}
+                </div>
+
+                {employees.map((employee, employeeIndex) => {
+                  const cellFlags = availability.cells[employeeIndex * availability.slotCount + slotIdx]!;
+                  const bookable = (cellFlags & SLOT_FLAG_BOOKABLE) !== 0;
+                  const blocked = (cellFlags & SLOT_FLAG_BLOCKED) !== 0;
+                  const isOccupied = isSlotOccupied(employee.id, slot.time, slotS, slotE);
+                  const isHighlighted = isSlotHighlighted(employee.id, slot.time);
+                  const shade = !bookable && !isOccupied;
+                  const canSchedule = !isOccupied && !blocked;
+                  const canPaste = canSchedule && !!appointmentClipboard && !!onSlotPaste;
+                  const pasteHint = canPaste
+                    ? appointmentClipboard!.mode === 'cut'
+                      ? 'Clic para mover la cita aquí (Mayús+clic = nueva cita)'
+                      : 'Clic para pegar la cita (Mayús+clic = nueva cita)'
+                    : undefined;
+
+                  const slotCell = (
+                    <div
+                      className={`relative border-r border-border transition-colors ${
+                        isHourMark ? 'border-t-2 border-border' : 'border-t border-border'
+                      } ${
+                        isOccupied
+                          ? 'bg-muted/50'
+                          : shade
+                            ? blocked
+                              ? UNAVAILABLE_CELL_BLOCKED
+                              : `${UNAVAILABLE_CELL} cursor-pointer hover:bg-accent/50`
+                            : 'bg-card cursor-pointer hover:bg-accent/40'
+                      } ${isHighlighted ? 'bg-blue-100 dark:bg-blue-950/40 border-blue-300 dark:border-blue-700' : ''} ${
+                        canPaste ? 'ring-1 ring-inset ring-emerald-400/50 dark:ring-emerald-600/40' : ''
+                      }`}
+                      style={{ height: `${cellHeight}px` }}
+                      title={
+                        pasteHint ??
+                        (shade && canSchedule
+                          ? 'Fuera del horario habitual — clic para cita excepcional'
+                          : blocked
+                            ? 'No disponible (bloqueo de agenda)'
+                            : undefined)
+                      }
+                      onClick={(e) => {
+                        if (!canSchedule) return;
+                        onSlotClick(employee.id, slot.time, { forceNew: e.shiftKey });
+                      }}
+                      onDragOver={(e) => canSchedule && onDragOver(e, employee.id, slot.time)}
+                      onDragLeave={onDragLeave}
+                      onDrop={(e) => canSchedule && onDrop(e, employee.id, slot.time)}
+                    />
+                  );
+
+                  if (!canPaste) {
+                    return <React.Fragment key={`${employee.id}-${slot.time}`}>{slotCell}</React.Fragment>;
+                  }
+
+                  return (
+                    <ContextMenu key={`${employee.id}-${slot.time}`}>
+                      <ContextMenuTrigger asChild>{slotCell}</ContextMenuTrigger>
+                      <ContextMenuContent className="z-[130]">
+                        <ContextMenuItem
+                          className="gap-2"
+                          onClick={() => onSlotPaste!(employee.id, slot.time)}
+                        >
+                          <ClipboardPaste className="h-3.5 w-3.5" />
+                          {appointmentClipboard!.mode === 'cut' ? 'Pegar (mover)' : 'Pegar'}
+                        </ContextMenuItem>
+                        <ContextMenuSeparator />
+                        <ContextMenuItem onClick={() => onSlotClick(employee.id, slot.time, { forceNew: true })}>
+                          Nueva cita vacía
+                        </ContextMenuItem>
+                      </ContextMenuContent>
+                    </ContextMenu>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaGridInner({
   employees,
   appointments,
@@ -605,14 +1032,11 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
   const headerScrollRef = React.useRef<HTMLDivElement>(null);
   const footerScrollRef = React.useRef<HTMLDivElement>(null);
   const [scrollbarWidth, setScrollbarWidth] = React.useState(0);
-  const [scrollTop, setScrollTop] = React.useState(0);
-  const [viewportHeight, setViewportHeight] = React.useState(0);
   const lastScrollTopRef = React.useRef(0);
   const lastHandledGoTodayRef = React.useRef(0);
   const lastHandledScrollToTimeRef = React.useRef(0);
   const lastHandledPersistedAnchorRef = React.useRef<string | null>(null);
   const scrollSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [nowLineTick, setNowLineTick] = React.useState(0);
 
   const [draggedAppointment, setDraggedAppointment] = React.useState<string | null>(null);
   const [dragOverSlot, setDragOverSlot] = React.useState<{ employeeId: string; time: string } | null>(null);
@@ -629,44 +1053,55 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
   const hourMarkPositions = React.useMemo(
     () =>
       timeSlots
-        .map((slot, idx) => ({ slot, y: idx * cellHeight }))
+        .map((slot, idx) => ({ slot, y: idx * cellHeight, slotIdx: idx }))
         .filter(({ slot }) => slot.minute === 0),
     [timeSlots, cellHeight],
   );
+  const slotStartMinutes = React.useMemo(
+    () => timeSlots.map((slot) => timeToMinutes(slot.time)),
+    [timeSlots],
+  );
   const gridStartMin = timeSlots.length ? timeToMinutes(timeSlots[0].time) : envStart;
   const gridEndMin = timeSlots.length ? timeToMinutes(timeSlots[timeSlots.length - 1].time) + slotMinutes : envEnd;
+  const dateKey = viewDateYmd ?? format(new Date(), 'yyyy-MM-dd');
+
+  const availability = React.useMemo(
+    () =>
+      buildAgendaAvailability({
+        dateYmd: dateKey,
+        slotStartMinutes,
+        slotMinutes,
+        centerHours,
+        employees,
+        employeeAgendaById,
+      }),
+    [dateKey, slotStartMinutes, slotMinutes, centerHours, employees, employeeAgendaById],
+  );
+
+  const occupancyIndex = React.useMemo(() => buildAgendaOccupancyIndex(appointments), [appointments]);
+
+  const occupiedSlotKeys = React.useMemo(() => {
+    if (!appointmentClipboard) return new Set<string>();
+    const slotTimes = timeSlots.map((slot) => slot.time);
+    return buildAgendaOccupiedSlotKeys(occupancyIndex, slotTimes, gridStartMin, slotMinutes);
+  }, [appointmentClipboard, occupancyIndex, timeSlots, gridStartMin, slotMinutes]);
 
   const isTodayView = viewDateYmd === format(new Date(), 'yyyy-MM-dd');
-
-  React.useEffect(() => {
-    if (!isTodayView) return;
-    const bump = () => setNowLineTick((t) => t + 1);
-    const id = setInterval(bump, 30_000);
-    const onVis = () => {
-      if (document.visibilityState === 'visible') bump();
-    };
-    document.addEventListener('visibilitychange', onVis);
-    return () => {
-      clearInterval(id);
-      document.removeEventListener('visibilitychange', onVis);
-    };
-  }, [isTodayView]);
-
-  const occupiedSlotKeys = React.useMemo(
-    () => buildOccupiedSlotKeySet(appointments, timeSlots, slotMinutes),
-    [appointments, timeSlots, slotMinutes],
-  );
-
-  const isSlotOccupiedByAppointment = React.useCallback(
-    (employeeId: string, time: string): boolean => occupiedSlotKeys.has(`${employeeId}|${time}`),
-    [occupiedSlotKeys],
-  );
 
   const employeeIndexById = React.useMemo(() => {
     const map = new Map<string, number>();
     employees.forEach((employee, index) => map.set(employee.id, index));
     return map;
   }, [employees]);
+
+  const isSlotOccupiedByAppointment = React.useCallback(
+    (employeeId: string, time: string): boolean => {
+      if (occupiedSlotKeys.size > 0) return occupiedSlotKeys.has(`${employeeId}|${time}`);
+      const slotS = timeToMinutes(time);
+      return isAgendaRangeOccupied(occupancyIndex, employeeId, slotS, slotS + slotMinutes);
+    },
+    [occupiedSlotKeys, occupancyIndex, slotMinutes],
+  );
 
   // Funciones para drag & drop
   const handleDragStart = React.useCallback((e: React.DragEvent, appointment: Appointment) => {
@@ -875,18 +1310,10 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
   React.useEffect(() => {
     const el = scrollRootRef.current;
     if (!el) return;
-    const syncViewport = () => {
-      setScrollTop(el.scrollTop);
-      setViewportHeight(el.clientHeight);
-    };
-    syncViewport();
-    const ro = new ResizeObserver(syncViewport);
-    ro.observe(el);
 
     const onScroll = () => {
       if (!scrollRootRef.current) return;
       lastScrollTopRef.current = scrollRootRef.current.scrollTop;
-      setScrollTop(scrollRootRef.current.scrollTop);
       if (persistUserId && viewDateYmd) {
         if (scrollSaveTimerRef.current) clearTimeout(scrollSaveTimerRef.current);
         scrollSaveTimerRef.current = setTimeout(() => flushScrollToStorage(), 220);
@@ -906,7 +1333,6 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
     document.addEventListener('visibilitychange', onHide);
 
     return () => {
-      ro.disconnect();
       el.removeEventListener('scroll', onScroll);
       window.removeEventListener('pagehide', onPageHide);
       document.removeEventListener('visibilitychange', onHide);
@@ -971,215 +1397,42 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
         ref={scrollRootRef}
         className="h-full min-h-0 overflow-x-auto overflow-y-scroll"
       >
-        <div className="min-w-[900px] relative">
-        <div
-          className="grid relative gap-0"
-          style={{ gridTemplateColumns: `${TIME_GUTTER_PX}px repeat(${employees.length}, minmax(0, 1fr))` }}
-        >
-          {/* Renderizar las citas como elementos posicionados absolutamente */}
-          {appointments.map((appointment) => {
-            const employeeIndex = employeeIndexById.get(appointment.employeeId);
-            if (employeeIndex === undefined) return null;
-
-            return (
-              <AgendaAppointmentItem
-                key={appointment.id}
-                appointment={appointment}
-                employeeIndex={employeeIndex}
-                employeeCount={employees.length}
-                employeeColor={employees[employeeIndex]?.color ?? ''}
-                overlap={overlapMap[appointment.id] || { index: 0, total: 1 }}
-                gridStartMin={gridStartMin}
-                gridEndMin={gridEndMin}
-                slotMinutes={slotMinutes}
-                cellHeight={cellHeight}
-                visibleFields={visibleFields}
-                onAppointmentClick={onAppointmentClick}
-                onAppointmentCopy={onAppointmentCopy}
-                onAppointmentCut={onAppointmentCut}
-                onDragStart={handleDragStart}
-                onDragEnd={handleDragEnd}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-              />
-            );
-          })}
-
-          {isTodayView && (() => {
-            const d = new Date();
-            const nowDec = d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60;
-            const clamped = Math.max(gridStartMin, Math.min(gridEndMin, nowDec));
-            const topPx = ((clamped - gridStartMin) / slotMinutes) * cellHeight;
-            return (
-              <div
-                key={`agenda-now-line-${nowLineTick}`}
-                className="pointer-events-none absolute left-0 right-0 z-[25]"
-                style={{
-                  top: `${topPx}px`,
-                  height: 0,
-                  borderTop: '2px solid rgb(220 38 38)',
-                  boxShadow: '0 0 0 1px rgba(255,255,255,0.6)',
-                }}
-                aria-hidden
-              />
-            );
-          })()}
-
-          {/* Renderizar todas las celdas del grid */}
-          {timeSlots.map((slot) => {
-            const isHourMark = slot.minute === 0;
-            const dateKey = viewDateYmd ?? format(new Date(), 'yyyy-MM-dd');
-            const slotS = timeToMinutes(slot.time);
-            const slotE = slotS + slotMinutes;
-            const { centerOpen } = slotBookableForAgenda(dateKey, slotS, slotE, centerHours, null, []);
-            const timeShade = !centerOpen;
-
-            return (
-              <div key={slot.time} className="contents">
-                {/* Columna de tiempo — etiqueta sobre la línea del slot */}
-                <div
-                  className={`sticky left-0 z-[26] relative overflow-visible border-r border-border ${
-                    isHourMark ? 'border-t-2 border-border bg-transparent' : 'border-t border-border bg-transparent'
-                  } ${timeShade ? UNAVAILABLE_TIME_GUTTER_TRANSPARENT : ''}`}
-                  style={{ height: `${cellHeight}px`, minHeight: `${cellHeight}px` }}
-                >
-                  {!isHourMark ? (
-                    <span
-                      className={`absolute left-0 right-0 top-0 z-[1] -translate-y-1/2 text-center leading-none px-2.5 text-xs font-medium text-muted-foreground dark:text-foreground/75 tabular-nums ${
-                        timeShade ? '!text-neutral-700 dark:!text-neutral-300' : ''
-                      }`}
-                    >
-                      <span
-                        className={`inline-block rounded-sm px-1.5 bg-card/80 ring-1 ring-border/30 ${
-                          timeShade ? 'bg-card/90 dark:bg-card/85' : ''
-                        }`}
-                      >
-                        {slot.time}
-                      </span>
-                    </span>
-                  ) : null}
-                </div>
-
-                {/* Columnas de empleados - siempre renderizar todas las celdas */}
-                {employees.map((employee) => {
-                  const isOccupied = isSlotOccupiedByAppointment(employee.id, slot.time);
-                  const isHighlighted = isSlotHighlighted(employee.id, slot.time);
-                  const meta = employeeAgendaById[employee.id] ?? { weekly: null, blocks: [] };
-                  const { bookable, blocked, schedulingAllowed } = slotBookableForAgenda(
-                    dateKey,
-                    slotS,
-                    slotE,
-                    centerHours,
-                    meta.weekly,
-                    meta.blocks,
-                  );
-                  const shade = !bookable && !isOccupied;
-                  const canSchedule = !isOccupied && schedulingAllowed;
-                  const canPaste = canSchedule && !!appointmentClipboard && !!onSlotPaste;
-                  const pasteHint = canPaste
-                    ? appointmentClipboard!.mode === 'cut'
-                      ? 'Clic para mover la cita aquí (Mayús+clic = nueva cita)'
-                      : 'Clic para pegar la cita (Mayús+clic = nueva cita)'
-                    : undefined;
-
-                  const slotCell = (
-                    <div
-                      className={`relative border-r border-border transition-colors ${
-                        isHourMark ? 'border-t-2 border-border' : 'border-t border-border'
-                      } ${
-                        isOccupied
-                          ? 'bg-muted/50'
-                          : shade
-                            ? blocked
-                              ? UNAVAILABLE_CELL_BLOCKED
-                              : `${UNAVAILABLE_CELL} cursor-pointer hover:bg-accent/50`
-                            : 'bg-card cursor-pointer hover:bg-accent/40'
-                      } ${isHighlighted ? 'bg-blue-100 dark:bg-blue-950/40 border-blue-300 dark:border-blue-700' : ''} ${
-                        canPaste ? 'ring-1 ring-inset ring-emerald-400/50 dark:ring-emerald-600/40' : ''
-                      }`}
-                      style={{ height: `${cellHeight}px` }}
-                      title={
-                        pasteHint ??
-                        (shade && canSchedule
-                          ? 'Fuera del horario habitual — clic para cita excepcional'
-                          : blocked
-                            ? 'No disponible (bloqueo de agenda)'
-                            : undefined)
-                      }
-                      onClick={(e) => {
-                        if (!canSchedule) return;
-                        onSlotClick(employee.id, slot.time, { forceNew: e.shiftKey });
-                      }}
-                      onDragOver={(e) => canSchedule && handleDragOver(e, employee.id, slot.time)}
-                      onDragLeave={handleDragLeave}
-                      onDrop={(e) => canSchedule && handleDrop(e, employee.id, slot.time)}
-                    />
-                  );
-
-                  if (!canPaste) {
-                    return <React.Fragment key={`${employee.id}-${slot.time}`}>{slotCell}</React.Fragment>;
-                  }
-
-                  return (
-                    <ContextMenu key={`${employee.id}-${slot.time}`}>
-                      <ContextMenuTrigger asChild>{slotCell}</ContextMenuTrigger>
-                      <ContextMenuContent className="z-[130]">
-                        <ContextMenuItem
-                          className="gap-2"
-                          onClick={() => onSlotPaste!(employee.id, slot.time)}
-                        >
-                          <ClipboardPaste className="h-3.5 w-3.5" />
-                          {appointmentClipboard!.mode === 'cut' ? 'Pegar (mover)' : 'Pegar'}
-                        </ContextMenuItem>
-                        <ContextMenuSeparator />
-                        <ContextMenuItem onClick={() => onSlotClick(employee.id, slot.time, { forceNew: true })}>
-                          Nueva cita vacía
-                        </ContextMenuItem>
-                      </ContextMenuContent>
-                    </ContextMenu>
-                  );
-                })}
-              </div>
-            );
-          })}
-        </div>
-        </div>
+        <AgendaGridVirtualRows
+          scrollRootRef={scrollRootRef}
+          timeSlots={timeSlots}
+          cellHeight={cellHeight}
+          employees={employees}
+          availability={availability}
+          occupancyIndex={occupancyIndex}
+          occupiedSlotKeys={occupiedSlotKeys}
+          appointments={appointments}
+          overlapMap={overlapMap}
+          employeeIndexById={employeeIndexById}
+          gridStartMin={gridStartMin}
+          gridEndMin={gridEndMin}
+          slotMinutes={slotMinutes}
+          isTodayView={isTodayView}
+          visibleFields={visibleFields}
+          appointmentClipboard={appointmentClipboard}
+          onSlotClick={onSlotClick}
+          onSlotPaste={onSlotPaste}
+          onAppointmentClick={onAppointmentClick}
+          onAppointmentCopy={onAppointmentCopy}
+          onAppointmentCut={onAppointmentCut}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          isSlotHighlighted={isSlotHighlighted}
+        />
       </div>
 
-      <div
-        className="pointer-events-none absolute left-0 top-0 z-[55] overflow-hidden"
-        style={{ width: TIME_GUTTER_PX, height: viewportHeight || undefined }}
-        aria-hidden
-      >
-        {hourMarkPositions.map(({ slot, y }) => {
-          const yViewport = y - scrollTop;
-          if (yViewport < -HOUR_LABEL_HALF_PX || yViewport > viewportHeight + HOUR_LABEL_HALF_PX) {
-            return null;
-          }
-          const top = Math.max(2, yViewport - HOUR_LABEL_HALF_PX);
-          const dateKey = viewDateYmd ?? format(new Date(), 'yyyy-MM-dd');
-          const slotS = timeToMinutes(slot.time);
-          const slotE = slotS + slotMinutes;
-          const { centerOpen } = slotBookableForAgenda(dateKey, slotS, slotE, centerHours, null, []);
-          const timeShade = !centerOpen;
-          return (
-            <div
-              key={`hour-label-${slot.time}`}
-              className="absolute left-0 right-0 flex justify-center"
-              style={{ top }}
-            >
-              <span
-                className={`inline-block rounded-sm px-1.5 text-sm font-semibold text-foreground tabular-nums leading-none bg-card shadow-sm ring-1 ring-border/50 ${
-                  timeShade ? 'text-neutral-700 dark:text-neutral-300' : ''
-                }`}
-              >
-                {slot.time}
-              </span>
-            </div>
-          );
-        })}
-      </div>
+      <AgendaHourLabelsOverlay
+        scrollRootRef={scrollRootRef}
+        hourMarkPositions={hourMarkPositions}
+        centerOpen={availability.centerOpen}
+      />
       </div>
 
       <div className="relative shrink-0 border-t border-border shadow-[0_-2px_4px_rgba(0,0,0,0.04)]">

@@ -1,26 +1,21 @@
-import { useQuery } from '@tanstack/react-query';
-import { useCallback } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect } from 'react';
 import { dunasoftSupabase } from '@/lib/dunasoftSupabase';
 import {
   buildEmployeeAgendaHoursMap,
   type DunasoftEmployeeHoursRow,
 } from '@/lib/dunasoftAgendaHours';
 import {
-  attachCustomerIdsToAppointments,
-  chunkArray,
   mapDunasoftEmployees,
-  mapPlan2009ToAppointments,
   type DunasoftEmpleadoRow,
-  type DunasoftPlan2009Row,
-  type DunasoftPlanArtRow,
 } from '@/lib/dunasoftAgendaMap';
-import { resolveCustomerIdsByLegacyCodcli } from '@/lib/appointmentCustomerResolve';
-import type { Appointment, Employee } from '@/types/agenda';
+import { fetchDunasoftDayAppointments } from '@/lib/dunasoftAgendaDayFetch';
+import type { Employee } from '@/types/agenda';
 import type { AgendaDayHoursMap, AgendaUnavailabilityEntry } from '@/lib/agendaHours';
 
 export type DunasoftAgendaDayData = {
   employees: Employee[];
-  appointments: Appointment[];
+  appointments: import('@/types/agenda').Appointment[];
   employeeAgendaById: Record<
     string,
     { weekly: AgendaDayHoursMap | null; blocks: AgendaUnavailabilityEntry[] }
@@ -53,88 +48,6 @@ async function fetchDunasoftEmployees(): Promise<{
   return { employees, rawEmployees, employeeAgendaById };
 }
 
-async function fetchDunasoftDayAppointments(
-  dateYmd: string,
-  companyId: string | null,
-  employees: Employee[],
-): Promise<Pick<DunasoftAgendaDayData, 'appointments'>> {
-  const planRes = await dunasoftSupabase
-    .from('plan2009')
-    .select(
-      '_row_id,idplan,codemp,codcli,fecha,horini,horfin,texto,nomcli,tel1cli,colfon,collet,facturado,codrec',
-    )
-    .eq('fecha', dateYmd);
-
-  if (planRes.error) throw planRes.error;
-  const plans = (planRes.data ?? []) as DunasoftPlan2009Row[];
-
-  const idplans = [
-    ...new Set(
-      plans
-        .map((p) => (p.idplan != null ? String(p.idplan).trim() : ''))
-        .filter(Boolean),
-    ),
-  ];
-
-  const planArtChunks = chunkArray(idplans, 150);
-  const planArtResults = await Promise.all(
-    planArtChunks.map(async (chunk) => {
-      if (!chunk.length) return [] as DunasoftPlanArtRow[];
-      const artRes = await dunasoftSupabase
-        .from('planart')
-        .select('idplan,codart,hora')
-        .in('idplan', chunk);
-      if (artRes.error) throw artRes.error;
-      return (artRes.data ?? []) as DunasoftPlanArtRow[];
-    }),
-  );
-  const planArtRows = planArtResults.flat();
-
-  const codarts = [
-    ...new Set(planArtRows.map((r) => String(r.codart ?? '').trim()).filter(Boolean)),
-  ];
-  const articles = new Map<string, string>();
-  const articleChunks = chunkArray(codarts, 200);
-  const articleResults = await Promise.all(
-    articleChunks.map(async (chunk) => {
-      if (!chunk.length) return [];
-      const artRes = await dunasoftSupabase.from('articulos').select('codart,desart').in('codart', chunk);
-      if (artRes.error) throw artRes.error;
-      return artRes.data ?? [];
-    }),
-  );
-  for (const rows of articleResults) {
-    for (const row of rows) {
-      const code = String((row as { codart?: string }).codart ?? '').trim();
-      const des = String((row as { desart?: string }).desart ?? '').trim();
-      if (code) articles.set(code, des || code);
-    }
-  }
-
-  const planArtByPlan = new Map<string, DunasoftPlanArtRow[]>();
-  for (const row of planArtRows) {
-    const key = String(row.idplan ?? '').trim();
-    if (!key) continue;
-    const list = planArtByPlan.get(key) ?? [];
-    list.push(row);
-    planArtByPlan.set(key, list);
-  }
-
-  let appointments = mapPlan2009ToAppointments(plans, employees, planArtByPlan, articles);
-
-  if (companyId) {
-    const legacyCodes = appointments
-      .map((a) => a.legacyClientCode)
-      .filter((c): c is string => Boolean(c?.trim()));
-    if (legacyCodes.length) {
-      const legacyMap = await resolveCustomerIdsByLegacyCodcli(companyId, legacyCodes);
-      appointments = attachCustomerIdsToAppointments(appointments, legacyMap);
-    }
-  }
-
-  return { appointments };
-}
-
 export function useDunasoftAgendaEmployees() {
   return useQuery({
     queryKey: ['dunasoft-agenda-employees'],
@@ -155,7 +68,6 @@ export function useDunasoftAgendaDay(dateYmd: string, companyId: string | null) 
     staleTime: 30_000,
     refetchInterval: 60_000,
     refetchIntervalInBackground: false,
-    // Solo conservar datos previos al refrescar el mismo día; al cambiar de fecha no mezclar citas.
     placeholderData: (previousData, previousQuery) =>
       previousQuery?.queryKey[1] === dateYmd ? previousData : undefined,
   });
@@ -165,7 +77,7 @@ export function useDunasoftAgendaDay(dateYmd: string, companyId: string | null) 
         employees: employeesQuery.data.employees,
         rawEmployees: employeesQuery.data.rawEmployees,
         employeeAgendaById: employeesQuery.data.employeeAgendaById,
-        appointments: dayQuery.data?.appointments ?? [],
+        appointments: dayQuery.data ?? [],
       }
     : undefined;
 
@@ -185,4 +97,39 @@ export function useDunasoftAgendaDay(dateYmd: string, companyId: string | null) 
     isDayLoading: dayQuery.isFetching && !dayQuery.data,
     isDayRefreshing: dayQuery.isFetching && !!dayQuery.data,
   };
+}
+
+export { fetchDunasoftDayAppointments };
+
+export function usePrefetchAdjacentDunasoftAgendaDays(
+  selectedDateYmd: string,
+  companyId: string | null,
+) {
+  const queryClient = useQueryClient();
+  const employeesQuery = useDunasoftAgendaEmployees();
+
+  useEffect(() => {
+    const employees = employeesQuery.data?.employees;
+    if (!companyId || !selectedDateYmd || !employees?.length) return;
+
+    const prefetchDay = (ymd: string) => {
+      void queryClient.prefetchQuery({
+        queryKey: ['dunasoft-agenda-day', ymd, companyId],
+        queryFn: () => fetchDunasoftDayAppointments(ymd, companyId, employees),
+        staleTime: 30_000,
+      });
+    };
+
+    const base = new Date(`${selectedDateYmd}T12:00:00`);
+    if (Number.isNaN(base.getTime())) return;
+
+    const prev = new Date(base);
+    prev.setDate(prev.getDate() - 1);
+    const next = new Date(base);
+    next.setDate(next.getDate() + 1);
+
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    prefetchDay(fmt(prev));
+    prefetchDay(fmt(next));
+  }, [companyId, employeesQuery.data?.employees, queryClient, selectedDateYmd]);
 }
