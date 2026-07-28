@@ -175,8 +175,13 @@ function visibleFieldsEqual(a?: AgendaVisibleFields, b?: AgendaVisibleFields): b
   );
 }
 
+/** Firma memoizada por identidad del array: evita recomputarla en cada comparación del memo. */
+const appointmentsSignatureCache = new WeakMap<Appointment[], string>();
+
 function appointmentsSignature(appointments: Appointment[]): string {
-  return appointments
+  const cached = appointmentsSignatureCache.get(appointments);
+  if (cached !== undefined) return cached;
+  const signature = appointments
     .map((a) => {
       const segments = (a.timeSegments ?? [])
         .map((s) => `${s.startTime}-${s.endTime}-${s.label}-${s.recursoColor ?? ''}-${s.recursoName ?? ''}`)
@@ -203,6 +208,8 @@ function appointmentsSignature(appointments: Appointment[]): string {
       ].join('\x00');
     })
     .join('\x1e');
+  appointmentsSignatureCache.set(appointments, signature);
+  return signature;
 }
 
 function agendaGridPropsAreEqual(prev: AgendaGridProps, next: AgendaGridProps): boolean {
@@ -574,6 +581,84 @@ function EmployeeNamesRow({
   );
 }
 
+type HourLabelsOverlayProps = {
+  scrollRootRef: React.RefObject<HTMLDivElement>;
+  hourMarkPositions: { slot: TimeSlot; y: number }[];
+  centerOpenByTime: Map<string, boolean>;
+};
+
+/**
+ * Etiquetas de hora flotantes sobre la columna izquierda. Componente aislado con su propia
+ * suscripción al scroll (con rAF): el scroll re-renderiza solo estas etiquetas, no la
+ * cuadrícula completa de celdas y citas.
+ */
+const HourLabelsOverlay = React.memo(function HourLabelsOverlay({
+  scrollRootRef,
+  hourMarkPositions,
+  centerOpenByTime,
+}: HourLabelsOverlayProps) {
+  const [scrollTop, setScrollTop] = React.useState(0);
+  const [viewportHeight, setViewportHeight] = React.useState(0);
+  const rafRef = React.useRef<number | null>(null);
+
+  React.useEffect(() => {
+    const el = scrollRootRef.current;
+    if (!el) return;
+    const sync = () => {
+      setScrollTop(el.scrollTop);
+      setViewportHeight(el.clientHeight);
+    };
+    sync();
+    const onScroll = () => {
+      if (rafRef.current != null) return;
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = null;
+        if (scrollRootRef.current) sync();
+      });
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      ro.disconnect();
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    };
+  }, [scrollRootRef]);
+
+  return (
+    <div
+      className="pointer-events-none absolute left-0 top-0 z-[55] overflow-hidden"
+      style={{ width: TIME_GUTTER_PX, height: viewportHeight || undefined }}
+      aria-hidden
+    >
+      {hourMarkPositions.map(({ slot, y }) => {
+        const yViewport = y - scrollTop;
+        if (yViewport < -HOUR_LABEL_HALF_PX || yViewport > viewportHeight + HOUR_LABEL_HALF_PX) {
+          return null;
+        }
+        const top = Math.max(2, yViewport - HOUR_LABEL_HALF_PX);
+        const timeShade = !(centerOpenByTime.get(slot.time) ?? false);
+        return (
+          <div
+            key={`hour-label-${slot.time}`}
+            className="absolute left-0 right-0 flex justify-center"
+            style={{ top }}
+          >
+            <span
+              className={`inline-block rounded-sm px-1.5 text-sm font-semibold text-foreground tabular-nums leading-none bg-card shadow-sm ring-1 ring-border/50 ${
+                timeShade ? 'text-neutral-700 dark:text-neutral-300' : ''
+              }`}
+            >
+              {slot.time}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+});
+
 export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaGridInner({
   employees,
   appointments,
@@ -605,8 +690,6 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
   const headerScrollRef = React.useRef<HTMLDivElement>(null);
   const footerScrollRef = React.useRef<HTMLDivElement>(null);
   const [scrollbarWidth, setScrollbarWidth] = React.useState(0);
-  const [scrollTop, setScrollTop] = React.useState(0);
-  const [viewportHeight, setViewportHeight] = React.useState(0);
   const lastScrollTopRef = React.useRef(0);
   const lastHandledGoTodayRef = React.useRef(0);
   const lastHandledScrollToTimeRef = React.useRef(0);
@@ -614,8 +697,11 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
   const scrollSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [nowLineTick, setNowLineTick] = React.useState(0);
 
-  const [draggedAppointment, setDraggedAppointment] = React.useState<string | null>(null);
-  const [dragOverSlot, setDragOverSlot] = React.useState<{ employeeId: string; time: string } | null>(null);
+  // Drag&drop por manipulación directa del DOM: mover el ratón arrastrando no
+  // debe re-renderizar la cuadrícula completa (celdas + citas) en cada evento.
+  const draggedAppointmentRef = React.useRef<string | null>(null);
+  const dragHighlightRef = React.useRef<HTMLDivElement>(null);
+  const dragHighlightKeyRef = React.useRef<string | null>(null);
 
   const centerHours = centerHoursProp ?? DEFAULT_AGENDA_CENTER_HOURS;
   const { startMin: envStart, endMin: envEnd } = React.useMemo(
@@ -637,6 +723,44 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
   const gridEndMin = timeSlots.length ? timeToMinutes(timeSlots[timeSlots.length - 1].time) + slotMinutes : envEnd;
 
   const isTodayView = viewDateYmd === format(new Date(), 'yyyy-MM-dd');
+  const dateKey = viewDateYmd ?? format(new Date(), 'yyyy-MM-dd');
+
+  /**
+   * Disponibilidad precalculada por slot (centro) y por empleado×slot: evita llamar a
+   * slotBookableForAgenda ~(slots × empleados) veces en cada re-render de la cuadrícula.
+   * Solo se recalcula al cambiar de día, horario o plantilla de empleados.
+   */
+  const slotAvailability = React.useMemo(() => {
+    const centerOpenByTime = new Map<string, boolean>();
+    const byEmployee = new Map<
+      string,
+      Map<string, { bookable: boolean; blocked: boolean; schedulingAllowed: boolean }>
+    >();
+    for (const slot of timeSlots) {
+      const slotS = timeToMinutes(slot.time);
+      const slotE = slotS + slotMinutes;
+      centerOpenByTime.set(
+        slot.time,
+        slotBookableForAgenda(dateKey, slotS, slotE, centerHours, null, []).centerOpen,
+      );
+    }
+    for (const employee of employees) {
+      const meta = employeeAgendaById[employee.id] ?? { weekly: null, blocks: [] };
+      const perSlot = new Map<string, { bookable: boolean; blocked: boolean; schedulingAllowed: boolean }>();
+      for (const slot of timeSlots) {
+        const slotS = timeToMinutes(slot.time);
+        const slotE = slotS + slotMinutes;
+        const r = slotBookableForAgenda(dateKey, slotS, slotE, centerHours, meta.weekly, meta.blocks);
+        perSlot.set(slot.time, {
+          bookable: r.bookable,
+          blocked: r.blocked,
+          schedulingAllowed: r.schedulingAllowed,
+        });
+      }
+      byEmployee.set(employee.id, perSlot);
+    }
+    return { centerOpenByTime, byEmployee };
+  }, [timeSlots, slotMinutes, dateKey, centerHours, employees, employeeAgendaById]);
 
   React.useEffect(() => {
     if (!isTodayView) return;
@@ -668,13 +792,38 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
     return map;
   }, [employees]);
 
+  /** Posiciona el overlay de resaltado sobre el slot destino sin pasar por React. */
+  const showDragHighlight = React.useCallback(
+    (employeeId: string, time: string) => {
+      const el = dragHighlightRef.current;
+      if (!el) return;
+      const employeeIndex = employeeIndexById.get(employeeId);
+      if (employeeIndex === undefined) return;
+      const key = `${employeeId}|${time}`;
+      if (dragHighlightKeyRef.current === key) return;
+      dragHighlightKeyRef.current = key;
+      const top = ((timeToMinutes(time) - gridStartMin) / slotMinutes) * cellHeight;
+      el.style.top = `${top}px`;
+      el.style.height = `${cellHeight}px`;
+      el.style.left = `calc(${TIME_GUTTER_PX}px + (100% - ${TIME_GUTTER_PX}px) * ${employeeIndex / employees.length})`;
+      el.style.width = `calc((100% - ${TIME_GUTTER_PX}px) / ${employees.length})`;
+      el.style.display = 'block';
+    },
+    [employeeIndexById, employees.length, gridStartMin, slotMinutes, cellHeight],
+  );
+
+  const hideDragHighlight = React.useCallback(() => {
+    dragHighlightKeyRef.current = null;
+    if (dragHighlightRef.current) dragHighlightRef.current.style.display = 'none';
+  }, []);
+
   // Funciones para drag & drop
   const handleDragStart = React.useCallback((e: React.DragEvent, appointment: Appointment) => {
     if (appointment.paymentStatus === 'paid' || appointment.paymentStatus === 'invoiced') {
       e.preventDefault();
       return;
     }
-    setDraggedAppointment(appointment.id);
+    draggedAppointmentRef.current = appointment.id;
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', appointment.id);
     
@@ -684,13 +833,13 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
   }, []);
 
   const handleDragEnd = React.useCallback((e: React.DragEvent) => {
-    setDraggedAppointment(null);
-    setDragOverSlot(null);
+    draggedAppointmentRef.current = null;
+    hideDragHighlight();
     
     // Restaurar la opacidad
     const target = e.target as HTMLElement;
     target.style.opacity = '1';
-  }, []);
+  }, [hideDragHighlight]);
 
   const handleDragOver = React.useCallback((e: React.DragEvent, employeeId: string, time: string) => {
     e.preventDefault();
@@ -699,9 +848,9 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
     // Solo permitir soltar en slots vacíos
     const isOccupied = isSlotOccupiedByAppointment(employeeId, time);
     if (!isOccupied) {
-      setDragOverSlot({ employeeId, time });
+      showDragHighlight(employeeId, time);
     }
-  }, [isSlotOccupiedByAppointment]);
+  }, [isSlotOccupiedByAppointment, showDragHighlight]);
 
   const handleDragLeave = React.useCallback((e: React.DragEvent) => {
     // Solo limpiar si realmente salimos del elemento
@@ -710,15 +859,15 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
                      e.clientY >= rect.top && e.clientY <= rect.bottom;
     
     if (!isInside) {
-      setDragOverSlot(null);
+      hideDragHighlight();
     }
-  }, []);
+  }, [hideDragHighlight]);
 
   const handleDrop = React.useCallback((e: React.DragEvent, employeeId: string, time: string) => {
     e.preventDefault();
     
     const appointmentId = e.dataTransfer.getData('text/plain');
-    if (appointmentId && draggedAppointment && onAppointmentMove) {
+    if (appointmentId && draggedAppointmentRef.current && onAppointmentMove) {
       // Verificar que el slot esté disponible
       const isOccupied = isSlotOccupiedByAppointment(employeeId, time);
       if (!isOccupied) {
@@ -726,13 +875,9 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
       }
     }
     
-    setDraggedAppointment(null);
-    setDragOverSlot(null);
-  }, [draggedAppointment, isSlotOccupiedByAppointment, onAppointmentMove]);
-
-  const isSlotHighlighted = React.useCallback((employeeId: string, time: string): boolean => {
-    return dragOverSlot?.employeeId === employeeId && dragOverSlot?.time === time;
-  }, [dragOverSlot]);
+    draggedAppointmentRef.current = null;
+    hideDragHighlight();
+  }, [hideDragHighlight, isSlotOccupiedByAppointment, onAppointmentMove]);
 
   const overlapMap = React.useMemo(() => {
     const byKey: Record<string, Appointment[]> = {};
@@ -875,18 +1020,12 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
   React.useEffect(() => {
     const el = scrollRootRef.current;
     if (!el) return;
-    const syncViewport = () => {
-      setScrollTop(el.scrollTop);
-      setViewportHeight(el.clientHeight);
-    };
-    syncViewport();
-    const ro = new ResizeObserver(syncViewport);
-    ro.observe(el);
 
+    // Solo persistencia con debounce: el scroll no debe provocar setState aquí
+    // (las etiquetas de hora flotantes se actualizan en HourLabelsOverlay).
     const onScroll = () => {
       if (!scrollRootRef.current) return;
       lastScrollTopRef.current = scrollRootRef.current.scrollTop;
-      setScrollTop(scrollRootRef.current.scrollTop);
       if (persistUserId && viewDateYmd) {
         if (scrollSaveTimerRef.current) clearTimeout(scrollSaveTimerRef.current);
         scrollSaveTimerRef.current = setTimeout(() => flushScrollToStorage(), 220);
@@ -906,7 +1045,6 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
     document.addEventListener('visibilitychange', onHide);
 
     return () => {
-      ro.disconnect();
       el.removeEventListener('scroll', onScroll);
       window.removeEventListener('pagehide', onPageHide);
       document.removeEventListener('visibilitychange', onHide);
@@ -1026,14 +1164,18 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
             );
           })()}
 
+          {/* Overlay de resaltado de drag&drop, posicionado imperativamente (sin re-render) */}
+          <div
+            ref={dragHighlightRef}
+            className="pointer-events-none absolute z-[15] rounded-sm bg-blue-100/70 ring-2 ring-inset ring-blue-300 dark:bg-blue-950/40 dark:ring-blue-700"
+            style={{ display: 'none' }}
+            aria-hidden
+          />
+
           {/* Renderizar todas las celdas del grid */}
           {timeSlots.map((slot) => {
             const isHourMark = slot.minute === 0;
-            const dateKey = viewDateYmd ?? format(new Date(), 'yyyy-MM-dd');
-            const slotS = timeToMinutes(slot.time);
-            const slotE = slotS + slotMinutes;
-            const { centerOpen } = slotBookableForAgenda(dateKey, slotS, slotE, centerHours, null, []);
-            const timeShade = !centerOpen;
+            const timeShade = !(slotAvailability.centerOpenByTime.get(slot.time) ?? false);
 
             return (
               <div key={slot.time} className="contents">
@@ -1064,16 +1206,10 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
                 {/* Columnas de empleados - siempre renderizar todas las celdas */}
                 {employees.map((employee) => {
                   const isOccupied = isSlotOccupiedByAppointment(employee.id, slot.time);
-                  const isHighlighted = isSlotHighlighted(employee.id, slot.time);
-                  const meta = employeeAgendaById[employee.id] ?? { weekly: null, blocks: [] };
-                  const { bookable, blocked, schedulingAllowed } = slotBookableForAgenda(
-                    dateKey,
-                    slotS,
-                    slotE,
-                    centerHours,
-                    meta.weekly,
-                    meta.blocks,
-                  );
+                  const availability = slotAvailability.byEmployee.get(employee.id)?.get(slot.time);
+                  const bookable = availability?.bookable ?? false;
+                  const blocked = availability?.blocked ?? false;
+                  const schedulingAllowed = availability?.schedulingAllowed ?? true;
                   const shade = !bookable && !isOccupied;
                   const canSchedule = !isOccupied && schedulingAllowed;
                   const canPaste = canSchedule && !!appointmentClipboard && !!onSlotPaste;
@@ -1095,7 +1231,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
                               ? UNAVAILABLE_CELL_BLOCKED
                               : `${UNAVAILABLE_CELL} cursor-pointer hover:bg-accent/50`
                             : 'bg-card cursor-pointer hover:bg-accent/40'
-                      } ${isHighlighted ? 'bg-blue-100 dark:bg-blue-950/40 border-blue-300 dark:border-blue-700' : ''} ${
+                      } ${
                         canPaste ? 'ring-1 ring-inset ring-emerald-400/50 dark:ring-emerald-600/40' : ''
                       }`}
                       style={{ height: `${cellHeight}px` }}
@@ -1147,39 +1283,11 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
         </div>
       </div>
 
-      <div
-        className="pointer-events-none absolute left-0 top-0 z-[55] overflow-hidden"
-        style={{ width: TIME_GUTTER_PX, height: viewportHeight || undefined }}
-        aria-hidden
-      >
-        {hourMarkPositions.map(({ slot, y }) => {
-          const yViewport = y - scrollTop;
-          if (yViewport < -HOUR_LABEL_HALF_PX || yViewport > viewportHeight + HOUR_LABEL_HALF_PX) {
-            return null;
-          }
-          const top = Math.max(2, yViewport - HOUR_LABEL_HALF_PX);
-          const dateKey = viewDateYmd ?? format(new Date(), 'yyyy-MM-dd');
-          const slotS = timeToMinutes(slot.time);
-          const slotE = slotS + slotMinutes;
-          const { centerOpen } = slotBookableForAgenda(dateKey, slotS, slotE, centerHours, null, []);
-          const timeShade = !centerOpen;
-          return (
-            <div
-              key={`hour-label-${slot.time}`}
-              className="absolute left-0 right-0 flex justify-center"
-              style={{ top }}
-            >
-              <span
-                className={`inline-block rounded-sm px-1.5 text-sm font-semibold text-foreground tabular-nums leading-none bg-card shadow-sm ring-1 ring-border/50 ${
-                  timeShade ? 'text-neutral-700 dark:text-neutral-300' : ''
-                }`}
-              >
-                {slot.time}
-              </span>
-            </div>
-          );
-        })}
-      </div>
+      <HourLabelsOverlay
+        scrollRootRef={scrollRootRef}
+        hourMarkPositions={hourMarkPositions}
+        centerOpenByTime={slotAvailability.centerOpenByTime}
+      />
       </div>
 
       <div className="relative shrink-0 border-t border-border shadow-[0_-2px_4px_rgba(0,0,0,0.04)]">

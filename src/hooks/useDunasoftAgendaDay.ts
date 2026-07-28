@@ -1,5 +1,6 @@
-import { useQuery } from '@tanstack/react-query';
-import { useCallback } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect } from 'react';
+import { addDays, format, isValid, parse, subDays } from 'date-fns';
 import { dunasoftSupabase } from '@/lib/dunasoftSupabase';
 import {
   buildEmployeeAgendaHoursMap,
@@ -53,6 +54,57 @@ async function fetchDunasoftEmployees(): Promise<{
   return { employees, rawEmployees, employeeAgendaById };
 }
 
+async function fetchPlanArtRows(idplans: string[]): Promise<DunasoftPlanArtRow[]> {
+  const planArtChunks = chunkArray(idplans, 150);
+  const planArtResults = await Promise.all(
+    planArtChunks.map(async (chunk) => {
+      if (!chunk.length) return [] as DunasoftPlanArtRow[];
+      const artRes = await dunasoftSupabase
+        .from('planart')
+        .select('idplan,codart,hora')
+        .in('idplan', chunk);
+      if (artRes.error) throw artRes.error;
+      return (artRes.data ?? []) as DunasoftPlanArtRow[];
+    }),
+  );
+  return planArtResults.flat();
+}
+
+/** Nombres de artículos por código: catálogo estable, se cachea entre días para ahorrar un round-trip. */
+const articleNameCache = new Map<string, string>();
+
+async function fetchArticleNames(codarts: string[]): Promise<Map<string, string>> {
+  const articles = new Map<string, string>();
+  const missing: string[] = [];
+  for (const code of codarts) {
+    const cached = articleNameCache.get(code);
+    if (cached !== undefined) articles.set(code, cached);
+    else missing.push(code);
+  }
+  if (!missing.length) return articles;
+
+  const articleChunks = chunkArray(missing, 200);
+  const articleResults = await Promise.all(
+    articleChunks.map(async (chunk) => {
+      if (!chunk.length) return [];
+      const artRes = await dunasoftSupabase.from('articulos').select('codart,desart').in('codart', chunk);
+      if (artRes.error) throw artRes.error;
+      return artRes.data ?? [];
+    }),
+  );
+  for (const rows of articleResults) {
+    for (const row of rows) {
+      const code = String((row as { codart?: string }).codart ?? '').trim();
+      const des = String((row as { desart?: string }).desart ?? '').trim();
+      if (code) {
+        articles.set(code, des || code);
+        articleNameCache.set(code, des || code);
+      }
+    }
+  }
+  return articles;
+}
+
 async function fetchDunasoftDayAppointments(
   dateYmd: string,
   companyId: string | null,
@@ -76,40 +128,21 @@ async function fetchDunasoftDayAppointments(
     ),
   ];
 
-  const planArtChunks = chunkArray(idplans, 150);
-  const planArtResults = await Promise.all(
-    planArtChunks.map(async (chunk) => {
-      if (!chunk.length) return [] as DunasoftPlanArtRow[];
-      const artRes = await dunasoftSupabase
-        .from('planart')
-        .select('idplan,codart,hora')
-        .in('idplan', chunk);
-      if (artRes.error) throw artRes.error;
-      return (artRes.data ?? []) as DunasoftPlanArtRow[];
-    }),
-  );
-  const planArtRows = planArtResults.flat();
+  // planart y la resolución de customer_id solo dependen de plan2009: en paralelo.
+  const legacyCodes = companyId
+    ? plans.map((p) => (p.codcli != null ? String(p.codcli).trim() : '')).filter(Boolean)
+    : [];
+  const [planArtRows, legacyMap] = await Promise.all([
+    fetchPlanArtRows(idplans),
+    legacyCodes.length
+      ? resolveCustomerIdsByLegacyCodcli(companyId!, legacyCodes)
+      : Promise.resolve(new Map<string, string>()),
+  ]);
 
   const codarts = [
     ...new Set(planArtRows.map((r) => String(r.codart ?? '').trim()).filter(Boolean)),
   ];
-  const articles = new Map<string, string>();
-  const articleChunks = chunkArray(codarts, 200);
-  const articleResults = await Promise.all(
-    articleChunks.map(async (chunk) => {
-      if (!chunk.length) return [];
-      const artRes = await dunasoftSupabase.from('articulos').select('codart,desart').in('codart', chunk);
-      if (artRes.error) throw artRes.error;
-      return artRes.data ?? [];
-    }),
-  );
-  for (const rows of articleResults) {
-    for (const row of rows) {
-      const code = String((row as { codart?: string }).codart ?? '').trim();
-      const des = String((row as { desart?: string }).desart ?? '').trim();
-      if (code) articles.set(code, des || code);
-    }
-  }
+  const articles = await fetchArticleNames(codarts);
 
   const planArtByPlan = new Map<string, DunasoftPlanArtRow[]>();
   for (const row of planArtRows) {
@@ -121,15 +154,8 @@ async function fetchDunasoftDayAppointments(
   }
 
   let appointments = mapPlan2009ToAppointments(plans, employees, planArtByPlan, articles);
-
-  if (companyId) {
-    const legacyCodes = appointments
-      .map((a) => a.legacyClientCode)
-      .filter((c): c is string => Boolean(c?.trim()));
-    if (legacyCodes.length) {
-      const legacyMap = await resolveCustomerIdsByLegacyCodcli(companyId, legacyCodes);
-      appointments = attachCustomerIdsToAppointments(appointments, legacyMap);
-    }
+  if (legacyMap.size) {
+    appointments = attachCustomerIdsToAppointments(appointments, legacyMap);
   }
 
   return { appointments };
@@ -185,4 +211,25 @@ export function useDunasoftAgendaDay(dateYmd: string, companyId: string | null) 
     isDayLoading: dayQuery.isFetching && !dayQuery.data,
     isDayRefreshing: dayQuery.isFetching && !!dayQuery.data,
   };
+}
+
+/** Precarga en caché los días anterior y siguiente para que la navegación ±1 día sea instantánea. */
+export function usePrefetchAdjacentDunasoftAgendaDays(dateYmd: string, companyId: string | null) {
+  const queryClient = useQueryClient();
+  const employeesQuery = useDunasoftAgendaEmployees();
+  const employees = employeesQuery.data?.employees;
+
+  useEffect(() => {
+    if (!employees || !dateYmd) return;
+    const base = parse(dateYmd, 'yyyy-MM-dd', new Date());
+    if (!isValid(base)) return;
+    for (const neighbor of [subDays(base, 1), addDays(base, 1)]) {
+      const ymd = format(neighbor, 'yyyy-MM-dd');
+      void queryClient.prefetchQuery({
+        queryKey: ['dunasoft-agenda-day', ymd, companyId],
+        queryFn: () => fetchDunasoftDayAppointments(ymd, companyId, employees),
+        staleTime: 30_000,
+      });
+    }
+  }, [employees, dateYmd, companyId, queryClient]);
 }

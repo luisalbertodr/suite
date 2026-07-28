@@ -19,7 +19,10 @@ import {
   DunasoftAppointmentForm,
   type DunasoftAppointmentFormValues,
 } from '@/components/DunasoftAppointmentForm';
-import { useDunasoftAgendaDay } from '@/hooks/useDunasoftAgendaDay';
+import {
+  useDunasoftAgendaDay,
+  usePrefetchAdjacentDunasoftAgendaDays,
+} from '@/hooks/useDunasoftAgendaDay';
 import { useDunasoftAppointmentMutations } from '@/hooks/useDunasoftAppointmentMutations';
 import { useDunasoftSyncStatus } from '@/hooks/useDunasoftSyncStatus';
 import { useStyleSyncAgentStatus } from '@/hooks/useStyleSyncAgentStatus';
@@ -137,8 +140,9 @@ export const DunasoftAgenda: React.FC = () => {
     saveAgendaViewPersisted(user.id, mergePersistedLastDate(prev, selectedDateYmd));
   }, [user?.id, selectedDateYmd]);
 
-  const { data, isLoading, isError, error, refetch, isFetching, isDayLoading, isDayRefreshing } =
+  const { data, isLoading, isError, error, refetch, isFetching, isDayLoading } =
     useDunasoftAgendaDay(selectedDateYmd, companyId);
+  usePrefetchAdjacentDunasoftAgendaDays(selectedDateYmd, companyId);
   useAgendaInboundSyncRefetch(companyId, refetch, selectedDateYmd);
   const showInitialSkeleton = isLoading && !data;
   const { createMutation, updateMutation, deleteMutation } = useDunasoftAppointmentMutations(selectedDateYmd);
@@ -410,7 +414,7 @@ export const DunasoftAgenda: React.FC = () => {
       ) : (
         <div
           className={`flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border/60 bg-card transition-opacity duration-150 ${
-            isDayLoading || isDayRefreshing ? 'opacity-60 pointer-events-none' : ''
+            isDayLoading ? 'opacity-60 pointer-events-none' : ''
           }`}
         >
           <AgendaGrid

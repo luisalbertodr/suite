@@ -121,6 +121,49 @@ type CreateAppointmentData = {
   items?: AppointmentItemDraft[];
 };
 
+const parseServiceFromDescription = (
+  description: string
+): { code: string; service: string; hourInText: string } => {
+  // Legacy sample: "[16:00] 214 - ZONA L..."
+  const match = description.match(/\[(\d{1,2}:\d{2})\]\s*([^\s-]+)\s*-\s*(.+)$/);
+  if (!match) return { code: '', service: '', hourInText: '' };
+  return {
+    hourInText: match[1]?.trim() || '',
+    code: match[2]?.trim() || '',
+    service: match[3]?.trim() || '',
+  };
+};
+
+const normalizeTime = (value?: string | null): string => {
+  if (!value) return '';
+  const str = String(value);
+  if (str.includes('T')) {
+    const part = str.split('T')[1] || '';
+    const hh = part.substring(0, 2);
+    const mm = part.substring(3, 5);
+    if (/^\d{2}$/.test(hh) && /^\d{2}$/.test(mm)) return `${hh}:${mm}`;
+  }
+  const m = str.match(/^(\d{1,2}):(\d{2})/);
+  if (m) return `${m[1].padStart(2, '0')}:${m[2]}`;
+  return str.substring(0, 5);
+};
+
+const normalizeDate = (
+  start: string | null | undefined,
+  legacyDate: string | null | undefined,
+  fallbackYmd: string,
+): string => {
+  if (start && String(start).includes('T')) return String(start).split('T')[0];
+  return legacyDate ? String(legacyDate) : fallbackYmd;
+};
+
+/** Identidad estable cuando la query de ítems está deshabilitada o sin datos. */
+const EMPTY_APPOINTMENT_ITEMS_PAYLOAD = {
+  grouped: {} as Record<string, AppointmentItemDraft[]>,
+  articleHints: new Map<string, ArticleResourceHint>(),
+  billingIdsByAppt: {} as Record<string, string[]>,
+};
+
 // Generate a Tailwind bg class from a hex color
 const hexToTailwindBg = (hex: string, index: number): string => {
   const fallbacks = [
@@ -520,7 +563,7 @@ export const Agenda: React.FC = () => {
 
   const appointmentIds = useMemo(() => dbAppointments.map((a) => a.id), [dbAppointments]);
 
-  const { data: appointmentItemsPayload = { grouped: {}, articleHints: new Map<string, ArticleResourceHint>(), billingIdsByAppt: {} as Record<string, string[]> } } = useQuery({
+  const { data: appointmentItemsPayload = EMPTY_APPOINTMENT_ITEMS_PAYLOAD } = useQuery({
     queryKey: ['appointment-time-segments', companyId, appointmentIds.join('|'), familyRecords.length],
     enabled: shouldLoadDayItems && !!companyId && appointmentIds.length > 0,
     staleTime: 30_000,
@@ -598,12 +641,16 @@ export const Agenda: React.FC = () => {
   const billingIdsByAppt = appointmentItemsPayload.billingIdsByAppt;
 
   // Map DB employees to grid employees with proper colors
-  const allEmployees: Employee[] = dbEmployees.map((emp, idx) => ({
-    id: emp.id,
-    name: emp.name,
-    color: hexToTailwindBg(emp.color || '#3B82F6', idx),
-    billing_company_id: emp.billing_company_id ?? null,
-  }));
+  const allEmployees: Employee[] = useMemo(
+    () =>
+      dbEmployees.map((emp, idx) => ({
+        id: emp.id,
+        name: emp.name,
+        color: hexToTailwindBg(emp.color || '#3B82F6', idx),
+        billing_company_id: emp.billing_company_id ?? null,
+      })),
+    [dbEmployees],
+  );
 
   const employees = useMemo(
     () =>
@@ -613,84 +660,64 @@ export const Agenda: React.FC = () => {
     [allEmployees, agendaBillingView, isMultiEntity],
   );
 
-  const parseServiceFromDescription = (
-    description: string
-  ): { code: string; service: string; hourInText: string } => {
-    // Legacy sample: "[16:00] 214 - ZONA L..."
-    const match = description.match(/\[(\d{1,2}:\d{2})\]\s*([^\s-]+)\s*-\s*(.+)$/);
-    if (!match) return { code: '', service: '', hourInText: '' };
-    return {
-      hourInText: match[1]?.trim() || '',
-      code: match[2]?.trim() || '',
-      service: match[3]?.trim() || '',
-    };
-  };
-
-  const normalizeTime = (value?: string | null): string => {
-    if (!value) return '';
-    const str = String(value);
-    if (str.includes('T')) {
-      const part = str.split('T')[1] || '';
-      const hh = part.substring(0, 2);
-      const mm = part.substring(3, 5);
-      if (/^\d{2}$/.test(hh) && /^\d{2}$/.test(mm)) return `${hh}:${mm}`;
-    }
-    const m = str.match(/^(\d{1,2}):(\d{2})/);
-    if (m) return `${m[1].padStart(2, '0')}:${m[2]}`;
-    return str.substring(0, 5);
-  };
-
-  const normalizeDate = (start?: string | null, legacyDate?: string | null): string => {
-    if (start && String(start).includes('T')) return String(start).split('T')[0];
-    return legacyDate ? String(legacyDate) : format(selectedDate, 'yyyy-MM-dd');
-  };
-
-  // Map appointments (schema moderno + legado)
-  const appointments: Appointment[] = dbAppointments.map((apt) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const row: any = apt;
-    const description = repairStyleText(row.description || '');
-    const parsedService = parseServiceFromDescription(description);
-    const clientName = repairStyleText(row.client_name || row.title || '');
-    const startTime = normalizeTime(row.start_time);
-    const endTime = normalizeTime(row.end_time);
-    const itemDrafts = appointmentItemsByAppt[row.id] || [];
-    const timeSegments = buildAppointmentTimeSegments(startTime, itemDrafts, recursoCatalog, {
-      recursos: recursoCatalog,
-      cabinas: cabinaCatalog,
-      articleHints: agendaArticleHints,
-    });
-    const occupiedEndTime = occupiedEndTimeFromItems(startTime, itemDrafts);
-    const paymentOnlyLabels = itemDrafts
-      .filter((it) => !it.occupies_time || Number(it.duration_minutes || 0) <= 0)
-      .map((it) => (it.label || '').trim())
-      .filter(Boolean);
-    const aptStatus = (['confirmed', 'pending', 'cancelled'].includes(row.status) ? row.status : 'pending') as Appointment['status'];
-    return {
-      id: row.id,
-      employeeId: row.employee_id || '',
-      clientName,
-      customerId: row.customer_id ?? null,
-      description,
-      serviceCode: parsedService.code,
-      serviceName: parsedService.service,
-      legacyEmployeeCode: row.legacy_codemp || undefined,
-      legacyClientCode: row.legacy_codcli || undefined,
-      legacyPlanincId: row.legacy_planinc_id ?? null,
-      legacyHourInText: parsedService.hourInText || undefined,
-      startTime,
-      endTime,
-      timeSegments,
-      occupiedEndTime,
-      paymentOnlyLabels,
-      date: normalizeDate(row.start_time, row.appointment_date),
-      color: row.color || '#3B82F6',
-      totalAmount: undefined,
-      paymentStatus: aptStatus === 'cancelled' ? 'none' : undefined,
-      status: aptStatus,
-      attachments: undefined,
-    };
-  });
+  // Map appointments (schema moderno + legado). Memoizado: este map (con
+  // buildAppointmentTimeSegments por cita) es de lo más caro del render del padre.
+  const appointments: Appointment[] = useMemo(
+    () =>
+      dbAppointments.map((apt) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const row: any = apt;
+        const description = repairStyleText(row.description || '');
+        const parsedService = parseServiceFromDescription(description);
+        const clientName = repairStyleText(row.client_name || row.title || '');
+        const startTime = normalizeTime(row.start_time);
+        const endTime = normalizeTime(row.end_time);
+        const itemDrafts = appointmentItemsByAppt[row.id] || [];
+        const timeSegments = buildAppointmentTimeSegments(startTime, itemDrafts, recursoCatalog, {
+          recursos: recursoCatalog,
+          cabinas: cabinaCatalog,
+          articleHints: agendaArticleHints,
+        });
+        const occupiedEndTime = occupiedEndTimeFromItems(startTime, itemDrafts);
+        const paymentOnlyLabels = itemDrafts
+          .filter((it) => !it.occupies_time || Number(it.duration_minutes || 0) <= 0)
+          .map((it) => (it.label || '').trim())
+          .filter(Boolean);
+        const aptStatus = (['confirmed', 'pending', 'cancelled'].includes(row.status) ? row.status : 'pending') as Appointment['status'];
+        return {
+          id: row.id,
+          employeeId: row.employee_id || '',
+          clientName,
+          customerId: row.customer_id ?? null,
+          description,
+          serviceCode: parsedService.code,
+          serviceName: parsedService.service,
+          legacyEmployeeCode: row.legacy_codemp || undefined,
+          legacyClientCode: row.legacy_codcli || undefined,
+          legacyPlanincId: row.legacy_planinc_id ?? null,
+          legacyHourInText: parsedService.hourInText || undefined,
+          startTime,
+          endTime,
+          timeSegments,
+          occupiedEndTime,
+          paymentOnlyLabels,
+          date: normalizeDate(row.start_time, row.appointment_date, selectedDateYmd),
+          color: row.color || '#3B82F6',
+          totalAmount: undefined,
+          paymentStatus: aptStatus === 'cancelled' ? 'none' : undefined,
+          status: aptStatus,
+          attachments: undefined,
+        };
+      }),
+    [
+      dbAppointments,
+      appointmentItemsByAppt,
+      recursoCatalog,
+      cabinaCatalog,
+      agendaArticleHints,
+      selectedDateYmd,
+    ],
+  );
 
   const openAppointmentById = useCallback(
     (appointmentId: string, dateYmd: string) => {
