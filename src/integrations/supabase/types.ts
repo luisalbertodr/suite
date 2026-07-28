@@ -1444,7 +1444,8 @@ export type Database = {
           credit_limit?: number | null
           email?: string | null
           first_session_date?: string | null
-          height_cm?: number | null          iban_account?: string | null
+          height_cm?: number | null
+          iban_account?: string | null
           id?: string
           intracomunitario?: string | null
           irpf_percentage?: number | null
