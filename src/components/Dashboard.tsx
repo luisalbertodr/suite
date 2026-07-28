@@ -21,7 +21,9 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useDashboardData } from '../hooks/useDashboardData';
 import {
+  DASHBOARD_ACTIVITY_TYPE_OPTIONS,
   DASHBOARD_RECENT_ACTIVITY_LIMIT,
+  type DashboardRecentActivityFilter,
   type DashboardRecentActivityType,
 } from '@/lib/dashboardRecentActivity';
 import { Reportes } from './Reportes';
@@ -281,6 +283,7 @@ export const Dashboard: React.FC = () => {
   const [comparisonPreset, setComparisonPreset] = useState<ComparisonPeriodPreset>('days15');
   const [comparisonMonth, setComparisonMonth] = useState(new Date().getMonth() + 1);
   const [selectedFamilies, setSelectedFamilies] = useState<string[] | null>(null);
+  const [activityTypeFilter, setActivityTypeFilter] = useState<DashboardRecentActivityFilter>('all');
   const defaultRange = useMemo(() => currentMonthRange(), []);
   const [boardFromDate, setBoardFromDate] = useState(defaultRange.from);
   const [boardToDate, setBoardToDate] = useState(defaultRange.to);
@@ -354,7 +357,12 @@ export const Dashboard: React.FC = () => {
     billingView,
     comparisonPeriod,
     selectedFamilies,
+    activityTypeFilter,
   );
+
+  const activityFilterLabel = DASHBOARD_ACTIVITY_TYPE_OPTIONS.find(
+    (option) => option.value === activityTypeFilter,
+  )?.label ?? 'Todos los tipos';
 
   const refreshDashboard = () => {
     void queryClient.invalidateQueries({
@@ -786,13 +794,32 @@ export const Dashboard: React.FC = () => {
           </div>
 
           <div className="bg-card rounded-xl shadow-lg p-6 border">
-            <div className="mb-4 flex items-center justify-between gap-2">
-              <h3 className="text-base font-semibold text-foreground">Actividad Reciente</h3>
-              {recentActivity && recentActivity.length > 0 && (
-                <span className="text-xs text-muted-foreground">
-                  Últimos {Math.min(recentActivity.length, DASHBOARD_RECENT_ACTIVITY_LIMIT)} movimientos
-                </span>
-              )}
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="text-base font-semibold text-foreground">Actividad Reciente</h3>
+                {recentActivity && recentActivity.length > 0 && (
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {activityTypeFilter === 'all'
+                      ? `Últimos ${Math.min(recentActivity.length, DASHBOARD_RECENT_ACTIVITY_LIMIT)} movimientos`
+                      : `Últimos ${Math.min(recentActivity.length, DASHBOARD_RECENT_ACTIVITY_LIMIT)} de ${activityFilterLabel.toLowerCase()}`}
+                  </p>
+                )}
+              </div>
+              <Select
+                value={activityTypeFilter}
+                onValueChange={(value) => setActivityTypeFilter(value as DashboardRecentActivityFilter)}
+              >
+                <SelectTrigger className="h-8 w-[180px] text-xs">
+                  <SelectValue placeholder="Tipo de evento" />
+                </SelectTrigger>
+                <SelectContent>
+                  {DASHBOARD_ACTIVITY_TYPE_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value} className="text-xs">
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="max-h-[min(70vh,720px)] space-y-2 overflow-y-auto pr-1">
               {recentActivity && recentActivity.length > 0 ? (
@@ -818,7 +845,11 @@ export const Dashboard: React.FC = () => {
               ) : (
                 <div className="py-6 text-center text-muted-foreground">
                   <Activity className="mx-auto mb-2 h-7 w-7 opacity-50" />
-                  <p className="text-sm">Sin actividad reciente</p>
+                  <p className="text-sm">
+                    {activityTypeFilter === 'all'
+                      ? 'Sin actividad reciente'
+                      : `Sin actividad reciente de ${activityFilterLabel.toLowerCase()}`}
+                  </p>
                 </div>
               )}
             </div>

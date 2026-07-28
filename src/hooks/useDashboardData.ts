@@ -9,6 +9,7 @@ import { familiesCacheKey } from '@/lib/dashboardBillingCache';
 import {
   fetchDashboardRecentActivity,
   type DashboardRecentActivity,
+  type DashboardRecentActivityFilter,
 } from '@/lib/dashboardRecentActivity';
 import { type DashboardCardStats, fetchDashboardCardStats } from '@/lib/dashboardStats';
 import {
@@ -52,7 +53,7 @@ async function fetchDashboardFamilyNames(
   return (data ?? []).map((row) => String(row.name));
 }
 
-export type { DashboardRecentActivity } from '@/lib/dashboardRecentActivity';
+export type { DashboardRecentActivity, DashboardRecentActivityFilter } from '@/lib/dashboardRecentActivity';
 
 type DashboardMainData = {
   stats: DashboardCardStats & { monthlyRevenue: number };
@@ -64,6 +65,7 @@ export const useDashboardData = (
   billingView: BillingEntityView = 'both',
   comparisonPeriod?: ComparisonPeriod,
   selectedFamilies: string[] | null = null,
+  activityTypeFilter: DashboardRecentActivityFilter = 'all',
 ) => {
   const { companyId, loading: companyLoading } = useCompanyFilter();
   const {
@@ -97,7 +99,7 @@ export const useDashboardData = (
 
   const familiesQueryKey = ['dashboard-families', catalogCompanyId, billingCompanyIds.join(',')] as const;
   const mainQueryKey = ['dashboard-main', companyId, opCompanyId, billingView] as const;
-  const activityQueryKey = ['dashboard-recent-activity', companyId, opCompanyId] as const;
+  const activityQueryKey = ['dashboard-recent-activity', companyId, opCompanyId, activityTypeFilter] as const;
   const dailyComparisonQueryKey = [
     'dashboard-daily-comparison',
     companyId,
@@ -242,7 +244,7 @@ export const useDashboardData = (
     queryKey: activityQueryKey,
     queryFn: async () => {
       if (!companyId || !opCompanyId) return [] as DashboardRecentActivity[];
-      return fetchDashboardRecentActivity(companyId, opCompanyId);
+      return fetchDashboardRecentActivity(companyId, opCompanyId, { typeFilter: activityTypeFilter });
     },
     enabled: !!companyId && !!opCompanyId && !companyLoading && !wcLoading,
     staleTime: 2 * 60 * 1000,

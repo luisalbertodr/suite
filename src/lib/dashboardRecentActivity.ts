@@ -25,6 +25,33 @@ export type DashboardRecentActivityType =
   | 'marketing'
   | 'nota_marketing';
 
+export type DashboardRecentActivityFilter = 'all' | DashboardRecentActivityType;
+
+export const DASHBOARD_ACTIVITY_TYPE_OPTIONS: Array<{
+  value: DashboardRecentActivityFilter;
+  label: string;
+}> = [
+  { value: 'all', label: 'Todos los tipos' },
+  { value: 'cita', label: 'Citas' },
+  { value: 'factura', label: 'Facturas' },
+  { value: 'cliente', label: 'Clientes' },
+  { value: 'venta', label: 'Ventas TPV' },
+  { value: 'marketing', label: 'Marketing' },
+  { value: 'nota_marketing', label: 'Notas marketing' },
+  { value: 'bascula', label: 'Báscula' },
+];
+
+const TYPE_TO_AUDIT_TABLE: Record<
+  Exclude<DashboardRecentActivityType, 'bascula' | 'nota_marketing'>,
+  (typeof AUDITED_ENTITY_TABLES)[number]
+> = {
+  cita: 'agenda_appointments',
+  cliente: 'customers',
+  factura: 'invoices',
+  venta: 'sales',
+  marketing: 'marketing_leads',
+};
+
 export type DashboardRecentActivity = {
   id: string;
   type: DashboardRecentActivityType;
@@ -255,58 +282,56 @@ function truncateText(text: string, max = 72): string {
   return `${trimmed.slice(0, max - 1)}…`;
 }
 
-export async function fetchDashboardRecentActivity(
-  companyId: string,
-  opCompanyId: string,
-  limit = DASHBOARD_RECENT_ACTIVITY_LIMIT,
-): Promise<DashboardRecentActivity[]> {
-  const companyIds = [...new Set([companyId, opCompanyId].filter(Boolean))];
-
+async function fetchAuditEvents(
+  companyIds: string[],
+  entityTables: string[],
+  limit: number,
+): Promise<AuditEventRow[]> {
   const auditPromises = companyIds.map((id) =>
     supabase
       .from('audit_events')
       .select('id, action, entity_table, entity_id, old_record, new_record, created_at')
       .eq('company_id', id)
-      .in('entity_table', [...AUDITED_ENTITY_TABLES])
+      .in('entity_table', entityTables)
       .order('created_at', { ascending: false })
-      .limit(AUDIT_FETCH_LIMIT),
+      .limit(limit),
   );
 
-  const [auditResults, scaleRes, notesRes] = await Promise.all([
-    Promise.all(auditPromises),
-    supabase
-      .from('inbody_measurements')
-      .select('id, customer_id, measured_at, weight_kg, pbf_pct, device, source, customers(name)')
-      .eq('company_id', opCompanyId)
-      .not('customer_id', 'is', null)
-      .order('measured_at', { ascending: false })
-      .limit(SUPPLEMENT_FETCH_LIMIT),
-    supabase
-      .from('marketing_lead_notes')
-      .select('id, lead_id, body, kind, created_at, marketing_leads(first_name, last_name, phone)')
-      .eq('company_id', opCompanyId)
-      .order('created_at', { ascending: false })
-      .limit(SUPPLEMENT_FETCH_LIMIT),
-  ]);
-
+  const auditResults = await Promise.all(auditPromises);
   for (const result of auditResults) {
     if (result.error) throw result.error;
   }
-  if (scaleRes.error) throw scaleRes.error;
-  if (notesRes.error) throw notesRes.error;
 
-  const auditEvents = auditResults
+  return auditResults
     .flatMap((result) => (result.data ?? []) as AuditEventRow[])
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-    .slice(0, AUDIT_FETCH_LIMIT);
+    .slice(0, limit);
+}
 
+function mapAuditEvents(events: AuditEventRow[]): DashboardRecentActivity[] {
   const activities: DashboardRecentActivity[] = [];
-
-  for (const event of auditEvents) {
+  for (const event of events) {
     const mapped = mapAuditEvent(event);
     if (mapped) activities.push(mapped);
   }
+  return activities;
+}
 
+async function fetchScaleActivities(
+  opCompanyId: string,
+  limit: number,
+): Promise<DashboardRecentActivity[]> {
+  const scaleRes = await supabase
+    .from('inbody_measurements')
+    .select('id, customer_id, measured_at, weight_kg, pbf_pct, device, source, customers(name)')
+    .eq('company_id', opCompanyId)
+    .not('customer_id', 'is', null)
+    .order('measured_at', { ascending: false })
+    .limit(limit);
+
+  if (scaleRes.error) throw scaleRes.error;
+
+  const activities: DashboardRecentActivity[] = [];
   for (const measurement of scaleRes.data ?? []) {
     if (!measurement.customer_id) continue;
     const customer = measurement.customers as { name?: string | null } | null;
@@ -325,7 +350,23 @@ export async function fetchDashboardRecentActivity(
       href: buildCustomerProfileUrl(measurement.customer_id, 'inbody'),
     });
   }
+  return activities;
+}
 
+async function fetchMarketingNoteActivities(
+  opCompanyId: string,
+  limit: number,
+): Promise<DashboardRecentActivity[]> {
+  const notesRes = await supabase
+    .from('marketing_lead_notes')
+    .select('id, lead_id, body, kind, created_at, marketing_leads(first_name, last_name, phone)')
+    .eq('company_id', opCompanyId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (notesRes.error) throw notesRes.error;
+
+  const activities: DashboardRecentActivity[] = [];
   for (const note of notesRes.data ?? []) {
     const lead = note.marketing_leads as {
       first_name?: string | null;
@@ -345,8 +386,44 @@ export async function fetchDashboardRecentActivity(
       href: marketingLeadHref(note.lead_id),
     });
   }
+  return activities;
+}
 
-  return activities
+export type FetchDashboardRecentActivityOptions = {
+  limit?: number;
+  typeFilter?: DashboardRecentActivityFilter;
+};
+
+export async function fetchDashboardRecentActivity(
+  companyId: string,
+  opCompanyId: string,
+  options: FetchDashboardRecentActivityOptions = {},
+): Promise<DashboardRecentActivity[]> {
+  const limit = options.limit ?? DASHBOARD_RECENT_ACTIVITY_LIMIT;
+  const typeFilter = options.typeFilter ?? 'all';
+  const companyIds = [...new Set([companyId, opCompanyId].filter(Boolean))];
+
+  if (typeFilter === 'bascula') {
+    return fetchScaleActivities(opCompanyId, limit);
+  }
+
+  if (typeFilter === 'nota_marketing') {
+    return fetchMarketingNoteActivities(opCompanyId, limit);
+  }
+
+  if (typeFilter !== 'all') {
+    const entityTable = TYPE_TO_AUDIT_TABLE[typeFilter];
+    const auditEvents = await fetchAuditEvents(companyIds, [entityTable], limit);
+    return mapAuditEvents(auditEvents);
+  }
+
+  const [auditEvents, scaleActivities, noteActivities] = await Promise.all([
+    fetchAuditEvents(companyIds, [...AUDITED_ENTITY_TABLES], AUDIT_FETCH_LIMIT),
+    fetchScaleActivities(opCompanyId, SUPPLEMENT_FETCH_LIMIT),
+    fetchMarketingNoteActivities(opCompanyId, SUPPLEMENT_FETCH_LIMIT),
+  ]);
+
+  return [...mapAuditEvents(auditEvents), ...scaleActivities, ...noteActivities]
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     .slice(0, limit);
 }
