@@ -29,6 +29,17 @@ function Write-Step([string]$Msg) {
     Write-Host "=== $Msg ===" -ForegroundColor Cyan
 }
 
+# schtasks remoto escribe "Acceso denegado" en stderr; con EAP Stop eso aborta el deploy.
+function Invoke-RemoteSchtasks {
+    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$SchtasksArgs)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    & schtasks @SchtasksArgs 2>&1 | Out-Null
+    $code = $LASTEXITCODE
+    $ErrorActionPreference = $prev
+    return $code
+}
+
 if (-not (Test-Path $StyleRemote)) {
     throw "Sin acceso SMB a $StyleRemote. Monta \\$VmHost\c$ o Z:\Style-Dunasoft."
 }
@@ -140,16 +151,16 @@ sh.Run Chr(34) & "$syncRoot\run_style_sync_agent.bat" & Chr(34), 0, False
 "@ | Set-Content -Path $vbs -Encoding ASCII
 
 Write-Step "Task Scheduler en VM ($AgentTaskName)"
-schtasks /Delete /S $VmHost /TN $AgentTaskName /F 2>$null | Out-Null
+$null = Invoke-RemoteSchtasks /Delete /S $VmHost /TN $AgentTaskName /F
 $tr = "wscript.exe //B `"$syncRoot\run_style_sync_agent_hidden.vbs`""
-schtasks /Create /S $VmHost /TN $AgentTaskName /TR $tr /SC ONLOGON /RU SYSTEM /RL HIGHEST /F 2>&1 | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    schtasks /Create /S $VmHost /TN $AgentTaskName /TR $tr /SC MINUTE /MO 5 /RU SYSTEM /F 2>&1 | Out-Null
+$taskCode = Invoke-RemoteSchtasks /Create /S $VmHost /TN $AgentTaskName /TR $tr /SC ONLOGON /RU SYSTEM /RL HIGHEST /F
+if ($taskCode -ne 0) {
+    $taskCode = Invoke-RemoteSchtasks /Create /S $VmHost /TN $AgentTaskName /TR $tr /SC MINUTE /MO 5 /RU SYSTEM /F
 }
-if ($LASTEXITCODE -eq 0) {
+if ($taskCode -eq 0) {
     Write-Host "  OK Task $AgentTaskName en $VmHost" -ForegroundColor Green
 } else {
-    Write-Warning "No se pudo registrar $AgentTaskName. El agente arranca con IniciarStyle.bat."
+    Write-Warning "No se pudo registrar $AgentTaskName (Acceso denegado a schtasks remoto). El agente arranca con IniciarStyle.bat o reinicialo manualmente en la VM."
 }
 
 if (-not $KeepDockerAgent) {
@@ -161,15 +172,15 @@ if (-not $KeepDockerAgent) {
 if (-not $SkipRestart) {
     Write-Step "Reiniciar agente en VM ($VmHost)"
     $onceTask = "SuiteRestartSyncAgentOnce"
-    schtasks /Delete /S $VmHost /TN $onceTask /F 2>$null | Out-Null
+    $null = Invoke-RemoteSchtasks /Delete /S $VmHost /TN $onceTask /F
     $tr = "cmd.exe /c `"$syncRoot\restart_style_sync_agent.bat`""
     $st = (Get-Date).AddMinutes(1).ToString("HH:mm")
-    schtasks /Create /S $VmHost /TN $onceTask /TR $tr /SC ONCE /ST $st /RU SYSTEM /F | Out-Null
-    if ($LASTEXITCODE -eq 0) {
-        schtasks /Run /S $VmHost /TN $onceTask | Out-Null
+    $restartCode = Invoke-RemoteSchtasks /Create /S $VmHost /TN $onceTask /TR $tr /SC ONCE /ST $st /RU SYSTEM /F
+    if ($restartCode -eq 0) {
+        $null = Invoke-RemoteSchtasks /Run /S $VmHost /TN $onceTask
         Write-Host "  Tarea remota lanzada ($onceTask)" -ForegroundColor Green
     } else {
-        Write-Warning "No se pudo lanzar tarea remota. En la VM ejecuta: $syncRoot\restart_style_sync_agent.bat"
+        Write-Warning "No se pudo lanzar tarea remota (schtasks). En la VM ejecuta: $syncRoot\restart_style_sync_agent.bat"
     }
 }
 
