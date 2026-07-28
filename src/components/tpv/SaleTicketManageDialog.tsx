@@ -103,6 +103,7 @@ export const SaleTicketManageDialog: React.FC<Props> = ({
     queryClient.invalidateQueries({ queryKey: ['sales'] });
     queryClient.invalidateQueries({ queryKey: ['appointment-sale'] });
     queryClient.invalidateQueries({ queryKey: ['audit_events'] });
+    queryClient.invalidateQueries({ queryKey: ['dashboard-recent-activity'] });
     onUpdated?.();
   };
 

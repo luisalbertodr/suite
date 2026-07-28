@@ -1389,6 +1389,7 @@ export const Agenda: React.FC = () => {
       await deleteOpenAppointment(appointmentId);
       await queryClient.invalidateQueries({ queryKey: ['agenda-appointments'] });
       await queryClient.invalidateQueries({ queryKey: ['audit_events'] });
+      await queryClient.invalidateQueries({ queryKey: ['dashboard-recent-activity'] });
       toast({
         title: 'Cita eliminada',
         description: 'El borrado quedó registrado en el historial de actividad.',
@@ -1434,6 +1435,7 @@ export const Agenda: React.FC = () => {
       await queryClient.invalidateQueries({ queryKey: ['agenda-appointments'] });
       await queryClient.invalidateQueries({ queryKey: ['appointment-sales', appointmentId] });
       await queryClient.invalidateQueries({ queryKey: ['audit_events'] });
+      await queryClient.invalidateQueries({ queryKey: ['dashboard-recent-activity'] });
 
       const items = appointmentItemsByAppt[appointmentId] ?? (await fetchAppointmentItems(appointmentId, companyId || undefined));
       setShowEditForm(false);
