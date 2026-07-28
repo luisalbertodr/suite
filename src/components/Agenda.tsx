@@ -174,6 +174,7 @@ export const Agenda: React.FC = () => {
   const [scrollToTimeRequest, setScrollToTimeRequest] = useState<{ requestId: number; time: string } | null>(null);
   const [appointmentPrefill, setAppointmentPrefill] = useState<AppointmentFormInitialPrefill | null>(null);
   const [appointmentPrefillLeadId, setAppointmentPrefillLeadId] = useState<string | null>(null);
+  const [appointmentFormSaving, setAppointmentFormSaving] = useState(false);
   const [resourceConflictDialogOpen, setResourceConflictDialogOpen] = useState(false);
   const [resourceConflictDialogMessages, setResourceConflictDialogMessages] = useState<string[]>([]);
   const processedMarketingLeadPrefillRef = useRef<string | null>(null);
@@ -1308,6 +1309,7 @@ export const Agenda: React.FC = () => {
   };
 
   const handleAppointmentSave = async (data: CreateAppointmentData) => {
+    setAppointmentFormSaving(true);
     try {
       const dateStr = data.date || format(selectedDate, 'yyyy-MM-dd');
       const items = data.items ?? [];
@@ -1379,10 +1381,13 @@ export const Agenda: React.FC = () => {
       setAppointmentPrefillLeadId(null);
     } catch (error) {
       console.error('Error creating appointment:', error);
+    } finally {
+      setAppointmentFormSaving(false);
     }
   };
 
   const handleAppointmentUpdate = async (updated: Appointment, items: AppointmentItemDraft[]) => {
+    setAppointmentFormSaving(true);
     try {
       const current = appointments.find((apt) => apt.id === updated.id);
       const paidLocked = current?.paymentStatus === 'paid' || current?.paymentStatus === 'invoiced';
@@ -1443,6 +1448,8 @@ export const Agenda: React.FC = () => {
       setSelectedAppointment(null);
     } catch (error) {
       console.error('Error updating:', error);
+    } finally {
+      setAppointmentFormSaving(false);
     }
   };
 
@@ -1787,6 +1794,7 @@ export const Agenda: React.FC = () => {
           recursos={recursos.data || []}
           dayAppointments={appointments}
           initialPrefill={appointmentPrefill}
+          saving={appointmentFormSaving}
           onSave={handleAppointmentSave}
           onCancel={() => {
             setShowAppointmentForm(false);
@@ -1807,6 +1815,7 @@ export const Agenda: React.FC = () => {
           cabinas={cabinas.data || []}
           recursos={recursos.data || []}
           dayAppointments={appointments}
+          saving={appointmentFormSaving}
           onSave={handleAppointmentUpdate}
           onCharge={handleChargeAppointment}
           onNotify={handleNotifyAppointment}
