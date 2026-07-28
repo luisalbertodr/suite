@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { addDays, format, isValid, parse, subDays } from 'date-fns';
 import { useCallback, useEffect } from 'react';
 import { dunasoftSupabase } from '@/lib/dunasoftSupabase';
 import {
@@ -48,26 +49,33 @@ async function fetchDunasoftEmployees(): Promise<{
   return { employees, rawEmployees, employeeAgendaById };
 }
 
-export function useDunasoftAgendaEmployees() {
+export function useDunasoftAgendaEmployees(enabled = true) {
   return useQuery({
     queryKey: ['dunasoft-agenda-employees'],
     queryFn: fetchDunasoftEmployees,
     staleTime: 10 * 60_000,
     gcTime: 30 * 60_000,
+    enabled,
   });
 }
 
-export function useDunasoftAgendaDay(dateYmd: string, companyId: string | null) {
-  const employeesQuery = useDunasoftAgendaEmployees();
+export function useDunasoftAgendaDay(
+  dateYmd: string,
+  companyId: string | null,
+  enabled = true,
+) {
+  const employeesQuery = useDunasoftAgendaEmployees(enabled);
 
   const dayQuery = useQuery({
     queryKey: ['dunasoft-agenda-day', dateYmd, companyId],
     queryFn: () =>
       fetchDunasoftDayAppointments(dateYmd, companyId, employeesQuery.data?.employees ?? []),
-    enabled: !!dateYmd && !!employeesQuery.data,
+    enabled: enabled && !!dateYmd && !!employeesQuery.data,
     staleTime: 30_000,
-    refetchInterval: 60_000,
+    gcTime: 10 * 60_000,
+    refetchInterval: enabled ? 60_000 : false,
     refetchIntervalInBackground: false,
+    // Solo conservar datos previos al refrescar el mismo día; al cambiar de fecha no mezclar citas.
     placeholderData: (previousData, previousQuery) =>
       previousQuery?.queryKey[1] === dateYmd ? previousData : undefined,
   });
@@ -104,13 +112,17 @@ export { fetchDunasoftDayAppointments };
 export function usePrefetchAdjacentDunasoftAgendaDays(
   selectedDateYmd: string,
   companyId: string | null,
+  enabled = true,
 ) {
   const queryClient = useQueryClient();
-  const employeesQuery = useDunasoftAgendaEmployees();
+  const employeesQuery = useDunasoftAgendaEmployees(enabled);
 
   useEffect(() => {
     const employees = employeesQuery.data?.employees;
-    if (!companyId || !selectedDateYmd || !employees?.length) return;
+    if (!enabled || !companyId || !selectedDateYmd || !employees?.length) return;
+
+    const base = parse(selectedDateYmd, 'yyyy-MM-dd', new Date());
+    if (!isValid(base)) return;
 
     const prefetchDay = (ymd: string) => {
       void queryClient.prefetchQuery({
@@ -120,16 +132,8 @@ export function usePrefetchAdjacentDunasoftAgendaDays(
       });
     };
 
-    const base = new Date(`${selectedDateYmd}T12:00:00`);
-    if (Number.isNaN(base.getTime())) return;
-
-    const prev = new Date(base);
-    prev.setDate(prev.getDate() - 1);
-    const next = new Date(base);
-    next.setDate(next.getDate() + 1);
-
-    const fmt = (d: Date) => d.toISOString().slice(0, 10);
-    prefetchDay(fmt(prev));
-    prefetchDay(fmt(next));
-  }, [companyId, employeesQuery.data?.employees, queryClient, selectedDateYmd]);
+    // date-fns en local: evita desfases de toISOString()/UTC al cruzar medianoche.
+    prefetchDay(format(subDays(base, 1), 'yyyy-MM-dd'));
+    prefetchDay(format(addDays(base, 1), 'yyyy-MM-dd'));
+  }, [companyId, employeesQuery.data?.employees, enabled, queryClient, selectedDateYmd]);
 }

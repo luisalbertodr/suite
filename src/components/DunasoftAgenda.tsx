@@ -56,6 +56,7 @@ import { TreatmentSessionDialog } from '@/components/clinical/TreatmentSessionDi
 import type { TrackingFamily } from '@/lib/treatmentTracking';
 import { createQuestionnaire, openQuestionnaireKiosk } from '@/lib/questionnaireApi';
 import { useToast } from '@/hooks/use-toast';
+import { useRoutePanelActive } from '@/contexts/RoutePanelContext';
 
 function appointmentToFormValues(apt: Appointment): Partial<DunasoftAppointmentFormValues> {
   const endTime =
@@ -86,6 +87,7 @@ export const DunasoftAgenda: React.FC = () => {
   const { requireOrToast: requirePermissionOrToast, can: canPermission } = usePermissionGuard();
   const navigate = useNavigate();
   const location = useLocation();
+  const panelActive = useRoutePanelActive();
 
   const [selectedDate, setSelectedDate] = useState(() => {
     const params = new URLSearchParams(location.search);
@@ -141,13 +143,16 @@ export const DunasoftAgenda: React.FC = () => {
   }, [user?.id, selectedDateYmd]);
 
   const { data, isLoading, isError, error, refetch, isFetching, isDayLoading } =
-    useDunasoftAgendaDay(selectedDateYmd, companyId);
-  usePrefetchAdjacentDunasoftAgendaDays(selectedDateYmd, companyId);
-  useAgendaInboundSyncRefetch(companyId, refetch, selectedDateYmd);
+    useDunasoftAgendaDay(selectedDateYmd, companyId, panelActive);
+  usePrefetchAdjacentDunasoftAgendaDays(selectedDateYmd, companyId, panelActive);
+  useAgendaInboundSyncRefetch(companyId, refetch, selectedDateYmd, panelActive);
   const showInitialSkeleton = isLoading && !data;
-  const { createMutation, updateMutation, deleteMutation } = useDunasoftAppointmentMutations(selectedDateYmd);
-  const { data: syncStatus } = useDunasoftSyncStatus(20_000);
-  const { data: styleSync } = useStyleSyncAgentStatus(companyId, 25_000);
+  const { createMutation, updateMutation, deleteMutation } = useDunasoftAppointmentMutations(
+    selectedDateYmd,
+    companyId,
+  );
+  const { data: syncStatus } = useDunasoftSyncStatus(20_000, panelActive);
+  const { data: styleSync } = useStyleSyncAgentStatus(companyId, 25_000, panelActive);
 
   const syncBadge = useMemo(
     () => buildAgendaSyncBadge(syncStatus, styleSync),

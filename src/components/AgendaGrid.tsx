@@ -155,8 +155,13 @@ function visibleFieldsEqual(a?: AgendaVisibleFields, b?: AgendaVisibleFields): b
   );
 }
 
+const appointmentSignatureCache = new WeakMap<Appointment[], string>();
+
 function appointmentsSignature(appointments: Appointment[]): string {
-  return appointments
+  const cached = appointmentSignatureCache.get(appointments);
+  if (cached !== undefined) return cached;
+
+  const signature = appointments
     .map((a) => {
       const segments = (a.timeSegments ?? [])
         .map((s) => `${s.startTime}-${s.endTime}-${s.label}-${s.recursoColor ?? ''}-${s.recursoName ?? ''}`)
@@ -183,6 +188,8 @@ function appointmentsSignature(appointments: Appointment[]): string {
       ].join('\x00');
     })
     .join('\x1e');
+  appointmentSignatureCache.set(appointments, signature);
+  return signature;
 }
 
 const appointmentsSignatureCache = new WeakMap<Appointment[], string>();
@@ -567,9 +574,12 @@ function EmployeeNamesRow({
 
 const VIRTUAL_ROW_OVERSCAN = 4;
 
+/** Altura razonable hasta que ResizeObserver mida el viewport real (evita 0 filas al montar). */
+const SCROLL_VIEWPORT_FALLBACK_PX = 640;
+
 function useAgendaScrollViewport(scrollRootRef: React.RefObject<HTMLDivElement | null>) {
   const [scrollTop, setScrollTop] = React.useState(0);
-  const [viewportHeight, setViewportHeight] = React.useState(0);
+  const [viewportHeight, setViewportHeight] = React.useState(SCROLL_VIEWPORT_FALLBACK_PX);
   const rafRef = React.useRef<number | null>(null);
 
   React.useEffect(() => {
@@ -578,7 +588,8 @@ function useAgendaScrollViewport(scrollRootRef: React.RefObject<HTMLDivElement |
 
     const sync = () => {
       setScrollTop(el.scrollTop);
-      setViewportHeight(el.clientHeight);
+      const h = el.clientHeight;
+      if (h > 0) setViewportHeight(h);
     };
 
     const scheduleSync = () => {

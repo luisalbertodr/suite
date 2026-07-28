@@ -20,6 +20,7 @@ import { EditAppointmentForm } from './EditAppointmentForm';
 import { AppointmentResourceConflictDialog } from './AppointmentResourceConflictDialog';
 import { fetchAgendaAppointmentsForDay } from '@/lib/agendaAppointmentsQuery';
 import { useAgendaAppointments } from '@/hooks/useAgendaAppointments';
+import { useAgendaEmployees } from '@/hooks/useAgendaEmployees';
 import { useAgendaInboundSyncRefetch } from '@/hooks/useAgendaInboundSyncRefetch';
 import { useCabinas, useRecursos } from '@/hooks/useRecursosCabinas';
 import { format, addDays, subDays, parse, isValid } from 'date-fns';
@@ -93,6 +94,7 @@ import {
   resolveAppointmentBillingIds,
 } from '@/lib/workCenterAudit';
 import { useRegisterTopBarContent } from '@/components/TopBarContentContext';
+import { useRoutePanelActive } from '@/contexts/RoutePanelContext';
 import { resolveAppointmentClientPick } from '@/lib/appointmentCustomerResolve';
 import {
   cancelAppointmentWithRefund,
@@ -139,6 +141,7 @@ const hexToTailwindBg = (hex: string, index: number): string => {
 export const Agenda: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const panelActive = useRoutePanelActive();
   const { user } = useAuth();
   const { requireOrToast: requirePermissionOrToast } = usePermissionGuard();
   const { companyId, loading: companyLoading } = useCompanyFilter();
@@ -181,6 +184,13 @@ export const Agenda: React.FC = () => {
   const selectedDateYmdRef = useRef(selectedDateYmd);
   selectedDateYmdRef.current = selectedDateYmd;
   const pendingOpenAppointmentIdRef = useRef<string | null>(null);
+  const invalidateSelectedAgendaDay = useCallback(async () => {
+    if (!opCompanyId) return;
+    await queryClient.invalidateQueries({
+      queryKey: ['agenda-appointments', selectedDateYmd, opCompanyId],
+      exact: true,
+    });
+  }, [opCompanyId, queryClient, selectedDateYmd]);
 
   const selectAgendaDate = useCallback(
     (d: Date, opts?: { syncUrl?: boolean }) => {
@@ -411,10 +421,10 @@ export const Agenda: React.FC = () => {
     updateAppointment,
     refetch: refetchAppointments,
   } = useAgendaAppointments(selectedDateYmd);
-  useAgendaInboundSyncRefetch(opCompanyId, refetchAppointments);
+  useAgendaInboundSyncRefetch(opCompanyId, refetchAppointments, selectedDateYmd, panelActive);
 
   useEffect(() => {
-    if (!opCompanyId || !selectedDateYmd) return;
+    if (!panelActive || !opCompanyId || !selectedDateYmd) return;
     const prefetchDay = (ymd: string) => {
       void queryClient.prefetchQuery({
         queryKey: ['agenda-appointments', ymd, opCompanyId],
@@ -426,7 +436,7 @@ export const Agenda: React.FC = () => {
     if (!isValid(base)) return;
     prefetchDay(format(subDays(base, 1), 'yyyy-MM-dd'));
     prefetchDay(format(addDays(base, 1), 'yyyy-MM-dd'));
-  }, [opCompanyId, queryClient, selectedDateYmd]);
+  }, [opCompanyId, panelActive, queryClient, selectedDateYmd]);
 
   const agendaAppointmentIds = useMemo(
     () => dbAppointments.map((a) => a.id).filter(Boolean),
@@ -1408,7 +1418,7 @@ export const Agenda: React.FC = () => {
     }
     try {
       await deleteOpenAppointment(appointmentId);
-      await queryClient.invalidateQueries({ queryKey: ['agenda-appointments'] });
+      await invalidateSelectedAgendaDay();
       await queryClient.invalidateQueries({ queryKey: ['audit_events'] });
       await queryClient.invalidateQueries({ queryKey: ['dashboard-recent-activity'] });
       toast({
@@ -1453,7 +1463,7 @@ export const Agenda: React.FC = () => {
         variant: toastMsg.variant,
       });
 
-      await queryClient.invalidateQueries({ queryKey: ['agenda-appointments'] });
+      await invalidateSelectedAgendaDay();
       await queryClient.invalidateQueries({ queryKey: ['appointment-sales', appointmentId] });
       await queryClient.invalidateQueries({ queryKey: ['audit_events'] });
       await queryClient.invalidateQueries({ queryKey: ['dashboard-recent-activity'] });

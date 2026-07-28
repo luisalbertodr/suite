@@ -10,12 +10,23 @@ import type {
   DunasoftUpdateAppointmentPayload,
 } from '@/lib/dunasoftDualWrite';
 
-export function useDunasoftAppointmentMutations(dateYmd: string) {
+export function useDunasoftAppointmentMutations(
+  dateYmd: string,
+  companyId: string | null,
+) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const invalidate = () => {
-    void queryClient.invalidateQueries({ queryKey: ['dunasoft-agenda-day', dateYmd] });
-    void queryClient.invalidateQueries({ queryKey: ['agenda-appointments'] });
+    void queryClient.invalidateQueries({
+      queryKey: ['dunasoft-agenda-day', dateYmd, companyId],
+      exact: true,
+    });
+    if (companyId) {
+      void queryClient.invalidateQueries({
+        queryKey: ['agenda-appointments', dateYmd, companyId],
+        exact: true,
+      });
+    }
   };
 
   const createMutation = useMutation({
