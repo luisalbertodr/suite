@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { format } from 'date-fns';
-import { CheckCircle, Clock, XCircle, Receipt, Banknote, FileText, Copy, Scissors, ClipboardPaste } from 'lucide-react';
+import { CheckCircle, Clock, XCircle, Receipt, Banknote, FileText, Copy, Scissors, ClipboardPaste, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -962,21 +962,25 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
   );
   const maxHOffset = Math.max(0, employeesContentWidthPx - Math.max(employeesViewportPx, 1));
 
-  /**
-   * Pan horizontal por transform (no depende de overflow-x / scrollWidth).
-   * Vertical: overflow-y nativo con touch-action:pan-y (lo que ya funciona en iPhone).
-   */
-  React.useEffect(() => {
-    const applyHOffset = (next: number) => {
-      const max = Math.max(0, employeesContentWidthPx - (bodyClipRef.current?.clientWidth ?? employeesViewportPx));
+  const applyHOffset = React.useCallback(
+    (next: number) => {
+      const viewport = bodyClipRef.current?.clientWidth ?? employeesViewportPx;
+      const max = Math.max(0, employeesContentWidthPx - Math.max(viewport, 1));
       const clamped = Math.max(0, Math.min(max, next));
       hOffsetRef.current = clamped;
       const tx = `translate3d(${-clamped}px,0,0)`;
       if (bodySlideRef.current) bodySlideRef.current.style.transform = tx;
       if (headerSlideRef.current) headerSlideRef.current.style.transform = tx;
       if (footerSlideRef.current) footerSlideRef.current.style.transform = tx;
-    };
+    },
+    [employeesContentWidthPx, employeesViewportPx],
+  );
 
+  /**
+   * Pan horizontal por transform (no depende de overflow-x / scrollWidth).
+   * Vertical: overflow-y nativo con touch-action:pan-y (lo que ya funciona en iPhone).
+   */
+  React.useEffect(() => {
     // Re-clamp si cambia el ancho.
     applyHOffset(hOffsetRef.current);
 
@@ -1051,7 +1055,10 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
         el.removeEventListener('wheel', onWheel);
       }
     };
-  }, [employeesContentWidthPx, employeesViewportPx, maxHOffset, gridBodyHeightPx]);
+  }, [applyHOffset, gridBodyHeightPx]);
+
+  const canPanHorizontal = maxHOffset > 0;
+  const stepH = Math.max(120, Math.round(Math.max(employeesViewportPx, 200) * 0.7));
 
   return (
     <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] bg-card">
@@ -1085,6 +1092,27 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
           Vertical nativo (overflow-y). Horizontal por translate3d en la franja
           de columnas — iOS no depende de scrollWidth/overflow-x.
         */}
+        {canPanHorizontal ? (
+          <>
+            <button
+              type="button"
+              aria-label="Ver columnas anteriores"
+              className="absolute top-1/2 z-[40] -translate-y-1/2 rounded-full border border-border bg-card/95 p-1.5 shadow-md"
+              style={{ left: TIME_GUTTER_PX + 4 }}
+              onClick={() => applyHOffset(hOffsetRef.current - stepH)}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              aria-label="Ver más columnas"
+              className="absolute right-1 top-1/2 z-[40] -translate-y-1/2 rounded-full border border-border bg-card/95 p-1.5 shadow-md"
+              onClick={() => applyHOffset(hOffsetRef.current + stepH)}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </>
+        ) : null}
         <div
           ref={scrollRootRef}
           className="h-full min-h-0 overflow-x-hidden overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch] [&_*]:[touch-action:pan-y]"
