@@ -159,9 +159,12 @@ export const DunasoftAgenda: React.FC = () => {
     [syncStatus, styleSync],
   );
 
-  const employees = data?.employees ?? [];
-  const appointments = data?.appointments ?? [];
-  const employeeAgendaById = data?.employeeAgendaById ?? {};
+  const employees = useMemo(() => data?.employees ?? [], [data?.employees]);
+  const appointments = useMemo(() => data?.appointments ?? [], [data?.appointments]);
+  const employeeAgendaById = useMemo(
+    () => data?.employeeAgendaById ?? {},
+    [data?.employeeAgendaById],
+  );
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);

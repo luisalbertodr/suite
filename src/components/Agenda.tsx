@@ -138,6 +138,41 @@ const hexToTailwindBg = (hex: string, index: number): string => {
   return fallbacks[index % fallbacks.length];
 };
 
+function parseServiceFromDescription(
+  description: string,
+): { code: string; service: string; hourInText: string } {
+  const match = description.match(/\[(\d{1,2}:\d{2})\]\s*([^\s-]+)\s*-\s*(.+)$/);
+  if (!match) return { code: '', service: '', hourInText: '' };
+  return {
+    hourInText: match[1]?.trim() || '',
+    code: match[2]?.trim() || '',
+    service: match[3]?.trim() || '',
+  };
+}
+
+function normalizeAgendaTime(value?: string | null): string {
+  if (!value) return '';
+  const str = String(value);
+  if (str.includes('T')) {
+    const part = str.split('T')[1] || '';
+    const hh = part.substring(0, 2);
+    const mm = part.substring(3, 5);
+    if (/^\d{2}$/.test(hh) && /^\d{2}$/.test(mm)) return `${hh}:${mm}`;
+  }
+  const match = str.match(/^(\d{1,2}):(\d{2})/);
+  if (match) return `${match[1].padStart(2, '0')}:${match[2]}`;
+  return str.substring(0, 5);
+}
+
+function normalizeAgendaDate(
+  start: string | null | undefined,
+  legacyDate: string | null | undefined,
+  fallbackDateYmd: string,
+): string {
+  if (start && String(start).includes('T')) return String(start).split('T')[0];
+  return legacyDate ? String(legacyDate) : fallbackDateYmd;
+}
+
 export const Agenda: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -630,38 +665,6 @@ export const Agenda: React.FC = () => {
     [allEmployees, agendaBillingView, isMultiEntity],
   );
 
-  const parseServiceFromDescription = (
-    description: string
-  ): { code: string; service: string; hourInText: string } => {
-    // Legacy sample: "[16:00] 214 - ZONA L..."
-    const match = description.match(/\[(\d{1,2}:\d{2})\]\s*([^\s-]+)\s*-\s*(.+)$/);
-    if (!match) return { code: '', service: '', hourInText: '' };
-    return {
-      hourInText: match[1]?.trim() || '',
-      code: match[2]?.trim() || '',
-      service: match[3]?.trim() || '',
-    };
-  };
-
-  const normalizeTime = (value?: string | null): string => {
-    if (!value) return '';
-    const str = String(value);
-    if (str.includes('T')) {
-      const part = str.split('T')[1] || '';
-      const hh = part.substring(0, 2);
-      const mm = part.substring(3, 5);
-      if (/^\d{2}$/.test(hh) && /^\d{2}$/.test(mm)) return `${hh}:${mm}`;
-    }
-    const m = str.match(/^(\d{1,2}):(\d{2})/);
-    if (m) return `${m[1].padStart(2, '0')}:${m[2]}`;
-    return str.substring(0, 5);
-  };
-
-  const normalizeDate = (start?: string | null, legacyDate?: string | null): string => {
-    if (start && String(start).includes('T')) return String(start).split('T')[0];
-    return legacyDate ? String(legacyDate) : format(selectedDate, 'yyyy-MM-dd');
-  };
-
   // Map appointments (schema moderno + legado)
   const appointments: Appointment[] = useMemo(() => {
     return dbAppointments.map((apt) => {
@@ -670,8 +673,8 @@ export const Agenda: React.FC = () => {
       const description = repairStyleText(row.description || '');
       const parsedService = parseServiceFromDescription(description);
       const clientName = repairStyleText(row.client_name || row.title || '');
-      const startTime = normalizeTime(row.start_time);
-      const endTime = normalizeTime(row.end_time);
+      const startTime = normalizeAgendaTime(row.start_time);
+      const endTime = normalizeAgendaTime(row.end_time);
       const itemDrafts = appointmentItemsByAppt[row.id] || [];
       const timeSegments = buildAppointmentTimeSegments(startTime, itemDrafts, recursoCatalog, {
         recursos: recursoCatalog,
@@ -701,7 +704,7 @@ export const Agenda: React.FC = () => {
         timeSegments,
         occupiedEndTime,
         paymentOnlyLabels,
-        date: normalizeDate(row.start_time, row.appointment_date),
+        date: normalizeAgendaDate(row.start_time, row.appointment_date, selectedDateYmd),
         color: row.color || '#3B82F6',
         totalAmount: undefined,
         paymentStatus: aptStatus === 'cancelled' ? 'none' : undefined,
@@ -709,7 +712,7 @@ export const Agenda: React.FC = () => {
         attachments: undefined,
       };
     });
-  }, [agendaArticleHints, appointmentItemsByAppt, cabinaCatalog, dbAppointments, recursoCatalog, selectedDate]);
+  }, [agendaArticleHints, appointmentItemsByAppt, cabinaCatalog, dbAppointments, recursoCatalog, selectedDateYmd]);
 
   const openAppointmentById = useCallback(
     (appointmentId: string, dateYmd: string) => {
