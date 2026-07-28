@@ -75,21 +75,25 @@ const EMP_COL_MIN_PX = 160;
 
 /**
  * Layout horizontal de columnas.
- * Importante: el ancho de contenido NO debe igualar el viewport en móvil
- * (si el flex hijo crece al contenido, maxOffset=0 y no hay pan).
+ * El viewport se acota por visualViewport/innerWidth: en iOS a veces
+ * clientWidth del scroller reporta el ancho del contenido (> pantalla).
  */
-function agendaEmployeesColumnLayout(employeeCount: number, viewportPx: number): {
+function agendaEmployeesColumnLayout(
+  employeeCount: number,
+  viewportPx: number,
+  viewportCapPx: number,
+): {
   contentWidthPx: number;
   columnWidthPx: number;
   columnsTemplate: string;
 } {
   const n = Math.max(1, employeeCount);
-  const vp = Math.max(0, Math.floor(viewportPx));
+  const cap = Math.max(0, Math.floor(viewportCapPx));
+  const rawVp = Math.max(0, Math.floor(viewportPx));
+  const vp = cap > 0 ? Math.min(rawVp, cap) : rawVp;
   const minContent = n * EMP_COL_MIN_PX;
-  // En pantallas anchas, estirar para llenar; en estrechas, mantener min → overflow.
   const contentWidthPx = vp > 0 ? Math.max(minContent, vp) : minContent;
   const columnWidthPx = Math.max(EMP_COL_MIN_PX, Math.floor(contentWidthPx / n));
-  // Ajuste por redondeo: la suma de columnas fija el ancho real.
   const fixedContent = columnWidthPx * n;
   return {
     contentWidthPx: fixedContent,
@@ -645,6 +649,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
   },
 }) {
   const scrollRootRef = React.useRef<HTMLDivElement>(null);
+  const shellRef = React.useRef<HTMLDivElement>(null);
   const bodyClipRef = React.useRef<HTMLDivElement>(null);
   const bodySlideRef = React.useRef<HTMLDivElement>(null);
   const headerClipRef = React.useRef<HTMLDivElement>(null);
@@ -652,9 +657,11 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
   const footerClipRef = React.useRef<HTMLDivElement>(null);
   const footerSlideRef = React.useRef<HTMLDivElement>(null);
   const hOffsetRef = React.useRef(0);
+  const [hOffset, setHOffset] = React.useState(0);
   const [scrollbarWidth, setScrollbarWidth] = React.useState(0);
-  /** Ancho del recorte visible de columnas (sin gutter). */
+  /** Ancho del recorte visible de columnas (sin gutter), acotado a la pantalla. */
   const [employeesViewportPx, setEmployeesViewportPx] = React.useState(0);
+  const [viewportCapPx, setViewportCapPx] = React.useState(0);
   const lastScrollTopRef = React.useRef(0);
   const lastHandledGoTodayRef = React.useRef(0);
   const lastHandledScrollToTimeRef = React.useRef(0);
@@ -663,8 +670,8 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
   const [nowLineTick, setNowLineTick] = React.useState(0);
   const allowHtml5Drag = React.useMemo(() => canUseHtml5AppointmentDrag(), []);
   const columnLayout = React.useMemo(
-    () => agendaEmployeesColumnLayout(employees.length, employeesViewportPx),
-    [employees.length, employeesViewportPx],
+    () => agendaEmployeesColumnLayout(employees.length, employeesViewportPx, viewportCapPx),
+    [employees.length, employeesViewportPx, viewportCapPx],
   );
   const employeesContentWidthPx = columnLayout.contentWidthPx;
   const columnsTemplate = columnLayout.columnsTemplate;
@@ -954,17 +961,25 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
   }, [employees.length, timeSlots.length, persistUserId, viewDateYmd, flushScrollToStorage]);
 
   /**
-   * Viewport de columnas = clientWidth del scroll vertical − gutter.
-   * NUNCA medir el clip: en iOS el flex/absoluto puede reportar el ancho del
-   * contenido y entonces maxOffset=0 (flechas ocultas) aunque solo se vean 2–3 columnas.
+   * Viewport = min(shell.getBoundingClientRect, visualViewport) − gutter.
+   * iOS a veces infla clientWidth del scroller al ancho del contenido.
    */
   React.useLayoutEffect(() => {
+    const shell = shellRef.current;
     const vEl = scrollRootRef.current;
-    if (!vEl) return;
+    if (!shell) return;
+
     const measure = () => {
-      setScrollbarWidth(Math.max(0, vEl.offsetWidth - vEl.clientWidth));
-      const vp = Math.max(0, Math.round(vEl.clientWidth - TIME_GUTTER_PX));
+      const shellW = Math.round(shell.getBoundingClientRect().width);
+      const vv = Math.round(window.visualViewport?.width ?? window.innerWidth);
+      const cap = Math.max(0, Math.min(shellW || vv, vv));
+      setViewportCapPx(cap);
+      const scrollerW = vEl ? Math.round(vEl.clientWidth) : shellW;
+      // Acotar scroller al cap de pantalla (evita clientWidth hinchado).
+      const usable = Math.max(0, Math.min(scrollerW || cap, cap));
+      const vp = Math.max(0, usable - TIME_GUTTER_PX);
       setEmployeesViewportPx(vp);
+      setScrollbarWidth(vEl ? Math.max(0, vEl.offsetWidth - vEl.clientWidth) : 0);
       if (bodyClipRef.current) {
         bodyClipRef.current.style.width = `${vp}px`;
         bodyClipRef.current.style.maxWidth = `${vp}px`;
@@ -978,10 +993,18 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
         footerClipRef.current.style.maxWidth = `${vp}px`;
       }
     };
+
     measure();
     const ro = new ResizeObserver(measure);
-    ro.observe(vEl);
-    return () => ro.disconnect();
+    ro.observe(shell);
+    if (vEl) ro.observe(vEl);
+    window.visualViewport?.addEventListener('resize', measure);
+    window.addEventListener('resize', measure);
+    return () => {
+      ro.disconnect();
+      window.visualViewport?.removeEventListener('resize', measure);
+      window.removeEventListener('resize', measure);
+    };
   }, [employees.length, timeSlots.length]);
 
   const edgeRowPad = { paddingRight: scrollbarWidth };
@@ -998,11 +1021,11 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
 
   const applyHOffset = React.useCallback(
     (next: number) => {
-      // Usar el viewport medido del scrollRoot, no clip.clientWidth (hinchado en iOS).
       const viewport = Math.max(employeesViewportPx, 1);
       const max = Math.max(0, employeesContentWidthPx - viewport);
       const clamped = Math.max(0, Math.min(max, next));
       hOffsetRef.current = clamped;
+      setHOffset(clamped);
       const tx = `translate3d(${-clamped}px,0,0)`;
       if (bodySlideRef.current) bodySlideRef.current.style.transform = tx;
       if (headerSlideRef.current) headerSlideRef.current.style.transform = tx;
@@ -1112,13 +1135,50 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
     };
   }, [applyHOffset, employeesContentWidthPx, gridBodyHeightPx, employees.length]);
 
+  // Controles siempre si hay ≥2 empleadas; el pan real depende de maxHOffset.
+  const showHPanControls = employees.length >= 2;
   const canPanHorizontal = maxHOffset > 1;
   const stepH = Math.max(EMP_COL_MIN_PX, Math.round(Math.max(employeesViewportPx, 160) * 0.75));
   const frameWidthPx =
     employeesViewportPx > 0 ? TIME_GUTTER_PX + employeesViewportPx : undefined;
 
   return (
-    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] bg-card">
+    <div
+      ref={shellRef}
+      className={
+        showHPanControls
+          ? 'grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] bg-card'
+          : 'grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] bg-card'
+      }
+    >
+      {showHPanControls ? (
+        <div className="flex shrink-0 items-center gap-2 border-b border-border bg-muted/60 px-2 py-1.5">
+          <button
+            type="button"
+            aria-label="Ver columnas anteriores"
+            disabled={!canPanHorizontal || hOffset <= 0}
+            className="inline-flex h-9 min-w-9 items-center justify-center rounded-md border border-border bg-background text-foreground shadow-sm disabled:opacity-40"
+            onClick={() => applyHOffset(hOffsetRef.current - stepH)}
+          >
+            <ChevronLeft className="h-5 w-5" />
+          </button>
+          <div className="min-w-0 flex-1 text-center text-[11px] font-medium text-foreground">
+            {canPanHorizontal
+              ? 'Desliza o usa las flechas para ver más empleadas'
+              : 'Ajustando columnas…'}
+          </div>
+          <button
+            type="button"
+            aria-label="Ver más columnas"
+            disabled={!canPanHorizontal || hOffset >= maxHOffset - 1}
+            className="inline-flex h-9 min-w-9 items-center justify-center rounded-md border border-border bg-background text-foreground shadow-sm disabled:opacity-40"
+            onClick={() => applyHOffset(hOffsetRef.current + stepH)}
+          >
+            <ChevronRight className="h-5 w-5" />
+          </button>
+        </div>
+      ) : null}
+
       <div className="relative shrink-0 border-b border-border shadow-sm overflow-hidden">
         <div
           className="pointer-events-none absolute left-0 top-0 z-[55] flex items-center justify-center border-r border-border bg-card px-3 py-1 text-center text-xs font-semibold leading-tight text-foreground"
@@ -1141,7 +1201,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
             ref={headerSlideRef}
             style={{
               ...employeesContentStyle,
-              transform: `translate3d(${-hOffsetRef.current}px,0,0)`,
+              transform: `translate3d(${-hOffset}px,0,0)`,
               willChange: 'transform',
             }}
           >
@@ -1157,8 +1217,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
 
       <div className="relative min-h-0 h-full overflow-hidden">
         {/*
-          Viewport H = scrollRoot.clientWidth − gutter (medido en JS).
-          Clip de columnas con width px fijo + position absolute — sin flex que se hinche.
+          Viewport H acotado por visualViewport. Clip en px absolutos.
         */}
         <div
           ref={scrollRootRef}
@@ -1228,7 +1287,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
                 style={{
                   ...employeesContentStyle,
                   height: gridBodyHeightPx,
-                  transform: `translate3d(${-hOffsetRef.current}px,0,0)`,
+                  transform: `translate3d(${-hOffset}px,0,0)`,
                   willChange: 'transform',
                 }}
               >
@@ -1383,28 +1442,6 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
             </div>
           </div>
         </div>
-
-        {canPanHorizontal ? (
-          <div className="pointer-events-none absolute inset-y-0 left-0 right-0 z-[100]">
-            <button
-              type="button"
-              aria-label="Ver columnas anteriores"
-              className="pointer-events-auto absolute top-1/2 z-[100] -translate-y-1/2 rounded-full border border-border bg-background p-2 shadow-lg"
-              style={{ left: TIME_GUTTER_PX + 6 }}
-              onClick={() => applyHOffset(hOffsetRef.current - stepH)}
-            >
-              <ChevronLeft className="h-5 w-5" />
-            </button>
-            <button
-              type="button"
-              aria-label="Ver más columnas"
-              className="pointer-events-auto absolute right-2 top-1/2 z-[100] -translate-y-1/2 rounded-full border border-border bg-background p-2 shadow-lg"
-              onClick={() => applyHOffset(hOffsetRef.current + stepH)}
-            >
-              <ChevronRight className="h-5 w-5" />
-            </button>
-          </div>
-        ) : null}
       </div>
 
       <div className="relative shrink-0 border-t border-border shadow-[0_-2px_4px_rgba(0,0,0,0.04)]">
@@ -1430,7 +1467,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
             ref={footerSlideRef}
             style={{
               ...employeesContentStyle,
-              transform: `translate3d(${-hOffsetRef.current}px,0,0)`,
+              transform: `translate3d(${-hOffset}px,0,0)`,
               willChange: 'transform',
             }}
           >
