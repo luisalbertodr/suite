@@ -634,6 +634,8 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
   const headerScrollRef = React.useRef<HTMLDivElement>(null);
   const footerScrollRef = React.useRef<HTMLDivElement>(null);
   const [scrollbarWidth, setScrollbarWidth] = React.useState(0);
+  /** Ancho del viewport horizontal (px); evita depender de width:max() en WebKit iOS. */
+  const [hViewportWidthPx, setHViewportWidthPx] = React.useState(0);
   const lastScrollTopRef = React.useRef(0);
   const lastHandledGoTodayRef = React.useRef(0);
   const lastHandledScrollToTimeRef = React.useRef(0);
@@ -642,6 +644,8 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
   const [nowLineTick, setNowLineTick] = React.useState(0);
   const allowHtml5Drag = React.useMemo(() => canUseHtml5AppointmentDrag(), []);
   const employeesMinWidthPx = agendaEmployeesMinWidthPx(employees.length);
+  /** Ancho real del contenido scrolleable: estira en desktop y garantiza overflow en móvil. */
+  const employeesContentWidthPx = Math.max(employeesMinWidthPx, hViewportWidthPx);
 
   const [draggedAppointment, setDraggedAppointment] = React.useState<string | null>(null);
   const [dragOverSlot, setDragOverSlot] = React.useState<{ employeeId: string; time: string } | null>(null);
@@ -940,6 +944,19 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
     return () => ro.disconnect();
   }, [employees.length, timeSlots.length]);
 
+  /** Mide el viewport del eje X (ancho de columnas visibles). */
+  React.useLayoutEffect(() => {
+    const el = hScrollRootRef.current;
+    if (!el) return;
+    const measure = () => {
+      setHViewportWidthPx(Math.max(0, Math.round(el.clientWidth)));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [employees.length, timeSlots.length]);
+
   /** Sincroniza scroll horizontal entre encabezado, zona de columnas y pie. */
   React.useEffect(() => {
     const bodyH = hScrollRootRef.current;
@@ -976,65 +993,123 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
       header?.removeEventListener('scroll', onHeader);
       footer?.removeEventListener('scroll', onFooter);
     };
-  }, [employees.length, employeesMinWidthPx]);
+  }, [employees.length, employeesContentWidthPx]);
 
   const edgeRowPad = { paddingRight: scrollbarWidth };
   const gridBodyHeightPx = timeSlots.length * cellHeight;
+  const employeesContentStyle = React.useMemo(
+    () => ({
+      width: employeesContentWidthPx,
+      minWidth: employeesContentWidthPx,
+    }),
+    [employeesContentWidthPx],
+  );
 
   /**
-   * Puente táctil en la zona de columnas: iOS no encadena bien vertical
-   * desde un hijo overflow-x hacia el padre overflow-y (y viceversa).
+   * iOS Safari captura el gesto en el overflow-y padre y no desplaza el
+   * overflow-x hijo. En puntero grueso: touch-action none + pan manual
+   * en capture (antes de que WebKit bloquee el eje).
    */
   React.useEffect(() => {
     const hEl = hScrollRootRef.current;
     const vEl = scrollRootRef.current;
     if (!hEl || !vEl) return;
 
+    const coarse =
+      typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
+    if (!coarse) return;
+
+    const prevH = hEl.style.touchAction;
+    const prevV = vEl.style.touchAction;
+    hEl.style.touchAction = 'none';
+    vEl.style.touchAction = 'none';
+
     let startX = 0;
     let startY = 0;
     let startLeft = 0;
     let startTop = 0;
     let axis: 'h' | 'v' | null = null;
+    let active = false;
+    let allowHorizontal = true;
+
+    const syncHeaderFooter = (left: number) => {
+      const header = headerScrollRef.current;
+      const footer = footerScrollRef.current;
+      if (header && header.scrollLeft !== left) header.scrollLeft = left;
+      if (footer && footer.scrollLeft !== left) footer.scrollLeft = left;
+    };
 
     const onTouchStart = (e: TouchEvent) => {
-      if (e.touches.length !== 1) return;
-      startX = e.touches[0]!.clientX;
-      startY = e.touches[0]!.clientY;
+      if (e.touches.length !== 1) {
+        active = false;
+        return;
+      }
+      const t = e.touches[0]!;
+      active = true;
+      axis = null;
+      startX = t.clientX;
+      startY = t.clientY;
       startLeft = hEl.scrollLeft;
       startTop = vEl.scrollTop;
-      axis = null;
+      const rect = hEl.getBoundingClientRect();
+      allowHorizontal = t.clientX >= rect.left - 1 && t.clientX <= rect.right + 1;
     };
 
     const onTouchMove = (e: TouchEvent) => {
-      if (e.touches.length !== 1) return;
-      const dx = e.touches[0]!.clientX - startX;
-      const dy = e.touches[0]!.clientY - startY;
+      if (!active || e.touches.length !== 1) return;
+      const t = e.touches[0]!;
+      const dx = t.clientX - startX;
+      const dy = t.clientY - startY;
+
       if (axis === null) {
-        if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
-        axis = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v';
+        if (Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
+        if (!allowHorizontal) {
+          axis = 'v';
+        } else {
+          // Preferir horizontal si el gesto es ambiguo (más usable en móvil).
+          axis = Math.abs(dx) >= Math.abs(dy) * 0.85 ? 'h' : 'v';
+        }
       }
+
+      // Imprescindible: sin esto Safari sigue scrolleando solo el eje Y.
+      e.preventDefault();
+
       if (axis === 'h') {
         const maxLeft = Math.max(0, hEl.scrollWidth - hEl.clientWidth);
-        if (maxLeft <= 0) return;
-        const nextLeft = Math.max(0, Math.min(maxLeft, startLeft - dx));
-        hEl.scrollLeft = nextLeft;
-        if (headerScrollRef.current) headerScrollRef.current.scrollLeft = nextLeft;
-        if (footerScrollRef.current) footerScrollRef.current.scrollLeft = nextLeft;
-        e.preventDefault();
-        return;
+        if (maxLeft > 0) {
+          const nextLeft = Math.max(0, Math.min(maxLeft, startLeft - dx));
+          if (hEl.scrollLeft !== nextLeft) hEl.scrollLeft = nextLeft;
+          syncHeaderFooter(nextLeft);
+          return;
+        }
+        // Sin overflow X (p. ej. iPad ancho): continuar como vertical.
+        axis = 'v';
       }
+
       const maxTop = Math.max(0, vEl.scrollHeight - vEl.clientHeight);
-      vEl.scrollTop = Math.max(0, Math.min(maxTop, startTop - dy));
-      e.preventDefault();
+      const nextTop = Math.max(0, Math.min(maxTop, startTop - dy));
+      if (vEl.scrollTop !== nextTop) vEl.scrollTop = nextTop;
     };
 
-    hEl.addEventListener('touchstart', onTouchStart, { passive: true });
-    hEl.addEventListener('touchmove', onTouchMove, { passive: false });
-    return () => {
-      hEl.removeEventListener('touchstart', onTouchStart);
-      hEl.removeEventListener('touchmove', onTouchMove);
+    const onTouchEnd = () => {
+      active = false;
+      axis = null;
     };
-  }, [employees.length, employeesMinWidthPx, gridBodyHeightPx]);
+
+    vEl.addEventListener('touchstart', onTouchStart, { passive: true, capture: true });
+    vEl.addEventListener('touchmove', onTouchMove, { passive: false, capture: true });
+    vEl.addEventListener('touchend', onTouchEnd, { passive: true, capture: true });
+    vEl.addEventListener('touchcancel', onTouchEnd, { passive: true, capture: true });
+
+    return () => {
+      hEl.style.touchAction = prevH;
+      vEl.style.touchAction = prevV;
+      vEl.removeEventListener('touchstart', onTouchStart, true);
+      vEl.removeEventListener('touchmove', onTouchMove, true);
+      vEl.removeEventListener('touchend', onTouchEnd, true);
+      vEl.removeEventListener('touchcancel', onTouchEnd, true);
+    };
+  }, [employees.length, employeesContentWidthPx, gridBodyHeightPx]);
 
   return (
     <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] bg-card">
@@ -1050,12 +1125,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
           className="overflow-x-auto overflow-y-hidden overscroll-x-contain touch-pan-x [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
           style={{ marginLeft: TIME_GUTTER_PX, ...edgeRowPad }}
         >
-          <div
-            style={{
-              minWidth: employeesMinWidthPx,
-              width: `max(100%, ${employeesMinWidthPx}px)`,
-            }}
-          >
+          <div style={employeesContentStyle}>
             <EmployeeNamesRow employees={employees} edge="top" variant="names-only" />
           </div>
         </div>
@@ -1115,18 +1185,17 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
               style={{ height: gridBodyHeightPx, WebkitOverflowScrolling: 'touch' }}
             >
               <div
-                className="relative h-full min-w-full"
+                className="relative h-full"
                 style={{
-                  minWidth: employeesMinWidthPx,
-                  width: `max(100%, ${employeesMinWidthPx}px)`,
+                  ...employeesContentStyle,
                   height: gridBodyHeightPx,
                 }}
               >
                 <div
-                  className="grid relative gap-0 w-full"
+                  className="grid relative gap-0"
                   style={{
                     gridTemplateColumns: agendaEmployeeOnlyColumnsTemplate(employees.length),
-                    minWidth: employeesMinWidthPx,
+                    ...employeesContentStyle,
                   }}
                 >
                   {appointments.map((appointment) => {
@@ -1288,12 +1357,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
           className="overflow-x-auto overflow-y-hidden overscroll-x-contain touch-pan-x [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
           style={{ marginLeft: TIME_GUTTER_PX, ...edgeRowPad }}
         >
-          <div
-            style={{
-              minWidth: employeesMinWidthPx,
-              width: `max(100%, ${employeesMinWidthPx}px)`,
-            }}
-          >
+          <div style={employeesContentStyle}>
             <EmployeeNamesRow employees={employees} edge="bottom" variant="names-only" />
           </div>
         </div>
