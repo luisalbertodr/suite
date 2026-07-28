@@ -32,7 +32,14 @@ async function fetchDunasoftEmployees(): Promise<{
   rawEmployees: DunasoftEmpleadoRow[];
   employeeAgendaById: DunasoftAgendaDayData['employeeAgendaById'];
 }> {
-  const empRes = await dunasoftSupabase.from('empleados').select(EMPLOYEE_SELECT);
+  // schema dunasoft no está tipado en el cliente generado.
+  const empRes = await (dunasoftSupabase as unknown as {
+    from: (table: string) => {
+      select: (cols: string) => Promise<{ data: unknown; error: { message?: string } | null }>;
+    };
+  })
+    .from('empleados')
+    .select(EMPLOYEE_SELECT);
   if (empRes.error) throw empRes.error;
 
   const rawEmployees = (empRes.data ?? []) as DunasoftEmpleadoRow[];

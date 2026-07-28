@@ -43,7 +43,13 @@ async function fetchDunasoftDayAppointmentsViaRpc(
   companyId: string | null,
   employees: Employee[],
 ): Promise<Appointment[] | null> {
-  const { data, error } = await supabase.rpc('agenda_dunasoft_day_bundle', {
+  // La firma aún no está en los types generados; fallback legacy si la RPC no existe.
+  const { data, error } = await (supabase as unknown as {
+    rpc: (
+      fn: string,
+      args: { p_date: string },
+    ) => Promise<{ data: unknown; error: { code?: string; message?: string } | null }>;
+  }).rpc('agenda_dunasoft_day_bundle', {
     p_date: dateYmd,
   });
 
@@ -77,7 +83,17 @@ async function fetchDunasoftDayAppointmentsLegacy(
   companyId: string | null,
   employees: Employee[],
 ): Promise<Appointment[]> {
-  const planRes = await dunasoftSupabase
+  // schema dunasoft no está tipado en el cliente generado.
+  const ds = dunasoftSupabase as unknown as {
+    from: (table: string) => {
+      select: (cols: string) => {
+        eq: (col: string, val: string) => Promise<{ data: unknown; error: { message?: string } | null }>;
+        in: (col: string, vals: string[]) => Promise<{ data: unknown; error: { message?: string } | null }>;
+      };
+    };
+  };
+
+  const planRes = await ds
     .from('plan2009')
     .select(
       '_row_id,idplan,codemp,codcli,fecha,horini,horfin,texto,nomcli,tel1cli,colfon,collet,facturado,codrec',
@@ -99,10 +115,7 @@ async function fetchDunasoftDayAppointmentsLegacy(
   const planArtResults = await Promise.all(
     planArtChunks.map(async (chunk) => {
       if (!chunk.length) return [] as DunasoftPlanArtRow[];
-      const artRes = await dunasoftSupabase
-        .from('planart')
-        .select('idplan,codart,hora')
-        .in('idplan', chunk);
+      const artRes = await ds.from('planart').select('idplan,codart,hora').in('idplan', chunk);
       if (artRes.error) throw artRes.error;
       return (artRes.data ?? []) as DunasoftPlanArtRow[];
     }),
@@ -116,16 +129,16 @@ async function fetchDunasoftDayAppointmentsLegacy(
   const articleChunks = chunkArray(codarts, 200);
   const articleResults = await Promise.all(
     articleChunks.map(async (chunk) => {
-      if (!chunk.length) return [];
-      const artRes = await dunasoftSupabase.from('articulos').select('codart,desart').in('codart', chunk);
+      if (!chunk.length) return [] as Array<{ codart?: string; desart?: string }>;
+      const artRes = await ds.from('articulos').select('codart,desart').in('codart', chunk);
       if (artRes.error) throw artRes.error;
-      return artRes.data ?? [];
+      return (artRes.data ?? []) as Array<{ codart?: string; desart?: string }>;
     }),
   );
   for (const rows of articleResults) {
     for (const row of rows) {
-      const code = String((row as { codart?: string }).codart ?? '').trim();
-      const des = String((row as { desart?: string }).desart ?? '').trim();
+      const code = String(row.codart ?? '').trim();
+      const des = String(row.desart ?? '').trim();
       if (code) articles.set(code, des || code);
     }
   }
