@@ -18,7 +18,7 @@ export const ABOVE_DOCK_DIALOG_POSITION =
   '!top-4 !bottom-[6.5rem] !translate-y-0';
 
 /** Altura máxima para diálogos que siguen centrados con translate-y. */
-export const ABOVE_DOCK_DIALOG_MAX_H = 'max-h-[min(90vh,calc(100dvh-12rem))]';
+export const ABOVE_DOCK_DIALOG_MAX_H = 'suite-max-h-dialog-xl';
 
 /** Centrado vertical conservador si no se usa posición anclada. */
 export const ABOVE_DOCK_DIALOG_TOP = '!top-[42%]';

@@ -399,7 +399,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
 
   return (
     <div className={`fixed inset-x-0 top-0 ${DOCK_CLEARANCE_BOTTOM} bg-black/50 flex items-start sm:items-center justify-center ${AGENDA_APPOINTMENT_MODAL_Z} px-4 pt-3 pb-28 sm:pb-24 sm:p-4`}>
-      <Card className="w-full max-w-lg max-h-[calc(100dvh-7rem)] overflow-y-auto">
+      <Card className="suite-max-h-dialog w-full max-w-lg overflow-y-auto">
         <CardHeader className="pb-3">
           <div className="flex items-center gap-2">
             {returnCustomerId && onReturnToCustomerHistory && (

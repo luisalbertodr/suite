@@ -96,6 +96,19 @@
   }
 }
 
+@layer base {
+  :root {
+    /* Viewport estable: vh primero (navegadores antiguos); dvh si existe. */
+    --suite-vh: 100vh;
+  }
+
+  @supports (height: 100dvh) {
+    :root {
+      --suite-vh: 100dvh;
+    }
+  }
+}
+
 @layer utilities {
   /* Scrollbar siempre visible para vistas tipo Kanban */
   .scrollbar-kanban {
@@ -125,17 +138,46 @@
     background: transparent;
   }
 
+  /* Alturas de viewport con fallback (evita calc(100dvh…) inválido en Safari < 15.4). */
+  .suite-h-viewport {
+    height: var(--suite-vh);
+    max-height: var(--suite-vh);
+  }
+  .suite-max-h-dialog-sm {
+    max-height: calc(var(--suite-vh) - 6rem);
+  }
+  .suite-max-h-dialog {
+    max-height: calc(var(--suite-vh) - 7rem);
+  }
+  .suite-max-h-dialog-lg {
+    max-height: min(90vh, calc(var(--suite-vh) - 7.5rem));
+  }
+  .suite-max-h-dialog-xl {
+    max-height: min(90vh, calc(var(--suite-vh) - 12rem));
+  }
+  .suite-h-whatsapp {
+    height: calc(var(--suite-vh) - 9.5rem);
+  }
+  .suite-h-agenda-viewport {
+    height: calc(var(--suite-vh) - 3.5rem - 6rem);
+    max-height: calc(var(--suite-vh) - 3.5rem - 6rem);
+  }
+
   /* Vista agenda: sin scroll del documento (min-h-screen + 100vh desborda en Windows). */
   html.suite-page-scroll-lock,
   html.suite-page-scroll-lock body {
     overflow: hidden !important;
+    height: 100vh !important;
     height: 100dvh !important;
+    max-height: 100vh !important;
     max-height: 100dvh !important;
   }
 
   html.suite-page-scroll-lock #root,
   html.suite-page-scroll-lock .suite-app-shell {
+    height: 100vh !important;
     height: 100dvh !important;
+    max-height: 100vh !important;
     max-height: 100dvh !important;
     min-height: 0 !important;
     overflow: hidden !important;

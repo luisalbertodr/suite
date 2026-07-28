@@ -94,7 +94,7 @@ export const TopBar: React.FC = () => {
           )}
         </div>
 
-        <div className="@container/agenda-actions flex min-w-0 max-w-full items-center justify-center overflow-hidden">
+        <div className="flex min-w-0 max-w-full items-center justify-center overflow-hidden">
           {content.actions && (
             <div className="flex min-w-0 max-w-full items-center justify-center gap-1.5 whitespace-nowrap">
               {content.actions}

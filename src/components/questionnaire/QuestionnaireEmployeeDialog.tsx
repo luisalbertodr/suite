@@ -39,7 +39,7 @@ import { getPersonalDataChangesFromAnswers } from '@/lib/questionnairePersonalDa
 
 /** Por encima del DockBar (z-[120]) y margen inferior para no tapar la barra. */
 const QUESTIONNAIRE_DIALOG_LAYER = 'z-[125]';
-const QUESTIONNAIRE_DIALOG_MAX_H = 'max-h-[min(85vh,calc(100dvh-7.5rem))]';
+const QUESTIONNAIRE_DIALOG_MAX_H = 'suite-max-h-dialog-lg';
 
 type Props = {
   questionnaireId: string | null;

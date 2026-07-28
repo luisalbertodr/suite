@@ -140,7 +140,7 @@ export function QuestionnaireAmendmentDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         overlayClassName={DIALOG_LAYER}
-        className={cn(DIALOG_LAYER, 'max-w-3xl max-h-[min(90vh,calc(100dvh-4rem))] flex flex-col overflow-hidden p-0 gap-0')}
+        className={cn(DIALOG_LAYER, 'max-w-3xl suite-max-h-dialog-lg flex flex-col overflow-hidden p-0 gap-0')}
       >
         <DialogHeader className="px-6 pt-6 pb-2 shrink-0">
           <DialogTitle className="flex items-center gap-2 pr-8">

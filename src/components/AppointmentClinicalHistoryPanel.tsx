@@ -170,7 +170,7 @@ export const AppointmentClinicalHistoryPanel: React.FC<Props> = ({
       aria-label="Historial clínico"
     >
       <div className="absolute inset-0 bg-black/55" aria-hidden onClick={onClose} />
-      <Card className="relative z-10 w-full max-w-6xl max-h-[calc(100dvh-7rem)] overflow-y-auto shadow-xl">
+      <Card className="suite-max-h-dialog relative z-10 w-full max-w-6xl overflow-y-auto shadow-xl">
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between gap-2">
             <CardTitle className="text-base flex items-center gap-2">
