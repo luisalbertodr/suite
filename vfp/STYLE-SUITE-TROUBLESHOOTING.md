@@ -101,6 +101,34 @@ El contenedor **no debe crashear** — diseñado para reintentar.
 
 ---
 
+## Agenda Style con pausas / retardos (agente activo)
+
+**Síntoma:** con el sync Style↔Suite encendido, la agenda de Duna “tira” o se congela unos segundos al crear/mover citas.
+
+**Causas típicas:**
+
+1. Worker inbound (`vfp9`) hace `RLOCK` sobre `plan2009`/`planart` mientras la UI las usa.
+2. `SuiteEnsureColaSincro` intentaba `USE EXCLUSIVE` de `cola_sincro` en el hot path (compite con lecturas del agente).
+3. Spawn del worker cada ~8 s con la UI abierta.
+
+**Mitigaciones en código (v0.2.4+ / worker 1.2.0+):**
+
+- Cola: abrir `SHARED` primero; `EXCLUSIVE` solo si falta migrar esquema.
+- Worker: `SET REPROCESS TO 2`; si lock ocupado, deja el JSON y reintenta (no ACK prematuro).
+- Agente: con UI Style abierta, spawn inbound cada `INBOUND_WORKER_MIN_INTERVAL_WHILE_STYLE_MS` (default 60 s).
+
+**Checklist ops:**
+
+| Paso | Acción |
+|------|--------|
+| 1 | Agente en VM local (`deploy-style-sync-agent-vm.ps1`), no Docker+CIFS duplicado |
+| 2 | `.env`: `INBOUND_WORKER_MIN_INTERVAL_WHILE_STYLE_MS=60000` |
+| 3 | Logs: `inbound worker lanzado (…, throttled=60000ms)` o `lock busy … defer` |
+| 4 | Sin `suite_full_unlock` / timer HTTP v1 en el exe |
+| 5 | Redeploy runtime VFP: `suite_inbound_worker.prg` + `suite_cola_sync.prg` |
+
+---
+
 ## Dead-letter acumulado
 
 **Síntoma:** carpetas en `sync/deadletter/`, contadores `outbound_errors` / `inbound_errors` altos.

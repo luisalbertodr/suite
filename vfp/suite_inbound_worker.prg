@@ -189,7 +189,7 @@ PROCEDURE SuiteInboundLog
  STRTOFILE(TTOC(DATETIME()) + " " + ALLTRIM(tcMsg) + CHR(13), lcLog, .T.)
 ENDPROC
 
-#DEFINE WORKER_VERSION "1.1.1"
+#DEFINE WORKER_VERSION "1.2.0"
 
 FUNCTION SuiteInboundFileAgeSec
  PARAMETER tcFile
@@ -390,7 +390,7 @@ PROCEDURE SuiteInboundApplyOne
  PARAMETER toMsg, tcInboundFile, tcAckDir
  LOCAL lnidplan, lnidand, lcMac, llDelete, ldFecha, lcfact
  LOCAL lchorini, lchorfin, lctexto, lccodemp, lccodcli, lccodrec, lcnomcli, lctel1cli
- LOCAL lnColfon, lnCollet, lcServicios, lnQueueId, lnIncomingVer, llApply, llApplied
+ LOCAL lnColfon, lnCollet, lcServicios, lnQueueId, lnIncomingVer, llApply, llApplied, llLockBusy
 
  lnidplan = SuiteGetObjNum(toMsg, "idplan", 0)
  lnQueueId = SuiteGetObjNum(toMsg, "queue_id", 0)
@@ -402,6 +402,7 @@ PROCEDURE SuiteInboundApplyOne
  llDelete = (UPPER(ALLTRIM(SuiteGetObj(toMsg, "eliminar", "NO")))=="SI")
  lnIncomingVer = SuiteInboundResolveVersion(toMsg)
  llApplied = .F.
+ llLockBusy = .F.
 
  lccodemp = ALLTRIM(SuiteGetObj(toMsg, "codemp", ""))
  lccodcli = ALLTRIM(SuiteGetObj(toMsg, "codcli", ""))
@@ -455,21 +456,28 @@ PROCEDURE SuiteInboundApplyOne
  SET ORDER TO idplan
  IF llDelete
     IF SEEK(lnidplan)
-       SELECT planart
-       SET ORDER TO idplan
-       IF SEEK(STR(lnidplan, 10))
-          SCAN REST WHILE planart.idplan = lnidplan
-             IF RLOCK("planart")
-                DELETE IN planart
-                UNLOCK IN planart
-             ENDIF
-          ENDSCAN
-       ENDIF
-       SELECT plan2009
-       IF RLOCK("plan2009")
+       * Lock cabecera primero: si falla, no tocamos planart ni ACK (reintento).
+       IF  .NOT. RLOCK("plan2009")
+          llLockBusy = .T.
+       ELSE
+          SELECT planart
+          SET ORDER TO idplan
+          IF SEEK(STR(lnidplan, 10))
+             SCAN REST WHILE planart.idplan = lnidplan
+                IF RLOCK("planart")
+                   DELETE IN planart
+                   UNLOCK IN planart
+                ENDIF
+             ENDSCAN
+          ENDIF
+          SELECT plan2009
           DELETE IN plan2009
           UNLOCK IN plan2009
+          llApplied = .T.
        ENDIF
+    ELSE
+       * Ya no existe: borrado idempotente.
+       llApplied = .T.
     ENDIF
  ELSE
     IF SEEK(lnidplan)
@@ -500,6 +508,8 @@ PROCEDURE SuiteInboundApplyOne
           ENDIF
           UNLOCK IN plan2009
           llApplied = .T.
+       ELSE
+          llLockBusy = .T.
        ENDIF
     ELSE
        IF RLOCK("0", "plan2009")
@@ -531,7 +541,14 @@ PROCEDURE SuiteInboundApplyOne
           ENDIF
           UNLOCK IN plan2009
           llApplied = .T.
+       ELSE
+          llLockBusy = .T.
        ENDIF
+    ENDIF
+
+    IF llLockBusy
+       DO SuiteInboundLog WITH "lock busy idplan="+ALLTRIM(STR(lnidplan))+" — defer (JSON se reintenta)"
+       RETURN
     ENDIF
 
     SELECT planart
@@ -547,7 +564,12 @@ PROCEDURE SuiteInboundApplyOne
     = SuiteApplyServiciosFromPayload(lnidplan, lcServicios, lchorini)
  ENDIF
 
- * ACK siempre (recibido y procesado; LWW skip ya retorno arriba)
+ IF llLockBusy
+    DO SuiteInboundLog WITH "lock busy idplan="+ALLTRIM(STR(lnidplan))+" — defer (JSON se reintenta)"
+    RETURN
+ ENDIF
+
+ * ACK solo si aplicamos o el borrado ya no existia (no si lock busy).
  DO SuiteInboundWriteAck WITH lnQueueId, lnidand, lnidplan, lcMac, lnIncomingVer, llApplied, tcAckDir
 
  IF FILE(tcInboundFile)
@@ -590,6 +612,10 @@ PROCEDURE SuiteInboundWorkerRun
 
  SET SAFETY OFF
  SET ESCAPE OFF
+ * Locks cortos: no congelar la agenda de Duna esperando RLOCK indefinido.
+ * Si el registro esta ocupado, SuiteInboundApplyOne deja el JSON para el siguiente ciclo.
+ SET REPROCESS TO 2
+ SET EXCLUSIVE OFF
  IF UPPER(ALLTRIM(GETENV("SUITE_INBOUND_HEADLESS"))) == "1" ;
     .OR. UPPER(ALLTRIM(GETENV("SUITE_VFP_HEADLESS"))) == "1"
     _SCREEN.Visible = .F.

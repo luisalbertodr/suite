@@ -14,14 +14,26 @@ FUNCTION SuiteColaRoot
 ENDFUNC
 **
 PROCEDURE SuiteEnsureColaSincro
- LOCAL lcpath, lcalias, llWasOpen, llExclusive
+ LOCAL lcpath, lcalias, llWasOpen, llExclusive, llNeedMigrate
  lcpath = SuiteColaRoot()+"cola_sincro"
  llWasOpen = USED("cola_sincro")
  IF FILE(lcpath+".dbf")
     llExclusive = .F.
+    * Hot path agenda: abrir SIEMPRE SHARED primero.
+    * USE EXCLUSIVE mientras el agente lee cola_sincro provoca pausas en Style (REPROCESS).
     IF  .NOT. llWasOpen
-       * Intentar EXCLUSIVE: la migracion de esquema (ALTER TABLE) lo exige.
+       USE SHARED (lcpath) ALIAS cola_sincro IN 0
+    ENDIF
+    * Migracion de esquema solo si faltan columnas (raro tras cutover); EXCLUSIVE puntual.
+    llNeedMigrate = .F.
+    IF USED("cola_sincro")
+       llNeedMigrate = ( .NOT. SuiteColaFieldExists("cola_sincro", "fechaiso") ) ;
+          .OR. ( .NOT. SuiteColaFieldExists("cola_sincro", "servicios") ) ;
+          .OR. ( .NOT. SuiteColaFieldExists("cola_sincro", "version") )
+    ENDIF
+    IF llNeedMigrate .AND.  .NOT. llWasOpen .AND. USED("cola_sincro")
        TRY
+          USE IN cola_sincro
           USE EXCLUSIVE (lcpath) ALIAS cola_sincro IN 0
           llExclusive = .T.
        CATCH

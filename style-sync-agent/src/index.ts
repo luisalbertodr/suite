@@ -54,6 +54,7 @@ const { version: pkgVersion } = require("../package.json") as { version: string 
  * - Reintentos con backoff en lecturas/escrituras CIFS y cola_sincro.dbf
  * - Archivo de histórico tras ack OK (evita acumular miles de JSON/.ok)
  * - Monitor heartbeat del worker VFP → alerta en Postgres
+ * - Con UI Style abierta: polls DBF diferidos + spawn inbound espaciado (evita pausas agenda)
  */
 
 const STYLE_ROOT = process.env.STYLE_ROOT ?? "C:\\Duna\\Style-Suite-Test";
