@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { format } from 'date-fns';
-import { CheckCircle, Clock, XCircle, Receipt, Banknote, FileText, Copy, Scissors, ClipboardPaste, ChevronLeft, ChevronRight } from 'lucide-react';
+import { CheckCircle, Clock, XCircle, Receipt, Banknote, FileText, Copy, Scissors, ClipboardPaste } from 'lucide-react';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -1019,27 +1019,31 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
   );
   const maxHOffset = Math.max(0, employeesContentWidthPx - Math.max(employeesViewportPx, 1));
 
+  const paintHOffset = React.useCallback((offset: number) => {
+    const tx = `translate3d(${-offset}px,0,0)`;
+    if (bodySlideRef.current) bodySlideRef.current.style.transform = tx;
+    if (headerSlideRef.current) headerSlideRef.current.style.transform = tx;
+    if (footerSlideRef.current) footerSlideRef.current.style.transform = tx;
+  }, []);
+
   const applyHOffset = React.useCallback(
-    (next: number) => {
+    (next: number, commitState = false) => {
       const viewport = Math.max(employeesViewportPx, 1);
       const max = Math.max(0, employeesContentWidthPx - viewport);
       const clamped = Math.max(0, Math.min(max, next));
       hOffsetRef.current = clamped;
-      setHOffset(clamped);
-      const tx = `translate3d(${-clamped}px,0,0)`;
-      if (bodySlideRef.current) bodySlideRef.current.style.transform = tx;
-      if (headerSlideRef.current) headerSlideRef.current.style.transform = tx;
-      if (footerSlideRef.current) footerSlideRef.current.style.transform = tx;
+      paintHOffset(clamped);
+      if (commitState) setHOffset(clamped);
     },
-    [employeesContentWidthPx, employeesViewportPx],
+    [employeesContentWidthPx, employeesViewportPx, paintHOffset],
   );
 
   /**
-   * Pan horizontal con Pointer Events + translate3d.
-   * touch-action:pan-y deja el vertical nativo; al detectar eje X capturamos el pointer.
+   * Pan H continuo: solo pinta transform en rAF (sin setState por frame).
+   * setState al soltar. touch-action:pan-y conserva el scroll vertical nativo.
    */
   React.useEffect(() => {
-    applyHOffset(hOffsetRef.current);
+    applyHOffset(hOffsetRef.current, true);
 
     const surfaces = [bodyClipRef.current, headerClipRef.current, footerClipRef.current].filter(
       Boolean,
@@ -1051,19 +1055,56 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
       startX: number;
       startY: number;
       startOffset: number;
+      lastX: number;
+      lastT: number;
+      velocity: number;
       axis: 'h' | 'v' | null;
       target: HTMLElement;
     };
     let drag: DragState | null = null;
+    let raf = 0;
+    let pendingOffset: number | null = null;
+    let momentumRaf = 0;
+
+    const cancelMomentum = () => {
+      if (momentumRaf) {
+        cancelAnimationFrame(momentumRaf);
+        momentumRaf = 0;
+      }
+    };
+
+    const flushPaint = () => {
+      raf = 0;
+      if (pendingOffset === null) return;
+      const next = pendingOffset;
+      pendingOffset = null;
+      hOffsetRef.current = next;
+      paintHOffset(next);
+    };
+
+    const queuePaint = (offset: number) => {
+      pendingOffset = offset;
+      if (!raf) raf = requestAnimationFrame(flushPaint);
+    };
+
+    const clampOffset = (next: number) => {
+      const viewport = Math.max(employeesViewportPx, 1);
+      const max = Math.max(0, employeesContentWidthPx - viewport);
+      return Math.max(0, Math.min(max, next));
+    };
 
     const onPointerDown = (e: PointerEvent) => {
       if (e.pointerType === 'mouse' && e.button !== 0) return;
+      cancelMomentum();
       const target = e.currentTarget as HTMLElement;
       drag = {
         pointerId: e.pointerId,
         startX: e.clientX,
         startY: e.clientY,
         startOffset: hOffsetRef.current,
+        lastX: e.clientX,
+        lastT: performance.now(),
+        velocity: 0,
         axis: null,
         target,
       };
@@ -1075,7 +1116,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
       const dy = e.clientY - drag.startY;
 
       if (drag.axis === null) {
-        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+        if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
         drag.axis = Math.abs(dx) >= Math.abs(dy) ? 'h' : 'v';
         if (drag.axis === 'h') {
           try {
@@ -1084,7 +1125,6 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
             /* ignore */
           }
         } else {
-          // Eje vertical: soltar y dejar el scroll nativo.
           drag = null;
           return;
         }
@@ -1092,11 +1132,48 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
 
       if (drag.axis !== 'h') return;
       e.preventDefault();
-      applyHOffset(drag.startOffset - dx);
+
+      const now = performance.now();
+      const dt = Math.max(1, now - drag.lastT);
+      const frameDx = e.clientX - drag.lastX;
+      drag.velocity = frameDx / dt;
+      drag.lastX = e.clientX;
+      drag.lastT = now;
+
+      queuePaint(clampOffset(drag.startOffset - dx));
+    };
+
+    const runMomentum = (velocityPxPerMs: number) => {
+      const max = Math.max(0, employeesContentWidthPx - Math.max(employeesViewportPx, 1));
+      if (max <= 0) {
+        applyHOffset(hOffsetRef.current, true);
+        return;
+      }
+      let v = velocityPxPerMs;
+      const tick = () => {
+        v *= 0.95;
+        if (Math.abs(v) < 0.02) {
+          momentumRaf = 0;
+          applyHOffset(hOffsetRef.current, true);
+          return;
+        }
+        const next = clampOffset(hOffsetRef.current - v * 16);
+        hOffsetRef.current = next;
+        paintHOffset(next);
+        if (next <= 0 || next >= max) {
+          momentumRaf = 0;
+          applyHOffset(next, true);
+          return;
+        }
+        momentumRaf = requestAnimationFrame(tick);
+      };
+      momentumRaf = requestAnimationFrame(tick);
     };
 
     const endDrag = (e: PointerEvent) => {
       if (!drag || drag.pointerId !== e.pointerId) return;
+      const wasH = drag.axis === 'h';
+      const vel = drag.velocity;
       try {
         if (drag.target.hasPointerCapture(e.pointerId)) {
           drag.target.releasePointerCapture(e.pointerId);
@@ -1105,12 +1182,27 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
         /* ignore */
       }
       drag = null;
+      if (raf) {
+        cancelAnimationFrame(raf);
+        raf = 0;
+      }
+      if (pendingOffset !== null) {
+        hOffsetRef.current = pendingOffset;
+        paintHOffset(pendingOffset);
+        pendingOffset = null;
+      }
+      if (wasH && Math.abs(vel) > 0.05) {
+        runMomentum(vel);
+      } else {
+        applyHOffset(hOffsetRef.current, true);
+      }
     };
 
     const onWheel = (e: WheelEvent) => {
       if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
       e.preventDefault();
-      applyHOffset(hOffsetRef.current + e.deltaX);
+      cancelMomentum();
+      applyHOffset(hOffsetRef.current + e.deltaX, true);
     };
 
     for (const el of surfaces) {
@@ -1124,6 +1216,8 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
     }
 
     return () => {
+      cancelMomentum();
+      if (raf) cancelAnimationFrame(raf);
       for (const el of surfaces) {
         el.removeEventListener('pointerdown', onPointerDown);
         el.removeEventListener('pointermove', onPointerMove);
@@ -1133,52 +1227,20 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
         el.removeEventListener('wheel', onWheel);
       }
     };
-  }, [applyHOffset, employeesContentWidthPx, gridBodyHeightPx, employees.length]);
+  }, [
+    applyHOffset,
+    paintHOffset,
+    employeesContentWidthPx,
+    employeesViewportPx,
+    gridBodyHeightPx,
+    employees.length,
+  ]);
 
-  // Controles siempre si hay ≥2 empleadas; el pan real depende de maxHOffset.
-  const showHPanControls = employees.length >= 2;
-  const canPanHorizontal = maxHOffset > 1;
-  const stepH = Math.max(EMP_COL_MIN_PX, Math.round(Math.max(employeesViewportPx, 160) * 0.75));
   const frameWidthPx =
     employeesViewportPx > 0 ? TIME_GUTTER_PX + employeesViewportPx : undefined;
 
   return (
-    <div
-      ref={shellRef}
-      className={
-        showHPanControls
-          ? 'grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] bg-card'
-          : 'grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] bg-card'
-      }
-    >
-      {showHPanControls ? (
-        <div className="flex shrink-0 items-center gap-2 border-b border-border bg-muted/60 px-2 py-1.5">
-          <button
-            type="button"
-            aria-label="Ver columnas anteriores"
-            disabled={!canPanHorizontal || hOffset <= 0}
-            className="inline-flex h-9 min-w-9 items-center justify-center rounded-md border border-border bg-background text-foreground shadow-sm disabled:opacity-40"
-            onClick={() => applyHOffset(hOffsetRef.current - stepH)}
-          >
-            <ChevronLeft className="h-5 w-5" />
-          </button>
-          <div className="min-w-0 flex-1 text-center text-[11px] font-medium text-foreground">
-            {canPanHorizontal
-              ? 'Desliza o usa las flechas para ver más empleadas'
-              : 'Ajustando columnas…'}
-          </div>
-          <button
-            type="button"
-            aria-label="Ver más columnas"
-            disabled={!canPanHorizontal || hOffset >= maxHOffset - 1}
-            className="inline-flex h-9 min-w-9 items-center justify-center rounded-md border border-border bg-background text-foreground shadow-sm disabled:opacity-40"
-            onClick={() => applyHOffset(hOffsetRef.current + stepH)}
-          >
-            <ChevronRight className="h-5 w-5" />
-          </button>
-        </div>
-      ) : null}
-
+    <div ref={shellRef} className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] bg-card">
       <div className="relative shrink-0 border-b border-border shadow-sm overflow-hidden">
         <div
           className="pointer-events-none absolute left-0 top-0 z-[55] flex items-center justify-center border-r border-border bg-card px-3 py-1 text-center text-xs font-semibold leading-tight text-foreground"
