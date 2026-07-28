@@ -3,7 +3,6 @@ import { es } from 'date-fns/locale';
 import {
   completeSpanishDni,
   inbodyBarScale,
-  inbodyMarkerCurvePathFromPoints,
   inbodyRangeStatus,
   inbodyStatusLabel,
   normalizeInbodyMeasurement,
@@ -314,14 +313,33 @@ function drawCompositionMarkerCurve(
     points.push({ x: markerX, y: barLeft.y });
   }
   if (points.length < 2) return;
-  const pathD = inbodyMarkerCurvePathFromPoints(points);
-  if (!pathD) return;
+
+  const lineWidth = Math.max(2, px(w, h, 0, 2.5).y);
+  const dotRadius = Math.max(4.5, px(w, h, 0, 6).y);
+  const dotStroke = Math.max(1.5, px(w, h, 0, 2).y);
+
   ctx.save();
   ctx.strokeStyle = '#1d4ed8';
-  ctx.lineWidth = Math.max(2, px(w, h, 0, 2.5).y);
+  ctx.lineWidth = lineWidth;
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
-  ctx.stroke(new Path2D(pathD));
+  ctx.beginPath();
+  ctx.moveTo(points[0]!.x, points[0]!.y);
+  for (let i = 1; i < points.length; i++) {
+    const point = points[i]!;
+    ctx.lineTo(point.x, point.y);
+  }
+  ctx.stroke();
+
+  for (const point of points) {
+    ctx.beginPath();
+    ctx.fillStyle = '#1d4ed8';
+    ctx.arc(point.x, point.y, dotRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = dotStroke;
+    ctx.stroke();
+  }
   ctx.restore();
 }
 
