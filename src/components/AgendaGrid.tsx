@@ -71,18 +71,31 @@ interface AgendaGridProps {
 const TIME_GUTTER_PX = 96;
 
 /** Ancho mínimo por columna de empleada (px) para poder desplazar en móvil. */
-const EMP_COL_MIN_PX = 120;
+const EMP_COL_MIN_PX = 148;
 
-/** Ancho mínimo de la zona de empleadas (sin columna hora). */
-const GRID_MIN_EMPLOYEES_PX = 900 - TIME_GUTTER_PX;
-
-function agendaEmployeesMinWidthPx(employeeCount: number): number {
-  return Math.max(GRID_MIN_EMPLOYEES_PX, Math.max(1, employeeCount) * EMP_COL_MIN_PX);
-}
-
-function agendaEmployeeOnlyColumnsTemplate(employeeCount: number): string {
+/**
+ * Layout horizontal de columnas.
+ * Importante: el ancho de contenido NO debe igualar el viewport en móvil
+ * (si el flex hijo crece al contenido, maxOffset=0 y no hay pan).
+ */
+function agendaEmployeesColumnLayout(employeeCount: number, viewportPx: number): {
+  contentWidthPx: number;
+  columnWidthPx: number;
+  columnsTemplate: string;
+} {
   const n = Math.max(1, employeeCount);
-  return `repeat(${n}, minmax(${EMP_COL_MIN_PX}px, 1fr))`;
+  const vp = Math.max(0, Math.floor(viewportPx));
+  const minContent = n * EMP_COL_MIN_PX;
+  // En pantallas anchas, estirar para llenar; en estrechas, mantener min → overflow.
+  const contentWidthPx = vp > 0 ? Math.max(minContent, vp) : minContent;
+  const columnWidthPx = Math.max(EMP_COL_MIN_PX, Math.floor(contentWidthPx / n));
+  // Ajuste por redondeo: la suma de columnas fija el ancho real.
+  const fixedContent = columnWidthPx * n;
+  return {
+    contentWidthPx: fixedContent,
+    columnWidthPx,
+    columnsTemplate: `repeat(${n}, ${columnWidthPx}px)`,
+  };
 }
 
 function agendaEmployeeColumnsTemplate(employeeCount: number): string {
@@ -553,10 +566,12 @@ function EmployeeNamesRow({
   employees,
   edge,
   variant = 'full',
+  columnsTemplate,
 }: {
   employees: Employee[];
   edge: 'top' | 'bottom';
   variant?: 'full' | 'names-only';
+  columnsTemplate?: string;
 }) {
   if (employees.length === 0) return null;
 
@@ -576,7 +591,8 @@ function EmployeeNamesRow({
       <div
         className="grid gap-0"
         style={{
-          gridTemplateColumns: agendaEmployeeOnlyColumnsTemplate(employees.length),
+          gridTemplateColumns:
+            columnsTemplate ?? `repeat(${Math.max(1, employees.length)}, minmax(${EMP_COL_MIN_PX}px, 1fr))`,
           minHeight: EMPLOYEE_NAMES_ROW_MIN_H,
         }}
       >
@@ -646,9 +662,12 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
   const scrollSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [nowLineTick, setNowLineTick] = React.useState(0);
   const allowHtml5Drag = React.useMemo(() => canUseHtml5AppointmentDrag(), []);
-  const employeesMinWidthPx = agendaEmployeesMinWidthPx(employees.length);
-  /** Ancho de la franja de empleadas (más ancho que el viewport en móvil). */
-  const employeesContentWidthPx = Math.max(employeesMinWidthPx, employeesViewportPx || employeesMinWidthPx);
+  const columnLayout = React.useMemo(
+    () => agendaEmployeesColumnLayout(employees.length, employeesViewportPx),
+    [employees.length, employeesViewportPx],
+  );
+  const employeesContentWidthPx = columnLayout.contentWidthPx;
+  const columnsTemplate = columnLayout.columnsTemplate;
 
   const [draggedAppointment, setDraggedAppointment] = React.useState<string | null>(null);
   const [dragOverSlot, setDragOverSlot] = React.useState<{ employeeId: string; time: string } | null>(null);
@@ -934,20 +953,20 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
     };
   }, [employees.length, timeSlots.length, persistUserId, viewDateYmd, flushScrollToStorage]);
 
-  /** Mide scrollbar vertical y ancho del recorte de columnas. */
+  /** Mide scrollbar vertical y ancho REAL del recorte (no el del contenido). */
   React.useLayoutEffect(() => {
     const vEl = scrollRootRef.current;
     const clip = bodyClipRef.current;
-    if (!vEl) return;
+    if (!vEl || !clip) return;
     const measure = () => {
       setScrollbarWidth(Math.max(0, vEl.offsetWidth - vEl.clientWidth));
-      const w = clip?.clientWidth ?? Math.max(0, vEl.clientWidth - TIME_GUTTER_PX);
-      setEmployeesViewportPx(Math.max(0, Math.round(w)));
+      // clientWidth del clip con flex-basis:0 — no debe crecer con el slide.
+      setEmployeesViewportPx(Math.max(0, Math.round(clip.clientWidth)));
     };
     measure();
     const ro = new ResizeObserver(measure);
+    ro.observe(clip);
     ro.observe(vEl);
-    if (clip) ro.observe(clip);
     return () => ro.disconnect();
   }, [employees.length, timeSlots.length]);
 
@@ -957,6 +976,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
     () => ({
       width: employeesContentWidthPx,
       minWidth: employeesContentWidthPx,
+      maxWidth: employeesContentWidthPx,
     }),
     [employeesContentWidthPx],
   );
@@ -964,8 +984,8 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
 
   const applyHOffset = React.useCallback(
     (next: number) => {
-      const viewport = bodyClipRef.current?.clientWidth ?? employeesViewportPx;
-      const max = Math.max(0, employeesContentWidthPx - Math.max(viewport, 1));
+      const viewport = bodyClipRef.current?.clientWidth || employeesViewportPx || 1;
+      const max = Math.max(0, employeesContentWidthPx - viewport);
       const clamped = Math.max(0, Math.min(max, next));
       hOffsetRef.current = clamped;
       const tx = `translate3d(${-clamped}px,0,0)`;
@@ -977,59 +997,76 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
   );
 
   /**
-   * Pan horizontal por transform (no depende de overflow-x / scrollWidth).
-   * Vertical: overflow-y nativo con touch-action:pan-y (lo que ya funciona en iPhone).
+   * Pan horizontal con Pointer Events + translate3d.
+   * touch-action:pan-y deja el vertical nativo; al detectar eje X capturamos el pointer.
    */
   React.useEffect(() => {
-    // Re-clamp si cambia el ancho.
     applyHOffset(hOffsetRef.current);
 
-    const surfaces: HTMLElement[] = [
-      bodyClipRef.current,
-      headerClipRef.current,
-      footerClipRef.current,
-      scrollRootRef.current,
-    ].filter(Boolean) as HTMLElement[];
+    const surfaces = [bodyClipRef.current, headerClipRef.current, footerClipRef.current].filter(
+      Boolean,
+    ) as HTMLElement[];
+    if (!surfaces.length) return;
 
-    let startX = 0;
-    let startY = 0;
-    let startOffset = 0;
-    let axis: 'h' | 'v' | null = null;
-    let active = false;
+    type DragState = {
+      pointerId: number;
+      startX: number;
+      startY: number;
+      startOffset: number;
+      axis: 'h' | 'v' | null;
+      target: HTMLElement;
+    };
+    let drag: DragState | null = null;
 
-    const onTouchStart = (e: TouchEvent) => {
-      if (e.touches.length !== 1) {
-        active = false;
-        return;
-      }
-      active = true;
-      axis = null;
-      startX = e.touches[0]!.clientX;
-      startY = e.touches[0]!.clientY;
-      startOffset = hOffsetRef.current;
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      const target = e.currentTarget as HTMLElement;
+      drag = {
+        pointerId: e.pointerId,
+        startX: e.clientX,
+        startY: e.clientY,
+        startOffset: hOffsetRef.current,
+        axis: null,
+        target,
+      };
     };
 
-    const onTouchMove = (e: TouchEvent) => {
-      if (!active || e.touches.length !== 1) return;
-      const t = e.touches[0]!;
-      const dx = t.clientX - startX;
-      const dy = t.clientY - startY;
+    const onPointerMove = (e: PointerEvent) => {
+      if (!drag || drag.pointerId !== e.pointerId) return;
+      const dx = e.clientX - drag.startX;
+      const dy = e.clientY - drag.startY;
 
-      if (axis === null) {
+      if (drag.axis === null) {
         if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
-        axis = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v';
+        drag.axis = Math.abs(dx) >= Math.abs(dy) ? 'h' : 'v';
+        if (drag.axis === 'h') {
+          try {
+            drag.target.setPointerCapture(e.pointerId);
+          } catch {
+            /* ignore */
+          }
+        } else {
+          // Eje vertical: soltar y dejar el scroll nativo.
+          drag = null;
+          return;
+        }
       }
 
-      if (axis !== 'h') return;
-
-      // Bloquear el pan-y nativo solo cuando el gesto es horizontal.
+      if (drag.axis !== 'h') return;
       e.preventDefault();
-      applyHOffset(startOffset - dx);
+      applyHOffset(drag.startOffset - dx);
     };
 
-    const onTouchEnd = () => {
-      active = false;
-      axis = null;
+    const endDrag = (e: PointerEvent) => {
+      if (!drag || drag.pointerId !== e.pointerId) return;
+      try {
+        if (drag.target.hasPointerCapture(e.pointerId)) {
+          drag.target.releasePointerCapture(e.pointerId);
+        }
+      } catch {
+        /* ignore */
+      }
+      drag = null;
     };
 
     const onWheel = (e: WheelEvent) => {
@@ -1039,26 +1076,29 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
     };
 
     for (const el of surfaces) {
-      el.addEventListener('touchstart', onTouchStart, { passive: true, capture: true });
-      el.addEventListener('touchmove', onTouchMove, { passive: false, capture: true });
-      el.addEventListener('touchend', onTouchEnd, { passive: true, capture: true });
-      el.addEventListener('touchcancel', onTouchEnd, { passive: true, capture: true });
+      el.style.touchAction = 'pan-y';
+      el.addEventListener('pointerdown', onPointerDown);
+      el.addEventListener('pointermove', onPointerMove, { passive: false });
+      el.addEventListener('pointerup', endDrag);
+      el.addEventListener('pointercancel', endDrag);
+      el.addEventListener('lostpointercapture', endDrag);
       el.addEventListener('wheel', onWheel, { passive: false });
     }
 
     return () => {
       for (const el of surfaces) {
-        el.removeEventListener('touchstart', onTouchStart, true);
-        el.removeEventListener('touchmove', onTouchMove, true);
-        el.removeEventListener('touchend', onTouchEnd, true);
-        el.removeEventListener('touchcancel', onTouchEnd, true);
+        el.removeEventListener('pointerdown', onPointerDown);
+        el.removeEventListener('pointermove', onPointerMove);
+        el.removeEventListener('pointerup', endDrag);
+        el.removeEventListener('pointercancel', endDrag);
+        el.removeEventListener('lostpointercapture', endDrag);
         el.removeEventListener('wheel', onWheel);
       }
     };
-  }, [applyHOffset, gridBodyHeightPx]);
+  }, [applyHOffset, employeesContentWidthPx, gridBodyHeightPx, employees.length]);
 
-  const canPanHorizontal = maxHOffset > 0;
-  const stepH = Math.max(120, Math.round(Math.max(employeesViewportPx, 200) * 0.7));
+  const canPanHorizontal = maxHOffset > 1;
+  const stepH = Math.max(EMP_COL_MIN_PX, Math.round(Math.max(employeesViewportPx, 160) * 0.75));
 
   return (
     <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] bg-card">
@@ -1071,7 +1111,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
         </div>
         <div
           ref={headerClipRef}
-          className="overflow-hidden [&_*]:[touch-action:pan-y]"
+          className="overflow-hidden"
           style={{ marginLeft: TIME_GUTTER_PX, touchAction: 'pan-y', ...edgeRowPad }}
         >
           <div
@@ -1082,46 +1122,38 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
               willChange: 'transform',
             }}
           >
-            <EmployeeNamesRow employees={employees} edge="top" variant="names-only" />
+            <EmployeeNamesRow
+              employees={employees}
+              edge="top"
+              variant="names-only"
+              columnsTemplate={columnsTemplate}
+            />
           </div>
         </div>
       </div>
 
       <div className="relative min-h-0 h-full overflow-hidden">
         {/*
-          Vertical nativo (overflow-y). Horizontal por translate3d en la franja
-          de columnas — iOS no depende de scrollWidth/overflow-x.
+          Vertical nativo. Horizontal: translate3d sobre franja de columnas.
+          flex:1 1 0% + width:0 evita que el clip crezca al ancho del contenido (bug iOS).
         */}
-        {canPanHorizontal ? (
-          <>
-            <button
-              type="button"
-              aria-label="Ver columnas anteriores"
-              className="absolute top-1/2 z-[40] -translate-y-1/2 rounded-full border border-border bg-card/95 p-1.5 shadow-md"
-              style={{ left: TIME_GUTTER_PX + 4 }}
-              onClick={() => applyHOffset(hOffsetRef.current - stepH)}
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              aria-label="Ver más columnas"
-              className="absolute right-1 top-1/2 z-[40] -translate-y-1/2 rounded-full border border-border bg-card/95 p-1.5 shadow-md"
-              onClick={() => applyHOffset(hOffsetRef.current + stepH)}
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </>
-        ) : null}
         <div
           ref={scrollRootRef}
-          className="h-full min-h-0 overflow-x-hidden overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch] [&_*]:[touch-action:pan-y]"
+          className="h-full min-h-0 overflow-x-hidden overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch]"
           style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-y' }}
         >
-          <div className="flex w-full" style={{ height: gridBodyHeightPx, minHeight: gridBodyHeightPx }}>
+          <div
+            className="flex"
+            style={{
+              width: '100%',
+              maxWidth: '100%',
+              height: gridBodyHeightPx,
+              minHeight: gridBodyHeightPx,
+            }}
+          >
             <div
               className="shrink-0 border-r border-border bg-card z-[20]"
-              style={{ width: TIME_GUTTER_PX, minWidth: TIME_GUTTER_PX }}
+              style={{ width: TIME_GUTTER_PX, minWidth: TIME_GUTTER_PX, maxWidth: TIME_GUTTER_PX }}
             >
               {timeSlots.map((slot) => {
                 const isHourMark = slot.minute === 0;
@@ -1156,7 +1188,18 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
               })}
             </div>
 
-            <div ref={bodyClipRef} className="relative min-w-0 flex-1 overflow-hidden">
+            <div
+              ref={bodyClipRef}
+              className="relative overflow-hidden"
+              style={{
+                flex: '1 1 0%',
+                width: 0,
+                minWidth: 0,
+                maxWidth: '100%',
+                height: gridBodyHeightPx,
+                touchAction: 'pan-y',
+              }}
+            >
               <div
                 ref={bodySlideRef}
                 className="relative"
@@ -1170,7 +1213,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
                 <div
                   className="grid relative gap-0"
                   style={{
-                    gridTemplateColumns: agendaEmployeeOnlyColumnsTemplate(employees.length),
+                    gridTemplateColumns: columnsTemplate,
                     ...employeesContentStyle,
                   }}
                 >
@@ -1268,7 +1311,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
                               } ${isHighlighted ? 'bg-blue-100 dark:bg-blue-950/40 border-blue-300 dark:border-blue-700' : ''} ${
                                 canPaste ? 'ring-1 ring-inset ring-emerald-400/50 dark:ring-emerald-600/40' : ''
                               }`}
-                              style={{ height: `${cellHeight}px` }}
+                              style={{ height: `${cellHeight}px`, touchAction: 'pan-y' }}
                               title={
                                 pasteHint ??
                                 (shade && canSchedule
@@ -1318,6 +1361,28 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
             </div>
           </div>
         </div>
+
+        {canPanHorizontal ? (
+          <div className="pointer-events-none absolute inset-y-0 left-0 right-0 z-[100]">
+            <button
+              type="button"
+              aria-label="Ver columnas anteriores"
+              className="pointer-events-auto absolute top-1/2 z-[100] -translate-y-1/2 rounded-full border border-border bg-background p-2 shadow-lg"
+              style={{ left: TIME_GUTTER_PX + 6 }}
+              onClick={() => applyHOffset(hOffsetRef.current - stepH)}
+            >
+              <ChevronLeft className="h-5 w-5" />
+            </button>
+            <button
+              type="button"
+              aria-label="Ver más columnas"
+              className="pointer-events-auto absolute right-2 top-1/2 z-[100] -translate-y-1/2 rounded-full border border-border bg-background p-2 shadow-lg"
+              onClick={() => applyHOffset(hOffsetRef.current + stepH)}
+            >
+              <ChevronRight className="h-5 w-5" />
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <div className="relative shrink-0 border-t border-border shadow-[0_-2px_4px_rgba(0,0,0,0.04)]">
@@ -1330,7 +1395,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
         </div>
         <div
           ref={footerClipRef}
-          className="overflow-hidden [&_*]:[touch-action:pan-y]"
+          className="overflow-hidden"
           style={{ marginLeft: TIME_GUTTER_PX, touchAction: 'pan-y', ...edgeRowPad }}
         >
           <div
@@ -1341,7 +1406,12 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
               willChange: 'transform',
             }}
           >
-            <EmployeeNamesRow employees={employees} edge="bottom" variant="names-only" />
+            <EmployeeNamesRow
+              employees={employees}
+              edge="bottom"
+              variant="names-only"
+              columnsTemplate={columnsTemplate}
+            />
           </div>
         </div>
       </div>
