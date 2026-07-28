@@ -23,10 +23,14 @@ export type StyleSyncAgentStatus = {
   pending_inbound_queue: number;
 };
 
-export function useStyleSyncAgentStatus(companyId?: string | null, pollMs = 30_000) {
+export function useStyleSyncAgentStatus(
+  companyId?: string | null,
+  pollMs = 30_000,
+  enabled = true,
+) {
   return useQuery({
     queryKey: ['style-sync-agent-status', companyId ?? 'default'],
-    enabled: !!companyId,
+    enabled: enabled && !!companyId,
     queryFn: async (): Promise<StyleSyncAgentStatus | null> => {
       const { data, error } = await supabase.rpc('style_sync_agent_status', {
         p_company_id: companyId ?? undefined,
@@ -58,7 +62,7 @@ export function useStyleSyncAgentStatus(companyId?: string | null, pollMs = 30_0
         pending_inbound_queue: Number(row.pending_inbound_queue ?? 0),
       };
     },
-    refetchInterval: pollMs,
+    refetchInterval: enabled ? pollMs : false,
     staleTime: 10_000,
   });
 }

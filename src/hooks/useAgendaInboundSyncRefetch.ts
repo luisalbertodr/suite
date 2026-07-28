@@ -16,12 +16,13 @@ export function useAgendaInboundSyncRefetch(
   refetch: () => void | Promise<unknown>,
   /** Si se indica, solo refetch cuando el evento afecta a este día (YYYY-MM-DD). */
   dateYmd?: string,
+  enabled = true,
 ) {
-  const { data: styleSync } = useStyleSyncAgentStatus(companyId, 30_000);
+  const { data: styleSync } = useStyleSyncAgentStatus(companyId, 30_000, enabled);
   const lastTsRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!companyId) return;
+    if (!companyId || !enabled) return;
 
     const channel = supabase
       .channel(`sync-event-log-agenda-${companyId}`)
@@ -49,9 +50,10 @@ export function useAgendaInboundSyncRefetch(
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [companyId, dateYmd, refetch]);
+  }, [companyId, dateYmd, enabled, refetch]);
 
   useEffect(() => {
+    if (!enabled) return;
     const ts = styleSync?.last_outbound_ok_at;
     if (!ts) return;
     if (lastTsRef.current === null) {
@@ -62,5 +64,5 @@ export function useAgendaInboundSyncRefetch(
       lastTsRef.current = ts;
       void refetch();
     }
-  }, [styleSync?.last_outbound_ok_at, refetch]);
+  }, [enabled, styleSync?.last_outbound_ok_at, refetch]);
 }

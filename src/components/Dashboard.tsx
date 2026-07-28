@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Users, Calendar, Receipt, TrendingUp,
+  Users, Calendar, Receipt, TrendingUp, Scale, Megaphone, ShoppingBag, MessageSquare,
   Loader2, AlertCircle, RefreshCw, CreditCard, BarChart3, Activity, Calculator,
 } from 'lucide-react';
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
@@ -20,6 +20,12 @@ import {
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useDashboardData } from '../hooks/useDashboardData';
+import {
+  DASHBOARD_ACTIVITY_TYPE_OPTIONS,
+  DASHBOARD_RECENT_ACTIVITY_LIMIT,
+  type DashboardRecentActivityFilter,
+  type DashboardRecentActivityType,
+} from '@/lib/dashboardRecentActivity';
 import { Reportes } from './Reportes';
 import { DashboardFamilySelector } from './DashboardFamilySelector';
 import { DashboardCommandBoard } from './DashboardCommandBoard';
@@ -70,6 +76,49 @@ function comparisonTooltipFormatter(
     `€${Number(v).toLocaleString('es-ES', { minimumFractionDigits: 2 })}`,
     label,
   ];
+}
+
+function activityVisual(type: DashboardRecentActivityType): {
+  className: string;
+  Icon: React.ComponentType<{ className?: string }>;
+} {
+  switch (type) {
+    case 'factura':
+      return {
+        className: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600',
+        Icon: Receipt,
+      };
+    case 'cita':
+      return {
+        className: 'bg-blue-100 dark:bg-blue-900/30 text-blue-600',
+        Icon: Calendar,
+      };
+    case 'cliente':
+      return {
+        className: 'bg-pink-100 dark:bg-pink-900/30 text-pink-600',
+        Icon: Users,
+      };
+    case 'bascula':
+      return {
+        className: 'bg-amber-100 dark:bg-amber-900/30 text-amber-600',
+        Icon: Scale,
+      };
+    case 'venta':
+      return {
+        className: 'bg-green-100 dark:bg-green-900/30 text-green-600',
+        Icon: ShoppingBag,
+      };
+    case 'marketing':
+      return {
+        className: 'bg-rose-100 dark:bg-rose-900/30 text-rose-600',
+        Icon: Megaphone,
+      };
+    case 'nota_marketing':
+      return {
+        className: 'bg-fuchsia-100 dark:bg-fuchsia-900/30 text-fuchsia-600',
+        Icon: MessageSquare,
+      };
+  }
 }
 
 function YearEntityChartLines({
@@ -234,6 +283,7 @@ export const Dashboard: React.FC = () => {
   const [comparisonPreset, setComparisonPreset] = useState<ComparisonPeriodPreset>('days15');
   const [comparisonMonth, setComparisonMonth] = useState(new Date().getMonth() + 1);
   const [selectedFamilies, setSelectedFamilies] = useState<string[] | null>(null);
+  const [activityTypeFilter, setActivityTypeFilter] = useState<DashboardRecentActivityFilter>('all');
   const defaultRange = useMemo(() => currentMonthRange(), []);
   const [boardFromDate, setBoardFromDate] = useState(defaultRange.from);
   const [boardToDate, setBoardToDate] = useState(defaultRange.to);
@@ -307,7 +357,12 @@ export const Dashboard: React.FC = () => {
     billingView,
     comparisonPeriod,
     selectedFamilies,
+    activityTypeFilter,
   );
+
+  const activityFilterLabel = DASHBOARD_ACTIVITY_TYPE_OPTIONS.find(
+    (option) => option.value === activityTypeFilter,
+  )?.label ?? 'Todos los tipos';
 
   const refreshDashboard = () => {
     void queryClient.invalidateQueries({
@@ -739,35 +794,62 @@ export const Dashboard: React.FC = () => {
           </div>
 
           <div className="bg-card rounded-xl shadow-lg p-6 border">
-            <h3 className="text-base font-semibold text-foreground mb-4">Actividad Reciente</h3>
-            <div className="space-y-3">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="text-base font-semibold text-foreground">Actividad Reciente</h3>
+                {recentActivity && recentActivity.length > 0 && (
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {activityTypeFilter === 'all'
+                      ? `Últimos ${Math.min(recentActivity.length, DASHBOARD_RECENT_ACTIVITY_LIMIT)} movimientos`
+                      : `Últimos ${Math.min(recentActivity.length, DASHBOARD_RECENT_ACTIVITY_LIMIT)} de ${activityFilterLabel.toLowerCase()}`}
+                  </p>
+                )}
+              </div>
+              <Select
+                value={activityTypeFilter}
+                onValueChange={(value) => setActivityTypeFilter(value as DashboardRecentActivityFilter)}
+              >
+                <SelectTrigger className="h-8 w-[180px] text-xs">
+                  <SelectValue placeholder="Tipo de evento" />
+                </SelectTrigger>
+                <SelectContent>
+                  {DASHBOARD_ACTIVITY_TYPE_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value} className="text-xs">
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="max-h-[min(70vh,720px)] space-y-2 overflow-y-auto pr-1">
               {recentActivity && recentActivity.length > 0 ? (
-                recentActivity.map((a, i) => (
+                recentActivity.map((a) => {
+                  const { className, Icon } = activityVisual(a.type);
+                  return (
                   <button
-                    key={`${a.type}-${a.createdAt}-${i}`}
+                    key={a.id}
                     type="button"
                     onClick={() => navigate(a.href)}
                     className="flex w-full items-center gap-3 rounded-lg p-2.5 text-left transition-colors hover:bg-muted/50"
                   >
-                    <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${
-                      a.type === 'factura' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600' :
-                      a.type === 'cita' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600' :
-                      'bg-pink-100 dark:bg-pink-900/30 text-pink-600'
-                    }`}>
-                      {a.type === 'factura' && <Receipt className="w-4 h-4" />}
-                      {a.type === 'cita' && <Calendar className="w-4 h-4" />}
-                      {a.type === 'cliente' && <Users className="w-4 h-4" />}
+                    <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${className}`}>
+                      <Icon className="h-4 w-4" />
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">{a.description}</p>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-foreground">{a.description}</p>
                       <p className="text-xs text-muted-foreground">{a.time}</p>
                     </div>
                   </button>
-                ))
+                  );
+                })
               ) : (
-                <div className="text-center py-6 text-muted-foreground">
-                  <Activity className="w-7 h-7 mx-auto mb-2 opacity-50" />
-                  <p className="text-sm">Sin actividad reciente</p>
+                <div className="py-6 text-center text-muted-foreground">
+                  <Activity className="mx-auto mb-2 h-7 w-7 opacity-50" />
+                  <p className="text-sm">
+                    {activityTypeFilter === 'all'
+                      ? 'Sin actividad reciente'
+                      : `Sin actividad reciente de ${activityFilterLabel.toLowerCase()}`}
+                  </p>
                 </div>
               )}
             </div>

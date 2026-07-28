@@ -20,6 +20,7 @@ import { EditAppointmentForm } from './EditAppointmentForm';
 import { AppointmentResourceConflictDialog } from './AppointmentResourceConflictDialog';
 import { fetchAgendaAppointmentsForDay } from '@/lib/agendaAppointmentsQuery';
 import { useAgendaAppointments } from '@/hooks/useAgendaAppointments';
+import { useAgendaEmployees } from '@/hooks/useAgendaEmployees';
 import { useAgendaInboundSyncRefetch } from '@/hooks/useAgendaInboundSyncRefetch';
 import { useCabinas, useRecursos } from '@/hooks/useRecursosCabinas';
 import { format, addDays, subDays, parse, isValid } from 'date-fns';
@@ -93,6 +94,7 @@ import {
   resolveAppointmentBillingIds,
 } from '@/lib/workCenterAudit';
 import { useRegisterTopBarContent } from '@/components/TopBarContentContext';
+import { useRoutePanelActive } from '@/contexts/RoutePanelContext';
 import { resolveAppointmentClientPick } from '@/lib/appointmentCustomerResolve';
 import {
   cancelAppointmentWithRefund,
@@ -136,9 +138,45 @@ const hexToTailwindBg = (hex: string, index: number): string => {
   return fallbacks[index % fallbacks.length];
 };
 
+function parseServiceFromDescription(
+  description: string,
+): { code: string; service: string; hourInText: string } {
+  const match = description.match(/\[(\d{1,2}:\d{2})\]\s*([^\s-]+)\s*-\s*(.+)$/);
+  if (!match) return { code: '', service: '', hourInText: '' };
+  return {
+    hourInText: match[1]?.trim() || '',
+    code: match[2]?.trim() || '',
+    service: match[3]?.trim() || '',
+  };
+}
+
+function normalizeAgendaTime(value?: string | null): string {
+  if (!value) return '';
+  const str = String(value);
+  if (str.includes('T')) {
+    const part = str.split('T')[1] || '';
+    const hh = part.substring(0, 2);
+    const mm = part.substring(3, 5);
+    if (/^\d{2}$/.test(hh) && /^\d{2}$/.test(mm)) return `${hh}:${mm}`;
+  }
+  const match = str.match(/^(\d{1,2}):(\d{2})/);
+  if (match) return `${match[1].padStart(2, '0')}:${match[2]}`;
+  return str.substring(0, 5);
+}
+
+function normalizeAgendaDate(
+  start: string | null | undefined,
+  legacyDate: string | null | undefined,
+  fallbackDateYmd: string,
+): string {
+  if (start && String(start).includes('T')) return String(start).split('T')[0];
+  return legacyDate ? String(legacyDate) : fallbackDateYmd;
+}
+
 export const Agenda: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const panelActive = useRoutePanelActive();
   const { user } = useAuth();
   const { requireOrToast: requirePermissionOrToast } = usePermissionGuard();
   const { companyId, loading: companyLoading } = useCompanyFilter();
@@ -181,6 +219,13 @@ export const Agenda: React.FC = () => {
   const selectedDateYmdRef = useRef(selectedDateYmd);
   selectedDateYmdRef.current = selectedDateYmd;
   const pendingOpenAppointmentIdRef = useRef<string | null>(null);
+  const invalidateSelectedAgendaDay = useCallback(async () => {
+    if (!opCompanyId) return;
+    await queryClient.invalidateQueries({
+      queryKey: ['agenda-appointments', selectedDateYmd, opCompanyId],
+      exact: true,
+    });
+  }, [opCompanyId, queryClient, selectedDateYmd]);
 
   const selectAgendaDate = useCallback(
     (d: Date, opts?: { syncUrl?: boolean }) => {
@@ -411,10 +456,10 @@ export const Agenda: React.FC = () => {
     updateAppointment,
     refetch: refetchAppointments,
   } = useAgendaAppointments(selectedDateYmd);
-  useAgendaInboundSyncRefetch(opCompanyId, refetchAppointments);
+  useAgendaInboundSyncRefetch(opCompanyId, refetchAppointments, selectedDateYmd, panelActive);
 
   useEffect(() => {
-    if (!opCompanyId || !selectedDateYmd) return;
+    if (!panelActive || !opCompanyId || !selectedDateYmd) return;
     const prefetchDay = (ymd: string) => {
       void queryClient.prefetchQuery({
         queryKey: ['agenda-appointments', ymd, opCompanyId],
@@ -426,7 +471,7 @@ export const Agenda: React.FC = () => {
     if (!isValid(base)) return;
     prefetchDay(format(subDays(base, 1), 'yyyy-MM-dd'));
     prefetchDay(format(addDays(base, 1), 'yyyy-MM-dd'));
-  }, [opCompanyId, queryClient, selectedDateYmd]);
+  }, [opCompanyId, panelActive, queryClient, selectedDateYmd]);
 
   const agendaAppointmentIds = useMemo(
     () => dbAppointments.map((a) => a.id).filter(Boolean),
@@ -597,13 +642,20 @@ export const Agenda: React.FC = () => {
   const agendaArticleHints = appointmentItemsPayload.articleHints;
   const billingIdsByAppt = appointmentItemsPayload.billingIdsByAppt;
 
-  // Map DB employees to grid employees with proper colors
-  const allEmployees: Employee[] = dbEmployees.map((emp, idx) => ({
-    id: emp.id,
-    name: emp.name,
-    color: hexToTailwindBg(emp.color || '#3B82F6', idx),
-    billing_company_id: emp.billing_company_id ?? null,
-  }));
+  // Map DB employees to grid employees with proper colors. Memoizado: se
+  // recalculaba en cada render del padre (p. ej. al abrir/cerrar diálogos)
+  // aunque `dbEmployees` no cambiara, generando nuevas referencias que
+  // invalidaban memos/comparadores aguas abajo (AgendaGrid, filtros).
+  const allEmployees: Employee[] = useMemo(
+    () =>
+      dbEmployees.map((emp, idx) => ({
+        id: emp.id,
+        name: emp.name,
+        color: hexToTailwindBg(emp.color || '#3B82F6', idx),
+        billing_company_id: emp.billing_company_id ?? null,
+      })),
+    [dbEmployees],
+  );
 
   const employees = useMemo(
     () =>
@@ -613,84 +665,54 @@ export const Agenda: React.FC = () => {
     [allEmployees, agendaBillingView, isMultiEntity],
   );
 
-  const parseServiceFromDescription = (
-    description: string
-  ): { code: string; service: string; hourInText: string } => {
-    // Legacy sample: "[16:00] 214 - ZONA L..."
-    const match = description.match(/\[(\d{1,2}:\d{2})\]\s*([^\s-]+)\s*-\s*(.+)$/);
-    if (!match) return { code: '', service: '', hourInText: '' };
-    return {
-      hourInText: match[1]?.trim() || '',
-      code: match[2]?.trim() || '',
-      service: match[3]?.trim() || '',
-    };
-  };
-
-  const normalizeTime = (value?: string | null): string => {
-    if (!value) return '';
-    const str = String(value);
-    if (str.includes('T')) {
-      const part = str.split('T')[1] || '';
-      const hh = part.substring(0, 2);
-      const mm = part.substring(3, 5);
-      if (/^\d{2}$/.test(hh) && /^\d{2}$/.test(mm)) return `${hh}:${mm}`;
-    }
-    const m = str.match(/^(\d{1,2}):(\d{2})/);
-    if (m) return `${m[1].padStart(2, '0')}:${m[2]}`;
-    return str.substring(0, 5);
-  };
-
-  const normalizeDate = (start?: string | null, legacyDate?: string | null): string => {
-    if (start && String(start).includes('T')) return String(start).split('T')[0];
-    return legacyDate ? String(legacyDate) : format(selectedDate, 'yyyy-MM-dd');
-  };
-
   // Map appointments (schema moderno + legado)
-  const appointments: Appointment[] = dbAppointments.map((apt) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const row: any = apt;
-    const description = repairStyleText(row.description || '');
-    const parsedService = parseServiceFromDescription(description);
-    const clientName = repairStyleText(row.client_name || row.title || '');
-    const startTime = normalizeTime(row.start_time);
-    const endTime = normalizeTime(row.end_time);
-    const itemDrafts = appointmentItemsByAppt[row.id] || [];
-    const timeSegments = buildAppointmentTimeSegments(startTime, itemDrafts, recursoCatalog, {
-      recursos: recursoCatalog,
-      cabinas: cabinaCatalog,
-      articleHints: agendaArticleHints,
+  const appointments: Appointment[] = useMemo(() => {
+    return dbAppointments.map((apt) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const row: any = apt;
+      const description = repairStyleText(row.description || '');
+      const parsedService = parseServiceFromDescription(description);
+      const clientName = repairStyleText(row.client_name || row.title || '');
+      const startTime = normalizeAgendaTime(row.start_time);
+      const endTime = normalizeAgendaTime(row.end_time);
+      const itemDrafts = appointmentItemsByAppt[row.id] || [];
+      const timeSegments = buildAppointmentTimeSegments(startTime, itemDrafts, recursoCatalog, {
+        recursos: recursoCatalog,
+        cabinas: cabinaCatalog,
+        articleHints: agendaArticleHints,
+      });
+      const occupiedEndTime = occupiedEndTimeFromItems(startTime, itemDrafts);
+      const paymentOnlyLabels = itemDrafts
+        .filter((it) => !it.occupies_time || Number(it.duration_minutes || 0) <= 0)
+        .map((it) => (it.label || '').trim())
+        .filter(Boolean);
+      const aptStatus = (['confirmed', 'pending', 'cancelled'].includes(row.status) ? row.status : 'pending') as Appointment['status'];
+      return {
+        id: row.id,
+        employeeId: row.employee_id || '',
+        clientName,
+        customerId: row.customer_id ?? null,
+        description,
+        serviceCode: parsedService.code,
+        serviceName: parsedService.service,
+        legacyEmployeeCode: row.legacy_codemp || undefined,
+        legacyClientCode: row.legacy_codcli || undefined,
+        legacyPlanincId: row.legacy_planinc_id ?? null,
+        legacyHourInText: parsedService.hourInText || undefined,
+        startTime,
+        endTime,
+        timeSegments,
+        occupiedEndTime,
+        paymentOnlyLabels,
+        date: normalizeAgendaDate(row.start_time, row.appointment_date, selectedDateYmd),
+        color: row.color || '#3B82F6',
+        totalAmount: undefined,
+        paymentStatus: aptStatus === 'cancelled' ? 'none' : undefined,
+        status: aptStatus,
+        attachments: undefined,
+      };
     });
-    const occupiedEndTime = occupiedEndTimeFromItems(startTime, itemDrafts);
-    const paymentOnlyLabels = itemDrafts
-      .filter((it) => !it.occupies_time || Number(it.duration_minutes || 0) <= 0)
-      .map((it) => (it.label || '').trim())
-      .filter(Boolean);
-    const aptStatus = (['confirmed', 'pending', 'cancelled'].includes(row.status) ? row.status : 'pending') as Appointment['status'];
-    return {
-      id: row.id,
-      employeeId: row.employee_id || '',
-      clientName,
-      customerId: row.customer_id ?? null,
-      description,
-      serviceCode: parsedService.code,
-      serviceName: parsedService.service,
-      legacyEmployeeCode: row.legacy_codemp || undefined,
-      legacyClientCode: row.legacy_codcli || undefined,
-      legacyPlanincId: row.legacy_planinc_id ?? null,
-      legacyHourInText: parsedService.hourInText || undefined,
-      startTime,
-      endTime,
-      timeSegments,
-      occupiedEndTime,
-      paymentOnlyLabels,
-      date: normalizeDate(row.start_time, row.appointment_date),
-      color: row.color || '#3B82F6',
-      totalAmount: undefined,
-      paymentStatus: aptStatus === 'cancelled' ? 'none' : undefined,
-      status: aptStatus,
-      attachments: undefined,
-    };
-  });
+  }, [agendaArticleHints, appointmentItemsByAppt, cabinaCatalog, dbAppointments, recursoCatalog, selectedDateYmd]);
 
   const openAppointmentById = useCallback(
     (appointmentId: string, dateYmd: string) => {
@@ -741,16 +763,28 @@ export const Agenda: React.FC = () => {
     );
   }, [appointments, location.pathname, location.search, navigate]);
 
-  const effectiveSelectedIds = preferences.visibleEmployeeIds.length
-    ? preferences.visibleEmployeeIds
-    : employees.map((e) => e.id);
-  const filteredEmployees = employees.filter((e) => effectiveSelectedIds.includes(e.id));
-  const filteredAppointments = appointments.filter((apt) => {
-    if (!effectiveSelectedIds.includes(apt.employeeId)) return false;
-    if (!isMultiEntity || agendaBillingView === 'all') return true;
-    const billingIds = billingIdsByAppt[apt.id] ?? [];
-    return appointmentVisibleInBillingView(billingIds, agendaBillingView);
-  });
+  // Memoizados: sin esto, cada render del padre (drag over, hover, toasts...)
+  // recreaba `filteredAppointments`/`filteredEmployees` con nueva identidad y
+  // obligaba a `AgendaGrid` a recomputar su firma de citas aunque los datos
+  // reales del día no hubieran cambiado.
+  const effectiveSelectedIds = useMemo(
+    () => (preferences.visibleEmployeeIds.length ? preferences.visibleEmployeeIds : employees.map((e) => e.id)),
+    [preferences.visibleEmployeeIds, employees],
+  );
+  const filteredEmployees = useMemo(
+    () => employees.filter((e) => effectiveSelectedIds.includes(e.id)),
+    [employees, effectiveSelectedIds],
+  );
+  const filteredAppointments = useMemo(
+    () =>
+      appointments.filter((apt) => {
+        if (!effectiveSelectedIds.includes(apt.employeeId)) return false;
+        if (!isMultiEntity || agendaBillingView === 'all') return true;
+        const billingIds = billingIdsByAppt[apt.id] ?? [];
+        return appointmentVisibleInBillingView(billingIds, agendaBillingView);
+      }),
+    [appointments, effectiveSelectedIds, isMultiEntity, agendaBillingView, billingIdsByAppt],
+  );
 
   const topBarActions = useMemo(() => (
     <>
@@ -1387,8 +1421,9 @@ export const Agenda: React.FC = () => {
     }
     try {
       await deleteOpenAppointment(appointmentId);
-      await queryClient.invalidateQueries({ queryKey: ['agenda-appointments'] });
+      await invalidateSelectedAgendaDay();
       await queryClient.invalidateQueries({ queryKey: ['audit_events'] });
+      await queryClient.invalidateQueries({ queryKey: ['dashboard-recent-activity'] });
       toast({
         title: 'Cita eliminada',
         description: 'El borrado quedó registrado en el historial de actividad.',
@@ -1431,9 +1466,10 @@ export const Agenda: React.FC = () => {
         variant: toastMsg.variant,
       });
 
-      await queryClient.invalidateQueries({ queryKey: ['agenda-appointments'] });
+      await invalidateSelectedAgendaDay();
       await queryClient.invalidateQueries({ queryKey: ['appointment-sales', appointmentId] });
       await queryClient.invalidateQueries({ queryKey: ['audit_events'] });
+      await queryClient.invalidateQueries({ queryKey: ['dashboard-recent-activity'] });
 
       const items = appointmentItemsByAppt[appointmentId] ?? (await fetchAppointmentItems(appointmentId, companyId || undefined));
       setShowEditForm(false);

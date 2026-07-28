@@ -7,7 +7,7 @@ export type DunasoftSyncStatus = {
   pending_outbox: number;
 };
 
-export function useDunasoftSyncStatus(pollMs = 30_000) {
+export function useDunasoftSyncStatus(pollMs = 30_000, enabled = true) {
   return useQuery({
     queryKey: ['dunasoft-sync-status'],
     queryFn: async (): Promise<DunasoftSyncStatus> => {
@@ -20,7 +20,8 @@ export function useDunasoftSyncStatus(pollMs = 30_000) {
         pending_outbox: Number(row.pending_outbox ?? 0),
       };
     },
-    refetchInterval: pollMs,
+    enabled,
+    refetchInterval: enabled ? pollMs : false,
     staleTime: 10_000,
   });
 }

@@ -111,6 +111,16 @@ export const useAgendaAppointments = (date?: string) => {
   const { companyId } = useCompanyFilter();
   const { operationalCompanyId, loading: wcLoading } = useWorkCenter();
   const scopeCompanyId = operationalCompanyId ?? companyId;
+  const invalidateAffectedDays = (changedDate?: string | null) => {
+    if (!scopeCompanyId) return;
+    const dates = new Set([date, changedDate].filter((value): value is string => Boolean(value)));
+    for (const affectedDate of dates) {
+      void queryClient.invalidateQueries({
+        queryKey: ['agenda-appointments', affectedDate, scopeCompanyId],
+        exact: true,
+      });
+    }
+  };
 
   const {
     data: appointments = [],
@@ -150,8 +160,11 @@ export const useAgendaAppointments = (date?: string) => {
       if (error) throw error;
       return data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['agenda-appointments'] });
+    onSuccess: (created) => {
+      invalidateAffectedDays(
+        ymdFromStartTime((created as Record<string, unknown> | null)?.appointment_date) ||
+          ymdFromStartTime((created as Record<string, unknown> | null)?.start_time),
+      );
       toast({
         title: 'Cita creada',
         description: 'La cita ha sido creada exitosamente.',
@@ -190,8 +203,11 @@ export const useAgendaAppointments = (date?: string) => {
       if (error) throw error;
       return data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['agenda-appointments'] });
+    onSuccess: (updated) => {
+      invalidateAffectedDays(
+        ymdFromStartTime((updated as Record<string, unknown> | null)?.appointment_date) ||
+          ymdFromStartTime((updated as Record<string, unknown> | null)?.start_time),
+      );
       toast({
         title: 'Cita actualizada',
         description: 'La cita ha sido actualizada exitosamente.',
@@ -217,7 +233,7 @@ export const useAgendaAppointments = (date?: string) => {
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['agenda-appointments'] });
+      invalidateAffectedDays();
       toast({
         title: 'Cita eliminada',
         description: 'La cita ha sido eliminada exitosamente.',

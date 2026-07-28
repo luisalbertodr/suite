@@ -431,7 +431,10 @@ export const useMarketingLeads = (scopeCompanyId?: string | null) => {
     },
   });
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['marketing-leads', companyId] });
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ['marketing-leads', companyId] });
+    queryClient.invalidateQueries({ queryKey: ['dashboard-recent-activity'] });
+  };
 
   const updateLead = useMutation({
     mutationFn: async (input: { id: string; values: MarketingLeadUpdate }) => {

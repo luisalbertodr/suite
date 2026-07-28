@@ -19,7 +19,10 @@ import {
   DunasoftAppointmentForm,
   type DunasoftAppointmentFormValues,
 } from '@/components/DunasoftAppointmentForm';
-import { useDunasoftAgendaDay } from '@/hooks/useDunasoftAgendaDay';
+import {
+  useDunasoftAgendaDay,
+  usePrefetchAdjacentDunasoftAgendaDays,
+} from '@/hooks/useDunasoftAgendaDay';
 import { useDunasoftAppointmentMutations } from '@/hooks/useDunasoftAppointmentMutations';
 import { useDunasoftSyncStatus } from '@/hooks/useDunasoftSyncStatus';
 import { useStyleSyncAgentStatus } from '@/hooks/useStyleSyncAgentStatus';
@@ -53,6 +56,7 @@ import { TreatmentSessionDialog } from '@/components/clinical/TreatmentSessionDi
 import type { TrackingFamily } from '@/lib/treatmentTracking';
 import { createQuestionnaire, openQuestionnaireKiosk } from '@/lib/questionnaireApi';
 import { useToast } from '@/hooks/use-toast';
+import { useRoutePanelActive } from '@/contexts/RoutePanelContext';
 
 function appointmentToFormValues(apt: Appointment): Partial<DunasoftAppointmentFormValues> {
   const endTime =
@@ -83,6 +87,7 @@ export const DunasoftAgenda: React.FC = () => {
   const { requireOrToast: requirePermissionOrToast, can: canPermission } = usePermissionGuard();
   const navigate = useNavigate();
   const location = useLocation();
+  const panelActive = useRoutePanelActive();
 
   const [selectedDate, setSelectedDate] = useState(() => {
     const params = new URLSearchParams(location.search);
@@ -137,22 +142,29 @@ export const DunasoftAgenda: React.FC = () => {
     saveAgendaViewPersisted(user.id, mergePersistedLastDate(prev, selectedDateYmd));
   }, [user?.id, selectedDateYmd]);
 
-  const { data, isLoading, isError, error, refetch, isFetching, isDayLoading, isDayRefreshing } =
-    useDunasoftAgendaDay(selectedDateYmd, companyId);
-  useAgendaInboundSyncRefetch(companyId, refetch, selectedDateYmd);
+  const { data, isLoading, isError, error, refetch, isFetching, isDayLoading } =
+    useDunasoftAgendaDay(selectedDateYmd, companyId, panelActive);
+  usePrefetchAdjacentDunasoftAgendaDays(selectedDateYmd, companyId, panelActive);
+  useAgendaInboundSyncRefetch(companyId, refetch, selectedDateYmd, panelActive);
   const showInitialSkeleton = isLoading && !data;
-  const { createMutation, updateMutation, deleteMutation } = useDunasoftAppointmentMutations(selectedDateYmd);
-  const { data: syncStatus } = useDunasoftSyncStatus(20_000);
-  const { data: styleSync } = useStyleSyncAgentStatus(companyId, 25_000);
+  const { createMutation, updateMutation, deleteMutation } = useDunasoftAppointmentMutations(
+    selectedDateYmd,
+    companyId,
+  );
+  const { data: syncStatus } = useDunasoftSyncStatus(20_000, panelActive);
+  const { data: styleSync } = useStyleSyncAgentStatus(companyId, 25_000, panelActive);
 
   const syncBadge = useMemo(
     () => buildAgendaSyncBadge(syncStatus, styleSync),
     [syncStatus, styleSync],
   );
 
-  const employees = data?.employees ?? [];
-  const appointments = data?.appointments ?? [];
-  const employeeAgendaById = data?.employeeAgendaById ?? {};
+  const employees = useMemo(() => data?.employees ?? [], [data?.employees]);
+  const appointments = useMemo(() => data?.appointments ?? [], [data?.appointments]);
+  const employeeAgendaById = useMemo(
+    () => data?.employeeAgendaById ?? {},
+    [data?.employeeAgendaById],
+  );
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -410,7 +422,7 @@ export const DunasoftAgenda: React.FC = () => {
       ) : (
         <div
           className={`flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border/60 bg-card transition-opacity duration-150 ${
-            isDayLoading || isDayRefreshing ? 'opacity-60 pointer-events-none' : ''
+            isDayLoading ? 'opacity-60' : ''
           }`}
         >
           <AgendaGrid
