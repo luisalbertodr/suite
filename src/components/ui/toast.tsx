@@ -4,6 +4,7 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { ABOVE_TOP_BANNER_Z } from "@/lib/dialogLayers"
 
 const ToastProvider = ToastPrimitives.Provider
 
@@ -14,7 +15,8 @@ const ToastViewport = React.forwardRef<
   <ToastPrimitives.Viewport
     ref={ref}
     className={cn(
-      "fixed top-14 left-1/2 z-[280] flex w-full max-w-lg -translate-x-1/2 flex-col gap-2 p-4 pointer-events-none",
+      "fixed top-14 left-1/2 flex w-full max-w-lg -translate-x-1/2 flex-col gap-2 p-4 pointer-events-none",
+      ABOVE_TOP_BANNER_Z,
       className
     )}
     {...props}

@@ -25,7 +25,8 @@ export const useCustomerLookup = (): {
       const { data, error } = await supabase
         .from('customers')
         .select('id, name, email, phone, phone_mobile, phone_home')
-        .eq('company_id', companyId);
+        .eq('company_id', companyId)
+        .is('archived_at', null);
       if (error) throw error;
       return data ?? [];
     },

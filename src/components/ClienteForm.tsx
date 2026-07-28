@@ -8,6 +8,7 @@ import { useForm } from 'react-hook-form';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { useWorkCenter } from '@/hooks/useWorkCenter';
 import { useCustomerAdvanced } from '@/hooks/useCustomerAdvanced';
+import { findExistingCustomerDuplicate } from '@/lib/customerDuplicateCheck';
 import { ClienteDatosTab } from './cliente/ClienteDatosTab';
 import { ClienteHistorialTab } from './cliente/ClienteHistorialTab';
 import { ClienteCitasTab } from './cliente/ClienteCitasTab';
@@ -158,6 +159,20 @@ export const ClienteForm: React.FC<ClienteFormProps> = ({ customer, onClose }) =
         if (error) throw error;
         savedCustomerId = customer.id;
       } else {
+        const dup = await findExistingCustomerDuplicate(catalogCompanyId, {
+          name: data.name,
+          phone: data.phone,
+          taxId: data.tax_id,
+        });
+        if (dup) {
+          const via =
+            dup.match === 'phone' ? 'teléfono' : dup.match === 'tax_id' ? 'DNI/NIF' : 'nombre';
+          throw Object.assign(new Error(`Ya existe «${dup.name}» con el mismo ${via}.`), {
+            code: 'CUSTOMER_DUPLICATE',
+            existingId: dup.id,
+            existingName: dup.name,
+          });
+        }
         const { data: newData, error } = await supabase.from('customers').insert([customerData]).select();
         if (error) throw error;
         savedCustomerId = newData[0].id;
@@ -177,7 +192,17 @@ export const ClienteForm: React.FC<ClienteFormProps> = ({ customer, onClose }) =
       onClose();
     },
     onError: (error) => {
-      const e = error as { code?: string; message?: string };
+      const e = error as { code?: string; message?: string; existingName?: string };
+      if (e?.code === 'CUSTOMER_DUPLICATE') {
+        toast({
+          title: 'Cliente ya existe',
+          description:
+            e.message ||
+            'Busca la ficha existente en lugar de crear una nueva (mismo teléfono, DNI o nombre).',
+          variant: 'destructive',
+        });
+        return;
+      }
       if (e?.code === '23505') {
         toast({
           title: 'Teléfono duplicado',

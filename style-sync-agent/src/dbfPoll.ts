@@ -17,7 +17,7 @@ import type { EntityEngineDeps, EntityHandler } from "./entitySync.js";
 const FINGERPRINT_FIELDS: Record<string, string[]> = {
   clientes: [
     "nomcli", "ape1cli", "ape2cli", "tel1cli", "tel2cli", "email", "dnicli",
-    "dircli", "codposcli", "pobcli", "procli", "pais", "percon", "obscli", "obsoleto",
+    "dircli", "codposcli", "pobcli", "procli", "pais", "percon", "obscli", "altura", "obsoleto",
   ],
   articulos: ["desart", "familia1", "pvpa", "coste", "stock", "ivaart", "tiempo", "obsoleto"],
   bonoscli: ["codcli", "codbon", "desbon", "sesiones", "consumi", "importe", "obsoleto"],

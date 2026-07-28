@@ -258,6 +258,9 @@ export const ClienteDetailView: React.FC<Props> = ({
                 taxId={mergedCustomer?.tax_id}
                 companyId={mergedCustomer?.company_id}
                 customerName={mergedCustomer?.name}
+                heightCm={mergedCustomer?.height_cm}
+                birthDate={mergedCustomer?.birth_date}
+                clinicalProfile={mergedCustomer?.clinical_profile}
                 compact={compact}
               />
             ) : null}

@@ -73,12 +73,12 @@ interface Props {
 }
 
 const AckIcon: React.FC<{ ack: number }> = ({ ack }) => {
-  if (ack <= 0) return <Clock className="h-3.5 w-3.5 text-emerald-50/70" aria-label="Pendiente" />;
-  if (ack === 1) return <Check className="h-3.5 w-3.5 text-emerald-50/80" aria-label="Enviado" />;
-  if (ack === 2) return <CheckCheck className="h-3.5 w-3.5 text-emerald-50/80" aria-label="Entregado" />;
+  if (ack <= 0) return <Clock className="h-3.5 w-3.5 text-[#667781]" aria-label="Pendiente" />;
+  if (ack === 1) return <Check className="h-3.5 w-3.5 text-[#667781]" aria-label="Enviado" />;
+  if (ack === 2) return <CheckCheck className="h-3.5 w-3.5 text-[#667781]" aria-label="Entregado" />;
   if (ack === 3 || ack === 4)
-    return <CheckCheck className="h-3.5 w-3.5 text-sky-300" aria-label="Leído" />;
-  return <AlertCircle className="h-3.5 w-3.5 text-rose-200" aria-label="Error" />;
+    return <CheckCheck className="h-3.5 w-3.5 text-[#53bdeb]" aria-label="Leído" />;
+  return <AlertCircle className="h-3.5 w-3.5 text-rose-500" aria-label="Error" />;
 };
 
 function QuoteBlock({ preview, isOut }: { preview: string; isOut: boolean }) {
@@ -230,10 +230,12 @@ function MediaContent({ message }: { message: WhatsappMessageRow }) {
     [message.raw],
   );
   const providerMediaHint = hasWhatsappProviderMediaHint(message);
+  const isMediaMessage =
+    type !== 'text' && type !== 'chat' && type !== 'revoked' && type !== 'unknown';
   const canDownload =
     !!embedded ||
     !!wahaDirectUrl ||
-    (!!(mediaMessageId && downloadChatId) && providerMediaHint);
+    (!!(mediaMessageId && downloadChatId) && (providerMediaHint || isMediaMessage));
 
   const prefetched = mediaMessageId ? getPrefetchMedia(mediaMessageId) : null;
 
@@ -294,12 +296,6 @@ function MediaContent({ message }: { message: WhatsappMessageRow }) {
     if (isWhatsappMediaUnavailable(cacheKey)) {
       setLoadFailed(true);
       setExpiredMedia(true);
-      return;
-    }
-    if (!providerMediaHint && !embedded && !wahaDirectUrl) {
-      setLoadFailed(true);
-      setExpiredMedia(true);
-      if (cacheKey) markWhatsappMediaUnavailable(cacheKey);
       return;
     }
     if (embedded) {
@@ -396,6 +392,11 @@ function MediaContent({ message }: { message: WhatsappMessageRow }) {
                 ? 'h-32 w-32 object-contain'
                 : 'max-h-80 w-auto max-w-full rounded-md'
             }
+            onError={() => {
+              setObjectUrl(null);
+              setLoadFailed(true);
+              if (isStorageUrl) setExpiredMedia(true);
+            }}
           />
         ) : !canDownload && type === 'sticker' ? (
           <div
@@ -429,6 +430,10 @@ function MediaContent({ message }: { message: WhatsappMessageRow }) {
             controls
             preload="metadata"
             className="max-h-80 w-auto max-w-full rounded-md"
+            onError={() => {
+              setObjectUrl(null);
+              setLoadFailed(true);
+            }}
           />
         ) : loadFailed ? (
           <MediaPlaceholder label="No se pudo cargar el vídeo" className="h-40 w-60" onRetry={retry} />
@@ -661,7 +666,7 @@ export const WhatsappMessageBubble: React.FC<Props> = ({
             textLine
           ) : (
             <span className="text-zinc-400 dark:text-zinc-500 italic">
-              Sin texto (revisa que el webhook esté actualizado)
+              Mensaje sin texto
             </span>
           )}
         </p>

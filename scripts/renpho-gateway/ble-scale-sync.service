@@ -1,0 +1,22 @@
+[Unit]
+Description=BLE Scale Sync (MorphoScan → Suite scale-ingest)
+After=network-online.target bluetooth.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/renpho-gateway/ble-scale-sync
+EnvironmentFile=-/root/renpho-gateway/ble-scale-sync/.env
+Environment=CONTINUOUS_MODE=true
+Environment=PATH=/root/renpho-gateway/ble-scale-sync/venv/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/npm start
+Restart=always
+RestartSec=5
+# node-ble acumula match rules de D-Bus; reciclar el proceso limpia la conexión.
+RuntimeMaxSec=3600
+# Bluetooth / D-Bus
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+
+[Install]
+WantedBy=multi-user.target

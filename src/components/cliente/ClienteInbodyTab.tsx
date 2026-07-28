@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { Activity, ChevronDown } from 'lucide-react';
+import { Activity, ChevronDown, Loader2, Scale, X } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
 import {
   Select,
   SelectContent,
@@ -11,33 +12,67 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { useInbodyMeasurements } from '@/hooks/useInbodyMeasurements';
 import {
+  SCALE_WEIGH_TTL_SECONDS,
+  useActiveScaleWeighRequest,
+  useCancelScaleWeighRequest,
+  useStartScaleWeighRequest,
+} from '@/hooks/useScaleWeighRequest';
+import { useToast } from '@/hooks/use-toast';
+import { useQueryClient } from '@tanstack/react-query';
+import { supabase } from '@/lib/supabase';
+import {
+  dniMatchKeys,
   formatInbodyNumber,
-  hasMorphoScanExtras,
   inbodySexLabel,
+  isMorphoScanMeasurement,
   scaleDeviceFromMeasurement,
   scaleDeviceLabel,
   type InbodyMeasurement,
 } from '@/lib/inbodyMeasurements';
-import { resolveInbodyDataQuality } from '@/lib/inbodyQuality';
-import { InbodyQualityAlert } from './inbody/InbodyQualityAlert';
+import {
+  ageYearsFromBirthDate,
+  buildScaleProfileSnapshot,
+  mergeClinicalSex,
+  missingScaleProfileFields,
+  sexFromClinicalProfile,
+  type ScaleSex,
+} from '@/lib/scaleWeighProfile';
+import { ABOVE_TOP_BANNER_Z } from '@/lib/dialogLayers';
+import { InbodyQualityWarningIcon } from './inbody/InbodyQualityAlert';
 import { InbodyMetricRow, InbodyRangeBar } from './inbody/InbodyRangeBar';
 import { InbodyCompositionRangeGroup } from './inbody/InbodyCompositionRangeGroup';
 import { InbodyHistoryChart } from './inbody/InbodyHistoryChart';
 import { InbodyCompositionEvolutionChart } from './inbody/InbodyCompositionEvolutionChart';
 import { InbodySegmentalSilhouette } from './inbody/InbodySegmentalSilhouette';
 import { InbodyReportExport } from './inbody/InbodyReportExport';
+import { MorphoScanMeasurementReport } from './inbody/MorphoScanMeasurementReport';
+import { MorphoScanReportExport } from './inbody/MorphoScanReportExport';
 import { InbodyNutritionPanel } from './inbody/InbodyNutritionPanel';
 import { InbodyMetricHelp, InbodySectionHelp } from './inbody/InbodyMetricHelp';
 import { InbodyCsvImportPanel } from '@/components/InbodyCsvImportPanel';
 import { Badge } from '@/components/ui/badge';
+import { cn } from '@/lib/utils';
 
 interface Props {
   customerId: string;
   taxId?: string | null;
   companyId?: string | null;
   customerName?: string | null;
+  heightCm?: number | null;
+  birthDate?: string | null;
+  clinicalProfile?: unknown;
   compact?: boolean;
 }
 
@@ -96,85 +131,363 @@ function ImpedanceTable({ measurement }: { measurement: InbodyMeasurement }) {
   );
 }
 
-function sessionLabel(m: InbodyMeasurement, index: number, total: number, all: InbodyMeasurement[]): string {
+function sessionLabel(m: InbodyMeasurement, index: number, total: number): string {
   const device = scaleDeviceLabel(scaleDeviceFromMeasurement(m));
   const date = format(new Date(m.measured_at), 'dd/MM/yyyy HH:mm', { locale: es });
   const weight = m.weight_kg != null ? formatInbodyNumber(m.weight_kg, 1, ' kg') : 'sin peso';
   const pbf = m.pbf_pct != null ? ` · PGC ${formatInbodyNumber(m.pbf_pct, 1, '%')}` : '';
-  const q = resolveInbodyDataQuality(m, all);
-  const warn = q.needs_repeat ? ' ⚠' : '';
-  return `${total - index}. [${device}] ${date} · ${weight}${pbf}${warn}`;
+  return `${total - index}. [${device}] ${date} · ${weight}${pbf}`;
 }
 
-function MorphoScanExtrasCard({ measurement }: { measurement: InbodyMeasurement }) {
-  if (!hasMorphoScanExtras(measurement)) return null;
+function useWeighCountdown(expiresAt: string | null | undefined): number {
+  const [left, setLeft] = useState(0);
+  useEffect(() => {
+    if (!expiresAt) {
+      setLeft(0);
+      return;
+    }
+    const tick = () => {
+      const ms = new Date(expiresAt).getTime() - Date.now();
+      setLeft(Math.max(0, Math.ceil(ms / 1000)));
+    };
+    tick();
+    const id = window.setInterval(tick, 500);
+    return () => window.clearInterval(id);
+  }, [expiresAt]);
+  return left;
+}
 
-  const rows: { label: string; value: string }[] = [];
-  if (measurement.bone_mass_kg != null) {
-    rows.push({ label: 'Masa ósea', value: formatInbodyNumber(measurement.bone_mass_kg, 1, ' kg') });
-  }
-  if (measurement.protein_mass_kg != null) {
-    rows.push({ label: 'Proteína', value: formatInbodyNumber(measurement.protein_mass_kg, 1, ' kg') });
-  }
-  if (measurement.protein_pct != null) {
-    rows.push({ label: 'Proteína %', value: formatInbodyNumber(measurement.protein_pct, 1, '%') });
-  }
-  if (measurement.body_water_pct != null) {
-    rows.push({ label: 'Agua %', value: formatInbodyNumber(measurement.body_water_pct, 1, '%') });
-  }
-  if (measurement.visceral_fat_index != null) {
-    rows.push({
-      label: 'Grasa visceral',
-      value: formatInbodyNumber(measurement.visceral_fat_index, 0),
+function ScaleWeighNowControls({
+  customerId,
+  taxId,
+  companyId,
+  customerName,
+  heightCm,
+  birthDate,
+  clinicalProfile,
+  compact,
+}: {
+  customerId: string;
+  taxId?: string | null;
+  companyId?: string | null;
+  customerName?: string | null;
+  heightCm?: number | null;
+  birthDate?: string | null;
+  clinicalProfile?: unknown;
+  compact?: boolean;
+}) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const { data: active, isLoading } = useActiveScaleWeighRequest(companyId, customerId);
+  const start = useStartScaleWeighRequest();
+  const cancel = useCancelScaleWeighRequest();
+  const toastedMeasurementRef = React.useRef<string | null>(null);
+  const secondsLeft = useWeighCountdown(
+    active?.status === 'open' ? active.expires_at : null,
+  );
+
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [formHeight, setFormHeight] = useState('');
+  const [formBirth, setFormBirth] = useState('');
+  const [formSex, setFormSex] = useState<ScaleSex | ''>('');
+
+  useEffect(() => {
+    if (active?.status !== 'fulfilled' || !active.measurement_id || !companyId) return;
+    const key = active.measurement_id;
+    if (toastedMeasurementRef.current === key) return;
+    toastedMeasurementRef.current = key;
+    const taxKeys = taxId ? dniMatchKeys(taxId) : [];
+    void queryClient.invalidateQueries({
+      queryKey: ['inbody_measurements', companyId, customerId, taxKeys.join('|')],
     });
-  }
-  if (measurement.subcutaneous_fat_pct != null) {
-    rows.push({
-      label: 'Grasa subcutánea',
-      value: formatInbodyNumber(measurement.subcutaneous_fat_pct, 1, '%'),
+    void queryClient.invalidateQueries({
+      queryKey: ['scale_weigh_request', companyId, customerId],
     });
+    toast({
+      title: 'Medición recibida',
+      description:
+        active.matched_weight_kg != null
+          ? `Peso ${formatInbodyNumber(active.matched_weight_kg, 1, ' kg')} vinculado a este cliente.`
+          : 'La medición MorphoScan se ha vinculado a este cliente.',
+    });
+  }, [active?.status, active?.measurement_id, active?.matched_weight_kg, companyId, customerId, taxId, queryClient, toast]);
+
+  const beginWeigh = (snapshot: {
+    height_cm: number;
+    age_years: number;
+    sex: ScaleSex;
+    profile_name: string;
+  }) => {
+    if (!companyId) return;
+    start.mutate(
+      {
+        companyId,
+        customerId,
+        heightCm: snapshot.height_cm,
+        ageYears: snapshot.age_years,
+        sex: snapshot.sex,
+        profileName: snapshot.profile_name,
+      },
+      {
+        onSuccess: () => {
+          toast({
+            title: 'Esperando báscula',
+            description: `Sube el paciente a la MorphoScan en los próximos ${Math.round(SCALE_WEIGH_TTL_SECONDS / 60)} minutos.`,
+          });
+        },
+        onError: (e: Error) =>
+          toast({
+            title: 'No se pudo iniciar',
+            description: e.message,
+            variant: 'destructive',
+          }),
+      },
+    );
+  };
+
+  const openProfileDialog = () => {
+    setFormHeight(heightCm != null && heightCm > 0 ? String(heightCm) : '');
+    setFormBirth(birthDate ? birthDate.slice(0, 10) : '');
+    setFormSex(sexFromClinicalProfile(clinicalProfile) ?? '');
+    setProfileOpen(true);
+  };
+
+  const onClickWeighNow = () => {
+    if (!companyId) return;
+    const missing = missingScaleProfileFields({
+      heightCm,
+      birthDate,
+      clinicalProfile,
+    });
+    if (missing.length > 0) {
+      openProfileDialog();
+      return;
+    }
+    try {
+      const snap = buildScaleProfileSnapshot({
+        heightCm: Number(heightCm),
+        birthDate: String(birthDate),
+        sex: sexFromClinicalProfile(clinicalProfile)!,
+        name: customerName,
+      });
+      beginWeigh(snap);
+    } catch (e) {
+      toast({
+        title: 'Datos incompletos',
+        description: e instanceof Error ? e.message : 'Revisa altura, edad y sexo.',
+        variant: 'destructive',
+      });
+      openProfileDialog();
+    }
+  };
+
+  const confirmProfileAndWeigh = async () => {
+    if (!companyId) return;
+    const height = Number(formHeight.replace(',', '.'));
+    if (!(height >= 100 && height <= 230)) {
+      toast({
+        title: 'Altura inválida',
+        description: 'Introduce la altura en cm (100–230).',
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (!formBirth || ageYearsFromBirthDate(formBirth) == null) {
+      toast({
+        title: 'Fecha inválida',
+        description: 'Introduce la fecha de nacimiento.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (formSex !== 'M' && formSex !== 'F') {
+      toast({
+        title: 'Sexo requerido',
+        description: 'Selecciona hombre o mujer (necesario para la composición corporal).',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setSavingProfile(true);
+    try {
+      const snap = buildScaleProfileSnapshot({
+        heightCm: height,
+        birthDate: formBirth,
+        sex: formSex,
+        name: customerName,
+      });
+      const { error } = await supabase
+        .from('customers')
+        .update({
+          height_cm: snap.height_cm,
+          birth_date: snap.birth_date,
+          clinical_profile: mergeClinicalSex(clinicalProfile, snap.sex) as any,
+        })
+        .eq('id', customerId)
+        .eq('company_id', companyId);
+      if (error) throw error;
+
+      void queryClient.invalidateQueries({ queryKey: ['customer_detail', customerId] });
+      setProfileOpen(false);
+      beginWeigh(snap);
+    } catch (e) {
+      toast({
+        title: 'No se pudo guardar el perfil',
+        description: e instanceof Error ? e.message : 'Error desconocido',
+        variant: 'destructive',
+      });
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const profileDialog = (
+    <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
+      <DialogContent className="sm:max-w-md" overlayClassName={ABOVE_TOP_BANNER_Z}>
+        <DialogHeader>
+          <DialogTitle>Datos para la báscula</DialogTitle>
+          <DialogDescription>
+            La MorphoScan necesita altura, edad y sexo para calcular la composición corporal.
+            Se guardarán en la ficha del cliente.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-3 py-2">
+          <div className="grid gap-1.5">
+            <Label htmlFor="scale-height">Altura (cm)</Label>
+            <Input
+              id="scale-height"
+              type="number"
+              min={100}
+              max={230}
+              step={0.1}
+              value={formHeight}
+              onChange={(e) => setFormHeight(e.target.value)}
+              placeholder="170"
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="scale-birth">Fecha de nacimiento</Label>
+            <Input
+              id="scale-birth"
+              type="date"
+              value={formBirth}
+              onChange={(e) => setFormBirth(e.target.value)}
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <Label>Sexo</Label>
+            <Select
+              value={formSex || undefined}
+              onValueChange={(v) => setFormSex(v as ScaleSex)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Seleccionar" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="F">Mujer</SelectItem>
+                <SelectItem value="M">Hombre</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => setProfileOpen(false)}>
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            disabled={savingProfile || start.isPending}
+            onClick={() => void confirmProfileAndWeigh()}
+          >
+            {savingProfile || start.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Scale className="h-4 w-4" />
+            )}
+            <span className="ml-1.5">Guardar y pesar</span>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+
+  if (!companyId) {
+    return (
+      <Button type="button" variant="outline" size={compact ? 'sm' : 'default'} disabled>
+        <Scale className="h-4 w-4" />
+        <span className="ml-1.5">Pesar ahora</span>
+      </Button>
+    );
   }
-  if (measurement.metabolic_age != null) {
-    rows.push({ label: 'Edad metabólica', value: formatInbodyNumber(measurement.metabolic_age, 0) });
+
+  if (active?.status === 'open') {
+    const mm = Math.floor(secondsLeft / 60);
+    const ss = String(secondsLeft % 60).padStart(2, '0');
+    return (
+      <div className="flex items-center gap-2">
+        <Badge
+          variant="default"
+          className={cn('tabular-nums gap-1.5 py-1.5 px-2.5', compact ? 'text-[10px]' : 'text-xs')}
+        >
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          Esperando báscula {mm}:{ss}
+        </Badge>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-8 px-2"
+          disabled={cancel.isPending}
+          onClick={() => {
+            cancel.mutate(
+              { id: active.id, companyId, customerId },
+              {
+                onError: (e: Error) =>
+                  toast({
+                    title: 'No se pudo cancelar',
+                    description: e.message,
+                    variant: 'destructive',
+                  }),
+              },
+            );
+          }}
+          title="Cancelar espera"
+        >
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
+    );
   }
-  if (measurement.smi != null) {
-    rows.push({ label: 'SMI', value: formatInbodyNumber(measurement.smi, 1) });
+
+  if (active?.status === 'fulfilled') {
+    return (
+      <Badge variant="secondary" className={cn('gap-1', compact ? 'text-[10px]' : 'text-xs')}>
+        <Scale className="h-3.5 w-3.5" />
+        Medición vinculada
+      </Badge>
+    );
   }
-  if (measurement.heart_rate != null) {
-    rows.push({ label: 'FC', value: formatInbodyNumber(measurement.heart_rate, 0, ' lpm') });
-  }
-  if (measurement.target_weight_kg != null) {
-    rows.push({ label: 'Peso objetivo', value: formatInbodyNumber(measurement.target_weight_kg, 1, ' kg') });
-  }
-  if (measurement.weight_control_kg != null) {
-    rows.push({ label: 'Control peso', value: formatInbodyNumber(measurement.weight_control_kg, 1, ' kg') });
-  }
-  if (measurement.body_type) {
-    rows.push({ label: 'Tipo corporal', value: measurement.body_type });
-  }
-  if (!rows.length) return null;
 
   return (
-    <Card className="border-sky-100/50 dark:border-sky-900/20">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm flex items-center gap-2">
-          MorphoScan — datos adicionales
-          <Badge variant="secondary" className="text-[10px] font-normal">
-            MorphoScan
-          </Badge>
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <dl className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-2 text-xs">
-          {rows.map((row) => (
-            <div key={row.label}>
-              <dt className="text-muted-foreground">{row.label}</dt>
-              <dd className="font-medium tabular-nums">{row.value}</dd>
-            </div>
-          ))}
-        </dl>
-      </CardContent>
-    </Card>
+    <>
+      <Button
+        type="button"
+        variant="default"
+        size={compact ? 'sm' : 'default'}
+        disabled={isLoading || start.isPending || savingProfile}
+        onClick={onClickWeighNow}
+      >
+        {start.isPending ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <Scale className="h-4 w-4" />
+        )}
+        <span className="ml-1.5">Pesar ahora</span>
+      </Button>
+      {profileDialog}
+    </>
   );
 }
 
@@ -182,11 +495,25 @@ function MeasurementSessionBar({
   measurements,
   selected,
   onSelect,
+  customerId,
+  taxId,
+  companyId,
+  customerName,
+  heightCm,
+  birthDate,
+  clinicalProfile,
   compact,
 }: {
   measurements: InbodyMeasurement[];
   selected: InbodyMeasurement;
   onSelect: (id: string) => void;
+  customerId: string;
+  taxId?: string | null;
+  companyId?: string | null;
+  customerName?: string | null;
+  heightCm?: number | null;
+  birthDate?: string | null;
+  clinicalProfile?: unknown;
   compact?: boolean;
 }) {
   const measuredLabel = format(new Date(selected.measured_at), 'yyyy-MM-dd HH:mm:ss', { locale: es });
@@ -194,18 +521,46 @@ function MeasurementSessionBar({
 
   return (
     <div className="space-y-2">
-      <Select value={selected.id} onValueChange={onSelect}>
-        <SelectTrigger className={compact ? 'h-8 text-xs' : ''}>
-          <SelectValue placeholder="Seleccionar medición" />
-        </SelectTrigger>
-        <SelectContent>
-          {measurements.map((m, idx) => (
-            <SelectItem key={m.id} value={m.id}>
-              {sessionLabel(m, idx, measurements.length, measurements)}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="min-w-[min(100%,18rem)] flex-1 flex items-center gap-1.5">
+          <Select value={selected.id} onValueChange={onSelect}>
+            <SelectTrigger className={cn('flex-1', compact ? 'h-8 text-xs' : '')}>
+              <SelectValue placeholder="Seleccionar medición" />
+            </SelectTrigger>
+            <SelectContent>
+              {measurements.map((m, idx) => (
+                <SelectItem key={m.id} value={m.id} className="pr-8">
+                  <span className="flex items-center gap-1.5 min-w-0">
+                    <span className="truncate">{sessionLabel(m, idx, measurements.length)}</span>
+                    <InbodyQualityWarningIcon
+                      measurement={m}
+                      siblings={measurements}
+                      side="right"
+                    />
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {/* Fuera del Select: hover funciona con el desplegable cerrado */}
+          <InbodyQualityWarningIcon
+            measurement={selected}
+            siblings={measurements}
+            side="bottom"
+            className="shrink-0"
+          />
+        </div>
+        <ScaleWeighNowControls
+          customerId={customerId}
+          taxId={taxId}
+          companyId={companyId}
+          customerName={customerName}
+          heightCm={heightCm}
+          birthDate={birthDate}
+          clinicalProfile={clinicalProfile}
+          compact={compact}
+        />
+      </div>
 
       <div className={compact ? 'text-xs' : 'text-sm'}>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
@@ -233,7 +588,6 @@ function MeasurementSessionBar({
 function MeasurementReport({
   measurement,
   siblings,
-  onSelectReference,
   compact,
 }: {
   measurement: InbodyMeasurement;
@@ -243,12 +597,6 @@ function MeasurementReport({
 }) {
   return (
     <div className="space-y-4">
-      <InbodyQualityAlert
-        measurement={measurement}
-        siblings={siblings}
-        onSelectReference={onSelectReference}
-        compact={compact}
-      />
       <Card className="border-sky-100/50 dark:border-sky-900/20">
         <CardHeader className="pb-2">
           <CardTitle className="text-sm">
@@ -323,14 +671,21 @@ function MeasurementReport({
 
       <InbodyNutritionPanel measurement={measurement} compact={compact} />
 
-      <MorphoScanExtrasCard measurement={measurement} />
-
       <ImpedanceTable measurement={measurement} />
     </div>
   );
 }
 
-export const ClienteInbodyTab: React.FC<Props> = ({ customerId, taxId, companyId, customerName, compact }) => {
+export const ClienteInbodyTab: React.FC<Props> = ({
+  customerId,
+  taxId,
+  companyId,
+  customerName,
+  heightCm,
+  birthDate,
+  clinicalProfile,
+  compact,
+}) => {
   const { data: measurements, isLoading, error } = useInbodyMeasurements(customerId, taxId, companyId);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -379,14 +734,24 @@ export const ClienteInbodyTab: React.FC<Props> = ({ customerId, taxId, companyId
   if (!measurements?.length) {
     return (
       <div className="space-y-4">
-        <div className="text-center py-12 text-muted-foreground">
-          <Activity className="h-10 w-10 mx-auto mb-3 opacity-30" />
-          <p className="font-medium text-foreground">Sin mediciones de báscula</p>
-          <p className="text-sm mt-1 max-w-sm mx-auto">
-            {taxId
-              ? 'No hay registros vinculados a este DNI. Importa un CSV de Lookin\'Body o captura MorphoScan vía el puente BLE.'
-              : 'Añade el DNI del cliente para vincular mediciones InBody o MorphoScan.'}
-          </p>
+        <div className="flex flex-col items-center gap-3 py-10 text-center text-muted-foreground">
+          <Activity className="h-10 w-10 opacity-30" />
+          <div>
+            <p className="font-medium text-foreground">Sin mediciones de báscula</p>
+            <p className="text-sm mt-1 max-w-sm mx-auto">
+              Pulsa «Pesar ahora» y sube al paciente a la MorphoScan, o importa un CSV de Lookin&apos;Body.
+            </p>
+          </div>
+          <ScaleWeighNowControls
+            customerId={customerId}
+            taxId={taxId}
+            companyId={companyId}
+            customerName={customerName}
+            heightCm={heightCm}
+            birthDate={birthDate}
+            clinicalProfile={clinicalProfile}
+            compact={compact}
+          />
         </div>
         <InbodyCsvImportPanel
           embedded
@@ -405,6 +770,13 @@ export const ClienteInbodyTab: React.FC<Props> = ({ customerId, taxId, companyId
           measurements={measurements}
           selected={selected}
           onSelect={setSelectedId}
+          customerId={customerId}
+          taxId={taxId}
+          companyId={companyId}
+          customerName={customerName}
+          heightCm={heightCm}
+          birthDate={birthDate}
+          clinicalProfile={clinicalProfile}
           compact={compact}
         />
       )}
@@ -435,24 +807,36 @@ export const ClienteInbodyTab: React.FC<Props> = ({ customerId, taxId, companyId
         />
       )}
 
-      {selected && (
-        <MeasurementReport
-          measurement={selected}
-          siblings={measurements}
-          onSelectReference={setSelectedId}
-          compact={compact}
-        />
-      )}
+      {selected &&
+        (isMorphoScanMeasurement(selected) ? (
+          <MorphoScanMeasurementReport measurement={selected} compact={compact} />
+        ) : (
+          <MeasurementReport
+            measurement={selected}
+            siblings={measurements}
+            onSelectReference={setSelectedId}
+            compact={compact}
+          />
+        ))}
 
-      {selected && (
-        <InbodyReportExport
-          key={`inbody-report-${customerId}-${selected.id}`}
-          customerId={customerId}
-          measurement={selected}
-          customerName={customerName ?? undefined}
-          compact={compact}
-        />
-      )}
+      {selected &&
+        (isMorphoScanMeasurement(selected) ? (
+          <MorphoScanReportExport
+            key={`morphoscan-report-${customerId}-${selected.id}`}
+            customerId={customerId}
+            measurement={selected}
+            customerName={customerName ?? undefined}
+            compact={compact}
+          />
+        ) : (
+          <InbodyReportExport
+            key={`inbody-report-${customerId}-${selected.id}`}
+            customerId={customerId}
+            measurement={selected}
+            customerName={customerName ?? undefined}
+            compact={compact}
+          />
+        ))}
 
       <InbodyCsvImportPanel
         embedded

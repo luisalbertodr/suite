@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { useLocation } from 'react-router-dom';
 import { useRoutePanelActive } from '@/contexts/RoutePanelContext';
 
 export type TopBarContent = {
@@ -15,12 +14,10 @@ type TopBarContentContextValue = {
 const TopBarContentContext = createContext<TopBarContentContextValue | null>(null);
 
 export const TopBarContentProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const location = useLocation();
   const [content, setContent] = useState<TopBarContent>({});
 
-  useEffect(() => {
-    setContent({});
-  }, [location.pathname]);
+  // No limpiar por pathname: ese efecto corría después de los hijos y borraba
+  // el registro (calendario/Hoy/sync) hasta el siguiente poll del badge (~20s).
 
   const value = useMemo(() => ({ content, setContent }), [content]);
 

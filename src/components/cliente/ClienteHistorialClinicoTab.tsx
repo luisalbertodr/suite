@@ -159,7 +159,7 @@ export const ClienteHistorialClinicoTab: React.FC<Props> = ({
         <div className="space-y-4">
           <div
             className={cn(
-              'sticky top-0 z-10 rounded-xl border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 p-4 space-y-3 shadow-sm',
+              'rounded-xl border bg-card/40 p-4 space-y-3',
               compact && 'p-3 space-y-2',
             )}
           >
@@ -198,7 +198,7 @@ export const ClienteHistorialClinicoTab: React.FC<Props> = ({
                             {formatDateYmd(entry.fecha)}
                           </span>
                           <span className="text-[11px] text-muted-foreground">
-                            {entry.isInitial ? 'Registro inicial' : 'Actualización'}
+                            {entry.isInitial ? 'Registro inicial' : 'Añadido (solo novedades)'}
                           </span>
                           {isVigente && (
                             <span className="text-[10px] font-medium uppercase tracking-wide text-sky-700 dark:text-sky-300">

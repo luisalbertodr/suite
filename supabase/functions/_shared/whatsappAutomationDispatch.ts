@@ -6,11 +6,16 @@ import {
   type WhatsappConfigRow,
 } from './marketingWhatsappAutomation.ts';
 import {
-  normalizeWhatsappProvider,
   resolveWhatsappCredentials,
-  type WhatsappProviderConfig,
 } from './whatsappProviderTypes.ts';
 import { providerSendText } from './whatsappProviderClient.ts';
+import {
+  classifyAppointmentReminderCategory,
+  pickHighestPriorityCategory,
+  resolveTreatmentReminderTemplate,
+  type AppointmentReminderCategory,
+} from './appointmentReminderTemplates.ts';
+import { ensureWhatsappSessionReadyForSend } from './whatsappSessionStatus.ts';
 
 export type WhatsappAutomationSettings = {
   company_id: string;
@@ -22,6 +27,7 @@ export type WhatsappAutomationSettings = {
   appointment_reminder_hour_before_enabled: boolean;
   appointment_reminder_hour_before_message: string | null;
   appointment_reminder_send_hour_start: number;
+  appointment_reminder_templates?: import('./appointmentReminderTemplates.ts').AppointmentReminderTemplates | null;
   marketing_queue_hour_start?: number | null;
   marketing_queue_hour_end?: number | null;
   phone_missed_whatsapp_enabled: boolean;
@@ -45,7 +51,7 @@ export type AutomationSendType =
   | 'phone_voicemail';
 
 const DEFAULT_DAY_BEFORE =
-  'Hola {nombre}, te recordamos tu cita mañana {fecha_cita} a las {hora_cita} en Lipoout. Si necesitas cambiarla, responde a este mensaje.';
+  'Buenos días {nombre}.\nTe recordamos tu cita de mañana en Lipoout a las {hora_cita}.\nAgradeceríamos que nos confirmaras tu asistencia; en caso de no recibir tu confirmación, la hora será liberada.\nMuchas gracias.';
 const DEFAULT_HOUR_BEFORE =
   'Hola {nombre}, tu cita es dentro de 1 hora ({hora_cita}). Te esperamos en Lipoout.';
 
@@ -186,8 +192,9 @@ export async function sendAutomatedWhatsapp(
   if (!cfg?.enabled || !cfg.base_url) {
     return { ok: false, error: 'WhatsApp no configurado' };
   }
-  if ((cfg.last_status ?? '').toUpperCase() !== 'WORKING') {
-    return { ok: false, error: `Sesión WhatsApp: ${cfg.last_status ?? 'desconocida'}` };
+  const session = await ensureWhatsappSessionReadyForSend(admin, companyId, cfg);
+  if (!session.ready) {
+    return { ok: false, error: session.error ?? 'Sesión WhatsApp no conectada' };
   }
 
   const { chatPhone, intendedLabel } = resolveRecipientPhone(intendedPhone, settings);
@@ -241,8 +248,9 @@ export async function sendDirectWhatsapp(
   if (!cfg?.enabled || !cfg.base_url) {
     return { ok: false, error: 'WhatsApp no configurado' };
   }
-  if ((cfg.last_status ?? '').toUpperCase() !== 'WORKING') {
-    return { ok: false, error: `Sesión WhatsApp: ${cfg.last_status ?? 'desconocida'}` };
+  const session = await ensureWhatsappSessionReadyForSend(admin, companyId, cfg);
+  if (!session.ready) {
+    return { ok: false, error: session.error ?? 'Sesión WhatsApp no conectada' };
   }
 
   const chatId = normalizeChatId(phone.replace(/\D/g, ''), cfg.default_country_code);
@@ -337,6 +345,83 @@ function addMadridDays(d: Date, days: number): Date {
   return new Date(d.getTime() + days * 24 * 60 * 60 * 1000);
 }
 
+/** Códigos Dunasoft útiles (ignora vacío / "0" = nota interna). */
+function legacyCodcliVariants(code: string | null | undefined): string[] {
+  const trimmed = String(code ?? '').trim();
+  if (!trimmed || trimmed === '0') return [];
+  const norm = trimmed.replace(/^0+/, '') || '0';
+  if (norm === '0') return [];
+  return [...new Set([trimmed, norm, trimmed.padStart(6, '0'), norm.padStart(6, '0')])];
+}
+
+type ReminderCustomer = {
+  id: string;
+  name: string | null;
+  phone: string | null;
+  phone_mobile: string | null;
+  phone_home: string | null;
+  legacy_codcli: string | null;
+};
+
+function customerPhone(c: ReminderCustomer | null | undefined): string | null {
+  if (!c) return null;
+  return (c.phone_mobile || c.phone || c.phone_home || '').trim() || null;
+}
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Pausa aleatoria entre envíos de recordatorio (15–30 s inclusive). */
+function randomReminderGapMs(): number {
+  return 15_000 + Math.floor(Math.random() * 15_001);
+}
+
+/** Normaliza hora HH:mm desde texto legacy o ISO. */
+function normalizeHm(value: string | null | undefined): string | null {
+  const s = String(value ?? '').trim();
+  if (!s) return null;
+  if (s.includes('T')) {
+    const part = s.split('T')[1]?.slice(0, 5);
+    return part && /^\d{2}:\d{2}$/.test(part) ? part : null;
+  }
+  const m = s.match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  return `${m[1].padStart(2, '0')}:${m[2]}`;
+}
+
+/**
+ * Convierte fecha agenda (YYYY-MM-DD) + hora HH:mm (Europe/Madrid) a Date UTC.
+ * El esquema legacy guarda start_time como "10:00", no timestamptz.
+ */
+function agendaStartToDate(
+  appointmentDate: string | null | undefined,
+  startTime: string | null | undefined,
+): Date | null {
+  const st = String(startTime ?? '').trim();
+  if (st.includes('T')) {
+    const d = new Date(st);
+    if (!Number.isNaN(d.getTime())) return d;
+  }
+  const ymdRaw = appointmentDate ? String(appointmentDate).slice(0, 10) : '';
+  const ymd = /^\d{4}-\d{2}-\d{2}$/.test(ymdRaw) ? ymdRaw : null;
+  const hm = normalizeHm(st);
+  if (!ymd || !hm) return null;
+
+  const [y, m, day] = ymd.split('-').map(Number);
+  const [hh, mm] = hm.split(':').map(Number);
+  let guess = Date.UTC(y, m - 1, day, hh, mm, 0);
+  for (let i = 0; i < 3; i++) {
+    const parts = madridParts(new Date(guess));
+    const asMadrid = Date.UTC(parts.y, parts.m - 1, parts.day, parts.hour, parts.minute);
+    const wanted = Date.UTC(y, m - 1, day, hh, mm);
+    const diff = wanted - asMadrid;
+    guess += diff;
+    if (diff === 0) break;
+  }
+  return new Date(guess);
+}
+
 export async function runAppointmentRemindersForCompany(
   admin: SupabaseClient,
   companyId: string,
@@ -347,6 +432,7 @@ export async function runAppointmentRemindersForCompany(
   }
 
   const now = new Date();
+  const todayKey = madridDayKey(now);
   const tomorrowKey = madridDayKey(addMadridDays(now, 1));
   const errors: string[] = [];
   let dayBefore = 0;
@@ -356,56 +442,175 @@ export async function runAppointmentRemindersForCompany(
     return { day_before: 0, hour_before: 0, errors: [] };
   }
 
-  const windowStart = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
-  const windowEnd = new Date(now.getTime() + 48 * 60 * 60 * 1000);
-
+  // start_time es TEXT "HH:mm"; filtrar por appointment_date (no por ISO en start_time).
   const { data: appointments, error } = await admin
     .from('agenda_appointments')
-    .select('id, title, start_time, status, customer_id, client_name, employee_id')
+    .select(
+      'id, description, appointment_date, start_time, status, customer_id, client_name, employee_id, legacy_codcli',
+    )
     .eq('company_id', companyId)
-    .gte('start_time', windowStart.toISOString())
-    .lte('start_time', windowEnd.toISOString())
+    .in('appointment_date', [todayKey, tomorrowKey])
     .not('status', 'eq', 'cancelled');
 
   if (error) throw error;
 
-  for (const apt of appointments ?? []) {
-    const startRaw = apt.start_time as string | null;
-    if (!startRaw) continue;
-    const start = new Date(startRaw);
-    if (Number.isNaN(start.getTime())) continue;
+  const customerById = new Map<string, ReminderCustomer>();
+  const customerByLegacy = new Map<string, ReminderCustomer>();
+  const customerIds = [
+    ...new Set(
+      (appointments ?? [])
+        .map((a) => a.customer_id as string | null)
+        .filter((id): id is string => !!id),
+    ),
+  ];
+  if (customerIds.length > 0) {
+    const { data: byId, error: byIdErr } = await admin
+      .from('customers')
+      .select('id, name, phone, phone_mobile, phone_home, legacy_codcli')
+      .eq('company_id', companyId)
+      .in('id', customerIds);
+    if (byIdErr) throw byIdErr;
+    for (const c of (byId ?? []) as ReminderCustomer[]) {
+      customerById.set(c.id, c);
+      for (const v of legacyCodcliVariants(c.legacy_codcli)) customerByLegacy.set(v, c);
+    }
+  }
+  const legacyVariants = [
+    ...new Set(
+      (appointments ?? []).flatMap((a) =>
+        a.customer_id ? [] : legacyCodcliVariants(a.legacy_codcli as string | null),
+      ),
+    ),
+  ];
+  if (legacyVariants.length > 0) {
+    const { data: byLegacy, error: byLegacyErr } = await admin
+      .from('customers')
+      .select('id, name, phone, phone_mobile, phone_home, legacy_codcli')
+      .eq('company_id', companyId)
+      .in('legacy_codcli', legacyVariants);
+    if (byLegacyErr) throw byLegacyErr;
+    for (const c of (byLegacy ?? []) as ReminderCustomer[]) {
+      customerById.set(c.id, c);
+      for (const v of legacyCodcliVariants(c.legacy_codcli)) customerByLegacy.set(v, c);
+    }
+  }
 
-    let phone: string | null = null;
-    let customerName = (apt.client_name as string | null)?.trim() ?? '';
+  type EnrichedApt = {
+    id: string;
+    start: Date;
+    dayKey: string;
+    phone: string;
+    customerName: string;
+    customerKey: string;
+    title: string | null;
+    employeeName: string | null;
+    category: AppointmentReminderCategory;
+  };
+
+  const enriched: EnrichedApt[] = [];
+
+  for (const apt of appointments ?? []) {
+    const start = agendaStartToDate(
+      apt.appointment_date as string | null,
+      apt.start_time as string | null,
+    );
+    if (!start) continue;
+
+    let cust: ReminderCustomer | null = null;
     if (apt.customer_id) {
-      const { data: cust } = await admin
-        .from('customers')
-        .select('name, phone, phone_mobile, phone_home')
-        .eq('id', apt.customer_id)
-        .maybeSingle();
-      if (cust) {
-        phone = (cust.phone_mobile || cust.phone || cust.phone_home || '').trim() || null;
-        customerName = cust.name?.trim() || customerName;
+      cust = customerById.get(apt.customer_id as string) ?? null;
+    }
+    if (!cust) {
+      for (const v of legacyCodcliVariants(apt.legacy_codcli as string | null)) {
+        cust = customerByLegacy.get(v) ?? null;
+        if (cust) break;
       }
     }
+
+    const phone = customerPhone(cust);
     if (!phone?.trim()) continue;
+    const customerName =
+      cust?.name?.trim() || (apt.client_name as string | null)?.trim() || 'cliente';
 
-    const employeeName = apt.employee_id
-      ? (
-          await admin
-            .from('agenda_employees')
-            .select('name')
-            .eq('id', apt.employee_id)
-            .maybeSingle()
-        ).data?.name?.trim() ?? null
-      : null;
-    const aptDayKey = madridDayKey(start);
+    let employeeName: string | null = null;
+    if (apt.employee_id) {
+      try {
+        const { data: emp } = await admin
+          .from('agenda_employees')
+          .select('name')
+          .eq('id', String(apt.employee_id))
+          .maybeSingle();
+        employeeName = emp?.name?.trim() ?? null;
+      } catch {
+        employeeName = null;
+      }
+    }
 
-    if (
-      settings.appointment_reminder_day_before_enabled &&
-      aptDayKey === tomorrowKey
-    ) {
-      const ref = `${apt.id}:day_before`;
+    let itemTexts: string[] = [];
+    try {
+      const { data: items } = await admin
+        .from('appointment_items')
+        .select('label, articles(familia, descripcion)')
+        .eq('appointment_id', apt.id);
+      for (const it of items ?? []) {
+        if (typeof it.label === 'string') itemTexts.push(it.label);
+        const art = it.articles as { familia?: string | null; descripcion?: string | null } | null;
+        if (art?.familia) itemTexts.push(String(art.familia));
+        if (art?.descripcion) itemTexts.push(String(art.descripcion));
+      }
+    } catch {
+      itemTexts = [];
+    }
+
+    const category = classifyAppointmentReminderCategory([
+      apt.description as string | null,
+      apt.client_name as string | null,
+      employeeName,
+      ...itemTexts,
+    ]);
+
+    const digits = phone.replace(/\D/g, '');
+    const customerKey =
+      cust?.id ||
+      (apt.customer_id as string | null) ||
+      digits.slice(-9) ||
+      (apt.id as string);
+
+    enriched.push({
+      id: apt.id as string,
+      start,
+      dayKey:
+        String(apt.appointment_date ?? '').slice(0, 10) || madridDayKey(start),
+      phone,
+      customerName,
+      customerKey,
+      title: (apt.description as string | null) ?? null,
+      employeeName,
+      category,
+    });
+  }
+
+  /** Una sola cita representante por cliente+día (prioridad tratamiento, luego hora más temprana). */
+  function pickRepresentative(list: EnrichedApt[]): EnrichedApt {
+    const bestCat = pickHighestPriorityCategory(list.map((a) => a.category));
+    const inCat = list.filter((a) => a.category === bestCat);
+    return [...inCat].sort((a, b) => a.start.getTime() - b.start.getTime())[0] ?? list[0];
+  }
+
+  // --- Día anterior: agrupar por cliente + día ---
+  if (settings.appointment_reminder_day_before_enabled) {
+    const tomorrowApts = enriched.filter((a) => a.dayKey === tomorrowKey);
+    const groups = new Map<string, EnrichedApt[]>();
+    for (const a of tomorrowApts) {
+      const gkey = `${a.customerKey}:${a.dayKey}`;
+      const arr = groups.get(gkey) ?? [];
+      arr.push(a);
+      groups.set(gkey, arr);
+    }
+    let dayBeforeAttempt = 0;
+    for (const [gkey, list] of groups) {
+      const rep = pickRepresentative(list);
+      const ref = `${gkey}:day_before`;
       const { data: sent } = await admin
         .from('whatsapp_automation_send_log')
         .select('id')
@@ -413,29 +618,54 @@ export async function runAppointmentRemindersForCompany(
         .eq('automation_type', 'appointment_day_before')
         .eq('reference_id', ref)
         .maybeSingle();
-      if (!sent) {
-        const text = renderAppointmentReminderTemplate(
-          settings.appointment_reminder_day_before_message,
-          { customerName: customerName || 'cliente', startTime: start, title: apt.title, employeeName },
-          defaultDayBeforeMessage(),
-        );
-        const res = await sendAutomatedWhatsapp(admin, companyId, phone, text, {
-          automation_type: 'appointment_day_before',
-          reference_id: ref,
-          intended_label: customerName || phone,
-        });
-        if (res.ok) dayBefore++;
-        else if (res.error) errors.push(res.error);
-      }
-    }
+      if (sent) continue;
 
-    const diffMin = (start.getTime() - now.getTime()) / 60_000;
-    if (
-      settings.appointment_reminder_hour_before_enabled &&
-      diffMin >= 50 &&
-      diffMin <= 70
-    ) {
-      const ref = `${apt.id}:hour_before`;
+      if (dayBeforeAttempt > 0) await sleepMs(randomReminderGapMs());
+      dayBeforeAttempt++;
+
+      const template = resolveTreatmentReminderTemplate(
+        settings.appointment_reminder_templates,
+        rep.category,
+        'day_before',
+        settings.appointment_reminder_day_before_message,
+      );
+      const text = renderAppointmentReminderTemplate(
+        template,
+        {
+          customerName: rep.customerName,
+          startTime: rep.start,
+          title: rep.title,
+          employeeName: rep.employeeName,
+        },
+        defaultDayBeforeMessage(),
+      );
+      const res = await sendAutomatedWhatsapp(admin, companyId, rep.phone, text, {
+        automation_type: 'appointment_day_before',
+        reference_id: ref,
+        intended_label: rep.customerName || rep.phone,
+      });
+      if (res.ok) dayBefore++;
+      else if (res.error) errors.push(res.error);
+    }
+  }
+
+  // --- 1 hora antes: agrupar por cliente (ventana 50–70 min) ---
+  if (settings.appointment_reminder_hour_before_enabled) {
+    const near = enriched.filter((a) => {
+      const diffMin = (a.start.getTime() - now.getTime()) / 60_000;
+      return diffMin >= 50 && diffMin <= 70;
+    });
+    const groups = new Map<string, EnrichedApt[]>();
+    for (const a of near) {
+      const gkey = `${a.customerKey}:${a.dayKey}`;
+      const arr = groups.get(gkey) ?? [];
+      arr.push(a);
+      groups.set(gkey, arr);
+    }
+    let hourBeforeAttempt = 0;
+    for (const [gkey, list] of groups) {
+      const rep = pickRepresentative(list);
+      const ref = `${gkey}:hour_before`;
       const { data: sent } = await admin
         .from('whatsapp_automation_send_log')
         .select('id')
@@ -443,20 +673,34 @@ export async function runAppointmentRemindersForCompany(
         .eq('automation_type', 'appointment_hour_before')
         .eq('reference_id', ref)
         .maybeSingle();
-      if (!sent) {
-        const text = renderAppointmentReminderTemplate(
-          settings.appointment_reminder_hour_before_message,
-          { customerName: customerName || 'cliente', startTime: start, title: apt.title, employeeName },
-          defaultHourBeforeMessage(),
-        );
-        const res = await sendAutomatedWhatsapp(admin, companyId, phone, text, {
-          automation_type: 'appointment_hour_before',
-          reference_id: ref,
-          intended_label: customerName || phone,
-        });
-        if (res.ok) hourBefore++;
-        else if (res.error) errors.push(res.error);
-      }
+      if (sent) continue;
+
+      if (hourBeforeAttempt > 0) await sleepMs(randomReminderGapMs());
+      hourBeforeAttempt++;
+
+      const template = resolveTreatmentReminderTemplate(
+        settings.appointment_reminder_templates,
+        rep.category,
+        'hour_before',
+        settings.appointment_reminder_hour_before_message,
+      );
+      const text = renderAppointmentReminderTemplate(
+        template,
+        {
+          customerName: rep.customerName,
+          startTime: rep.start,
+          title: rep.title,
+          employeeName: rep.employeeName,
+        },
+        defaultHourBeforeMessage(),
+      );
+      const res = await sendAutomatedWhatsapp(admin, companyId, rep.phone, text, {
+        automation_type: 'appointment_hour_before',
+        reference_id: ref,
+        intended_label: rep.customerName || rep.phone,
+      });
+      if (res.ok) hourBefore++;
+      else if (res.error) errors.push(res.error);
     }
   }
 

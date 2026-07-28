@@ -153,6 +153,12 @@ export const WhatsappCreateCustomerDialog: React.FC<Props> = ({
       if (!companyId || !chat) throw new Error('Sin empresa o chat');
       const trimmedName = name.trim();
       if (!trimmedName) throw new Error('El nombre es obligatorio');
+      if (existingCustomer) {
+        throw Object.assign(
+          new Error(`Ya existe «${existingCustomer.name}». Usa «Vincular a cliente existente».`),
+          { code: 'CUSTOMER_DUPLICATE' },
+        );
+      }
 
       const { data: created, error } = await supabase
         .from('customers')
@@ -190,10 +196,10 @@ export const WhatsappCreateCustomerDialog: React.FC<Props> = ({
     },
     onError: (e) => {
       const any = e as { code?: string; message?: string };
-      if (any?.code === '23505') {
+      if (any?.code === 'CUSTOMER_DUPLICATE' || any?.code === '23505') {
         toast({
-          title: 'Ya existe un cliente con este teléfono',
-          description: 'Usa «Vincular a cliente existente» si aparece arriba.',
+          title: 'Cliente ya existe',
+          description: any.message || 'Usa «Vincular a cliente existente» si aparece arriba.',
           variant: 'destructive',
         });
         return;

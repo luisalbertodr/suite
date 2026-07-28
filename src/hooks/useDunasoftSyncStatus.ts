@@ -10,6 +10,7 @@ export type DunasoftSyncStatus = {
 export function useDunasoftSyncStatus(pollMs = 30_000, enabled = true) {
   return useQuery({
     queryKey: ['dunasoft-sync-status'],
+    enabled,
     queryFn: async (): Promise<DunasoftSyncStatus> => {
       const { data, error } = await supabase.rpc('agenda_dunasoft_sync_status');
       if (error) throw error;
@@ -20,7 +21,6 @@ export function useDunasoftSyncStatus(pollMs = 30_000, enabled = true) {
         pending_outbox: Number(row.pending_outbox ?? 0),
       };
     },
-    enabled,
     refetchInterval: enabled ? pollMs : false,
     staleTime: 10_000,
   });

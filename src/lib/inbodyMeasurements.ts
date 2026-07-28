@@ -1,7 +1,11 @@
+import { enrichMorphoScanSegmentals } from '@/lib/morphoscanSegmentals';
+
 export interface InbodySegmentEntry {
   kg?: number | null;
   pct?: number | null;
   eval_pct?: number | null;
+  /** Valor estándar de referencia (kg), estilo informe Renpho. */
+  standard_kg?: number | null;
 }
 
 export interface InbodySegmentalLean {
@@ -15,11 +19,11 @@ export interface InbodySegmentalLean {
 }
 
 export interface InbodySegmentalFat {
-  right_arm?: { kg?: number | null; pct?: number | null };
-  left_arm?: { kg?: number | null; pct?: number | null };
-  trunk?: { kg?: number | null; pct?: number | null };
-  right_leg?: { kg?: number | null; pct?: number | null };
-  left_leg?: { kg?: number | null; pct?: number | null };
+  right_arm?: InbodySegmentEntry;
+  left_arm?: InbodySegmentEntry;
+  trunk?: InbodySegmentEntry;
+  right_leg?: InbodySegmentEntry;
+  left_leg?: InbodySegmentEntry;
 }
 
 export interface InbodyImpedanceFreq {
@@ -100,15 +104,29 @@ export interface InbodyMeasurement {
 /** Etiqueta de dispositivo para el selector de sesiones (InBody / MorphoScan). */
 export function scaleDeviceFromMeasurement(m: Pick<InbodyMeasurement, 'device' | 'source'>): ScaleDevice {
   const d = (m.device || '').toLowerCase().trim();
-  if (d === 'morphoscan') return 'morphoscan';
+  if (d === 'morphoscan' || d === 'morpho' || d === 'renpho') return 'morphoscan';
   if (d === 'inbody') return 'inbody';
   const src = (m.source || '').toLowerCase();
-  if (src.includes('morphoscan') || src.includes('renpho')) return 'morphoscan';
+  // ble-scale-sync = bridge MorphoScan Nova / Renpho en mail
+  if (
+    src.includes('morphoscan') ||
+    src.includes('renpho') ||
+    src.includes('ble-scale') ||
+    src === 'morphoscan_ble'
+  ) {
+    return 'morphoscan';
+  }
   return 'inbody';
 }
 
 export function scaleDeviceLabel(device: ScaleDevice): string {
   return device === 'morphoscan' ? 'MorphoScan' : 'InBody';
+}
+
+export function isMorphoScanMeasurement(
+  m: Pick<InbodyMeasurement, 'device' | 'source'>,
+): boolean {
+  return scaleDeviceFromMeasurement(m) === 'morphoscan';
 }
 
 export function hasMorphoScanExtras(m: InbodyMeasurement): boolean {
@@ -413,7 +431,8 @@ export function normalizeInbodyMeasurement(raw: InbodyMeasurement): InbodyMeasur
   out.body_fat_min_kg = bfmRange.min;
   out.body_fat_max_kg = bfmRange.max;
 
-  return out;
+  // MorphoScan: impedance Ω sí; lean/fat kg segmentales no vienen por BLE → derivar.
+  return enrichMorphoScanSegmentals(out);
 }
 
 const ONE_HOUR_MS = 3600_000;

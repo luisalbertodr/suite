@@ -14,6 +14,9 @@ export type CustomerSearchRow = {
   phone_home?: string | null;
   phone_mobile?: string | null;
   legacy_codcli?: string | null;
+  address_city?: string | null;
+  photo_url?: string | null;
+  archived_at?: string | null;
 };
 
 /** Escapa comodines para filtros ilike de PostgREST. */

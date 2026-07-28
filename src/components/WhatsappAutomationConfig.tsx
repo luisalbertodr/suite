@@ -38,6 +38,13 @@ import {
 } from '@/hooks/useWhatsappAutomationSettings';
 import { useMetaConfig } from '@/hooks/useMetaConfig';
 import { MetaFormWhatsappAudioField } from '@/components/meta/MetaFormWhatsappAudioField';
+import {
+  APPOINTMENT_REMINDER_CATEGORY_LABELS,
+  APPOINTMENT_REMINDER_CATEGORY_ORDER,
+  mergeAppointmentReminderTemplates,
+  type AppointmentReminderCategory,
+  type AppointmentReminderTemplates,
+} from '@/lib/appointmentReminderTemplates';
 
 const APPOINTMENT_VARS = [
   { key: 'nombre', description: 'Nombre del cliente' },
@@ -63,6 +70,11 @@ export const WhatsappAutomationConfig: React.FC = () => {
   const [hourBeforeEnabled, setHourBeforeEnabled] = useState(true);
   const [dayBeforeMsg, setDayBeforeMsg] = useState(DEFAULT_DAY_BEFORE);
   const [hourBeforeMsg, setHourBeforeMsg] = useState(DEFAULT_HOUR_BEFORE);
+  const [treatmentTemplates, setTreatmentTemplates] = useState(
+    () => mergeAppointmentReminderTemplates(null),
+  );
+  const [treatmentTab, setTreatmentTab] =
+    useState<AppointmentReminderCategory>('laser_fotodepilacion');
   const [automationHourStart, setAutomationHourStart] = useState(10);
   const [automationHourEnd, setAutomationHourEnd] = useState(20);
   const [phoneAlertsEnabled, setPhoneAlertsEnabled] = useState(true);
@@ -77,6 +89,11 @@ export const WhatsappAutomationConfig: React.FC = () => {
     setHourBeforeEnabled(settings.appointment_reminder_hour_before_enabled);
     setDayBeforeMsg(settings.appointment_reminder_day_before_message ?? DEFAULT_DAY_BEFORE);
     setHourBeforeMsg(settings.appointment_reminder_hour_before_message ?? DEFAULT_HOUR_BEFORE);
+    setTreatmentTemplates(
+      mergeAppointmentReminderTemplates(
+        settings.appointment_reminder_templates as AppointmentReminderTemplates | null,
+      ),
+    );
     setAutomationHourStart(settings.marketing_queue_hour_start ?? 10);
     setAutomationHourEnd(settings.marketing_queue_hour_end ?? 20);
     setPhoneAlertsEnabled(settings.phone_missed_whatsapp_enabled ?? true);
@@ -105,6 +122,7 @@ export const WhatsappAutomationConfig: React.FC = () => {
       appointment_reminder_hour_before_enabled: hourBeforeEnabled,
       appointment_reminder_day_before_message: dayBeforeMsg,
       appointment_reminder_hour_before_message: hourBeforeMsg,
+      appointment_reminder_templates: treatmentTemplates,
       marketing_queue_hour_start: automationHourStart,
       marketing_queue_hour_end: Math.max(automationHourStart + 1, automationHourEnd),
       phone_missed_whatsapp_enabled: phoneAlertsEnabled,
@@ -114,7 +132,10 @@ export const WhatsappAutomationConfig: React.FC = () => {
   const handleTestSend = async (type: 'day_before' | 'hour_before') => {
     try {
       await handleSaveGeneral();
-      const res = await sendTest.mutateAsync(type);
+      const res = await sendTest.mutateAsync({
+        testType: type,
+        treatmentCategory: treatmentTab,
+      });
       toast({
         title: 'Mensaje de prueba enviado',
         description: res?.test_mode
@@ -254,16 +275,28 @@ export const WhatsappAutomationConfig: React.FC = () => {
             <CardHeader>
               <CardTitle className="text-base">Recordatorios de cita</CardTitle>
               <CardDescription>
-                Aviso al cliente el día anterior y 1 hora antes de la cita, solo dentro del horario
-                de envíos automáticos ({String(automationHourStart).padStart(2, '0')}:00–
-                {String(automationHourEnd).padStart(2, '0')}:00 Madrid). Requiere teléfono en la
-                ficha del cliente.
+                Aviso al cliente el día anterior y 1 hora antes. Si tiene varias citas el mismo día,
+                se envía <strong>un solo mensaje</strong> con la hora de la primera cita, eligiendo
+                la plantilla según prioridad: láser/fotodepilación → micropigmentación → medicina →
+                resto. Solo dentro del horario de envíos ({String(automationHourStart).padStart(2, '0')}
+                :00–{String(automationHourEnd).padStart(2, '0')}:00 Madrid).
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex items-center justify-between rounded-lg border px-3 py-2">
                 <Label>Recordatorios activos</Label>
                 <Switch checked={remindersEnabled} onCheckedChange={setRemindersEnabled} />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <Switch checked={dayBeforeEnabled} onCheckedChange={setDayBeforeEnabled} />
+                  <Label className="text-xs">Día anterior</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch checked={hourBeforeEnabled} onCheckedChange={setHourBeforeEnabled} />
+                  <Label className="text-xs">1 hora antes</Label>
+                </div>
               </div>
 
               <div className="flex flex-wrap gap-1.5">
@@ -274,54 +307,80 @@ export const WhatsappAutomationConfig: React.FC = () => {
                 ))}
               </div>
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-xs">Día anterior</Label>
-                    <Switch checked={dayBeforeEnabled} onCheckedChange={setDayBeforeEnabled} />
-                  </div>
-                  <Textarea
-                    value={dayBeforeMsg}
-                    onChange={(e) => setDayBeforeMsg(e.target.value)}
-                    rows={4}
-                    className="text-xs"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="gap-1"
-                    disabled={sendTest.isPending}
-                    onClick={() => handleTestSend('day_before')}
-                  >
-                    <Send className="h-3 w-3" />
-                    Probar envío
-                  </Button>
-                </div>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-xs">1 hora antes</Label>
-                    <Switch checked={hourBeforeEnabled} onCheckedChange={setHourBeforeEnabled} />
-                  </div>
-                  <Textarea
-                    value={hourBeforeMsg}
-                    onChange={(e) => setHourBeforeMsg(e.target.value)}
-                    rows={4}
-                    className="text-xs"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="gap-1"
-                    disabled={sendTest.isPending}
-                    onClick={() => handleTestSend('hour_before')}
-                  >
-                    <Send className="h-3 w-3" />
-                    Probar envío
-                  </Button>
-                </div>
-              </div>
+              <Tabs
+                value={treatmentTab}
+                onValueChange={(v) => setTreatmentTab(v as AppointmentReminderCategory)}
+              >
+                <TabsList className="flex h-auto flex-wrap gap-1">
+                  {APPOINTMENT_REMINDER_CATEGORY_ORDER.map((cat) => (
+                    <TabsTrigger key={cat} value={cat} className="text-xs">
+                      {APPOINTMENT_REMINDER_CATEGORY_LABELS[cat]}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+                {APPOINTMENT_REMINDER_CATEGORY_ORDER.map((cat) => (
+                  <TabsContent key={cat} value={cat} className="mt-3 space-y-3">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label className="text-xs">Día anterior</Label>
+                        <Textarea
+                          value={treatmentTemplates[cat].day_before}
+                          onChange={(e) =>
+                            setTreatmentTemplates((prev) => ({
+                              ...prev,
+                              [cat]: { ...prev[cat], day_before: e.target.value },
+                            }))
+                          }
+                          rows={8}
+                          className="text-xs"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-xs">1 hora antes</Label>
+                        <Textarea
+                          value={treatmentTemplates[cat].hour_before}
+                          onChange={(e) =>
+                            setTreatmentTemplates((prev) => ({
+                              ...prev,
+                              [cat]: { ...prev[cat], hour_before: e.target.value },
+                            }))
+                          }
+                          rows={8}
+                          className="text-xs"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-1"
+                        disabled={sendTest.isPending}
+                        onClick={() => handleTestSend('day_before')}
+                      >
+                        <Send className="h-3 w-3" />
+                        Probar día anterior
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-1"
+                        disabled={sendTest.isPending}
+                        onClick={() => handleTestSend('hour_before')}
+                      >
+                        <Send className="h-3 w-3" />
+                        Probar 1 h antes
+                      </Button>
+                    </div>
+                  </TabsContent>
+                ))}
+              </Tabs>
+
+              <p className="text-[11px] text-muted-foreground">
+                Las plantillas genéricas antiguas se mantienen como respaldo si falta alguna categoría.
+              </p>
             </CardContent>
           </Card>
         </TabsContent>

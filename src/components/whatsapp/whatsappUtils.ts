@@ -572,25 +572,65 @@ export function hasStickerInWahaMessageRaw(raw: unknown): boolean {
 export type WhatsappMessageTypeSource = {
   type?: string | null;
   body?: string | null;
+  media_url?: string | null;
   media_mime_type?: string | null;
+  media_filename?: string | null;
   raw?: unknown;
 };
 
-/** Tipo efectivo para UI (stickers mal tipados en sync antiguo o WAHA). */
+function hasBaileysMediaKey(raw: unknown, key: string): boolean {
+  if (!raw || typeof raw !== 'object') return false;
+  const root = raw as Record<string, unknown>;
+  const check = (msg: unknown): boolean => {
+    if (!msg || typeof msg !== 'object') return false;
+    const u = unwrapBaileysInnerMessage(msg as Record<string, unknown>);
+    return u[key] != null && typeof u[key] === 'object';
+  };
+  if (check(root.message)) return true;
+  const data = root._data as Record<string, unknown> | undefined;
+  return data ? check(data.message) : false;
+}
+
+/** Tipo efectivo para UI (stickers/imágenes mal tipados en sync o webhook). */
 export function resolveWhatsappMessageType(m: WhatsappMessageTypeSource): string {
   const rawType = (m.type ?? 'text').toLowerCase();
-  if (rawType === 'undefined' || rawType === 'null' || rawType === 'unknown') {
-    const mime = m.media_mime_type?.toLowerCase() ?? '';
+  const mime = m.media_mime_type?.toLowerCase() ?? '';
+  const name = m.media_filename?.toLowerCase() ?? '';
+  const weak =
+    !rawType ||
+    rawType === 'text' ||
+    rawType === 'chat' ||
+    rawType === 'unknown' ||
+    rawType === 'undefined' ||
+    rawType === 'null';
+
+  if (rawType === 'sticker' || rawType === 'stickermessage') return 'sticker';
+  if (hasStickerInWahaMessageRaw(m.raw) || m.body?.trim() === '[sticker]') return 'sticker';
+  if (hasBaileysMediaKey(m.raw, 'imageMessage')) return 'image';
+  if (hasBaileysMediaKey(m.raw, 'videoMessage')) return 'video';
+  if (hasBaileysMediaKey(m.raw, 'audioMessage')) {
+    return 'voice';
+  }
+  if (hasBaileysMediaKey(m.raw, 'documentMessage')) return 'document';
+
+  if (weak) {
+    if (mime.includes('webp') && (hasStickerInWahaMessageRaw(m.raw) || /sticker/i.test(name))) {
+      return 'sticker';
+    }
+    if (mime.startsWith('image/') || /\.(jpe?g|png|gif|webp)$/i.test(name)) return 'image';
+    if (mime.startsWith('video/') || /\.(mp4|mov|webm)$/i.test(name)) return 'video';
     if (mime.includes('ogg') || mime.includes('opus')) return 'voice';
     if (mime.startsWith('audio/')) return 'audio';
+    if (m.media_url?.includes('/storage/v1/object/public/whatsapp-media/')) {
+      if (mime.startsWith('image/') || !mime) return 'image';
+    }
+    if (m.media_url && (mime || name)) return 'document';
     return 'text';
   }
-  if (rawType === 'sticker' || rawType === 'stickermessage') return 'sticker';
-  if (hasStickerInWahaMessageRaw(m.raw)) return 'sticker';
-  if (m.body?.trim() === '[sticker]') return 'sticker';
+
   if (
     (rawType === 'image' || rawType === 'unknown') &&
-    m.media_mime_type?.toLowerCase().includes('webp') &&
+    mime.includes('webp') &&
     hasStickerInWahaMessageRaw(m.raw)
   ) {
     return 'sticker';
@@ -700,18 +740,25 @@ export function extractMediaUrlFromWahaMessageRaw(raw: unknown): string | null {
   return tryMsg(root.message) ?? tryMsg((root._data as Record<string, unknown> | undefined)?.message);
 }
 
-/** Hay URL embebida o en Storage para pedir media al proveedor (sin solo message id). */
+/** Hay pista de media descargable vía proxy o Storage (CDN cuenta: el proxy usa message_id). */
 export function hasWhatsappProviderMediaHint(message: {
   media_url?: string | null;
+  waha_message_id?: string | null;
+  type?: string | null;
   raw?: unknown;
 }): boolean {
   const stored = message.media_url?.includes('/storage/v1/object/public/whatsapp-media/');
   if (stored) return true;
   if (extractEmbeddedMediaBase64(message.raw)) return true;
   const rawUrl = extractMediaUrlFromWahaMessageRaw(message.raw);
-  if (rawUrl && !isExternalWhatsappCdnUrl(rawUrl)) return true;
+  if (rawUrl) return true;
   const direct = message.media_url?.trim();
-  if (direct && !isExternalWhatsappCdnUrl(direct)) return true;
+  if (direct) return true;
+  if (resolveWhatsappMediaMessageId(message)) {
+    const t = (message.type ?? '').toLowerCase();
+    if (t && t !== 'text' && t !== 'chat' && t !== 'revoked') return true;
+    if (hasStickerInWahaMessageRaw(message.raw)) return true;
+  }
   return false;
 }
 

@@ -7,6 +7,12 @@ import { IbanInput } from '@/components/ui/iban-input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { formatAgeLabel } from '@/lib/patientAge';
+import { repairStyleText } from '@/lib/styleTextEncoding';
+import {
+  mergeClinicalSex,
+  sexFromClinicalProfile,
+  type ScaleSex,
+} from '@/lib/scaleWeighProfile';
 
 interface Props {
   customer: any;
@@ -37,6 +43,9 @@ export const ClienteFichaTecnicaTab: React.FC<Props> = ({ customer, isLoading, o
 
   const birthYmd = birthDateYmd(customer);
   const ageLabel = formatAgeLabel(birthYmd);
+  const sex = sexFromClinicalProfile(customer.clinical_profile);
+
+  const text = (value: string | null | undefined) => repairStyleText(value || '');
 
   return (
     <div className="rounded-lg border border-sky-100/50 dark:border-sky-900/20 bg-card/40 p-3">
@@ -44,7 +53,7 @@ export const ClienteFichaTecnicaTab: React.FC<Props> = ({ customer, isLoading, o
         <div>
           <Label className={fieldLabel}>Nombre</Label>
           <Input
-            value={customer.name || ''}
+            value={text(customer.name)}
             onChange={(e) => onUpdate('name', e.target.value)}
             className={fieldInput}
           />
@@ -84,9 +93,51 @@ export const ClienteFichaTecnicaTab: React.FC<Props> = ({ customer, isLoading, o
           </div>
         </div>
         <div>
+          <Label className={fieldLabel}>Sexo</Label>
+          <Select
+            value={sex ?? undefined}
+            onValueChange={(v) =>
+              onUpdate(
+                'clinical_profile',
+                mergeClinicalSex(customer.clinical_profile, v as ScaleSex),
+              )
+            }
+          >
+            <SelectTrigger className={cn(fieldInput, 'h-8')}>
+              <SelectValue placeholder="Seleccionar" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="F">Mujer</SelectItem>
+              <SelectItem value="M">Hombre</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <Label className={fieldLabel}>Altura (cm)</Label>
+          <Input
+            type="number"
+            inputMode="decimal"
+            min={100}
+            max={230}
+            step={0.1}
+            placeholder="170"
+            value={customer.height_cm ?? ''}
+            onChange={(e) => {
+              const raw = e.target.value.trim();
+              if (!raw) {
+                onUpdate('height_cm', null);
+                return;
+              }
+              const n = Number(raw);
+              onUpdate('height_cm', Number.isFinite(n) ? n : null);
+            }}
+            className={fieldInput}
+          />
+        </div>
+        <div>
           <Label className={fieldLabel}>Persona contacto</Label>
           <Input
-            value={customer.contact_person || ''}
+            value={text(customer.contact_person)}
             onChange={(e) => onUpdate('contact_person', e.target.value)}
             className={fieldInput}
           />
@@ -145,7 +196,7 @@ export const ClienteFichaTecnicaTab: React.FC<Props> = ({ customer, isLoading, o
         <div className="sm:col-span-2 lg:col-span-3">
           <Label className={fieldLabel}>Calle</Label>
           <Input
-            value={customer.address_street || ''}
+            value={text(customer.address_street)}
             onChange={(e) => onUpdate('address_street', e.target.value)}
             className={fieldInput}
           />
@@ -153,7 +204,7 @@ export const ClienteFichaTecnicaTab: React.FC<Props> = ({ customer, isLoading, o
         <div>
           <Label className={fieldLabel}>Ciudad</Label>
           <Input
-            value={customer.address_city || ''}
+            value={text(customer.address_city)}
             onChange={(e) => onUpdate('address_city', e.target.value)}
             className={fieldInput}
           />
@@ -161,7 +212,7 @@ export const ClienteFichaTecnicaTab: React.FC<Props> = ({ customer, isLoading, o
         <div>
           <Label className={fieldLabel}>Provincia</Label>
           <Input
-            value={customer.address_state || ''}
+            value={text(customer.address_state)}
             onChange={(e) => onUpdate('address_state', e.target.value)}
             className={fieldInput}
           />
@@ -185,7 +236,7 @@ export const ClienteFichaTecnicaTab: React.FC<Props> = ({ customer, isLoading, o
         <div className="sm:col-span-2 lg:col-span-3">
           <Label className={fieldLabel}>Notas</Label>
           <Textarea
-            value={customer.notes || ''}
+            value={text(customer.notes)}
             onChange={(e) => onUpdate('notes', e.target.value)}
             rows={3}
             placeholder="Notas internas..."

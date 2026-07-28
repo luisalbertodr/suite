@@ -72,7 +72,16 @@ import {
   stripMediaBase64,
   uploadWhatsappOutgoingMedia,
 } from '../_shared/whatsappOutgoingMediaStorage.ts';
-import { whatsappMediaPreviewLabel } from '../_shared/whatsappMessageType.ts';
+import {
+  whatsappMediaPreviewLabel,
+  inferWhatsappMediaFromRaw,
+  isWeakWhatsappMessageType,
+  sanitizeWhatsappMessageType,
+} from '../_shared/whatsappMessageType.ts';
+import {
+  assignBatchOrderedIsos,
+  isoFromUnixSecondsLive,
+} from '../_shared/whatsappMessageOrder.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -1496,33 +1505,46 @@ async function syncChatMessagesFromWaha(
   );
   // Guardar bajo el chat_id de la UI (lista lateral) para que coincida al abrir la conversación.
   const rowChatId = chatId;
-  const rows = data.map((m) => ({
-    company_id: companyId,
-    chat_id: rowChatId,
-    source_provider: 'waha',
-    waha_message_id: m.id,
-    from_jid: resolveIncomingFromJid(
-      chatId,
-      !!m.fromMe,
-      m.from ?? null,
-      m,
-      extractMessageKey(m),
-    ),
-    from_me: !!m.fromMe,
-    type: m.type ?? 'text',
-    body: m.body ?? null,
-    caption: m.caption ?? null,
-    media_url: m.media?.url ?? null,
-    media_mime_type: m.media?.mimetype ?? null,
-    media_filename: m.media?.filename ?? null,
-    media_size: m.media?.size ?? null,
-    ack: Number(m.ack ?? 0) || 0,
-    quoted_message_id: m.quotedMsg?.id ?? null,
-    timestamp: m.timestamp
-      ? new Date(m.timestamp * 1000).toISOString()
-      : new Date().toISOString(),
-    raw: m as unknown,
-  }));
+  const orderedTs = assignBatchOrderedIsos(
+    data.map((m) => m.timestamp ?? null),
+    { newestFirst: true },
+  );
+  const rows = data.map((m, i) => {
+    const inferred = inferWhatsappMediaFromRaw(m);
+    const declaredType = m.type ?? 'text';
+    const type = sanitizeWhatsappMessageType(
+      isWeakWhatsappMessageType(declaredType) && inferred ? inferred.type : declaredType,
+      {
+        mime: m.media?.mimetype ?? inferred?.mediaMime,
+        filename: m.media?.filename ?? inferred?.mediaFilename,
+      },
+    );
+    return {
+      company_id: companyId,
+      chat_id: rowChatId,
+      source_provider: 'waha',
+      waha_message_id: m.id,
+      from_jid: resolveIncomingFromJid(
+        chatId,
+        !!m.fromMe,
+        m.from ?? null,
+        m,
+        extractMessageKey(m),
+      ),
+      from_me: !!m.fromMe,
+      type,
+      body: m.body ?? inferred?.body ?? null,
+      caption: m.caption ?? inferred?.caption ?? null,
+      media_url: m.media?.url ?? inferred?.mediaUrl ?? null,
+      media_mime_type: m.media?.mimetype ?? inferred?.mediaMime ?? null,
+      media_filename: m.media?.filename ?? inferred?.mediaFilename ?? null,
+      media_size: m.media?.size ?? inferred?.mediaSize ?? null,
+      ack: Number(m.ack ?? 0) || 0,
+      quoted_message_id: m.quotedMsg?.id ?? null,
+      timestamp: orderedTs[i],
+      raw: m as unknown,
+    };
+  });
   const { error: upsertError } = await admin
     .from('whatsapp_messages')
     .upsert(rows, {
@@ -1552,8 +1574,15 @@ async function syncChatMessagesFromOpenwa(
   const rawMessages = await openwaListChatMessages(providerCfg, chatId, limit, offset);
   if (!rawMessages.length) return 0;
 
-  const rows = rawMessages.map((raw) =>
-    buildOpenwaMessageUpsertRow(raw, chatId, companyId)
+  const orderedTs = assignBatchOrderedIsos(
+    rawMessages.map((raw) => {
+      const n = normalizeOpenwaMessageToWahaShape(raw, chatId);
+      return Number(n.timestamp ?? 0) || null;
+    }),
+    { newestFirst: true },
+  );
+  const rows = rawMessages.map((raw, i) =>
+    buildOpenwaMessageUpsertRow(raw, chatId, companyId, orderedTs[i]),
   );
 
   const { error: upsertError } = await admin
@@ -2662,8 +2691,15 @@ serve(async (req) => {
         if (!chatId) return err('Falta chat_id');
         if (provider === 'openwa') {
           const rawMessages = await openwaListChatMessages(providerCfg, chatId, limit, offset);
-          const rows = rawMessages.map((raw) =>
-            buildOpenwaMessageUpsertRow(raw, chatId, companyId)
+          const orderedTs = assignBatchOrderedIsos(
+            rawMessages.map((raw) => {
+              const n = normalizeOpenwaMessageToWahaShape(raw, chatId);
+              return Number(n.timestamp ?? 0) || null;
+            }),
+            { newestFirst: true },
+          );
+          const rows = rawMessages.map((raw, i) =>
+            buildOpenwaMessageUpsertRow(raw, chatId, companyId, orderedTs[i]),
           );
           if (rows.length > 0) {
             await admin.from('whatsapp_messages').upsert(rows, {
@@ -2946,11 +2982,9 @@ serve(async (req) => {
           timestamp?: number;
         };
         const wahaId = sendResult.messageId ?? resolveOutgoingMessageId(provider, res, chatId);
-        const ts = sendResult.timestamp
-          ? new Date(sendResult.timestamp * 1000).toISOString()
-          : res?.timestamp
-            ? new Date(res.timestamp * 1000).toISOString()
-            : new Date().toISOString();
+        const ts = isoFromUnixSecondsLive(
+          sendResult.timestamp ?? res?.timestamp ?? Math.floor(Date.now() / 1000),
+        );
         const outgoingBody = type === 'text' ? sendBody.text ?? null : null;
 
         let outgoingMediaUrl: string | null = null;
@@ -3133,9 +3167,7 @@ serve(async (req) => {
           }),
         });
         const wahaId = resolveOutgoingWahaId(res, chatId);
-        const ts = res?.timestamp
-          ? new Date(res.timestamp * 1000).toISOString()
-          : new Date().toISOString();
+        const ts = isoFromUnixSecondsLive(res?.timestamp ?? null);
         await admin.from('whatsapp_chats').upsert(
           {
             company_id: companyId,

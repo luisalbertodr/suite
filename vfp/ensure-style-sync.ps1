@@ -108,6 +108,16 @@ sh.Run Chr(34) & "$runner" & Chr(34), 0, False
 
 function Start-StyleSyncAgent {
     param([string]$AgentDirPath, [string]$Root)
+    $restartFlag = Join-Path $Root "Usuarios\_suite_restart_agent.req"
+    $needRestart = Test-Path $restartFlag
+    if ($needRestart -and (Test-StyleSyncAgentRunning)) {
+        Write-SyncLog "reinicio agente solicitado (_suite_restart_agent.req)"
+        Get-CimInstance Win32_Process -Filter "name='node.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { $_.CommandLine -match 'dist[/\\]index\.js' } |
+            ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+        Start-Sleep -Seconds 2
+        Remove-Item $restartFlag -Force -ErrorAction SilentlyContinue
+    }
     if (Test-StyleSyncAgentRunning) {
         Write-SyncLog "agente Node ya en ejecucion"
         return $true

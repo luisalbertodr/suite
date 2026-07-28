@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { withFsRetry } from "./fsRetry.js";
 import { readColaRows } from "./colaDbf.js";
 import { loadDbfIndexed, lookupDbfRow, normalizeStyleKey, type DbfRow } from "./dbfSource.js";
+import { writeVfpJsonFile } from "./vfpJsonFile.js";
 
 /**
  * Motor genérico Style ↔ Suite para maestros y transacciones (clientes, artículos,
@@ -253,7 +254,7 @@ export async function pollOutboxToInbound(
     );
     if (exists) continue;
     await withFsRetry(
-      () => fs.writeFileSync(out, JSON.stringify({ ...shape, entity_type: row.entity_type, outbox_id: row.id }, null, 2), "utf8"),
+      () => writeVfpJsonFile(out, { ...shape, entity_type: row.entity_type, outbox_id: row.id }),
       { label: `write ${out}` },
     );
     deps.log(`outbox ${row.entity_type} -> ${out}`);

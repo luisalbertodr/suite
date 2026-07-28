@@ -1368,6 +1368,7 @@ export type Database = {
           address_postal_code: string | null
           address_state: string | null
           address_street: string | null
+          archived_at: string | null
           birth_date: string | null
           clinical_profile: Json
           company_id: string
@@ -1401,6 +1402,7 @@ export type Database = {
           address_postal_code?: string | null
           address_state?: string | null
           address_street?: string | null
+          archived_at?: string | null
           birth_date?: string | null
           clinical_profile?: Json
           company_id: string
@@ -1433,6 +1435,7 @@ export type Database = {
           address_postal_code?: string | null
           address_state?: string | null
           address_street?: string | null
+          archived_at?: string | null
           birth_date?: string | null
           clinical_profile?: Json
           company_id?: string
@@ -1441,8 +1444,7 @@ export type Database = {
           credit_limit?: number | null
           email?: string | null
           first_session_date?: string | null
-          height_cm?: number | null
-          iban_account?: string | null
+          height_cm?: number | null          iban_account?: string | null
           id?: string
           intracomunitario?: string | null
           irpf_percentage?: number | null

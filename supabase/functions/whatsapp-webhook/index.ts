@@ -23,7 +23,10 @@ import { mapOpenwaStatusToInternal } from '../_shared/whatsappProviderTypes.ts';
 import {
   sanitizeWhatsappMessageType,
   whatsappMediaPreviewLabel,
+  inferWhatsappMediaFromRaw,
+  isWeakWhatsappMessageType,
 } from '../_shared/whatsappMessageType.ts';
+import { isoFromUnixSecondsLive } from '../_shared/whatsappMessageOrder.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -102,6 +105,16 @@ function openwaToWahaEnvelope(body: OpenwaWebhookEnvelope): WahaEnvelope {
 
   if (event === 'message.received' || event === 'message.sent') {
     const fromMe = !!data.fromMe;
+    const inferred = inferWhatsappMediaFromRaw(data);
+    const declaredType = data.type ?? 'text';
+    const type = isWeakWhatsappMessageType(declaredType) && inferred
+      ? inferred.type
+      : declaredType;
+    const dataKey = asRecord(asRecord(data._data)?.key) ?? asRecord(data.key);
+    const dataMessage =
+      asRecord(asRecord(data._data)?.message) ??
+      asRecord(data.message) ??
+      null;
     return {
       event: fromMe ? 'message.any' : 'message',
       payload: {
@@ -109,15 +122,28 @@ function openwaToWahaEnvelope(body: OpenwaWebhookEnvelope): WahaEnvelope {
         from: data.from,
         to: data.to,
         fromMe,
-        body: data.body,
-        caption: data.caption,
-        type: data.type ?? 'text',
+        body: data.body ?? inferred?.body ?? null,
+        caption: data.caption ?? inferred?.caption ?? null,
+        type,
         timestamp: data.waTimestamp ?? data.timestamp,
-        hasMedia: data.hasMedia,
-        media: data.media ?? null,
-        mimetype: data.mimetype ?? null,
+        hasMedia: data.hasMedia ?? !!inferred,
+        media: data.media ??
+          (inferred?.mediaUrl
+            ? {
+                url: inferred.mediaUrl,
+                mimetype: inferred.mediaMime,
+                filename: inferred.mediaFilename,
+                size: inferred.mediaSize,
+              }
+            : null),
+        mimetype: data.mimetype ?? inferred?.mediaMime ?? null,
         notifyName: (data.contact as { pushName?: string } | undefined)?.pushName,
         pushName: (data.contact as { pushName?: string } | undefined)?.pushName,
+        // Permite el camino Baileys en normalizeMessage.
+        key: dataKey,
+        message: dataMessage ?? undefined,
+        messageTimestamp: data.waTimestamp ?? data.timestamp,
+        _data: data._data ?? data,
       },
     };
   }
@@ -731,7 +757,7 @@ function normalizeMessage(
     const c = baileysContent(payload.message ?? asRecord(payload._data)?.message as Record<string, unknown> | undefined);
     const tsRaw = payload.messageTimestamp ?? asRecord(payload._data)?.messageTimestamp;
     const tsSecs = typeof tsRaw === 'string' ? Number(tsRaw) : Number(tsRaw ?? 0);
-    const ts = tsSecs ? new Date(tsSecs * 1000).toISOString() : new Date().toISOString();
+    const ts = isoFromUnixSecondsLive(tsSecs || null);
     const fromJid = isGroup
       ? resolveIncomingFromJid(remoteJid, !!key!.fromMe, null, payload, key)
       : resolveIncomingFromJid(
@@ -775,15 +801,14 @@ function normalizeMessage(
     return key?.remoteJid ?? null;
   })();
   if (!chatId) return null;
-  const ts = payload.timestamp
-    ? new Date(payload.timestamp * 1000).toISOString()
-    : new Date().toISOString();
+  const ts = isoFromUnixSecondsLive(payload.timestamp ?? null);
+  const inferred = inferWhatsappMediaFromRaw(payload);
   const bodyOrPreview = (() => {
     const b = payload.body?.trim();
     if (b && b !== 'undefined' && b !== 'null') return b;
     const c = payload.caption?.trim();
     if (c && c !== 'undefined' && c !== 'null') return c;
-    return null;
+    return inferred?.caption ?? inferred?.body ?? null;
   })();
   const isGroupChat = /@g\.us$/i.test(chatId);
   const fromJid = resolveIncomingFromJid(
@@ -793,29 +818,32 @@ function normalizeMessage(
     payload,
     key,
   );
+  const declaredType = payload.type ?? 'text';
+  const mimeHint =
+    payload.media?.mimetype ??
+    (typeof (payload as Record<string, unknown>).mimetype === 'string'
+      ? ((payload as Record<string, unknown>).mimetype as string)
+      : null) ??
+    inferred?.mediaMime ??
+    null;
   return {
     id: resolveWahaMessageId(payload),
     chatId,
     fromJid,
     fromMe: !!payload.fromMe,
-    type: sanitizeWhatsappMessageType(payload.type ?? 'text', {
-      mime:
-        payload.media?.mimetype ??
-        (typeof (payload as Record<string, unknown>).mimetype === 'string'
-          ? ((payload as Record<string, unknown>).mimetype as string)
-          : null),
-      filename: payload.media?.filename ?? null,
-    }),
+    type: sanitizeWhatsappMessageType(
+      isWeakWhatsappMessageType(declaredType) && inferred ? inferred.type : declaredType,
+      {
+        mime: mimeHint,
+        filename: payload.media?.filename ?? inferred?.mediaFilename ?? null,
+      },
+    ),
     body: bodyOrPreview,
-    caption: payload.caption ?? null,
-    mediaUrl: payload.media?.url ?? null,
-    mediaMime:
-      payload.media?.mimetype ??
-      (typeof (payload as Record<string, unknown>).mimetype === 'string'
-        ? ((payload as Record<string, unknown>).mimetype as string)
-        : null),
-    mediaFilename: payload.media?.filename ?? null,
-    mediaSize: payload.media?.size ?? null,
+    caption: payload.caption ?? inferred?.caption ?? null,
+    mediaUrl: payload.media?.url ?? inferred?.mediaUrl ?? null,
+    mediaMime: mimeHint,
+    mediaFilename: payload.media?.filename ?? inferred?.mediaFilename ?? null,
+    mediaSize: payload.media?.size ?? inferred?.mediaSize ?? null,
     ack: Number(payload.ack ?? 0) || 0,
     timestamp: ts,
     pushName: extractContactPushName(payload, mePushName),
@@ -898,7 +926,7 @@ async function handleMessage(
     const { data: existing } = await admin
       .from('whatsapp_messages')
       .select(
-        'body, caption, type, media_url, media_mime_type, media_filename, media_size, from_jid, raw',
+        'body, caption, type, media_url, media_mime_type, media_filename, media_size, from_jid, raw, timestamp',
       )
       .eq('company_id', companyId)
       .eq('waha_message_id', m.id)
@@ -910,7 +938,7 @@ async function handleMessage(
         const { data: rows } = await admin
           .from('whatsapp_messages')
           .select(
-            'body, caption, type, media_url, media_mime_type, media_filename, media_size, from_jid, raw',
+            'body, caption, type, media_url, media_mime_type, media_filename, media_size, from_jid, raw, timestamp',
           )
           .eq('company_id', companyId)
           .eq('chat_id', chatId)
@@ -941,6 +969,8 @@ async function handleMessage(
         media_mime_type: m.mediaMime ?? existingRow.media_mime_type,
         media_filename: m.mediaFilename ?? existingRow.media_filename,
         media_size: m.mediaSize ?? existingRow.media_size,
+        // No pisar el desempate intra-segundo ya persistido.
+        timestamp: (existingRow.timestamp as string | null) ?? m.timestamp,
         raw: keepBody || keepCap ? (existingRow.raw as unknown) ?? m.raw : m.raw,
       };
     }
@@ -1110,11 +1140,30 @@ async function handleStateChange(
   admin: SupabaseClient,
   companyId: string,
   envelope: WahaEnvelope,
+  eventName: string,
 ) {
   const payload = envelope.payload as
     | { status?: string; state?: string; message?: string; qr?: string | null }
     | undefined;
-  const status = payload?.status ?? payload?.state ?? null;
+  const statusRaw = payload?.status ?? payload?.state;
+  const status =
+    typeof statusRaw === 'string' && statusRaw.trim() ? statusRaw.trim() : null;
+  // engine.event es ruido interno de Baileys (creds/chats.update); no trae status
+  // y no debe pisar last_status a null (deja la UI pensando que la sesión cayó).
+  if (eventName === 'engine.event' && !status) {
+    const patch: Record<string, unknown> = {
+      last_status_at: new Date().toISOString(),
+    };
+    if (envelope.me?.id) patch.me_jid = envelope.me.id;
+    if (envelope.me?.pushName) patch.me_pushname = envelope.me.pushName;
+    if (Object.keys(patch).length > 1) {
+      await admin.from('whatsapp_config').update(patch).eq('company_id', companyId);
+    }
+    return;
+  }
+  if (!status && eventName !== 'session.status' && eventName !== 'state.change') {
+    return;
+  }
   const qrRaw = payload?.qr;
   const qrDataUrl =
     typeof qrRaw === 'string' && qrRaw.length > 0
@@ -1125,7 +1174,7 @@ async function handleStateChange(
   await admin
     .from('whatsapp_config')
     .update({
-      last_status: status,
+      ...(status ? { last_status: status } : {}),
       last_status_message: payload?.message ?? null,
       last_status_at: new Date().toISOString(),
       ...(qrDataUrl ? { qr_data_url: qrDataUrl } : {}),
@@ -1233,7 +1282,7 @@ serve(async (req) => {
       event === 'session.status' ||
       event === 'engine.event'
     ) {
-      await handleStateChange(admin, companyId, envelope);
+      await handleStateChange(admin, companyId, envelope, event);
     } else if (event === 'chat.archive') {
       const p = (envelope.payload ?? {}) as { chatId?: string; archived?: boolean };
       if (p.chatId) {

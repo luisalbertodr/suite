@@ -102,10 +102,21 @@ const clientesHandler: EntityHandler = {
       p_fecnac: dbfDateIso(src, "fecnac"),
       p_obsoleto: dbfBool(src, "obsoleto"),
       p_sync_version: syncVersionFrom(cola, src),
+      p_altura: (() => {
+        const n = dbfNum(src, "altura");
+        return n >= 100 && n <= 230 ? Math.round(n) : null;
+      })(),
     };
   },
   toInboundJson(row) {
     const p = row.payload ?? {};
+    const alturaRaw = p["altura"];
+    const alturaNum =
+      typeof alturaRaw === "number"
+        ? alturaRaw
+        : typeof alturaRaw === "string" && alturaRaw.trim()
+          ? Number(alturaRaw)
+          : null;
     return {
       entity_type: "customer",
       operation: row.operation,
@@ -124,6 +135,9 @@ const clientesHandler: EntityHandler = {
       percon: String(p["percon"] ?? ""),
       obscli: String(p["obscli"] ?? ""),
       fecnac: String(p["fecnac"] ?? ""),
+      altura: Number.isFinite(alturaNum) && (alturaNum as number) >= 100 && (alturaNum as number) <= 230
+        ? Math.round(alturaNum as number)
+        : "",
       obsoleto: p["obsoleto"] ? "SI" : "NO",
       sync_version: p["sync_version"] ?? 0,
     };

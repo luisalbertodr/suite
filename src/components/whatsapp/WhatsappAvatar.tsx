@@ -1,6 +1,7 @@
 import React from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Users } from 'lucide-react';
+import { resolveSupabasePublicStorageUrl } from './whatsappUtils';
 
 interface WhatsappAvatarProps {
   name?: string | null;
@@ -45,10 +46,11 @@ export const WhatsappAvatar: React.FC<WhatsappAvatarProps> = ({
 }) => {
   const initials = getInitials(name, !!isGroup);
   const color = colorFor(name ?? '');
+  const resolvedUrl = resolveSupabasePublicStorageUrl(pictureUrl) ?? pictureUrl;
   return (
     <Avatar className={className}>
-      {pictureUrl ? (
-        <AvatarImage src={pictureUrl} alt={name ?? 'avatar'} />
+      {resolvedUrl ? (
+        <AvatarImage src={resolvedUrl} alt={name ?? 'avatar'} />
       ) : null}
       <AvatarFallback
         className={`${color} text-white font-semibold`}
