@@ -1,6 +1,30 @@
 * Worker inbound Suite -> Style (VFP9).
 * Lee JSON en sync\inbound\*.json, aplica a plan2009/planart y genera ack en sync\inbound_ack\{queue_id}.ok
 
+FUNCTION SuiteInboundLocalRoot
+ PARAMETER tcRoot
+ LOCAL lc, lnSlash, lcShare, lcRest
+ lc = ADDBS(ALLTRIM(NVL(tcRoot, "")))
+ IF LEFT(lc, 2) <> "\\"
+    RETURN lc
+ ENDIF
+ * Admin share SMB: \\host\c$\Style-Dunasoft\ -> C:\Style-Dunasoft\
+ * Evita abrir el mismo DBF por UNC y por letra de unidad (rompe CDX / cuelga UI).
+ lnSlash = AT(SUBSTR(lc, 3), "\")
+ IF lnSlash <= 0
+    RETURN lc
+ ENDIF
+ lcShare = SUBSTR(lc, 3 + lnSlash, 2)
+ IF LEN(lcShare) = 2 .AND. SUBSTR(lcShare, 2, 1) = "$" .AND. ISALPHA(LEFT(lcShare, 1))
+    lcRest = SUBSTR(lc, 3 + lnSlash + 2)
+    IF LEFT(lcRest, 1) = "\"
+       lcRest = SUBSTR(lcRest, 2)
+    ENDIF
+    RETURN ADDBS(UPPER(LEFT(lcShare, 1)) + ":\" + lcRest)
+ ENDIF
+ RETURN lc
+ENDFUNC
+
 FUNCTION SuiteInboundRoot
  LOCAL lcRoot
  lcRoot = ""
@@ -8,9 +32,12 @@ FUNCTION SuiteInboundRoot
     lcRoot = ADDBS(pcSuiteStyleRoot)
  ENDIF
  IF EMPTY(lcRoot)
+    lcRoot = ADDBS(ALLTRIM(GETENV("STYLE_HOME")))
+ ENDIF
+ IF EMPTY(lcRoot)
     lcRoot = ADDBS(SYS(5)+SYS(2003))
  ENDIF
- RETURN lcRoot
+ RETURN SuiteInboundLocalRoot(lcRoot)
 ENDFUNC
 
 PROCEDURE SuiteInboundEnsureWedb

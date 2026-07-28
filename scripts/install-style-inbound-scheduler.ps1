@@ -50,17 +50,23 @@ $oncePrg = Join-Path $StyleRoot "PROGS\_inbound_once.prg"
 $onceSrc = Join-Path (Split-Path -Parent $PSScriptRoot) "vfp\_inbound_once.prg"
 if (Test-Path $onceSrc) {
     $once = Get-Content $onceSrc -Raw -Encoding UTF8
-    $once = $once -replace 'C:\\Duna\\Style-Suite-Test\\', ($TaskStyleRoot + '\')
+    # Plantilla resuelve STYLE_HOME / cwd; no incrustar UNC (rompe CDX vs C:\).
 } else {
     $once = @"
-LOCAL lcWorker
+LOCAL lcWorker, lcEnv, lcRoot
 SET SAFETY OFF
 SET ESCAPE OFF
 SET NOTIFY OFF
 ON ERROR DO InboundOnceError
 _SCREEN.Visible = .F.
 PUBLIC pcSuiteStyleRoot
-pcSuiteStyleRoot = "$TaskStyleRoot\"
+lcEnv = ALLTRIM(GETENV("STYLE_HOME"))
+IF .NOT. EMPTY(lcEnv)
+   lcRoot = ADDBS(lcEnv)
+ELSE
+   lcRoot = ADDBS("$TaskStyleRoot\")
+ENDIF
+pcSuiteStyleRoot = lcRoot
 SET DEFAULT TO (pcSuiteStyleRoot)
 lcWorker = pcSuiteStyleRoot + "PROGS\suite_inbound_worker_sync.prg"
 IF .NOT. FILE(lcWorker)

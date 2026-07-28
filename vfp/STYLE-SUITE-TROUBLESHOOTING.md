@@ -4,6 +4,28 @@ Diagnóstico por síntoma. Ver [STYLE-SUITE-OPERATIONS.md](STYLE-SUITE-OPERATION
 
 ---
 
+## Style se cuelga al crear un cliente nuevo
+
+**Síntoma:** al pulsar Nuevo/guardar cliente, Duna.exe/Duna2 se congela. Un `.exe` antiguo también falla → el fallo está **fuera del exe**.
+
+| Paso | Qué revisar |
+|------|-------------|
+| 1 | `PROGS\_inbound_once.prg` — ¿`pcSuiteStyleRoot` es `C:\Style-Dunasoft\` o `\\192.168.99.16\c$\Style-Dunasoft\`? |
+| 2 | Timestamps `dbf\CLIENTES.DBF` vs `CLIENTES.CDX` — si el DBF es más nuevo, el índice está corrupto/desfasado |
+| 3 | Log inbound: `Index does not match the table` |
+| 4 | `funciones.fxp` (externo) — `Damenumero` hace `RLOCK` sobre `registros` |
+
+**Causa frecuente:** el worker inbound abre los DBF por **UNC admin share** mientras Style los abre por **C:\\**. Misma tabla, dos rutas → CDX desfasado → `SEEK`/`APPEND` en el alta de cliente se cuelga (bucle de unicidad + numerador).
+
+**Reparación:**
+
+1. Parar Style (Duna/Duna2) y el worker inbound.
+2. Asegurar `_inbound_once.prg` con ruta local (`STYLE_HOME` / cwd, nunca `\\host\c$\...`).
+3. Reindexar: `USE dbf\clientes EXCLUSIVE` → `REINDEX` (también `articulos`, `bonoscli` si CDX stale).
+4. Redeploy runtime: `.\scripts\deploy-style-sync-runtime.ps1 -StyleRoot C:\Style-Dunasoft`.
+
+---
+
 ## Style no llega a Suite
 
 **Síntoma:** cita guardada en Style; no aparece en Suite.

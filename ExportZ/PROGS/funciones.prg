@@ -20,129 +20,145 @@ ENDFUNC
 **
 FUNCTION Damenumero
  PARAMETER xdescrip, xtabla, xserie, xyear, xvisible
- LOCAL xnumero, tablaant, lnnumreg, lnrecno, lcorder
+ LOCAL xnumero, tablaant, lnnumreg, lnrecno, lcorder, lcRepNum, lcRepUnit, llDone
+ * Con REPROCESS=0 (defecto) un RLOCK sobre REGISTROS espera para siempre si el
+ * numerador esta ocupado (otra sesion, worker inbound por UNC, etc.) y Style se
+ * congela al crear cliente. Acotar espera; si no hay lock, devolver 0 (fail-open).
  xnumero = 1
- IF PCOUNT()=2
-    xserie = ""
-    xyear = 0
-    xvisible = .T.
- ENDIF
- IF PCOUNT()=4
-    xvisible = .T.
- ENDIF
- IF PCOUNT()=3
-    xyear = 0
-    xvisible = .T.
- ENDIF
- tablaant = SELECT()
- lnnumreg = 0
- IF ALLTRIM(UPPER(xtabla))=="FACCAB"
-    lnnumeroinicio = damevalor("dbf/series", "facini", xserie, "serie")
-    IF  .NOT. cfgnumerofacturaseguro
-       SELECT faccab
-       IF  .NOT. EOF()
-          lnrecno = RECNO()
-       ELSE
-          lnrecno = 0
-       ENDIF
-       lcorder = ORDER()
-       SET ORDER TO numfac DESCENDING
-       IF SEEK(STR(xyear, 4)+xserie)
-          lnnumreg = faccab.numfac+1
-       ELSE
-          lnnumreg = 1
-       ENDIF
+ llDone = .F.
+ lcRepNum = SET("REPROCESS")
+ lcRepUnit = SET("REPROCESS", 2)
+ SET REPROCESS TO 3 SECONDS
+ TRY
+    IF PCOUNT()=2
+       xserie = ""
+       xyear = 0
+       xvisible = .T.
     ENDIF
-    IF lnnumeroinicio<>0 .AND. lnnumreg<lnnumeroinicio
-       lnnumreg = lnnumeroinicio
+    IF PCOUNT()=4
+       xvisible = .T.
     ENDIF
- ENDIF
- SELECT registros
- GOTO TOP
- LOCATE FOR tabla=xtabla .AND. serie=xserie .AND. year=xyear
- IF FOUND()
-    IF RLOCK("REGISTROS")
-       DO CASE
-          CASE ALLTRIM(UPPER(xtabla))=="CLIENTES"
-             IF registros.numreg<cfgprimercliente
-                REPLACE numreg WITH cfgprimercliente
-             ELSE
-                REPLACE numreg WITH numreg+1
-             ENDIF
-          CASE ALLTRIM(UPPER(xtabla))=="BONOS"
-             IF cfgcodbonautomatico .AND. registros.numreg<cfgprimerbono
-                REPLACE numreg WITH cfgprimerbono
-             ELSE
-                REPLACE numreg WITH numreg+1
-             ENDIF
-          OTHERWISE
-             IF cfgnumerofacturaseguro .AND. lnnumreg<>0
-                REPLACE numreg WITH IIF(lnnumreg<=numreg, numreg+1, lnnumreg)
-             ELSE
-                REPLACE numreg WITH IIF(lnnumreg=0, numreg+1, lnnumreg)
-             ENDIF
-       ENDCASE
-       UNLOCK IN registros
-    ELSE
-       xnumero = 0
-       SELECT (tablaant)
-       IF ALLTRIM(UPPER(xtabla))=="CLIENTES"
-          RETURN ("0")
-       ELSE
-          RETURN xnumero
-       ENDIF
+    IF PCOUNT()=3
+       xyear = 0
+       xvisible = .T.
     ENDIF
-    xnumero = numreg
- ELSE
-    SELECT registros
-    IF RLOCK("0", "REGISTROS")
-       APPEND BLANK
-       REPLACE descrip WITH xdescrip
-       REPLACE tabla WITH xtabla
-       REPLACE serie WITH xserie
-       REPLACE year WITH xyear
-       DO CASE
-          CASE ALLTRIM(UPPER(xtabla))=="CLIENTES"
-             REPLACE numreg WITH IIF(cfgprimercliente=0, 1, cfgprimercliente)
-          CASE ALLTRIM(UPPER(xtabla))=="BONOS"
-             REPLACE numreg WITH IIF(cfgprimerbono=0, 1, cfgprimerbono)
-          OTHERWISE
-             REPLACE numreg WITH IIF(lnnumreg=0, 1, lnnumreg)
-       ENDCASE
-       REPLACE visible WITH xvisible
-       UNLOCK IN registros RECORD 0
-    ELSE
-       xnumero = 0
-       SELECT (tablaant)
-       IF ALLTRIM(UPPER(xtabla))=="CLIENTES"
-          RETURN ("0")
-       ELSE
-          RETURN xnumero
-       ENDIF
-    ENDIF
-    xnumero = numreg
- ENDIF
- IF ALLTRIM(UPPER(xtabla))=="CLIENTES"
-    IF cfgformatocliente<>0
-       IF LEN(ALLTRIM(STR(xnumero)))<cfgformatocliente
-          xnumero = PADL(ALLTRIM(STR(xnumero)), cfgformatocliente, "0")
-       ELSE
-          xnumero = ALLTRIM(STR(xnumero))
-       ENDIF
-    ELSE
-       xnumero = ALLTRIM(STR(xnumero))
-    ENDIF
- ENDIF
- IF  .NOT. cfgnumerofacturaseguro
+    tablaant = SELECT()
+    lnnumreg = 0
     IF ALLTRIM(UPPER(xtabla))=="FACCAB"
-       SELECT faccab
-       IF lnrecno<>0
-          GOTO lnrecno
+       lnnumeroinicio = damevalor("dbf/series", "facini", xserie, "serie")
+       IF  .NOT. cfgnumerofacturaseguro
+          SELECT faccab
+          IF  .NOT. EOF()
+             lnrecno = RECNO()
+          ELSE
+             lnrecno = 0
+          ENDIF
+          lcorder = ORDER()
+          SET ORDER TO numfac DESCENDING
+          IF SEEK(STR(xyear, 4)+xserie)
+             lnnumreg = faccab.numfac+1
+          ELSE
+             lnnumreg = 1
+          ENDIF
        ENDIF
-       SET ORDER TO &lcorder
+       IF lnnumeroinicio<>0 .AND. lnnumreg<lnnumeroinicio
+          lnnumreg = lnnumeroinicio
+       ENDIF
+    ENDIF
+    SELECT registros
+    GOTO TOP
+    LOCATE FOR tabla=xtabla .AND. serie=xserie .AND. year=xyear
+    IF FOUND()
+       IF RLOCK("REGISTROS")
+          DO CASE
+             CASE ALLTRIM(UPPER(xtabla))=="CLIENTES"
+                IF registros.numreg<cfgprimercliente
+                   REPLACE numreg WITH cfgprimercliente
+                ELSE
+                   REPLACE numreg WITH numreg+1
+                ENDIF
+             CASE ALLTRIM(UPPER(xtabla))=="BONOS"
+                IF cfgcodbonautomatico .AND. registros.numreg<cfgprimerbono
+                   REPLACE numreg WITH cfgprimerbono
+                ELSE
+                   REPLACE numreg WITH numreg+1
+                ENDIF
+             OTHERWISE
+                IF cfgnumerofacturaseguro .AND. lnnumreg<>0
+                   REPLACE numreg WITH IIF(lnnumreg<=numreg, numreg+1, lnnumreg)
+                ELSE
+                   REPLACE numreg WITH IIF(lnnumreg=0, numreg+1, lnnumreg)
+                ENDIF
+          ENDCASE
+          UNLOCK IN registros
+          xnumero = numreg
+       ELSE
+          xnumero = 0
+          SELECT (tablaant)
+          llDone = .T.
+       ENDIF
+    ELSE
+       SELECT registros
+       IF RLOCK("0", "REGISTROS")
+          APPEND BLANK
+          REPLACE descrip WITH xdescrip
+          REPLACE tabla WITH xtabla
+          REPLACE serie WITH xserie
+          REPLACE year WITH xyear
+          DO CASE
+             CASE ALLTRIM(UPPER(xtabla))=="CLIENTES"
+                REPLACE numreg WITH IIF(cfgprimercliente=0, 1, cfgprimercliente)
+             CASE ALLTRIM(UPPER(xtabla))=="BONOS"
+                REPLACE numreg WITH IIF(cfgprimerbono=0, 1, cfgprimerbono)
+             OTHERWISE
+                REPLACE numreg WITH IIF(lnnumreg=0, 1, lnnumreg)
+          ENDCASE
+          REPLACE visible WITH xvisible
+          UNLOCK IN registros RECORD 0
+          xnumero = numreg
+       ELSE
+          xnumero = 0
+          SELECT (tablaant)
+          llDone = .T.
+       ENDIF
+    ENDIF
+    IF  .NOT. llDone
+       IF ALLTRIM(UPPER(xtabla))=="CLIENTES"
+          IF cfgformatocliente<>0
+             IF LEN(ALLTRIM(STR(xnumero)))<cfgformatocliente
+                xnumero = PADL(ALLTRIM(STR(xnumero)), cfgformatocliente, "0")
+             ELSE
+                xnumero = ALLTRIM(STR(xnumero))
+             ENDIF
+          ELSE
+             xnumero = ALLTRIM(STR(xnumero))
+          ENDIF
+       ENDIF
+       IF  .NOT. cfgnumerofacturaseguro
+          IF ALLTRIM(UPPER(xtabla))=="FACCAB"
+             SELECT faccab
+             IF lnrecno<>0
+                GOTO lnrecno
+             ENDIF
+             SET ORDER TO &lcorder
+          ENDIF
+       ENDIF
+       SELECT (tablaant)
+    ENDIF
+ CATCH
+    xnumero = 0
+ FINALLY
+    IF UPPER(ALLTRIM(TRANSFORM(lcRepUnit))) == "SECONDS"
+       SET REPROCESS TO VAL(TRANSFORM(lcRepNum)) SECONDS
+    ELSE
+       SET REPROCESS TO VAL(TRANSFORM(lcRepNum))
+    ENDIF
+ ENDTRY
+ IF ALLTRIM(UPPER(xtabla))=="CLIENTES"
+    IF (VARTYPE(xnumero)="N" .AND. xnumero=0) .OR. ALLTRIM(TRANSFORM(xnumero))=="0"
+       RETURN ("0")
     ENDIF
  ENDIF
- SELECT (tablaant)
  RETURN xnumero
 ENDFUNC
 **
