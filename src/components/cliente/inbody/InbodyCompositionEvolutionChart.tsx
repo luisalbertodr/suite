@@ -73,7 +73,7 @@ export const InbodyCompositionEvolutionChart: React.FC<Props> = ({
           <InbodySectionHelp metricId="weight_kg" title="Evolución composición corporal" />
         </CardTitle>
         <p className="text-[10px] text-muted-foreground mt-1">
-          Barras por sesión y curvas de tendencia para peso, MME y masa grasa (kg).
+          Barras por sesión y líneas rectas entre mediciones de peso, MME y masa grasa (kg).
         </p>
       </CardHeader>
       <CardContent className={cn('pb-4', compact && 'px-3 pb-3')}>
@@ -142,7 +142,7 @@ export const InbodyCompositionEvolutionChart: React.FC<Props> = ({
             {INBODY_COMPOSITION_SERIES.map((key) => (
               <Line
                 key={`line-${key}`}
-                type="monotone"
+                type="linear"
                 dataKey={key}
                 stroke={`var(--color-${key})`}
                 strokeWidth={2.5}
@@ -157,14 +157,14 @@ export const InbodyCompositionEvolutionChart: React.FC<Props> = ({
                       key={row.id ?? `dot-${index ?? 0}`}
                       cx={cx}
                       cy={cy}
-                      r={selected ? 5.5 : 4}
+                      r={selected ? 7 : 5.5}
                       fill={`var(--color-${key})`}
                       stroke="hsl(var(--background))"
-                      strokeWidth={selected ? 2.5 : 1.75}
+                      strokeWidth={selected ? 3 : 2.25}
                     />
                   );
                 }}
-                activeDot={{ r: 6, strokeWidth: 2 }}
+                activeDot={{ r: 8, strokeWidth: 2.5 }}
                 isAnimationActive={false}
               />
             ))}

@@ -200,7 +200,7 @@ export const InbodyHistoryChart: React.FC<Props> = ({
                   }
                 />
                 <Line
-                  type="monotone"
+                  type="linear"
                   dataKey="value"
                   stroke="var(--color-value)"
                   strokeWidth={2}
@@ -214,16 +214,16 @@ export const InbodyHistoryChart: React.FC<Props> = ({
                         key={row.id ?? `dot-${index ?? 0}`}
                         cx={cx}
                         cy={cy}
-                        r={selected ? 5.5 : 4}
+                        r={selected ? 7 : 5.5}
                         fill={selected ? 'hsl(var(--primary))' : 'var(--color-value)'}
                         stroke="hsl(var(--foreground) / 0.45)"
-                        strokeWidth={selected ? 2.5 : 1.75}
+                        strokeWidth={selected ? 3 : 2.25}
                         className="drop-shadow-sm dark:drop-shadow-[0_0_4px_hsl(199_95%_72%/0.85)]"
                       />
                     );
                   }}
                   activeDot={{
-                    r: 7,
+                    r: 8,
                     fill: 'var(--color-value)',
                     stroke: 'hsl(var(--foreground) / 0.6)',
                     strokeWidth: 2.5,
