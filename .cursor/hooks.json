@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "node .cursor/hooks/single-agent-lock.cjs acquire",
+        "timeout": 10
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "node .cursor/hooks/single-agent-lock.cjs gate",
+        "timeout": 10
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "node .cursor/hooks/single-agent-lock.cjs gate",
+        "timeout": 10
+      }
+    ],
+    "beforeMCPExecution": [
+      {
+        "command": "node .cursor/hooks/single-agent-lock.cjs gate",
+        "timeout": 10
+      }
+    ],
+    "sessionEnd": [
+      {
+        "command": "node .cursor/hooks/single-agent-lock.cjs release",
+        "timeout": 10
+      }
+    ]
+  }
+}
