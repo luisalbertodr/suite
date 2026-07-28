@@ -646,51 +646,53 @@ export const Agenda: React.FC = () => {
   };
 
   // Map appointments (schema moderno + legado)
-  const appointments: Appointment[] = dbAppointments.map((apt) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const row: any = apt;
-    const description = repairStyleText(row.description || '');
-    const parsedService = parseServiceFromDescription(description);
-    const clientName = repairStyleText(row.client_name || row.title || '');
-    const startTime = normalizeTime(row.start_time);
-    const endTime = normalizeTime(row.end_time);
-    const itemDrafts = appointmentItemsByAppt[row.id] || [];
-    const timeSegments = buildAppointmentTimeSegments(startTime, itemDrafts, recursoCatalog, {
-      recursos: recursoCatalog,
-      cabinas: cabinaCatalog,
-      articleHints: agendaArticleHints,
+  const appointments: Appointment[] = useMemo(() => {
+    return dbAppointments.map((apt) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const row: any = apt;
+      const description = repairStyleText(row.description || '');
+      const parsedService = parseServiceFromDescription(description);
+      const clientName = repairStyleText(row.client_name || row.title || '');
+      const startTime = normalizeTime(row.start_time);
+      const endTime = normalizeTime(row.end_time);
+      const itemDrafts = appointmentItemsByAppt[row.id] || [];
+      const timeSegments = buildAppointmentTimeSegments(startTime, itemDrafts, recursoCatalog, {
+        recursos: recursoCatalog,
+        cabinas: cabinaCatalog,
+        articleHints: agendaArticleHints,
+      });
+      const occupiedEndTime = occupiedEndTimeFromItems(startTime, itemDrafts);
+      const paymentOnlyLabels = itemDrafts
+        .filter((it) => !it.occupies_time || Number(it.duration_minutes || 0) <= 0)
+        .map((it) => (it.label || '').trim())
+        .filter(Boolean);
+      const aptStatus = (['confirmed', 'pending', 'cancelled'].includes(row.status) ? row.status : 'pending') as Appointment['status'];
+      return {
+        id: row.id,
+        employeeId: row.employee_id || '',
+        clientName,
+        customerId: row.customer_id ?? null,
+        description,
+        serviceCode: parsedService.code,
+        serviceName: parsedService.service,
+        legacyEmployeeCode: row.legacy_codemp || undefined,
+        legacyClientCode: row.legacy_codcli || undefined,
+        legacyPlanincId: row.legacy_planinc_id ?? null,
+        legacyHourInText: parsedService.hourInText || undefined,
+        startTime,
+        endTime,
+        timeSegments,
+        occupiedEndTime,
+        paymentOnlyLabels,
+        date: normalizeDate(row.start_time, row.appointment_date),
+        color: row.color || '#3B82F6',
+        totalAmount: undefined,
+        paymentStatus: aptStatus === 'cancelled' ? 'none' : undefined,
+        status: aptStatus,
+        attachments: undefined,
+      };
     });
-    const occupiedEndTime = occupiedEndTimeFromItems(startTime, itemDrafts);
-    const paymentOnlyLabels = itemDrafts
-      .filter((it) => !it.occupies_time || Number(it.duration_minutes || 0) <= 0)
-      .map((it) => (it.label || '').trim())
-      .filter(Boolean);
-    const aptStatus = (['confirmed', 'pending', 'cancelled'].includes(row.status) ? row.status : 'pending') as Appointment['status'];
-    return {
-      id: row.id,
-      employeeId: row.employee_id || '',
-      clientName,
-      customerId: row.customer_id ?? null,
-      description,
-      serviceCode: parsedService.code,
-      serviceName: parsedService.service,
-      legacyEmployeeCode: row.legacy_codemp || undefined,
-      legacyClientCode: row.legacy_codcli || undefined,
-      legacyPlanincId: row.legacy_planinc_id ?? null,
-      legacyHourInText: parsedService.hourInText || undefined,
-      startTime,
-      endTime,
-      timeSegments,
-      occupiedEndTime,
-      paymentOnlyLabels,
-      date: normalizeDate(row.start_time, row.appointment_date),
-      color: row.color || '#3B82F6',
-      totalAmount: undefined,
-      paymentStatus: aptStatus === 'cancelled' ? 'none' : undefined,
-      status: aptStatus,
-      attachments: undefined,
-    };
-  });
+  }, [agendaArticleHints, appointmentItemsByAppt, cabinaCatalog, dbAppointments, recursoCatalog, selectedDate]);
 
   const openAppointmentById = useCallback(
     (appointmentId: string, dateYmd: string) => {
