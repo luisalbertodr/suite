@@ -123,7 +123,7 @@ export function AppointmentDocumentationDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent overlayClassName="z-[125]" className="max-w-lg max-h-[min(90vh,calc(100dvh-7.5rem))] !flex flex-col overflow-hidden p-0 gap-0 z-[125]">
+      <DialogContent overlayClassName="z-[125]" className="max-w-lg suite-max-h-dialog-lg !flex flex-col overflow-hidden p-0 gap-0 z-[125]">
         <DialogHeader className="px-5 pt-5 pb-2 shrink-0">
           <DialogTitle className="text-base pr-6">Documentación — {clientName}</DialogTitle>
           {serviceLabel ? (

@@ -59,9 +59,11 @@ interface AppointmentFormProps {
   cabinas?: any[];
   recursos?: any[];
   dayAppointments?: Appointment[];
-  onSave: (appointment: any) => void;
+  onSave: (appointment: any) => void | Promise<void>;
   onCancel: () => void;
   initialPrefill?: AppointmentFormInitialPrefill | null;
+  /** True mientras el padre persiste la cita (dual-sync incluido). */
+  saving?: boolean;
 }
 
 export const AppointmentForm: React.FC<AppointmentFormProps> = ({
@@ -75,6 +77,7 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
   onSave,
   onCancel,
   initialPrefill = null,
+  saving = false,
 }) => {
   const navigate = useNavigate();
   const { companyId } = useCompanyFilter();
@@ -233,6 +236,22 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
     },
   });
 
+  const styleCodcli =
+    (clientPick?.kind === 'customer' ? clientPick.legacyCodcli : null)?.trim() ||
+    String(selectedCustomer?.legacy_codcli ?? '').trim() ||
+    '';
+  const stylePhone =
+    (clientPick?.kind === 'customer' ? clientPick.phone : null)?.trim() ||
+    String(
+      selectedCustomer?.phone_mobile ||
+        selectedCustomer?.phone ||
+        selectedCustomer?.phone_home ||
+        '',
+    ).trim() ||
+    '';
+  const selectedEmployeeName =
+    employees.find((e) => e.id === formData.employeeId)?.name ?? formData.employeeId;
+
   const { data: activeBonos = [] } = useCustomerActiveBonos(selectedCustomerId);
   const activeVouchersCount = activeBonos.length;
 
@@ -275,13 +294,31 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
             <div className="flex-1 min-w-0">
               <AppointmentClientePicker lazySearch value={clientPick} onChange={setClientPick} />
             </div>
-            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0 mt-0.5" onClick={onCancel}>
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0 mt-0.5" onClick={onCancel} disabled={saving}>
               <X className="w-4 h-4" />
             </Button>
           </div>
         </CardHeader>
         <CardContent className="px-4 pb-3 pt-0">
           <form onSubmit={handleSubmit} className="space-y-2">
+            <div className="text-[11px] text-muted-foreground rounded-md border border-border/60 bg-muted/30 px-2 py-1.5">
+              Profesional: <strong className="text-foreground">{selectedEmployeeName}</strong>
+              <span className="ml-1.5">· Se sincronizará con Style (cola DBF)</span>
+            </div>
+
+            {(stylePhone || styleCodcli) && (
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="rounded-md border border-border/50 bg-muted/20 px-2 py-1.5 min-w-0">
+                  <div className="text-[10px] text-muted-foreground">Teléfono</div>
+                  <div className="truncate tabular-nums font-medium">{stylePhone || '—'}</div>
+                </div>
+                <div className="rounded-md border border-border/50 bg-muted/20 px-2 py-1.5 min-w-0">
+                  <div className="text-[10px] text-muted-foreground">Cód. cliente Style</div>
+                  <div className="truncate tabular-nums font-medium">{styleCodcli || '—'}</div>
+                </div>
+              </div>
+            )}
+
             {selectedCustomerId && selectedCustomer && (
               <AppointmentCustomerSummaryBar
                 customer={selectedCustomer}
@@ -297,10 +334,15 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
                 onCharge={chargeCheck.allowed ? openTpvWithCurrentItems : undefined}
               />
             )}
-            <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
               <div>
                 <Label className="text-xs">Fecha</Label>
-                <Input type="date" value={formData.date} onChange={(e) => setFormData({ ...formData, date: e.target.value })} />
+                <Input
+                  type="date"
+                  value={formData.date}
+                  onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                  disabled={saving}
+                />
               </div>
               <div>
                 <Label className="text-xs">Hora inicio</Label>
@@ -308,7 +350,12 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
                   type="time"
                   value={formData.startTime}
                   onChange={(e) => setFormData({ ...formData, startTime: e.target.value })}
+                  disabled={saving}
                 />
+              </div>
+              <div>
+                <Label className="text-xs">Fin (calc.)</Label>
+                <Input type="time" value={computedEndTime} readOnly tabIndex={-1} className="bg-muted/40" />
               </div>
               <div>
                 <Label className="text-xs">Empleada</Label>
@@ -317,7 +364,11 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
                     Cita con servicios de distintas empresas: asigna empleada del tenant o divide la cita.
                   </p>
                 )}
-                <Select value={formData.employeeId} onValueChange={(v) => setFormData({ ...formData, employeeId: v })}>
+                <Select
+                  value={formData.employeeId}
+                  onValueChange={(v) => setFormData({ ...formData, employeeId: v })}
+                  disabled={saving}
+                >
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <AppointmentSelectContent>
                     {eligibleEmployees.map((e) => (
@@ -354,13 +405,16 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
             </div>
 
             <div className="flex gap-2 pt-2">
+              <Button type="button" variant="outline" className="flex-1" onClick={onCancel} disabled={saving}>
+                Cancelar
+              </Button>
               <Button
                 type="submit"
                 className="flex-1 gap-1"
-                disabled={!clientPick || resourceConflictMessages.length > 0}
+                disabled={!clientPick || resourceConflictMessages.length > 0 || saving}
                 title={resourceConflictMessages.length > 0 ? 'Hay conflicto de cabina o recurso' : undefined}
               >
-                <Save className="w-4 h-4" /> Guardar
+                <Save className="w-4 h-4" /> {saving ? 'Guardando…' : 'Guardar'}
               </Button>
             </div>
           </form>

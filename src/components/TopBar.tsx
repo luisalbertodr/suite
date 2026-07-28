@@ -66,7 +66,7 @@ export const TopBar: React.FC = () => {
 
   return (
     <header className="fixed top-0 left-0 right-0 z-40 h-12 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-      <div className="grid h-full grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(0,1fr)] items-center gap-3 px-4 sm:px-5">
+      <div className="grid h-full grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-2 px-2 sm:gap-3 sm:px-5">
         <div className="flex items-center gap-2.5 min-w-0">
           {showBrandSkeleton ? (
             <span className="h-6 w-32 rounded bg-muted animate-pulse" aria-hidden />
@@ -94,9 +94,9 @@ export const TopBar: React.FC = () => {
           )}
         </div>
 
-        <div className="flex min-w-0 items-center justify-center overflow-x-auto">
+        <div className="flex min-w-0 max-w-full items-center justify-center overflow-hidden">
           {content.actions && (
-            <div className="flex min-w-0 items-center justify-center gap-1.5 whitespace-nowrap">
+            <div className="flex min-w-0 max-w-full items-center justify-center gap-1.5 whitespace-nowrap">
               {content.actions}
             </div>
           )}

@@ -45,7 +45,7 @@ export const ClienteDetailOverlay: React.FC<Props> = ({
       aria-label="Ficha del cliente"
     >
       <div className="absolute inset-0 bg-black/50" aria-hidden="true" />
-      <div className="relative z-10 w-full max-w-4xl max-h-[calc(100dvh-6rem)] overflow-y-auto rounded-lg border bg-background shadow-2xl">
+      <div className="suite-max-h-dialog-sm relative z-10 w-full max-w-4xl overflow-y-auto rounded-lg border bg-background shadow-2xl">
         <div className="p-3">
           <ClienteDetailView
             key={`${customerId}-${initialTab}`}

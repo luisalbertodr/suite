@@ -59,6 +59,10 @@ interface Appointment {
   clientName: string;
   customerId?: string | null;
   legacyClientCode?: string | null;
+  legacyEmployeeCode?: string | null;
+  legacyIdPlan?: string | null;
+  /** Réplica de plan2009.tel1cli: respaldo cuando la ficha Suite no tiene teléfono. */
+  clientPhone?: string | null;
   description: string;
   startTime: string;
   endTime: string;
@@ -82,6 +86,8 @@ interface EditAppointmentFormProps {
   onCancelAndRefund?: (appointmentId: string) => void | Promise<void>;
   paymentStatus?: AgendaAppointment['paymentStatus'];
   onCancel: () => void;
+  /** True mientras el padre persiste (dual-sync incluido). */
+  saving?: boolean;
   returnCustomerId?: string | null;
   onReturnToCustomerHistory?: () => void;
   onHistoryAppointmentClick?: (appointmentId: string, dateYmd: string) => void;
@@ -151,6 +157,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
   onCancelAndRefund,
   paymentStatus,
   onCancel,
+  saving = false,
   returnCustomerId,
   onReturnToCustomerHistory,
   onHistoryAppointmentClick,
@@ -311,7 +318,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
     },
   });
 
-  const { data: customerByLegacy } = useQuery({
+  const { data: customerByLegacy, isFetched: legacyCustomerFetched } = useQuery({
     queryKey: ['edit-appointment-customer-by-legacy', companyId, legacyCodcli],
     enabled: !!companyId && !!legacyCodcli && !selectedCustomerId,
     queryFn: async () => {
@@ -339,6 +346,20 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
 
   const summaryCustomer = selectedCustomer ?? customerByLegacy ?? null;
   const effectiveCustomerId = selectedCustomerId ?? summaryCustomer?.id ?? null;
+  const stylePhone = String(
+    summaryCustomer?.phone_mobile ||
+      summaryCustomer?.phone ||
+      summaryCustomer?.phone_home ||
+      appointment.clientPhone ||
+      '',
+  ).trim();
+  const showUnlinkedStyleHint =
+    Boolean(appointment.legacyClientCode?.trim()) &&
+    !effectiveCustomerId &&
+    Boolean(companyId) &&
+    (!legacyCodcli || legacyCustomerFetched);
+  const computedEndTime = calcEndFromStart(formData.startTime, effectiveDurationMinutes(items));
+  const styleFacturado = paymentStatus === 'paid' || paymentStatus === 'invoiced';
 
   const serviceLabel = useMemo(
     () =>
@@ -397,7 +418,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
 
   return (
     <div className={`fixed inset-x-0 top-0 ${DOCK_CLEARANCE_BOTTOM} bg-black/50 flex items-start sm:items-center justify-center ${AGENDA_APPOINTMENT_MODAL_Z} px-4 pt-3 pb-28 sm:pb-24 sm:p-4`}>
-      <Card className="w-full max-w-lg max-h-[calc(100dvh-7rem)] overflow-y-auto">
+      <Card className="suite-max-h-dialog w-full max-w-lg overflow-y-auto">
         <CardHeader className="pb-3">
           <div className="flex items-center gap-2">
             {returnCustomerId && onReturnToCustomerHistory && (
@@ -412,14 +433,16 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                 Historial
               </Button>
             )}
-            <CardTitle className="text-base shrink-0">Cita</CardTitle>
+            <CardTitle className="text-base shrink-0 truncate max-w-[9rem]" title={appointment.legacyIdPlan ? `IDPLAN ${appointment.legacyIdPlan}` : undefined}>
+              {appointment.legacyIdPlan ? `Cita · ${appointment.legacyIdPlan}` : 'Cita'}
+            </CardTitle>
             <div className="flex flex-1 min-w-0 items-center gap-1.5">
               <Input
                 type="date"
                 aria-label="Fecha"
                 value={formData.date}
                 onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                disabled={paidLocked}
+                disabled={paidLocked || saving}
                 className="h-8 min-w-0 flex-1 text-xs px-2"
               />
               <Input
@@ -428,12 +451,21 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                 className="h-8 w-[5.25rem] shrink-0 text-xs px-1.5 tabular-nums"
                 value={formData.startTime}
                 onChange={(e) => setFormData({ ...formData, startTime: e.target.value })}
-                disabled={paidLocked}
+                disabled={paidLocked || saving}
+              />
+              <Input
+                type="time"
+                aria-label="Hora fin calculada"
+                title="Fin calculado según servicios"
+                className="h-8 w-[5.25rem] shrink-0 text-xs px-1.5 tabular-nums bg-muted/40"
+                value={computedEndTime}
+                readOnly
+                tabIndex={-1}
               />
               <Select
                 value={formData.employeeId}
                 onValueChange={(v) => setFormData({ ...formData, employeeId: v })}
-                disabled={paidLocked}
+                disabled={paidLocked || saving}
               >
                 <SelectTrigger
                   className="h-8 min-w-0 flex-1 text-xs"
@@ -448,9 +480,42 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                 </AppointmentSelectContent>
               </Select>
             </div>
-            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0" onClick={onCancel} title="Cerrar y volver a la agenda">
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0" onClick={onCancel} disabled={saving} title="Cerrar y volver a la agenda">
               <X className="w-4 h-4" />
             </Button>
+          </div>
+          <div className="mt-1.5 space-y-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="inline-flex h-5 items-center rounded border border-border/70 bg-muted/40 px-1.5 text-[10px] font-medium text-muted-foreground">
+                Style · dual sync
+              </span>
+              {styleFacturado ? (
+                <span className="inline-flex h-5 items-center rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 text-[10px] font-medium text-emerald-800 dark:text-emerald-300">
+                  Facturado Style/TPV
+                </span>
+              ) : null}
+            </div>
+            {(appointment.legacyIdPlan ||
+              appointment.legacyClientCode ||
+              appointment.legacyEmployeeCode ||
+              stylePhone) && (
+              <p className="text-[11px] text-muted-foreground tabular-nums truncate" title="Códigos Style / dual-sync">
+                {[
+                  appointment.legacyIdPlan ? `IDPLAN ${appointment.legacyIdPlan}` : null,
+                  appointment.legacyClientCode ? `cli ${appointment.legacyClientCode}` : null,
+                  appointment.legacyEmployeeCode ? `emp ${appointment.legacyEmployeeCode}` : null,
+                  stylePhone ? `tel ${stylePhone}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </p>
+            )}
+            {showUnlinkedStyleHint ? (
+              <p className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+                Cliente Style sin ficha en Suite (cód. {appointment.legacyClientCode}). Vincule el
+                cliente en Clientes con el mismo código legacy para usar cuestionarios y documentación.
+              </p>
+            ) : null}
           </div>
         </CardHeader>
         <CardContent>
@@ -643,10 +708,11 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                 <Button
                   type="submit"
                   size="sm"
-                  disabled={resourceConflictMessages.length > 0}
+                  disabled={resourceConflictMessages.length > 0 || saving}
                   title={resourceConflictMessages.length > 0 ? 'Hay conflicto de cabina o recurso' : undefined}
                 >
-                  <Save className="w-4 h-4 mr-1" /> {paidLocked ? 'Guardar observaciones' : 'Guardar'}
+                  <Save className="w-4 h-4 mr-1" />{' '}
+                  {saving ? 'Guardando…' : paidLocked ? 'Guardar observaciones' : 'Guardar'}
                 </Button>
               </div>
             </div>

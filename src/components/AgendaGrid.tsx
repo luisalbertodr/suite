@@ -78,11 +78,48 @@ interface AgendaGridProps {
 /** Ancho de la columna «Hora» (px); debe coincidir con gridTemplateColumns. */
 const TIME_GUTTER_PX = 96;
 
-/** Ancho mínimo de la zona de empleadas (sin columna hora). */
-const GRID_MIN_EMPLOYEES_PX = 900 - TIME_GUTTER_PX;
+/** Ancho mínimo por columna de empleada (px) — fuerza overflow en móvil con ≥3 empleadas. */
+const EMP_COL_MIN_PX = 160;
 
-/** Mitad aproximada de la pastilla de etiqueta horaria (px). */
-const HOUR_LABEL_HALF_PX = 8;
+/**
+ * Layout horizontal de columnas.
+ * El viewport se acota por visualViewport/innerWidth: en iOS a veces
+ * clientWidth del scroller reporta el ancho del contenido (> pantalla).
+ */
+function agendaEmployeesColumnLayout(
+  employeeCount: number,
+  viewportPx: number,
+  viewportCapPx: number,
+): {
+  contentWidthPx: number;
+  columnWidthPx: number;
+  columnsTemplate: string;
+} {
+  const n = Math.max(1, employeeCount);
+  const cap = Math.max(0, Math.floor(viewportCapPx));
+  const rawVp = Math.max(0, Math.floor(viewportPx));
+  const vp = cap > 0 ? Math.min(rawVp, cap) : rawVp;
+  const minContent = n * EMP_COL_MIN_PX;
+  const contentWidthPx = vp > 0 ? Math.max(minContent, vp) : minContent;
+  const columnWidthPx = Math.max(EMP_COL_MIN_PX, Math.floor(contentWidthPx / n));
+  const fixedContent = columnWidthPx * n;
+  return {
+    contentWidthPx: fixedContent,
+    columnWidthPx,
+    columnsTemplate: `repeat(${n}, ${columnWidthPx}px)`,
+  };
+}
+
+function agendaEmployeeColumnsTemplate(employeeCount: number): string {
+  const n = Math.max(1, employeeCount);
+  return `${TIME_GUTTER_PX}px repeat(${n}, minmax(${EMP_COL_MIN_PX}px, 1fr))`;
+}
+
+/** HTML5 drag bloquea el pan táctil en iOS; solo en puntero fino. */
+function canUseHtml5AppointmentDrag(): boolean {
+  if (typeof window === 'undefined') return true;
+  return window.matchMedia('(pointer: fine)').matches;
+}
 
 /** Franjas fuera de horario en columna hora (fondo transparente para no tapar etiquetas). */
 const UNAVAILABLE_TIME_GUTTER_TRANSPARENT =
@@ -281,6 +318,7 @@ type AgendaAppointmentBlockProps = {
   lockedByPayment: boolean;
   slotDesc: string | null;
   outerRecursoStyle: ReturnType<typeof segmentStyleFromHex>;
+  allowHtml5Drag: boolean;
   onDragStart: (e: React.DragEvent, appointment: Appointment) => void;
   onDragEnd: (e: React.DragEvent) => void;
 };
@@ -296,10 +334,12 @@ const AgendaAppointmentBlock = React.memo(function AgendaAppointmentBlock({
   lockedByPayment,
   slotDesc,
   outerRecursoStyle,
+  allowHtml5Drag,
   onDragStart,
   onDragEnd,
 }: AgendaAppointmentBlockProps) {
   const segments = appointment.timeSegments ?? [];
+  const draggable = allowHtml5Drag && !lockedByPayment;
 
   return (
     <div
@@ -314,7 +354,7 @@ const AgendaAppointmentBlock = React.memo(function AgendaAppointmentBlock({
             }
           : undefined
       }
-      draggable={!lockedByPayment}
+      draggable={draggable}
       onDragStart={(e) => onDragStart(e, appointment)}
       onDragEnd={onDragEnd}
     >
@@ -410,6 +450,7 @@ type AgendaAppointmentItemProps = {
   onAppointmentClick?: (appointment: Appointment) => void;
   onAppointmentCopy?: (appointment: Appointment) => void;
   onAppointmentCut?: (appointment: Appointment) => void;
+  allowHtml5Drag: boolean;
   onDragStart: (e: React.DragEvent, appointment: Appointment) => void;
   onDragEnd: (e: React.DragEvent) => void;
   onDragOver: (e: React.DragEvent, employeeId: string, time: string) => void;
@@ -431,6 +472,7 @@ const AgendaAppointmentItem = React.memo(function AgendaAppointmentItem({
   onAppointmentClick,
   onAppointmentCopy,
   onAppointmentCut,
+  allowHtml5Drag,
   onDragStart,
   onDragEnd,
   onDragOver,
@@ -457,8 +499,9 @@ const AgendaAppointmentItem = React.memo(function AgendaAppointmentItem({
   const height = Math.max(((endMin - startMin) / slotMinutes) * cellHeight, cellHeight * 0.5);
 
   const colFrac = overlap.total > 0 ? overlap.index / overlap.total : 0;
-  const left = `calc(${TIME_GUTTER_PX}px + (100% - ${TIME_GUTTER_PX}px) * ${employeeIndex / employeeCount} + (100% - ${TIME_GUTTER_PX}px) / ${employeeCount} * ${colFrac})`;
-  const width = `calc((100% - ${TIME_GUTTER_PX}px) / ${employeeCount} / ${overlap.total})`;
+  /** Coordenadas relativas a la zona de empleadas (sin columna Hora). */
+  const left = `calc(100% * ${employeeIndex / employeeCount} + 100% / ${employeeCount} * ${colFrac})`;
+  const width = `calc(100% / ${employeeCount} / ${overlap.total})`;
   const slotDesc = visibleFields.description ? slotDescriptionText(appointment) : null;
   const lockedByPayment = appointment.paymentStatus === 'paid' || appointment.paymentStatus === 'invoiced';
   const singleSegmentColor = segments.length === 1 ? segments[0]?.recursoColor ?? null : null;
@@ -492,6 +535,7 @@ const AgendaAppointmentItem = React.memo(function AgendaAppointmentItem({
             lockedByPayment={lockedByPayment}
             slotDesc={slotDesc}
             outerRecursoStyle={outerRecursoStyle}
+            allowHtml5Drag={allowHtml5Drag}
             onDragStart={onDragStart}
             onDragEnd={onDragEnd}
           />
@@ -524,10 +568,12 @@ function EmployeeNamesRow({
   employees,
   edge,
   variant = 'full',
+  columnsTemplate,
 }: {
   employees: Employee[];
   edge: 'top' | 'bottom';
   variant?: 'full' | 'names-only';
+  columnsTemplate?: string;
 }) {
   if (employees.length === 0) return null;
 
@@ -547,7 +593,8 @@ function EmployeeNamesRow({
       <div
         className="grid gap-0"
         style={{
-          gridTemplateColumns: `repeat(${employees.length}, minmax(0, 1fr))`,
+          gridTemplateColumns:
+            columnsTemplate ?? `repeat(${Math.max(1, employees.length)}, minmax(${EMP_COL_MIN_PX}px, 1fr))`,
           minHeight: EMPLOYEE_NAMES_ROW_MIN_H,
         }}
       >
@@ -560,7 +607,7 @@ function EmployeeNamesRow({
     <div
       className="grid gap-0"
       style={{
-        gridTemplateColumns: `${TIME_GUTTER_PX}px repeat(${employees.length}, minmax(0, 1fr))`,
+        gridTemplateColumns: agendaEmployeeColumnsTemplate(employees.length),
         minHeight: EMPLOYEE_NAMES_ROW_MIN_H,
       }}
     >
@@ -613,52 +660,6 @@ function useAgendaScrollViewport(scrollRootRef: React.RefObject<HTMLDivElement |
   }, [scrollRootRef]);
 
   return { scrollTop, viewportHeight };
-}
-
-type AgendaHourLabelsOverlayProps = {
-  scrollRootRef: React.RefObject<HTMLDivElement | null>;
-  hourMarkPositions: { slot: TimeSlot; y: number; slotIdx: number }[];
-  centerOpen: Uint8Array;
-};
-
-function AgendaHourLabelsOverlay({
-  scrollRootRef,
-  hourMarkPositions,
-  centerOpen,
-}: AgendaHourLabelsOverlayProps) {
-  const { scrollTop, viewportHeight } = useAgendaScrollViewport(scrollRootRef);
-
-  return (
-    <div
-      className="pointer-events-none absolute left-0 top-0 z-[55] overflow-hidden"
-      style={{ width: TIME_GUTTER_PX, height: viewportHeight || undefined }}
-      aria-hidden
-    >
-      {hourMarkPositions.map(({ slot, y, slotIdx }) => {
-        const yViewport = y - scrollTop;
-        if (yViewport < -HOUR_LABEL_HALF_PX || yViewport > viewportHeight + HOUR_LABEL_HALF_PX) {
-          return null;
-        }
-        const top = Math.max(2, yViewport - HOUR_LABEL_HALF_PX);
-        const timeShade = centerOpen[slotIdx] !== 1;
-        return (
-          <div
-            key={`hour-label-${slot.time}`}
-            className="absolute left-0 right-0 flex justify-center"
-            style={{ top }}
-          >
-            <span
-              className={`inline-block rounded-sm px-1.5 text-sm font-semibold text-foreground tabular-nums leading-none bg-card shadow-sm ring-1 ring-border/50 ${
-                timeShade ? 'text-neutral-700 dark:text-neutral-300' : ''
-              }`}
-            >
-              {slot.time}
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
 }
 
 type AgendaNowLineProps = {
@@ -756,8 +757,11 @@ type AgendaGridVirtualRowsProps = {
   gridEndMin: number;
   slotMinutes: number;
   isTodayView: boolean;
+  /** Plantilla de columnas de la zona de empleadas (sin columna Hora). */
+  columnsTemplate: string;
   visibleFields: AgendaVisibleFields;
   appointmentClipboard?: { mode: 'copy' | 'cut' } | null;
+  allowHtml5Drag: boolean;
   onSlotClick: (employeeId: string, time: string, opts?: AgendaSlotClickOptions) => void;
   onSlotPaste?: (employeeId: string, time: string) => void;
   onAppointmentClick?: (appointment: Appointment) => void;
@@ -786,8 +790,10 @@ function AgendaGridVirtualRows({
   gridEndMin,
   slotMinutes,
   isTodayView,
+  columnsTemplate,
   visibleFields,
   appointmentClipboard = null,
+  allowHtml5Drag,
   onSlotClick,
   onSlotPaste,
   onAppointmentClick,
@@ -801,7 +807,6 @@ function AgendaGridVirtualRows({
   isSlotHighlighted,
 }: AgendaGridVirtualRowsProps) {
   const { scrollTop, viewportHeight } = useAgendaScrollViewport(scrollRootRef);
-  const totalHeight = timeSlots.length * cellHeight;
   const useOccupiedKeys = occupiedSlotKeys.size > 0;
 
   const { startRow, endRow } = React.useMemo(() => {
@@ -849,165 +854,133 @@ function AgendaGridVirtualRows({
   );
 
   return (
-    <div className="min-w-[900px] relative">
-      <div className="relative" style={{ height: totalHeight, minHeight: totalHeight }}>
-        <div className="absolute inset-0">
-          {visibleAppointments.map((appointment) => {
-            const employeeIndex = employeeIndexById.get(appointment.employeeId);
-            if (employeeIndex === undefined) return null;
+    <div className="absolute inset-0">
+      {visibleAppointments.map((appointment) => {
+        const employeeIndex = employeeIndexById.get(appointment.employeeId);
+        if (employeeIndex === undefined) return null;
 
-            return (
-              <AgendaAppointmentItem
-                key={appointment.id}
-                appointment={appointment}
-                employeeIndex={employeeIndex}
-                employeeCount={employees.length}
-                employeeColor={employees[employeeIndex]?.color ?? ''}
-                overlap={overlapMap[appointment.id] || { index: 0, total: 1 }}
-                gridStartMin={gridStartMin}
-                gridEndMin={gridEndMin}
-                slotMinutes={slotMinutes}
-                cellHeight={cellHeight}
-                visibleFields={visibleFields}
-                onAppointmentClick={onAppointmentClick}
-                onAppointmentCopy={onAppointmentCopy}
-                onAppointmentCut={onAppointmentCut}
-                onDragStart={onDragStart}
-                onDragEnd={onDragEnd}
-                onDragOver={onDragOver}
-                onDragLeave={onDragLeave}
-                onDrop={onDrop}
-              />
-            );
-          })}
-
-          <AgendaNowLine
-            isTodayView={isTodayView}
+        return (
+          <AgendaAppointmentItem
+            key={appointment.id}
+            appointment={appointment}
+            employeeIndex={employeeIndex}
+            employeeCount={employees.length}
+            employeeColor={employees[employeeIndex]?.color ?? ''}
+            overlap={overlapMap[appointment.id] || { index: 0, total: 1 }}
             gridStartMin={gridStartMin}
             gridEndMin={gridEndMin}
             slotMinutes={slotMinutes}
             cellHeight={cellHeight}
+            visibleFields={visibleFields}
+            onAppointmentClick={onAppointmentClick}
+            onAppointmentCopy={onAppointmentCopy}
+            onAppointmentCut={onAppointmentCut}
+            allowHtml5Drag={allowHtml5Drag}
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
+            onDragOver={onDragOver}
+            onDragLeave={onDragLeave}
+            onDrop={onDrop}
           />
+        );
+      })}
 
-          {visibleSlotIndices.map((slotIdx) => {
-            const slot = timeSlots[slotIdx]!;
-            const isHourMark = slot.minute === 0;
-            const slotS = timeToMinutes(slot.time);
-            const slotE = slotS + slotMinutes;
-            const centerOpen = availability.centerOpen[slotIdx] === 1;
-            const timeShade = !centerOpen;
-            const rowTop = slotIdx * cellHeight;
+      <AgendaNowLine
+        isTodayView={isTodayView}
+        gridStartMin={gridStartMin}
+        gridEndMin={gridEndMin}
+        slotMinutes={slotMinutes}
+        cellHeight={cellHeight}
+      />
 
-            return (
-              <div
-                key={slot.time}
-                className="absolute left-0 right-0 grid gap-0"
-                style={{
-                  top: rowTop,
-                  height: cellHeight,
-                  gridTemplateColumns: `${TIME_GUTTER_PX}px repeat(${employees.length}, minmax(0, 1fr))`,
-                }}
-              >
+      {visibleSlotIndices.map((slotIdx) => {
+        const slot = timeSlots[slotIdx]!;
+        const isHourMark = slot.minute === 0;
+        const slotS = timeToMinutes(slot.time);
+        const slotE = slotS + slotMinutes;
+        const rowTop = slotIdx * cellHeight;
+
+        return (
+          <div
+            key={slot.time}
+            className="absolute left-0 right-0 grid gap-0"
+            style={{ top: rowTop, height: cellHeight, gridTemplateColumns: columnsTemplate }}
+          >
+            {employees.map((employee, employeeIndex) => {
+              const cellFlags = availability.cells[employeeIndex * availability.slotCount + slotIdx]!;
+              const bookable = (cellFlags & SLOT_FLAG_BOOKABLE) !== 0;
+              const blocked = (cellFlags & SLOT_FLAG_BLOCKED) !== 0;
+              const isOccupied = isSlotOccupied(employee.id, slot.time, slotS, slotE);
+              const isHighlighted = isSlotHighlighted(employee.id, slot.time);
+              const shade = !bookable && !isOccupied;
+              const canSchedule = !isOccupied && !blocked;
+              const canPaste = canSchedule && !!appointmentClipboard && !!onSlotPaste;
+              const pasteHint = canPaste
+                ? appointmentClipboard!.mode === 'cut'
+                  ? 'Clic para mover la cita aquí (Mayús+clic = nueva cita)'
+                  : 'Clic para pegar la cita (Mayús+clic = nueva cita)'
+                : undefined;
+
+              const slotCell = (
                 <div
-                  className={`sticky left-0 z-[26] relative overflow-visible border-r border-border ${
-                    isHourMark ? 'border-t-2 border-border bg-transparent' : 'border-t border-border bg-transparent'
-                  } ${timeShade ? UNAVAILABLE_TIME_GUTTER_TRANSPARENT : ''}`}
-                  style={{ height: `${cellHeight}px`, minHeight: `${cellHeight}px` }}
-                >
-                  {!isHourMark ? (
-                    <span
-                      className={`absolute left-0 right-0 top-0 z-[1] -translate-y-1/2 text-center leading-none px-2.5 text-xs font-medium text-muted-foreground dark:text-foreground/75 tabular-nums ${
-                        timeShade ? '!text-neutral-700 dark:!text-neutral-300' : ''
-                      }`}
-                    >
-                      <span
-                        className={`inline-block rounded-sm px-1.5 bg-card/80 ring-1 ring-border/30 ${
-                          timeShade ? 'bg-card/90 dark:bg-card/85' : ''
-                        }`}
-                      >
-                        {slot.time}
-                      </span>
-                    </span>
-                  ) : null}
-                </div>
-
-                {employees.map((employee, employeeIndex) => {
-                  const cellFlags = availability.cells[employeeIndex * availability.slotCount + slotIdx]!;
-                  const bookable = (cellFlags & SLOT_FLAG_BOOKABLE) !== 0;
-                  const blocked = (cellFlags & SLOT_FLAG_BLOCKED) !== 0;
-                  const isOccupied = isSlotOccupied(employee.id, slot.time, slotS, slotE);
-                  const isHighlighted = isSlotHighlighted(employee.id, slot.time);
-                  const shade = !bookable && !isOccupied;
-                  const canSchedule = !isOccupied && !blocked;
-                  const canPaste = canSchedule && !!appointmentClipboard && !!onSlotPaste;
-                  const pasteHint = canPaste
-                    ? appointmentClipboard!.mode === 'cut'
-                      ? 'Clic para mover la cita aquí (Mayús+clic = nueva cita)'
-                      : 'Clic para pegar la cita (Mayús+clic = nueva cita)'
-                    : undefined;
-
-                  const slotCell = (
-                    <div
-                      className={`relative border-r border-border transition-colors ${
-                        isHourMark ? 'border-t-2 border-border' : 'border-t border-border'
-                      } ${
-                        isOccupied
-                          ? 'bg-muted/50'
-                          : shade
-                            ? blocked
-                              ? UNAVAILABLE_CELL_BLOCKED
-                              : `${UNAVAILABLE_CELL} cursor-pointer hover:bg-accent/50`
-                            : 'bg-card cursor-pointer hover:bg-accent/40'
-                      } ${isHighlighted ? 'bg-blue-100 dark:bg-blue-950/40 border-blue-300 dark:border-blue-700' : ''} ${
-                        canPaste ? 'ring-1 ring-inset ring-emerald-400/50 dark:ring-emerald-600/40' : ''
-                      }`}
-                      style={{ height: `${cellHeight}px` }}
-                      title={
-                        pasteHint ??
-                        (shade && canSchedule
-                          ? 'Fuera del horario habitual — clic para cita excepcional'
-                          : blocked
-                            ? 'No disponible (bloqueo de agenda)'
-                            : undefined)
-                      }
-                      onClick={(e) => {
-                        if (!canSchedule) return;
-                        onSlotClick(employee.id, slot.time, { forceNew: e.shiftKey });
-                      }}
-                      onDragOver={(e) => canSchedule && onDragOver(e, employee.id, slot.time)}
-                      onDragLeave={onDragLeave}
-                      onDrop={(e) => canSchedule && onDrop(e, employee.id, slot.time)}
-                    />
-                  );
-
-                  if (!canPaste) {
-                    return <React.Fragment key={`${employee.id}-${slot.time}`}>{slotCell}</React.Fragment>;
+                  className={`relative border-r border-border transition-colors ${
+                    isHourMark ? 'border-t-2 border-border' : 'border-t border-border'
+                  } ${
+                    isOccupied
+                      ? 'bg-muted/50'
+                      : shade
+                        ? blocked
+                          ? UNAVAILABLE_CELL_BLOCKED
+                          : `${UNAVAILABLE_CELL} cursor-pointer hover:bg-accent/50`
+                        : 'bg-card cursor-pointer hover:bg-accent/40'
+                  } ${isHighlighted ? 'bg-blue-100 dark:bg-blue-950/40 border-blue-300 dark:border-blue-700' : ''} ${
+                    canPaste ? 'ring-1 ring-inset ring-emerald-400/50 dark:ring-emerald-600/40' : ''
+                  }`}
+                  style={{ height: `${cellHeight}px`, touchAction: 'pan-y' }}
+                  title={
+                    pasteHint ??
+                    (shade && canSchedule
+                      ? 'Fuera del horario habitual — clic para cita excepcional'
+                      : blocked
+                        ? 'No disponible (bloqueo de agenda)'
+                        : undefined)
                   }
+                  onClick={(e) => {
+                    if (!canSchedule) return;
+                    onSlotClick(employee.id, slot.time, { forceNew: e.shiftKey });
+                  }}
+                  onDragOver={(e) => canSchedule && onDragOver(e, employee.id, slot.time)}
+                  onDragLeave={onDragLeave}
+                  onDrop={(e) => canSchedule && onDrop(e, employee.id, slot.time)}
+                />
+              );
 
-                  return (
-                    <ContextMenu key={`${employee.id}-${slot.time}`}>
-                      <ContextMenuTrigger asChild>{slotCell}</ContextMenuTrigger>
-                      <ContextMenuContent className="z-[130]">
-                        <ContextMenuItem
-                          className="gap-2"
-                          onClick={() => onSlotPaste!(employee.id, slot.time)}
-                        >
-                          <ClipboardPaste className="h-3.5 w-3.5" />
-                          {appointmentClipboard!.mode === 'cut' ? 'Pegar (mover)' : 'Pegar'}
-                        </ContextMenuItem>
-                        <ContextMenuSeparator />
-                        <ContextMenuItem onClick={() => onSlotClick(employee.id, slot.time, { forceNew: true })}>
-                          Nueva cita vacía
-                        </ContextMenuItem>
-                      </ContextMenuContent>
-                    </ContextMenu>
-                  );
-                })}
-              </div>
-            );
-          })}
-        </div>
-      </div>
+              if (!canPaste) {
+                return <React.Fragment key={`${employee.id}-${slot.time}`}>{slotCell}</React.Fragment>;
+              }
+
+              return (
+                <ContextMenu key={`${employee.id}-${slot.time}`}>
+                  <ContextMenuTrigger asChild>{slotCell}</ContextMenuTrigger>
+                  <ContextMenuContent className="z-[130]">
+                    <ContextMenuItem
+                      className="gap-2"
+                      onClick={() => onSlotPaste!(employee.id, slot.time)}
+                    >
+                      <ClipboardPaste className="h-3.5 w-3.5" />
+                      {appointmentClipboard!.mode === 'cut' ? 'Pegar (mover)' : 'Pegar'}
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem onClick={() => onSlotClick(employee.id, slot.time, { forceNew: true })}>
+                      Nueva cita vacía
+                    </ContextMenuItem>
+                  </ContextMenuContent>
+                </ContextMenu>
+              );
+            })}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1040,14 +1013,31 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
   },
 }) {
   const scrollRootRef = React.useRef<HTMLDivElement>(null);
-  const headerScrollRef = React.useRef<HTMLDivElement>(null);
-  const footerScrollRef = React.useRef<HTMLDivElement>(null);
+  const shellRef = React.useRef<HTMLDivElement>(null);
+  const bodyClipRef = React.useRef<HTMLDivElement>(null);
+  const bodySlideRef = React.useRef<HTMLDivElement>(null);
+  const headerClipRef = React.useRef<HTMLDivElement>(null);
+  const headerSlideRef = React.useRef<HTMLDivElement>(null);
+  const footerClipRef = React.useRef<HTMLDivElement>(null);
+  const footerSlideRef = React.useRef<HTMLDivElement>(null);
+  const hOffsetRef = React.useRef(0);
+  const [hOffset, setHOffset] = React.useState(0);
   const [scrollbarWidth, setScrollbarWidth] = React.useState(0);
+  /** Ancho del recorte visible de columnas (sin gutter), acotado a la pantalla. */
+  const [employeesViewportPx, setEmployeesViewportPx] = React.useState(0);
+  const [viewportCapPx, setViewportCapPx] = React.useState(0);
   const lastScrollTopRef = React.useRef(0);
   const lastHandledGoTodayRef = React.useRef(0);
   const lastHandledScrollToTimeRef = React.useRef(0);
   const lastHandledPersistedAnchorRef = React.useRef<string | null>(null);
   const scrollSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const allowHtml5Drag = React.useMemo(() => canUseHtml5AppointmentDrag(), []);
+  const columnLayout = React.useMemo(
+    () => agendaEmployeesColumnLayout(employees.length, employeesViewportPx, viewportCapPx),
+    [employees.length, employeesViewportPx, viewportCapPx],
+  );
+  const employeesContentWidthPx = columnLayout.contentWidthPx;
+  const columnsTemplate = columnLayout.columnsTemplate;
 
   const [draggedAppointment, setDraggedAppointment] = React.useState<string | null>(null);
   const [dragOverSlot, setDragOverSlot] = React.useState<{ employeeId: string; time: string } | null>(null);
@@ -1060,13 +1050,6 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
   const timeSlots = React.useMemo(
     () => generateAgendaSlots(envStart, envEnd, slotMinutes) as TimeSlot[],
     [envStart, envEnd, slotMinutes],
-  );
-  const hourMarkPositions = React.useMemo(
-    () =>
-      timeSlots
-        .map((slot, idx) => ({ slot, y: idx * cellHeight, slotIdx: idx }))
-        .filter(({ slot }) => slot.minute === 0),
-    [timeSlots, cellHeight],
   );
   const slotStartMinutes = React.useMemo(
     () => timeSlots.map((slot) => timeToMinutes(slot.time)),
@@ -1321,7 +1304,6 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
   React.useEffect(() => {
     const el = scrollRootRef.current;
     if (!el) return;
-
     const onScroll = () => {
       if (!scrollRootRef.current) return;
       lastScrollTopRef.current = scrollRootRef.current.scrollTop;
@@ -1352,115 +1334,464 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
     };
   }, [employees.length, timeSlots.length, persistUserId, viewDateYmd, flushScrollToStorage]);
 
-  /** Reserva el ancho de la barra vertical para alinear encabezado/pie con la cuadrícula. */
+  /**
+   * Viewport = min(shell.getBoundingClientRect, visualViewport) − gutter.
+   * iOS a veces infla clientWidth del scroller al ancho del contenido.
+   */
   React.useLayoutEffect(() => {
-    const el = scrollRootRef.current;
-    if (!el) return;
+    const shell = shellRef.current;
+    const vEl = scrollRootRef.current;
+    if (!shell) return;
+
     const measure = () => {
-      setScrollbarWidth(Math.max(0, el.offsetWidth - el.clientWidth));
+      const shellW = Math.round(shell.getBoundingClientRect().width);
+      const vv = Math.round(window.visualViewport?.width ?? window.innerWidth);
+      const cap = Math.max(0, Math.min(shellW || vv, vv));
+      setViewportCapPx(cap);
+      const scrollerW = vEl ? Math.round(vEl.clientWidth) : shellW;
+      // Acotar scroller al cap de pantalla (evita clientWidth hinchado).
+      const usable = Math.max(0, Math.min(scrollerW || cap, cap));
+      const vp = Math.max(0, usable - TIME_GUTTER_PX);
+      setEmployeesViewportPx(vp);
+      setScrollbarWidth(vEl ? Math.max(0, vEl.offsetWidth - vEl.clientWidth) : 0);
+      if (bodyClipRef.current) {
+        bodyClipRef.current.style.width = `${vp}px`;
+        bodyClipRef.current.style.maxWidth = `${vp}px`;
+      }
+      if (headerClipRef.current) {
+        headerClipRef.current.style.width = `${vp}px`;
+        headerClipRef.current.style.maxWidth = `${vp}px`;
+      }
+      if (footerClipRef.current) {
+        footerClipRef.current.style.width = `${vp}px`;
+        footerClipRef.current.style.maxWidth = `${vp}px`;
+      }
     };
+
     measure();
     const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
+    ro.observe(shell);
+    if (vEl) ro.observe(vEl);
+    window.visualViewport?.addEventListener('resize', measure);
+    window.addEventListener('resize', measure);
+    return () => {
+      ro.disconnect();
+      window.visualViewport?.removeEventListener('resize', measure);
+      window.removeEventListener('resize', measure);
+    };
   }, [employees.length, timeSlots.length]);
 
-  /** Sincroniza scroll horizontal entre encabezado, cuadrícula y pie. */
-  React.useEffect(() => {
-    const body = scrollRootRef.current;
-    const header = headerScrollRef.current;
-    const footer = footerScrollRef.current;
-    if (!body) return;
-    const syncFromBody = () => {
-      const left = body.scrollLeft;
-      if (header && header.scrollLeft !== left) header.scrollLeft = left;
-      if (footer && footer.scrollLeft !== left) footer.scrollLeft = left;
-    };
-    body.addEventListener('scroll', syncFromBody, { passive: true });
-    syncFromBody();
-    return () => body.removeEventListener('scroll', syncFromBody);
-  }, [employees.length]);
-
   const edgeRowPad = { paddingRight: scrollbarWidth };
+  const gridBodyHeightPx = timeSlots.length * cellHeight;
+  const employeesContentStyle = React.useMemo(
+    () => ({
+      width: employeesContentWidthPx,
+      minWidth: employeesContentWidthPx,
+      maxWidth: employeesContentWidthPx,
+    }),
+    [employeesContentWidthPx],
+  );
+
+  const paintHOffset = React.useCallback((offset: number) => {
+    const tx = `translate3d(${-offset}px,0,0)`;
+    if (bodySlideRef.current) bodySlideRef.current.style.transform = tx;
+    if (headerSlideRef.current) headerSlideRef.current.style.transform = tx;
+    if (footerSlideRef.current) footerSlideRef.current.style.transform = tx;
+  }, []);
+
+  const applyHOffset = React.useCallback(
+    (next: number, commitState = false) => {
+      const viewport = Math.max(employeesViewportPx, 1);
+      const max = Math.max(0, employeesContentWidthPx - viewport);
+      const clamped = Math.max(0, Math.min(max, next));
+      hOffsetRef.current = clamped;
+      paintHOffset(clamped);
+      if (commitState) setHOffset(clamped);
+    },
+    [employeesContentWidthPx, employeesViewportPx, paintHOffset],
+  );
+
+  /**
+   * Pan H continuo: solo pinta transform en rAF (sin setState por frame).
+   * setState al soltar. touch-action:pan-y conserva el scroll vertical nativo.
+   */
+  React.useEffect(() => {
+    applyHOffset(hOffsetRef.current, true);
+
+    const surfaces = [bodyClipRef.current, headerClipRef.current, footerClipRef.current].filter(
+      Boolean,
+    ) as HTMLElement[];
+    if (!surfaces.length) return;
+
+    type DragState = {
+      pointerId: number;
+      startX: number;
+      startY: number;
+      startOffset: number;
+      lastX: number;
+      lastT: number;
+      velocity: number;
+      axis: 'h' | 'v' | null;
+      target: HTMLElement;
+    };
+    let drag: DragState | null = null;
+    let raf = 0;
+    let pendingOffset: number | null = null;
+    let momentumRaf = 0;
+
+    const cancelMomentum = () => {
+      if (momentumRaf) {
+        cancelAnimationFrame(momentumRaf);
+        momentumRaf = 0;
+      }
+    };
+
+    const flushPaint = () => {
+      raf = 0;
+      if (pendingOffset === null) return;
+      const next = pendingOffset;
+      pendingOffset = null;
+      hOffsetRef.current = next;
+      paintHOffset(next);
+    };
+
+    const queuePaint = (offset: number) => {
+      pendingOffset = offset;
+      if (!raf) raf = requestAnimationFrame(flushPaint);
+    };
+
+    const clampOffset = (next: number) => {
+      const viewport = Math.max(employeesViewportPx, 1);
+      const max = Math.max(0, employeesContentWidthPx - viewport);
+      return Math.max(0, Math.min(max, next));
+    };
+
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      cancelMomentum();
+      const target = e.currentTarget as HTMLElement;
+      drag = {
+        pointerId: e.pointerId,
+        startX: e.clientX,
+        startY: e.clientY,
+        startOffset: hOffsetRef.current,
+        lastX: e.clientX,
+        lastT: performance.now(),
+        velocity: 0,
+        axis: null,
+        target,
+      };
+    };
+
+    const onPointerMove = (e: PointerEvent) => {
+      if (!drag || drag.pointerId !== e.pointerId) return;
+      const dx = e.clientX - drag.startX;
+      const dy = e.clientY - drag.startY;
+
+      if (drag.axis === null) {
+        if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+        drag.axis = Math.abs(dx) >= Math.abs(dy) ? 'h' : 'v';
+        if (drag.axis === 'h') {
+          try {
+            drag.target.setPointerCapture(e.pointerId);
+          } catch {
+            /* ignore */
+          }
+        } else {
+          drag = null;
+          return;
+        }
+      }
+
+      if (drag.axis !== 'h') return;
+      e.preventDefault();
+
+      const now = performance.now();
+      const dt = Math.max(1, now - drag.lastT);
+      const frameDx = e.clientX - drag.lastX;
+      drag.velocity = frameDx / dt;
+      drag.lastX = e.clientX;
+      drag.lastT = now;
+
+      queuePaint(clampOffset(drag.startOffset - dx));
+    };
+
+    const runMomentum = (velocityPxPerMs: number) => {
+      const max = Math.max(0, employeesContentWidthPx - Math.max(employeesViewportPx, 1));
+      if (max <= 0) {
+        applyHOffset(hOffsetRef.current, true);
+        return;
+      }
+      let v = velocityPxPerMs;
+      const tick = () => {
+        v *= 0.95;
+        if (Math.abs(v) < 0.02) {
+          momentumRaf = 0;
+          applyHOffset(hOffsetRef.current, true);
+          return;
+        }
+        const next = clampOffset(hOffsetRef.current - v * 16);
+        hOffsetRef.current = next;
+        paintHOffset(next);
+        if (next <= 0 || next >= max) {
+          momentumRaf = 0;
+          applyHOffset(next, true);
+          return;
+        }
+        momentumRaf = requestAnimationFrame(tick);
+      };
+      momentumRaf = requestAnimationFrame(tick);
+    };
+
+    const endDrag = (e: PointerEvent) => {
+      if (!drag || drag.pointerId !== e.pointerId) return;
+      const wasH = drag.axis === 'h';
+      const vel = drag.velocity;
+      try {
+        if (drag.target.hasPointerCapture(e.pointerId)) {
+          drag.target.releasePointerCapture(e.pointerId);
+        }
+      } catch {
+        /* ignore */
+      }
+      drag = null;
+      if (raf) {
+        cancelAnimationFrame(raf);
+        raf = 0;
+      }
+      if (pendingOffset !== null) {
+        hOffsetRef.current = pendingOffset;
+        paintHOffset(pendingOffset);
+        pendingOffset = null;
+      }
+      if (wasH && Math.abs(vel) > 0.05) {
+        runMomentum(vel);
+      } else {
+        applyHOffset(hOffsetRef.current, true);
+      }
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
+      e.preventDefault();
+      cancelMomentum();
+      applyHOffset(hOffsetRef.current + e.deltaX, true);
+    };
+
+    for (const el of surfaces) {
+      el.style.touchAction = 'pan-y';
+      el.addEventListener('pointerdown', onPointerDown);
+      el.addEventListener('pointermove', onPointerMove, { passive: false });
+      el.addEventListener('pointerup', endDrag);
+      el.addEventListener('pointercancel', endDrag);
+      el.addEventListener('lostpointercapture', endDrag);
+      el.addEventListener('wheel', onWheel, { passive: false });
+    }
+
+    return () => {
+      cancelMomentum();
+      if (raf) cancelAnimationFrame(raf);
+      for (const el of surfaces) {
+        el.removeEventListener('pointerdown', onPointerDown);
+        el.removeEventListener('pointermove', onPointerMove);
+        el.removeEventListener('pointerup', endDrag);
+        el.removeEventListener('pointercancel', endDrag);
+        el.removeEventListener('lostpointercapture', endDrag);
+        el.removeEventListener('wheel', onWheel);
+      }
+    };
+  }, [
+    applyHOffset,
+    paintHOffset,
+    employeesContentWidthPx,
+    employeesViewportPx,
+    gridBodyHeightPx,
+    employees.length,
+  ]);
+
+  const frameWidthPx =
+    employeesViewportPx > 0 ? TIME_GUTTER_PX + employeesViewportPx : undefined;
 
   return (
-    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] bg-card">
-      <div className="relative shrink-0 border-b border-border shadow-sm">
+    <div ref={shellRef} className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] bg-card">
+      <div className="relative shrink-0 border-b border-border shadow-sm overflow-hidden">
         <div
-          className="pointer-events-none absolute left-0 top-0 z-[55] flex items-center justify-center border-r border-border bg-transparent px-3 py-1 text-center text-xs font-semibold leading-tight text-foreground"
+          className="pointer-events-none absolute left-0 top-0 z-[55] flex items-center justify-center border-r border-border bg-card px-3 py-1 text-center text-xs font-semibold leading-tight text-foreground"
           style={{ width: TIME_GUTTER_PX, minHeight: EMPLOYEE_NAMES_ROW_MIN_H }}
         >
           Hora
         </div>
         <div
-          ref={headerScrollRef}
-          className="overflow-x-auto overflow-y-hidden [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
-          style={{ marginLeft: TIME_GUTTER_PX, ...edgeRowPad }}
+          ref={headerClipRef}
+          className="overflow-hidden"
+          style={{
+            marginLeft: TIME_GUTTER_PX,
+            width: employeesViewportPx > 0 ? employeesViewportPx : undefined,
+            maxWidth: employeesViewportPx > 0 ? employeesViewportPx : undefined,
+            touchAction: 'pan-y',
+            ...edgeRowPad,
+          }}
         >
-          <div style={{ minWidth: GRID_MIN_EMPLOYEES_PX }}>
-            <EmployeeNamesRow employees={employees} edge="top" variant="names-only" />
+          <div
+            ref={headerSlideRef}
+            style={{
+              ...employeesContentStyle,
+              transform: `translate3d(${-hOffset}px,0,0)`,
+              willChange: 'transform',
+            }}
+          >
+            <EmployeeNamesRow
+              employees={employees}
+              edge="top"
+              variant="names-only"
+              columnsTemplate={columnsTemplate}
+            />
           </div>
         </div>
       </div>
 
       <div className="relative min-h-0 h-full overflow-hidden">
-      <div
-        ref={scrollRootRef}
-        className="h-full min-h-0 overflow-x-auto overflow-y-scroll"
-      >
-        <AgendaGridVirtualRows
-          scrollRootRef={scrollRootRef}
-          timeSlots={timeSlots}
-          cellHeight={cellHeight}
-          employees={employees}
-          availability={availability}
-          occupancyIndex={occupancyIndex}
-          occupiedSlotKeys={occupiedSlotKeys}
-          appointments={appointments}
-          overlapMap={overlapMap}
-          employeeIndexById={employeeIndexById}
-          gridStartMin={gridStartMin}
-          gridEndMin={gridEndMin}
-          slotMinutes={slotMinutes}
-          isTodayView={isTodayView}
-          visibleFields={visibleFields}
-          appointmentClipboard={appointmentClipboard}
-          onSlotClick={onSlotClick}
-          onSlotPaste={onSlotPaste}
-          onAppointmentClick={onAppointmentClick}
-          onAppointmentCopy={onAppointmentCopy}
-          onAppointmentCut={onAppointmentCut}
-          onDragStart={handleDragStart}
-          onDragEnd={handleDragEnd}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
-          isSlotHighlighted={isSlotHighlighted}
-        />
-      </div>
+        {/*
+          Viewport H acotado por visualViewport. Clip en px absolutos.
+        */}
+        <div
+          ref={scrollRootRef}
+          className="h-full min-h-0 overflow-x-hidden overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch]"
+          style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-y' }}
+        >
+          <div
+            className="relative overflow-hidden"
+            style={{
+              width: frameWidthPx ?? '100%',
+              maxWidth: '100%',
+              height: gridBodyHeightPx,
+              minHeight: gridBodyHeightPx,
+            }}
+          >
+            <div
+              className="absolute left-0 top-0 z-[20] border-r border-border bg-card"
+              style={{ width: TIME_GUTTER_PX, height: gridBodyHeightPx }}
+            >
+              {timeSlots.map((slot, slotIdx) => {
+                const isHourMark = slot.minute === 0;
+                const timeShade = availability.centerOpen[slotIdx] !== 1;
+                return (
+                  <div
+                    key={`gutter-${slot.time}`}
+                    className={`relative overflow-visible ${
+                      isHourMark ? 'border-t-2 border-border' : 'border-t border-border'
+                    } ${timeShade ? UNAVAILABLE_TIME_GUTTER_TRANSPARENT : 'bg-transparent'}`}
+                    style={{ height: `${cellHeight}px`, minHeight: `${cellHeight}px` }}
+                  >
+                    <span
+                      className={`absolute left-0 right-0 top-0 z-[1] -translate-y-1/2 text-center leading-none px-1.5 text-xs font-medium text-muted-foreground dark:text-foreground/75 tabular-nums ${
+                        isHourMark ? 'text-sm font-semibold text-foreground' : ''
+                      } ${timeShade ? '!text-neutral-700 dark:!text-neutral-300' : ''}`}
+                    >
+                      <span
+                        className={`inline-block rounded-sm px-1.5 bg-card/90 ring-1 ring-border/30 ${
+                          isHourMark ? 'shadow-sm ring-border/50' : ''
+                        }`}
+                      >
+                        {slot.time}
+                      </span>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
 
-      <AgendaHourLabelsOverlay
-        scrollRootRef={scrollRootRef}
-        hourMarkPositions={hourMarkPositions}
-        centerOpen={availability.centerOpen}
-      />
+            <div
+              ref={bodyClipRef}
+              className="absolute top-0 overflow-hidden"
+              style={{
+                left: TIME_GUTTER_PX,
+                width: employeesViewportPx > 0 ? employeesViewportPx : `calc(100% - ${TIME_GUTTER_PX}px)`,
+                maxWidth: employeesViewportPx > 0 ? employeesViewportPx : undefined,
+                height: gridBodyHeightPx,
+                touchAction: 'pan-y',
+              }}
+            >
+              <div
+                ref={bodySlideRef}
+                className="relative"
+                style={{
+                  ...employeesContentStyle,
+                  height: gridBodyHeightPx,
+                  transform: `translate3d(${-hOffset}px,0,0)`,
+                  willChange: 'transform',
+                }}
+              >
+                <AgendaGridVirtualRows
+                  scrollRootRef={scrollRootRef}
+                  timeSlots={timeSlots}
+                  cellHeight={cellHeight}
+                  employees={employees}
+                  availability={availability}
+                  occupancyIndex={occupancyIndex}
+                  occupiedSlotKeys={occupiedSlotKeys}
+                  appointments={appointments}
+                  overlapMap={overlapMap}
+                  employeeIndexById={employeeIndexById}
+                  gridStartMin={gridStartMin}
+                  gridEndMin={gridEndMin}
+                  slotMinutes={slotMinutes}
+                  isTodayView={isTodayView}
+                  columnsTemplate={columnsTemplate}
+                  visibleFields={visibleFields}
+                  appointmentClipboard={appointmentClipboard}
+                  allowHtml5Drag={allowHtml5Drag}
+                  onSlotClick={onSlotClick}
+                  onSlotPaste={onSlotPaste}
+                  onAppointmentClick={onAppointmentClick}
+                  onAppointmentCopy={onAppointmentCopy}
+                  onAppointmentCut={onAppointmentCut}
+                  onDragStart={handleDragStart}
+                  onDragEnd={handleDragEnd}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  isSlotHighlighted={isSlotHighlighted}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="relative shrink-0 border-t border-border shadow-[0_-2px_4px_rgba(0,0,0,0.04)]">
         <div
-          className="pointer-events-none absolute left-0 top-0 z-[55] flex items-center justify-center border-r border-border bg-transparent"
+          className="pointer-events-none absolute left-0 top-0 z-[55] flex items-center justify-center border-r border-border bg-card"
           style={{ width: TIME_GUTTER_PX, minHeight: EMPLOYEE_NAMES_ROW_MIN_H }}
           aria-hidden
         >
           {'\u00a0'}
         </div>
         <div
-          ref={footerScrollRef}
-          className="overflow-x-auto overflow-y-hidden [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
-          style={{ marginLeft: TIME_GUTTER_PX, ...edgeRowPad }}
+          ref={footerClipRef}
+          className="overflow-hidden"
+          style={{
+            marginLeft: TIME_GUTTER_PX,
+            width: employeesViewportPx > 0 ? employeesViewportPx : undefined,
+            maxWidth: employeesViewportPx > 0 ? employeesViewportPx : undefined,
+            touchAction: 'pan-y',
+            ...edgeRowPad,
+          }}
         >
-          <div style={{ minWidth: GRID_MIN_EMPLOYEES_PX }}>
-            <EmployeeNamesRow employees={employees} edge="bottom" variant="names-only" />
+          <div
+            ref={footerSlideRef}
+            style={{
+              ...employeesContentStyle,
+              transform: `translate3d(${-hOffset}px,0,0)`,
+              willChange: 'transform',
+            }}
+          >
+            <EmployeeNamesRow
+              employees={employees}
+              edge="bottom"
+              variant="names-only"
+              columnsTemplate={columnsTemplate}
+            />
           </div>
         </div>
       </div>
