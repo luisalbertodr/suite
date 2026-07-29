@@ -2,11 +2,32 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import {
   dniMatchKeys,
+  dniNumericKey,
+  extractInbodyDni,
   dedupeInbodyMeasurements,
   normalizeInbodyMeasurement,
+  normInbodyUserId,
   type InbodyMeasurement,
 } from '@/lib/inbodyMeasurements';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+
+function measurementBelongsToCustomer(
+  row: InbodyMeasurement,
+  customerId: string,
+  taxId: string | null | undefined,
+): boolean {
+  const customerDni = taxId?.trim() ? dniNumericKey(taxId) : null;
+  const measureDni = dniNumericKey(extractInbodyDni(row.inbody_user_id));
+
+  if (row.customer_id === customerId) {
+    if (!customerDni || !measureDni) return true;
+    return customerDni === measureDni;
+  }
+
+  if (!taxId?.trim()) return false;
+  const keys = new Set(dniMatchKeys(taxId));
+  return keys.has(normInbodyUserId(extractInbodyDni(row.inbody_user_id)));
+}
 
 export function useInbodyMeasurements(
   customerId: string | undefined,
@@ -41,6 +62,7 @@ export function useInbodyMeasurements(
       const seen = new Set<string>();
       const raw: InbodyMeasurement[] = [];
       for (const row of (data || []) as InbodyMeasurement[]) {
+        if (!measurementBelongsToCustomer(row, customerId, taxId)) continue;
         const key = `${row.inbody_user_id}|${row.measured_at}`;
         if (seen.has(key)) continue;
         seen.add(key);

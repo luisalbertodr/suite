@@ -152,11 +152,31 @@ export function normInbodyUserId(value: string | null | undefined): string {
   return (value || '').replace(/[\s\-.]/g, '').replace(/\u0000/g, '').toUpperCase();
 }
 
+/** LookInBody USERID: "32803069D (008278)" → DNI "32803069D". */
+export function extractInbodyDni(userId: string | null | undefined): string {
+  const raw = String(userId ?? '').trim();
+  if (!raw) return '';
+  const paren = raw.match(/^(.+?)\s*\(\d+\)\s*$/);
+  return (paren ? paren[1] : raw).trim();
+}
+
+/** Código legacy Style embebido en USERID LookInBody, p. ej. "(008278)". */
+export function extractInbodyLegacyCodcli(userId: string | null | undefined): string | null {
+  const raw = String(userId ?? '').trim();
+  const paren = raw.match(/\((\d+)\)\s*$/);
+  return paren ? paren[1] : null;
+}
+
+/** Fichas auto-creadas por importación InBody sin cliente real vinculado. */
+export function isInbodyPlaceholderCustomerName(name: string | null | undefined): boolean {
+  return /^paciente\s+in\s*body\b/i.test(String(name ?? '').trim());
+}
+
 const SPANISH_DNI_LETTERS = 'TRWAGMYFPDXBNJZSQVHLCKE';
 
 /** Completa letra de control si el ID InBody trae solo 7-8 dígitos (p. ej. 36108902 → 36108902Y). */
 export function completeSpanishDni(userId: string | null | undefined): string {
-  const norm = normInbodyUserId(userId);
+  const norm = normInbodyUserId(extractInbodyDni(userId));
   if (/^\d{7,8}$/.test(norm)) {
     const num = parseInt(norm.padStart(8, '0'), 10);
     const letter = SPANISH_DNI_LETTERS[num % 23] ?? '';
@@ -167,7 +187,7 @@ export function completeSpanishDni(userId: string | null | undefined): string {
 
 /** Parte numérica del DNI/NIE sin letra de control (clave de cruce entre variantes). */
 export function dniNumericKey(value: string | null | undefined): string | null {
-  const s = normInbodyUserId(value);
+  const s = normInbodyUserId(extractInbodyDni(value));
   if (!s) return null;
 
   // DNI: 7-8 dígitos + letra opcional
@@ -189,7 +209,7 @@ export function dniNumericKey(value: string | null | undefined): string | null {
 
 /** Todas las variantes equivalentes (con/sin letra, ceros a la izquierda). */
 export function dniMatchKeys(value: string | null | undefined): string[] {
-  const raw = (value || '').replace(/[\s\-.]/g, '');
+  const raw = extractInbodyDni(value).replace(/[\s\-.]/g, '');
   const s = raw.toUpperCase();
   if (!s) return [];
 

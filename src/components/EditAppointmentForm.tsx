@@ -38,7 +38,7 @@ import { useFamilies } from '@/hooks/useFamilies';
 import { ClienteDetailOverlay } from '@/components/cliente/ClienteDetailOverlay';
 import { PermissionButton } from '@/components/PermissionButton';
 import { usePermissionGuard } from '@/hooks/usePermissionGuard';
-import { resolveAppointmentClientPick } from '@/lib/appointmentCustomerResolve';
+import { resolveAppointmentClientPick, resolveCustomerIdByLegacyCodcli } from '@/lib/appointmentCustomerResolve';
 import { normalizeLegacyAppointmentDescription } from '@/lib/legacyAppointmentItems';
 import { isAppointmentFinanciallyClosed } from '@/lib/appointmentLifecycle';
 import { AppointmentResourceConflictDialog } from '@/components/AppointmentResourceConflictDialog';
@@ -300,8 +300,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
   );
 
   const selectedCustomerId =
-    appointment.customerId ??
-    (resolvedClient?.kind === 'customer' ? resolvedClient.customerId : null);
+    resolvedClient?.kind === 'customer' ? resolvedClient.customerId : null;
   const legacyCodcli = appointment.legacyClientCode?.trim() || null;
 
   const { data: selectedCustomer } = useQuery({
@@ -322,25 +321,15 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
     queryKey: ['edit-appointment-customer-by-legacy', companyId, legacyCodcli],
     enabled: !!companyId && !!legacyCodcli && !selectedCustomerId,
     queryFn: async () => {
+      const customerId = await resolveCustomerIdByLegacyCodcli(companyId!, legacyCodcli!);
+      if (!customerId) return null;
       const { data, error } = await supabase
         .from('customers')
         .select(APPOINTMENT_CUSTOMER_SUMMARY_FIELDS)
-        .eq('company_id', companyId!)
-        .eq('legacy_codcli', legacyCodcli!)
+        .eq('id', customerId)
         .maybeSingle();
       if (error) throw error;
-      if (data) return data;
-      const norm = legacyCodcli!.replace(/^0+/, '') || '0';
-      const { data: rows, error: err2 } = await supabase
-        .from('customers')
-        .select(APPOINTMENT_CUSTOMER_SUMMARY_FIELDS)
-        .eq('company_id', companyId!)
-        .not('legacy_codcli', 'is', null);
-      if (err2) throw err2;
-      return (rows ?? []).find((c) => {
-        const cCode = String(c.legacy_codcli ?? '').trim();
-        return cCode === legacyCodcli || (cCode.replace(/^0+/, '') || '0') === norm;
-      }) ?? null;
+      return data;
     },
   });
 
@@ -411,7 +400,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
       ...appointment,
       ...formData,
       clientName,
-      customerId: appointment.customerId ?? effectiveCustomerId ?? null,
+      customerId: effectiveCustomerId ?? null,
       endTime,
     }, items.map((it) => ({ ...it, quantity: 1 })));
   };

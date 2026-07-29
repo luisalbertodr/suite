@@ -1,5 +1,6 @@
 import type { CustomerSearchRow } from '@/lib/customerSearch';
 import type { AppointmentClientPick } from '@/components/forms/AppointmentClientePicker';
+import { isInbodyPlaceholderCustomerName } from '@/lib/inbodyMeasurements';
 import { supabase } from '@/lib/supabase';
 
 export function normLegacyCodcli(value: string): string {
@@ -14,6 +15,31 @@ export function legacyCodcliMatches(a: string, b: string): boolean {
   if (!x || !y) return false;
   if (x === y) return true;
   return normLegacyCodcli(x) === normLegacyCodcli(y);
+}
+
+function customerNameMatches(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+function pickBestLegacyCustomer(
+  customers: CustomerSearchRow[],
+  legacyCodcli: string,
+): CustomerSearchRow | undefined {
+  const matches = customers.filter((x) => legacyCodcliMatches(legacyCodcli, x.legacy_codcli ?? ''));
+  if (!matches.length) return undefined;
+  return matches.find((x) => !isInbodyPlaceholderCustomerName(x.name)) ?? matches[0];
+}
+
+function customerMatchesAppointment(
+  customer: CustomerSearchRow,
+  clientName: string,
+  legacyCodcli: string | null,
+): boolean {
+  if (isInbodyPlaceholderCustomerName(customer.name)) return false;
+  const name = clientName.trim();
+  if (name && customerNameMatches(customer.name, name)) return true;
+  if (legacyCodcli && legacyCodcliMatches(legacyCodcli, customer.legacy_codcli ?? '')) return true;
+  return !name && !legacyCodcli;
 }
 
 /** Variantes tipicas Style/Suite (con y sin ceros a la izquierda, pad 6). */
@@ -41,21 +67,24 @@ export function resolveAppointmentClientPick(
   const customerId = opts?.customerId?.trim() || null;
   const legacyCodcli = opts?.legacyCodcli?.trim() || null;
 
-  if (customerId) {
-    const c = customers.find((x) => x.id === customerId);
-    if (c) return { kind: 'customer', customerId: c.id, displayName: c.name };
-    if (name) return { kind: 'customer', customerId, displayName: name };
-  }
-
   if (legacyCodcli) {
-    const byLegacy = customers.find((x) => legacyCodcliMatches(legacyCodcli, x.legacy_codcli ?? ''));
+    const byLegacy = pickBestLegacyCustomer(customers, legacyCodcli);
     if (byLegacy) return { kind: 'customer', customerId: byLegacy.id, displayName: byLegacy.name };
   }
 
   if (name) {
-    const byName = customers.find((x) => x.name.trim().toLowerCase() === name.toLowerCase());
+    const byName = customers.find((x) => customerNameMatches(x.name, name));
     if (byName) return { kind: 'customer', customerId: byName.id, displayName: byName.name };
     return { kind: 'manual', name };
+  }
+
+  if (customerId) {
+    const c = customers.find((x) => x.id === customerId);
+    if (c && customerMatchesAppointment(c, name, legacyCodcli)) {
+      return { kind: 'customer', customerId: c.id, displayName: c.name };
+    }
+    if (c) return { kind: 'customer', customerId: c.id, displayName: c.name };
+    if (name) return { kind: 'customer', customerId, displayName: name };
   }
 
   return null;
@@ -80,12 +109,13 @@ export async function resolveCustomerIdsByLegacyCodcli(
   if (!lookupList.length) return new Map();
 
   const out = new Map<string, string>();
+  const nameByKey = new Map<string, string>();
   const chunkSize = 80;
   for (let i = 0; i < lookupList.length; i += chunkSize) {
     const chunk = lookupList.slice(i, i + chunkSize);
     const { data, error } = await supabase
       .from('customers')
-      .select('id, legacy_codcli')
+      .select('id, legacy_codcli, name')
       .eq('company_id', companyId)
       .is('archived_at', null)
       .in('legacy_codcli', chunk);
@@ -95,7 +125,21 @@ export async function resolveCustomerIdsByLegacyCodcli(
       const rowCode = String(row.legacy_codcli ?? '').trim();
       if (!rowCode || !row.id) continue;
       const key = normLegacyCodcli(rowCode);
-      if (!out.has(key)) out.set(key, row.id as string);
+      const rowName = String(row.name ?? '').trim();
+      const existingId = out.get(key);
+      if (!existingId) {
+        out.set(key, row.id as string);
+        nameByKey.set(key, rowName);
+        continue;
+      }
+      const existingName = nameByKey.get(key) ?? '';
+      if (
+        isInbodyPlaceholderCustomerName(existingName) &&
+        !isInbodyPlaceholderCustomerName(rowName)
+      ) {
+        out.set(key, row.id as string);
+        nameByKey.set(key, rowName);
+      }
     }
   }
 
