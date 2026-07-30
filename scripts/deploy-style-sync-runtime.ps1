@@ -34,6 +34,8 @@ Write-Host "Ruta local worker: $LocalStyleRoot"
 $copyRoot = @(
     "ensure-style-sync.ps1",
     "close-duna2-nightly.ps1",
+    "install-style-close-duna2-scheduler.ps1",
+    "InstalarCierreDuna2Nightly.bat",
     "IniciarStyle.bat",
     "RecuperarSyncInbound.bat",
     "SuiteSyncAgent.cfg.example"

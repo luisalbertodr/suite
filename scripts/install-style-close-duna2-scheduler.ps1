@@ -1,7 +1,6 @@
-# Task Scheduler: cerrar Duna2.exe a las 01:00 cada dia (ventana sync hard).
+# Wrapper repo: copia scripts a StyleRoot e instala tarea (local o VM remota).
 #
 # Uso:
-#   .\scripts\install-style-close-duna2-scheduler.ps1
 #   .\scripts\install-style-close-duna2-scheduler.ps1 -StyleRoot "C:\Style-Dunasoft"
 #   .\scripts\install-style-close-duna2-scheduler.ps1 -VmHost "192.168.99.16"
 #
@@ -16,62 +15,47 @@ param(
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
-$VfpScript = Join-Path $RepoRoot "vfp\close-duna2-nightly.ps1"
-if (-not (Test-Path $VfpScript)) { throw "Falta $VfpScript" }
+$Vfp = Join-Path $RepoRoot "vfp"
 
 $VmLocalRoot = "C:\Style-Dunasoft"
 if ($VmHost) {
     $StyleRoot = "\\$VmHost\c$\Style-Dunasoft"
-    $TaskStyleRoot = $VmLocalRoot
+    $InvokeStyleRoot = $VmLocalRoot
 } else {
-    $TaskStyleRoot = $StyleRoot
+    $InvokeStyleRoot = $StyleRoot
 }
 $StyleRoot = [IO.Path]::GetFullPath($StyleRoot.TrimEnd('\'))
-$TaskStyleRoot = $TaskStyleRoot.TrimEnd('\')
 
-$destScript = Join-Path $StyleRoot "close-duna2-nightly.ps1"
-Copy-Item $VfpScript $destScript -Force
-Write-Host "  OK close-duna2-nightly.ps1 -> $destScript" -ForegroundColor Green
-
-$drainArg = if ($NoDrainInbound) { "" } else { " -DrainInbound" }
-$hardArg = if ($NoHardSync) { "" } else { " -TriggerHardSync" }
-$taskScript = Join-Path $TaskStyleRoot "close-duna2-nightly.ps1"
-$psArgs = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$taskScript`" -StyleRoot `"$TaskStyleRoot`"$drainArg$hardArg"
-
-$registered = $false
-try {
-    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $psArgs -WorkingDirectory $TaskStyleRoot
-    $trigger = New-ScheduledTaskTrigger -Daily -At $DailyAt
-    $settings = New-ScheduledTaskSettingsSet `
-        -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
-        -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 45) `
-        -Hidden
-
-    if ($VmHost) {
-        Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings `
-            -User "SYSTEM" -RunLevel Highest -Force -CimSession (New-CimSession -ComputerName $VmHost) | Out-Null
-    } else {
-        Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings `
-            -User "SYSTEM" -RunLevel Highest -Force | Out-Null
-    }
-    $registered = $true
-    Write-Host "OK Task $TaskName diaria a las $DailyAt (SYSTEM, todas las sesiones)" -ForegroundColor Green
-} catch {
-    Write-Warning "Register-ScheduledTask: $($_.Exception.Message)"
+foreach ($f in @("close-duna2-nightly.ps1", "install-style-close-duna2-scheduler.ps1", "InstalarCierreDuna2Nightly.bat")) {
+    $src = Join-Path $Vfp $f
+    if (-not (Test-Path $src)) { throw "Falta $src" }
+    Copy-Item $src (Join-Path $StyleRoot $f) -Force
+    Write-Host "  OK $f -> $StyleRoot" -ForegroundColor Green
 }
 
-if (-not $registered) {
-    $tr = "powershell.exe $psArgs"
-    if ($VmHost) {
-        schtasks /Delete /S $VmHost /TN $TaskName /F 2>$null | Out-Null
-        $code = schtasks /Create /S $VmHost /TN $TaskName /TR $tr /SC DAILY /ST $DailyAt /RU SYSTEM /RL HIGHEST /F 2>&1
-    } else {
-        schtasks /Delete /TN $TaskName /F 2>$null | Out-Null
-        $code = schtasks /Create /TN $TaskName /TR $tr /SC DAILY /ST $DailyAt /RU SYSTEM /RL HIGHEST /F 2>&1
-    }
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "OK Task $TaskName (schtasks diaria $DailyAt)" -ForegroundColor Green
-    } else {
-        throw "No se pudo registrar $TaskName. Ejecuta PowerShell como administrador. Detalle: $code"
-    }
+$installer = Join-Path $Vfp "install-style-close-duna2-scheduler.ps1"
+$args = @{
+    StyleRoot     = $InvokeStyleRoot
+    TaskName      = $TaskName
+    DailyAt       = $DailyAt
+    NoDrainInbound = $NoDrainInbound
+    NoHardSync    = $NoHardSync
+}
+
+if ($VmHost) {
+    $argList = @(
+        "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+        (Join-Path $InvokeStyleRoot "install-style-close-duna2-scheduler.ps1"),
+        "-StyleRoot", $InvokeStyleRoot,
+        "-TaskName", $TaskName,
+        "-DailyAt", $DailyAt
+    )
+    if ($NoDrainInbound) { $argList += "-NoDrainInbound" }
+    if ($NoHardSync) { $argList += "-NoHardSync" }
+    Invoke-Command -ComputerName $VmHost -ScriptBlock {
+        param($ArgList)
+        & powershell.exe @ArgList
+    } -ArgumentList (, $argList)
+} else {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer @args
 }
