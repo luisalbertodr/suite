@@ -163,6 +163,13 @@ if ($taskCode -eq 0) {
     Write-Warning "No se pudo registrar $AgentTaskName (Acceso denegado a schtasks remoto). El agente arranca con IniciarStyle.bat o reinicialo manualmente en la VM."
 }
 
+Write-Step "Cierre nocturno Duna2.exe ($VmHost, 01:00)"
+try {
+    & (Join-Path $RepoRoot "scripts\install-style-close-duna2-scheduler.ps1") -VmHost $VmHost
+} catch {
+    Write-Warning "install-style-close-duna2-scheduler: $_"
+}
+
 if (-not $KeepDockerAgent) {
     Write-Step "Detener agente Docker en $SshHost (evitar doble sync + CIFS)"
     ssh -i $Key $SshHost "docker rm -f style-sync-agent 2>/dev/null || true; docker ps -a --filter name=style-sync-agent --format '{{.Names}} {{.Status}}' || true"
