@@ -10,7 +10,8 @@ param(
     [string]$TaskName = "SuiteStyleCloseDuna2Nightly",
     [string]$DailyAt = "01:00",
     [string]$VmHost = "",
-    [switch]$NoDrainInbound
+    [switch]$NoDrainInbound,
+    [switch]$NoHardSync
 )
 
 $ErrorActionPreference = "Stop"
@@ -33,8 +34,9 @@ Copy-Item $VfpScript $destScript -Force
 Write-Host "  OK close-duna2-nightly.ps1 -> $destScript" -ForegroundColor Green
 
 $drainArg = if ($NoDrainInbound) { "" } else { " -DrainInbound" }
+$hardArg = if ($NoHardSync) { "" } else { " -TriggerHardSync" }
 $taskScript = Join-Path $TaskStyleRoot "close-duna2-nightly.ps1"
-$psArgs = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$taskScript`" -StyleRoot `"$TaskStyleRoot`"$drainArg"
+$psArgs = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$taskScript`" -StyleRoot `"$TaskStyleRoot`"$drainArg$hardArg"
 
 $registered = $false
 try {
@@ -42,7 +44,7 @@ try {
     $trigger = New-ScheduledTaskTrigger -Daily -At $DailyAt
     $settings = New-ScheduledTaskSettingsSet `
         -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
-        -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 10) `
+        -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 45) `
         -Hidden
 
     if ($VmHost) {

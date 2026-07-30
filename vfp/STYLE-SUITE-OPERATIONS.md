@@ -163,5 +163,5 @@ El agente reintenta operaciones de fichero con backoff (`FS_RETRY_MAX=6`, base 1
 | Purgar `sync/archive/` antiguo (>30 días) | Mensual |
 | Revisar `sync/deadletter/` | Cuando `*_errors` sube |
 | Verificar Task Scheduler worker | Semanal |
-| `SuiteStyleCloseDuna2Nightly` (cierra Duna2.exe 01:00, sync hard DBF) | Diario (automático) |
+| `SuiteStyleCloseDuna2Nightly` (cierra Duna2.exe 01:00 + hard sync DBF) | Diario (automático) |
 | Purga opcional `cola_sincro.dbf` (filas id ≤ last_cola_id) | Semanal (PRG opcional) |
