@@ -82,6 +82,7 @@ if (-not $sr) { throw "No se pudo leer SUPABASE_SERVICE_ROLE_KEY" }
 $syncRoot = $VmLocalRoot.TrimEnd('\')
 $envContent = @"
 STYLE_ROOT=$syncRoot
+STYLE_PHOTOS_DIR=$syncRoot\Fotografias
 SUPABASE_URL=https://supabase.lipoout.com
 SUPABASE_SERVICE_ROLE_KEY=$sr
 COMPANY_ID=$CompanyId
