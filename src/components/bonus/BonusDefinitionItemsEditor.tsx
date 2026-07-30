@@ -1,9 +1,5 @@
-import React, { useMemo } from 'react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Trash2 } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { FamilyGridPickerDialog } from '@/components/forms/FamilyGridPickerDialog';
 import {
   ArticleFamilyPicker,
   articleLabel,
@@ -55,6 +51,7 @@ const rowArticleLabel = (it: BonoCoverageItem, articles: ArticleRow[]): string =
 export const BonusDefinitionItemsEditor: React.FC<Props> = ({ items, onChange, articles, disabled }) => {
   const hasFamilyRow = items.some((it) => it.coverage_type === 'family');
   const { familyRows, loading: familiesLoading } = useNonEmptyArticleFamilies('all', hasFamilyRow);
+  const [familyGridRow, setFamilyGridRow] = useState<number | null>(null);
 
   const articleById = useMemo(() => {
     const map = new Map<string, ArticleRow>();
@@ -105,33 +102,47 @@ export const BonusDefinitionItemsEditor: React.FC<Props> = ({ items, onChange, a
             </Select>
 
             {it.coverage_type === 'family' ? (
-              <Select
-                value={it.family_code ?? 'none'}
-                disabled={disabled || familiesLoading}
-                onValueChange={(v) => {
-                  const next = [...items];
-                  const code = v === 'none' ? null : v;
-                  next[idx] = {
-                    ...it,
-                    family_code: code,
-                    article_id: null,
-                    label: code ? `Familia ${code === '__sin_familia__' ? 'Sin familia' : code}` : 'Familia',
-                  };
-                  onChange(next);
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder={familiesLoading ? 'Cargando…' : 'Familia'} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Selecciona familia</SelectItem>
-                  {familyRows.map((f) => (
-                    <SelectItem key={f} value={f}>
-                      {f === '__sin_familia__' ? 'Sin familia' : f}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="flex min-w-0 items-center gap-1">
+                <Select
+                  value={it.family_code ?? 'none'}
+                  disabled={disabled || familiesLoading}
+                  onValueChange={(v) => {
+                    const next = [...items];
+                    const code = v === 'none' ? null : v;
+                    next[idx] = {
+                      ...it,
+                      family_code: code,
+                      article_id: null,
+                      label: code ? `Familia ${code === '__sin_familia__' ? 'Sin familia' : code}` : 'Familia',
+                    };
+                    onChange(next);
+                  }}
+                >
+                  <SelectTrigger className="min-w-0 flex-1">
+                    <SelectValue placeholder={familiesLoading ? 'Cargando…' : 'Familia'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Selecciona familia</SelectItem>
+                    {familyRows.map((f) => (
+                      <SelectItem key={f} value={f}>
+                        {f === '__sin_familia__' ? 'Sin familia' : f}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9 shrink-0"
+                  disabled={disabled || familiesLoading}
+                  title="Selector gráfico de familias"
+                  aria-label="Abrir selector gráfico de familias"
+                  onClick={() => setFamilyGridRow(idx)}
+                >
+                  <LayoutGrid className="h-4 w-4" />
+                </Button>
+              </div>
             ) : (
               <ArticleFamilyPicker
                 value={it.article_id}
@@ -213,6 +224,25 @@ export const BonusDefinitionItemsEditor: React.FC<Props> = ({ items, onChange, a
       >
         <Plus className="w-4 h-4 mr-1" /> Añadir componente
       </Button>
+      <FamilyGridPickerDialog
+        open={familyGridRow !== null}
+        onOpenChange={(next) => {
+          if (!next) setFamilyGridRow(null);
+        }}
+        selectedFamily={familyGridRow !== null ? items[familyGridRow]?.family_code : null}
+        onSelect={(familyKey) => {
+          if (familyGridRow === null) return;
+          const next = [...items];
+          next[familyGridRow] = {
+            ...next[familyGridRow],
+            family_code: familyKey,
+            article_id: null,
+            label: `Familia ${familyKey === '__sin_familia__' ? 'Sin familia' : familyKey}`,
+          };
+          onChange(next);
+          setFamilyGridRow(null);
+        }}
+      />
     </div>
   );
 };

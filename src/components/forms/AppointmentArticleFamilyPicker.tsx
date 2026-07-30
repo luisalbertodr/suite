@@ -5,7 +5,8 @@ import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { AGENDA_APPOINTMENT_SELECT_Z } from '@/lib/agendaResourceColors';
 import { cn } from '@/lib/utils';
-import { ChevronDown, ChevronRight, ChevronsUpDown, Search } from 'lucide-react';
+import { ChevronDown, ChevronRight, ChevronsUpDown, LayoutGrid, Search } from 'lucide-react';
+import { ArticleGridPickerDialog } from '@/components/forms/ArticleGridPickerDialog';
 import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { useWorkCenter } from '@/hooks/useWorkCenter';
@@ -82,6 +83,7 @@ export const AppointmentArticleFamilyPicker: React.FC<Props> = ({
   placeholder,
 }) => {
   const [open, setOpen] = useState(false);
+  const [gridOpen, setGridOpen] = useState(false);
   const [expandedFamily, setExpandedFamily] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const { companyId } = useCompanyFilter();
@@ -247,7 +249,9 @@ export const AppointmentArticleFamilyPicker: React.FC<Props> = ({
   const label = kindLabel(itemKind);
 
   return (
-    <Popover open={open} onOpenChange={handleOpenChange}>
+    <>
+    <div className="flex min-w-0 flex-1 items-center gap-1">
+      <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <Button
           type="button"
@@ -355,6 +359,27 @@ export const AppointmentArticleFamilyPicker: React.FC<Props> = ({
         </div>
       </PopoverContent>
     </Popover>
+      <Button
+        type="button"
+        variant="outline"
+        size="icon"
+        disabled={disabled}
+        className={cn('h-7 w-7 shrink-0', triggerClassName?.includes('h-10') && 'h-10 w-10')}
+        title="Selector gráfico"
+        aria-label="Abrir selector gráfico de artículos"
+        onClick={() => setGridOpen(true)}
+      >
+        <LayoutGrid className="h-3.5 w-3.5" />
+      </Button>
+    </div>
+    <ArticleGridPickerDialog
+      open={gridOpen}
+      onOpenChange={setGridOpen}
+      itemKind={itemKind}
+      selectedId={value}
+      onSelect={onSelect}
+    />
+    </>
   );
 };
 

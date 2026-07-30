@@ -39,6 +39,7 @@ import {
   type AppointmentArticleOption,
 } from '@/components/forms/AppointmentArticleFamilyPicker';
 import { ARTICLE_SEARCH_MIN_CHARS } from '@/lib/articleSearch';
+import { resolveArticleImageUrl } from '@/lib/resolveArticleImageUrl';
 
 interface CartItem {
   id: string;
@@ -60,6 +61,7 @@ interface Article {
   stock_actual: number;
   codigo: string;
   foto_url: string | null;
+  legacy_photo_path?: string | null;
   tipo_producto: 'textil' | 'calzado' | 'standard';
   codigo_barras?: string;
   familia?: string;
@@ -97,6 +99,7 @@ function ProductGridCell({
   const articleIndex = rowIndex * columnCount + columnIndex;
   const article = articles[articleIndex];
   if (!article) return null;
+  const imageUrl = resolveArticleImageUrl(article);
 
   return (
     <div style={{ ...style, padding: gap / 2 }}>
@@ -108,8 +111,8 @@ function ProductGridCell({
       >
         <div className="p-3 h-full flex flex-col justify-between">
           <div className="flex-shrink-0 h-12 flex items-center justify-center mb-2">
-            {article.foto_url ? (
-              <img src={article.foto_url} alt={article.descripcion} className="w-10 h-10 rounded-md object-cover" />
+            {imageUrl ? (
+              <img src={imageUrl} alt={article.descripcion} className="w-10 h-10 rounded-md object-cover" />
             ) : (
               <div className="w-10 h-10 bg-gradient-to-r from-green-500 to-blue-500 rounded-md flex items-center justify-center text-white">
                 <Package className="w-6 h-6" />
@@ -318,7 +321,7 @@ export const TPV: React.FC = () => {
       const searchPattern = `%${debouncedSearchTerm.trim()}%`;
       const { data, error } = await supabase
         .from('articles')
-        .select('id, descripcion, precio, stock_actual, codigo, foto_url, tipo_producto, codigo_barras, familia, billing_company_id, company_id')
+        .select('id, descripcion, precio, stock_actual, codigo, foto_url, legacy_photo_path, tipo_producto, codigo_barras, familia, billing_company_id, company_id')
         .eq('estado', 'activo')
         .eq('company_id', catalogCompanyId)
         .or(`descripcion.ilike.${searchPattern},codigo.ilike.${searchPattern}`)
@@ -636,7 +639,7 @@ export const TPV: React.FC = () => {
     try {
       const { data: articleData, error: articleError } = await supabase
         .from('articles')
-        .select('id, descripcion, precio, stock_actual, codigo, foto_url, tipo_producto, codigo_barras, familia, billing_company_id, company_id')
+        .select('id, descripcion, precio, stock_actual, codigo, foto_url, legacy_photo_path, tipo_producto, codigo_barras, familia, billing_company_id, company_id')
         .eq('codigo_barras', barcode.trim())
         .eq('estado', 'activo')
         .eq('company_id', catalogCompanyId)
