@@ -3,7 +3,11 @@
 #
 # Uso (desde C:\Style-Dunasoft, PowerShell como administrador):
 #   .\install-style-close-duna2-scheduler.ps1
-#   .\install-style-close-duna2-scheduler.ps1 -DailyAt "01:00"
+#   cd C:\Style-Dunasoft; .\install-style-close-duna2-scheduler.ps1
+#
+# Desde el repo en la misma VM:
+#   .\scripts\install-style-close-duna2-scheduler.ps1
+#   .\scripts\install-style-close-duna2-scheduler.ps1 -StyleRoot "C:\Style-Dunasoft"
 #
 param(
     [string]$StyleRoot = "",
