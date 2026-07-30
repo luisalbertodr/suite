@@ -6,7 +6,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { X, Save, Plus, Trash2 } from 'lucide-react';
-import { dunasoftSupabase } from '@/lib/dunasoftSupabase';
 import type { DunasoftPlanArtInput } from '@/lib/dunasoftDualWrite';
 import type { Employee } from '@/types/agenda';
 import { calcEndFromStart } from '@/lib/agendaAppointmentItems';
@@ -16,6 +15,14 @@ import {
   AppointmentClientePicker,
   type AppointmentClientPick,
 } from '@/components/forms/AppointmentClientePicker';
+import {
+  AppointmentArticleFamilyPicker,
+  type AppointmentArticleOption,
+} from '@/components/forms/AppointmentArticleFamilyPicker';
+import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useWorkCenter } from '@/hooks/useWorkCenter';
+import { supabase } from '@/lib/supabase';
+import { DEFAULT_APPOINTMENT_SERVICE_MINUTES } from '@/lib/appointmentArticleKind';
 
 export type DunasoftAppointmentFormValues = {
   codemp: string;
@@ -28,6 +35,10 @@ export type DunasoftAppointmentFormValues = {
   texto: string;
   planart: DunasoftPlanArtInput[];
   customer_id?: string | null;
+};
+
+type PlanArtDraft = DunasoftPlanArtInput & {
+  articleId?: string | null;
 };
 
 type Props = {
@@ -43,6 +54,20 @@ type Props = {
   onCancel: () => void;
 };
 
+function serviceMinutes(article?: AppointmentArticleOption | null): number {
+  const mins = article?.duration_minutes;
+  if (typeof mins === 'number' && mins > 0) return mins;
+  return DEFAULT_APPOINTMENT_SERVICE_MINUTES;
+}
+
+function recalcHorfin(rows: PlanArtDraft[], start: string, articlesById: Map<string, AppointmentArticleOption>): string {
+  const totalMins = rows.reduce((sum, row) => {
+    const article = row.articleId ? articlesById.get(row.articleId) : undefined;
+    return sum + serviceMinutes(article);
+  }, 0);
+  return calcEndFromStart(start, totalMins || DEFAULT_APPOINTMENT_SERVICE_MINUTES);
+}
+
 export const DunasoftAppointmentForm: React.FC<Props> = ({
   mode,
   employeeId,
@@ -56,6 +81,9 @@ export const DunasoftAppointmentForm: React.FC<Props> = ({
   onCancel,
 }) => {
   const employee = employees.find((e) => e.id === employeeId);
+  const { companyId } = useCompanyFilter();
+  const { catalogHostCompanyId } = useWorkCenter();
+  const catalogCompanyId = catalogHostCompanyId ?? companyId;
 
   const [clientPick, setClientPick] = useState<AppointmentClientPick | null>(() => {
     const name = (initial?.nomcli ?? '').trim();
@@ -70,11 +98,51 @@ export const DunasoftAppointmentForm: React.FC<Props> = ({
   const [horini, setHorini] = useState(initial?.horini ?? startTime);
   const [horfin, setHorfin] = useState(initial?.horfin ?? calcEndFromStart(startTime, 45));
   const [texto, setTexto] = useState(initial?.texto ?? '');
-  const [planart, setPlanart] = useState<DunasoftPlanArtInput[]>(
+  const [planart, setPlanart] = useState<PlanArtDraft[]>(
     initial?.planart?.length
-      ? initial.planart
-      : [{ codart: '', hora: startTime }],
+      ? initial.planart.map((row) => ({ ...row }))
+      : [{ codart: '', hora: startTime, articleId: null }],
   );
+  const [articleCache, setArticleCache] = useState<Map<string, AppointmentArticleOption>>(new Map());
+
+  const initialCodarts = useMemo(
+    () => [...new Set((initial?.planart ?? []).map((row) => row.codart.trim()).filter(Boolean))],
+    [initial?.planart],
+  );
+
+  const { data: resolvedArticles = [] } = useQuery({
+    queryKey: ['dunasoft-planart-articles', catalogCompanyId, initialCodarts],
+    enabled: Boolean(catalogCompanyId && initialCodarts.length > 0),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('articles')
+        .select('id,codigo,descripcion,descripcion_larga,precio,duration_minutes,article_kind,estado,familia,recurso_id')
+        .eq('company_id', catalogCompanyId!)
+        .eq('estado', 'activo')
+        .in('codigo', initialCodarts);
+      if (error) throw error;
+      return (data ?? []) as AppointmentArticleOption[];
+    },
+    staleTime: 60_000,
+  });
+
+  useEffect(() => {
+    if (!resolvedArticles.length) return;
+    const byCode = new Map(resolvedArticles.map((a) => [String(a.codigo ?? '').trim(), a]));
+    setArticleCache((prev) => {
+      const next = new Map(prev);
+      for (const article of resolvedArticles) next.set(article.id, article);
+      return next;
+    });
+    setPlanart((rows) =>
+      rows.map((row) => {
+        if (row.articleId) return row;
+        const code = row.codart.trim();
+        const article = code ? byCode.get(code) : undefined;
+        return article ? { ...row, articleId: article.id, desart: article.descripcion } : row;
+      }),
+    );
+  }, [resolvedArticles]);
 
   useEffect(() => {
     if (!clientPick) return;
@@ -89,28 +157,35 @@ export const DunasoftAppointmentForm: React.FC<Props> = ({
     setCustomerId(clientPick.customerId);
   }, [clientPick]);
 
-  const { data: articulos = [] } = useQuery({
-    queryKey: ['dunasoft-articulos-agenda'],
-    queryFn: async () => {
-      const res = await dunasoftSupabase
-        .from('articulos')
-        .select('codart,desart,tiempo,obsoleto')
-        .order('desart')
-        .limit(800);
-      if (res.error) throw res.error;
-      return (res.data ?? []).filter((a) => (a as { obsoleto?: boolean }).obsoleto !== true);
-    },
-    staleTime: 120_000,
-  });
+  const applyArticleAt = (index: number, article: AppointmentArticleOption) => {
+    setArticleCache((prev) => {
+      const next = new Map(prev);
+      next.set(article.id, article);
+      return next;
+    });
+    setPlanart((rows) => {
+      const next = [...rows];
+      const mins = serviceMinutes(article);
+      next[index] = {
+        ...next[index]!,
+        codart: String(article.codigo ?? '').trim(),
+        desart: article.descripcion,
+        articleId: article.id,
+        hora: next[index]!.hora || horini,
+      };
+      setHorfin(calcEndFromStart(horini, mins * next.filter((r) => r.codart.trim()).length));
+      return next;
+    });
+  };
 
-  const articuloByCode = useMemo(() => {
-    const m = new Map<string, { desart: string; tiempo?: string | null }>();
-    for (const a of articulos) {
-      const code = String((a as { codart?: string }).codart ?? '').trim();
-      if (code) m.set(code, { desart: String((a as { desart?: string }).desart ?? ''), tiempo: (a as { tiempo?: string }).tiempo });
-    }
-    return m;
-  }, [articulos]);
+  const clearArticleAt = (index: number) => {
+    setPlanart((rows) => {
+      const next = [...rows];
+      next[index] = { ...next[index]!, codart: '', desart: '', articleId: null };
+      setHorfin(recalcHorfin(next, horini, articleCache));
+      return next;
+    });
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -124,7 +199,9 @@ export const DunasoftAppointmentForm: React.FC<Props> = ({
       horini,
       horfin,
       texto: texto.trim(),
-      planart: planart.filter((p) => p.codart.trim()),
+      planart: planart
+        .filter((p) => p.codart.trim())
+        .map(({ codart, hora, desart }) => ({ codart, hora, desart })),
       customer_id: customerId,
     });
   };
@@ -190,69 +267,71 @@ export const DunasoftAppointmentForm: React.FC<Props> = ({
             </div>
 
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label>Servicios (planart)</Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label>Servicios</Label>
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   className="h-7 text-xs"
-                  onClick={() => setPlanart((rows) => [...rows, { codart: '', hora: horini }])}
+                  disabled={saving}
+                  onClick={() => setPlanart((rows) => [...rows, { codart: '', hora: horini, articleId: null }])}
                 >
                   <Plus className="w-3 h-3 mr-1" /> Línea
                 </Button>
               </div>
-              {planart.map((row, idx) => (
-                <div key={idx} className="flex gap-1 items-end">
-                  <div className="flex-1">
+              <p className="text-[11px] text-muted-foreground">
+                Toca el servicio para abrir la rejilla gráfica con familias y fotos.
+              </p>
+              {planart.map((row, idx) => {
+                const cached = row.articleId ? articleCache.get(row.articleId) : undefined;
+                const selectedLabel =
+                  cached?.descripcion?.trim() ||
+                  row.desart?.trim() ||
+                  (row.codart.trim() ? row.codart : undefined);
+                return (
+                  <div key={idx} className="flex gap-1 items-center">
+                    <div className="min-w-0 flex-1">
+                      <AppointmentArticleFamilyPicker
+                        value={row.articleId ?? null}
+                        itemKind="service"
+                        selectedLabel={selectedLabel}
+                        selectedUnitPrice={cached?.precio}
+                        placeholder="Elegir servicio…"
+                        triggerClassName="h-9 text-xs"
+                        primaryOpensGrid
+                        disabled={saving}
+                        onSelect={(article) => applyArticleAt(idx, article)}
+                        onClear={() => clearArticleAt(idx)}
+                      />
+                    </div>
                     <Input
-                      list="dunasoft-articulos"
-                      value={row.codart}
-                      placeholder="Cód. artículo"
+                      className="w-20 h-9 shrink-0"
+                      value={row.hora ?? ''}
+                      placeholder="HH:mm"
+                      disabled={saving}
                       onChange={(e) => {
-                        const cod = e.target.value;
+                        const h = e.target.value;
                         setPlanart((rows) => {
                           const next = [...rows];
-                          const meta = articuloByCode.get(cod.trim());
-                          const mins = parseInt(String(meta?.tiempo ?? '15'), 10) || 15;
-                          next[idx] = { ...next[idx]!, codart: cod, hora: next[idx]!.hora || horini };
-                          if (idx === rows.length - 1) setHorfin(calcEndFromStart(horini, mins * rows.length));
+                          next[idx] = { ...next[idx]!, hora: h };
                           return next;
                         });
                       }}
                     />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-9 w-9 p-0 shrink-0"
+                      disabled={saving || planart.length <= 1}
+                      onClick={() => setPlanart((rows) => rows.filter((_, i) => i !== idx))}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
                   </div>
-                  <Input
-                    className="w-20"
-                    value={row.hora ?? ''}
-                    placeholder="HH:mm"
-                    onChange={(e) => {
-                      const h = e.target.value;
-                      setPlanart((rows) => {
-                        const next = [...rows];
-                        next[idx] = { ...next[idx]!, hora: h };
-                        return next;
-                      });
-                    }}
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-9 w-9 p-0 shrink-0"
-                    onClick={() => setPlanart((rows) => rows.filter((_, i) => i !== idx))}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                </div>
-              ))}
-              <datalist id="dunasoft-articulos">
-                {articulos.slice(0, 200).map((a) => (
-                  <option key={String(a.codart)} value={String(a.codart)}>
-                    {String(a.desart ?? '')}
-                  </option>
-                ))}
-              </datalist>
+                );
+              })}
             </div>
 
             <div>

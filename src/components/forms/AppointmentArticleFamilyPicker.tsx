@@ -43,6 +43,8 @@ type Props = {
   /** Precio del artículo ya elegido (se muestra en el botón junto al nombre). */
   selectedUnitPrice?: number | null;
   placeholder?: string;
+  /** Al pulsar el campo principal se abre la rejilla gráfica (recomendado en agenda táctil). */
+  primaryOpensGrid?: boolean;
 };
 
 export const articleLabel = (a: AppointmentArticleOption) =>
@@ -81,6 +83,7 @@ export const AppointmentArticleFamilyPicker: React.FC<Props> = ({
   selectedLabel,
   selectedUnitPrice,
   placeholder,
+  primaryOpensGrid = false,
 }) => {
   const [open, setOpen] = useState(false);
   const [gridOpen, setGridOpen] = useState(false);
@@ -248,10 +251,8 @@ export const AppointmentArticleFamilyPicker: React.FC<Props> = ({
 
   const label = kindLabel(itemKind);
 
-  return (
-    <>
-    <div className="flex min-w-0 flex-1 items-center gap-1">
-      <Popover open={open} onOpenChange={handleOpenChange}>
+  const listPicker = (
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <Button
           type="button"
@@ -260,13 +261,23 @@ export const AppointmentArticleFamilyPicker: React.FC<Props> = ({
           aria-expanded={open}
           disabled={disabled}
           className={cn(
-            'h-7 min-w-0 flex-1 justify-between font-normal text-[11px] px-1.5',
-            !value && 'text-muted-foreground',
-            triggerClassName,
+            primaryOpensGrid
+              ? cn('shrink-0 p-0', triggerClassName?.includes('h-9') ? 'h-9 w-9' : 'h-7 w-7')
+              : 'h-7 min-w-0 flex-1 justify-between font-normal text-[11px] px-1.5',
+            !primaryOpensGrid && !value && 'text-muted-foreground',
+            !primaryOpensGrid && triggerClassName,
           )}
+          title={primaryOpensGrid ? 'Lista y búsqueda' : undefined}
+          aria-label={primaryOpensGrid ? 'Abrir lista de artículos' : undefined}
         >
-          <span className="truncate text-left">{triggerText}</span>
-          <ChevronsUpDown className="ml-1 h-3 w-3 shrink-0 opacity-50" />
+          {primaryOpensGrid ? (
+            <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-70" />
+          ) : (
+            <>
+              <span className="truncate text-left">{triggerText}</span>
+              <ChevronsUpDown className="ml-1 h-3 w-3 shrink-0 opacity-50" />
+            </>
+          )}
         </Button>
       </PopoverTrigger>
       <PopoverContent
@@ -359,18 +370,45 @@ export const AppointmentArticleFamilyPicker: React.FC<Props> = ({
         </div>
       </PopoverContent>
     </Popover>
-      <Button
-        type="button"
-        variant="outline"
-        size="icon"
-        disabled={disabled}
-        className={cn('h-7 w-7 shrink-0', triggerClassName?.includes('h-10') && 'h-10 w-10')}
-        title="Selector gráfico"
-        aria-label="Abrir selector gráfico de artículos"
-        onClick={() => setGridOpen(true)}
-      >
-        <LayoutGrid className="h-3.5 w-3.5" />
-      </Button>
+  );
+
+  return (
+    <>
+    <div className="flex min-w-0 flex-1 items-center gap-1">
+      {primaryOpensGrid ? (
+        <Button
+          type="button"
+          variant="outline"
+          disabled={disabled}
+          className={cn(
+            'h-7 min-w-0 flex-1 justify-between gap-1 font-normal text-[11px] px-2',
+            !value && 'text-muted-foreground',
+            triggerClassName,
+          )}
+          title="Selector gráfico de artículos"
+          aria-label="Abrir selector gráfico de artículos"
+          onClick={() => setGridOpen(true)}
+        >
+          <LayoutGrid className="h-3.5 w-3.5 shrink-0 opacity-70" />
+          <span className="truncate text-left">{triggerText}</span>
+        </Button>
+      ) : (
+        listPicker
+      )}
+      {primaryOpensGrid ? listPicker : (
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          disabled={disabled}
+          className={cn('h-7 w-7 shrink-0', triggerClassName?.includes('h-10') && 'h-10 w-10')}
+          title="Selector gráfico"
+          aria-label="Abrir selector gráfico de artículos"
+          onClick={() => setGridOpen(true)}
+        >
+          <LayoutGrid className="h-3.5 w-3.5" />
+        </Button>
+      )}
     </div>
     <ArticleGridPickerDialog
       open={gridOpen}
