@@ -31,6 +31,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
   const { createVariations } = useArticleVariations();
   const [loading, setLoading] = useState(false);
   const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imageRemoved, setImageRemoved] = useState(false);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [variations, setVariations] = useState<ArticleVariation[]>([]);
   const [createdArticle, setCreatedArticle] = useState<Article | null>(null);
@@ -232,6 +233,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
     if (file) {
       console.log('Image file selected:', file.name, file.size);
       setImageFile(file);
+      setImageRemoved(false);
       const reader = new FileReader();
       reader.onload = (event) => {
         const result = event.target?.result as string;
@@ -245,7 +247,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
   const handleRemoveImage = () => {
     setImageFile(null);
     setImagePreview(null);
-    console.log('Image removed');
+    setImageRemoved(true);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -266,7 +268,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
       
       if (article) {
         console.log('Updating article with ID:', article.id);
-        await updateArticle(article.id, payload, imageFile || undefined);
+        await updateArticle(article.id, payload, imageFile || undefined, {
+          clearFoto: imageRemoved && !imageFile,
+        });
         if (formData.article_kind === 'bono') {
           try {
             await bonoDefRef.current?.persist(article.id);

@@ -9,6 +9,7 @@ import {
   type DbfRow,
 } from "./dbfSource.js";
 import type { EntityEngineDeps, EntityHandler } from "./entitySync.js";
+import { prepareStylePhotoFromPayload, syncStylePhotoToSuite } from "./articlePhotos.js";
 
 const DEL_ACTIONS = new Set(["DEL", "BAJA", "BOR", "BORRAR", "DELETE"]);
 
@@ -185,8 +186,39 @@ const articulosHandler: EntityHandler = {
       stock: p["stock"] ?? 0,
       iva: p["iva"] ?? 21,
       obsoleto: p["obsoleto"] ?? "NO",
+      foto: String(p["foto"] ?? ""),
+      foto_url: String(p["foto_url"] ?? ""),
       sync_version: p["sync_version"] ?? 0,
     };
+  },
+  async afterApply(deps, cola, src) {
+    const codart = cola.id_reg.trim();
+    const legacyPhoto = dbfStr(src, "foto");
+    if (!codart || !legacyPhoto) return;
+    await syncStylePhotoToSuite(deps.supabase, deps.companyId, codart, legacyPhoto, deps.log);
+  },
+  async enrichInboundJson(row, deps) {
+    const p = row.payload ?? {};
+    const base = {
+      entity_type: "article",
+      operation: row.operation,
+      codart: String(row.style_key ?? p["codart"] ?? ""),
+      desart: String(p["desart"] ?? ""),
+      familia1: String(p["familia1"] ?? ""),
+      pvpa: p["pvpa"] ?? 0,
+      coste: p["coste"] ?? 0,
+      stock: p["stock"] ?? 0,
+      iva: p["iva"] ?? 21,
+      obsoleto: p["obsoleto"] ?? "NO",
+      foto: String(p["foto"] ?? ""),
+      foto_url: String(p["foto_url"] ?? ""),
+      sync_version: p["sync_version"] ?? 0,
+    };
+    const foto = await prepareStylePhotoFromPayload(
+      { ...row.payload, codart: base.codart, foto: base.foto, foto_url: base.foto_url },
+      deps.log,
+    );
+    return { ...base, foto };
   },
 };
 

@@ -161,7 +161,7 @@ ENDFUNC
 FUNCTION SuiteEntityApplyArticulo
  * Suite -> Style: alta/edicion de articulo nativo Suite (solo si trae codart).
  PARAMETER toMsg
- LOCAL lcCodart, lcDes, lcFam, lnPvpa, lnCoste, lnStock, lnIva, llObs, llApplied
+ LOCAL lcCodart, lcDes, lcFam, lnPvpa, lnCoste, lnStock, lnIva, llObs, lcFoto, llApplied
  llApplied = .F.
  IF  .NOT. SuiteInboundOpenTable("articulos")
     RETURN ""
@@ -177,6 +177,7 @@ FUNCTION SuiteEntityApplyArticulo
  lnStock = VAL(ALLTRIM(SuiteGetObj(toMsg, "stock", "0")))
  lnIva = SuiteEntityIvaStyleCode(VAL(ALLTRIM(SuiteGetObj(toMsg, "iva", "21"))))
  llObs = (UPPER(ALLTRIM(SuiteGetObj(toMsg, "obsoleto", "NO"))) == "SI")
+ lcFoto = ALLTRIM(SuiteGetObj(toMsg, "foto", ""))
 
  SELECT articulos
  LOCATE FOR ALLTRIM(codart) == lcCodart
@@ -210,6 +211,9 @@ FUNCTION SuiteEntityApplyArticulo
     ENDIF
     IF SuiteEntityFieldExists("articulos", "obsoleto")
        REPLACE obsoleto WITH llObs
+    ENDIF
+    IF  .NOT. EMPTY(lcFoto) .AND. SuiteEntityFieldExists("articulos", "foto")
+       REPLACE foto WITH lcFoto
     ENDIF
     UNLOCK IN articulos
     llApplied = .T.

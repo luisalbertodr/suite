@@ -54,6 +54,17 @@ export interface EntityHandler {
   ): Record<string, unknown> | null | Promise<Record<string, unknown> | null>;
   /** Da forma al JSON inbound para Suite→Style (si la entidad lo soporta). */
   toInboundJson?(row: OutboxRow): Record<string, unknown>;
+  /** Tras aplicar RPC Style→Suite (p. ej. subir foto a Storage). */
+  afterApply?(
+    deps: EntityEngineDeps,
+    cola: EntityColaRow,
+    src: DbfRow | null,
+  ): void | Promise<void>;
+  /** Enriquece JSON inbound antes de escribir (p. ej. descargar foto a Fotografias). */
+  enrichInboundJson?(
+    row: OutboxRow,
+    deps: EntityEngineDeps,
+  ): Promise<Record<string, unknown>> | Record<string, unknown>;
 }
 
 export type EntityEngineDeps = {
@@ -164,6 +175,8 @@ export async function processEntitiesFromStyle(
             deps.log(
               `entity ${tabla} PARTIAL_MERGE+CONFLICT id_reg=${row.id_reg} fields=${JSON.stringify(result?.fields ?? [])}`,
             );
+          } else if (handler.afterApply && src) {
+            await handler.afterApply(deps, row, src);
           }
         }
         maxId = Math.max(maxId, row.id);
@@ -238,16 +251,21 @@ export async function pollOutboxToInbound(
   let wrote = 0;
   for (const row of rows) {
     const handler = byType.get(row.entity_type);
-    const shape = handler?.toInboundJson
-      ? handler.toInboundJson(row)
-      : {
-          ...row.payload,
-          entity_type: row.entity_type,
-          operation: row.operation,
-          style_key: row.style_key ?? "",
-          outbox_id: row.id,
-          created_at: row.created_at,
-        };
+    let shape: Record<string, unknown>;
+    if (handler?.enrichInboundJson) {
+      shape = await handler.enrichInboundJson(row, deps);
+    } else if (handler?.toInboundJson) {
+      shape = handler.toInboundJson(row);
+    } else {
+      shape = {
+        ...row.payload,
+        entity_type: row.entity_type,
+        operation: row.operation,
+        style_key: row.style_key ?? "",
+        outbox_id: row.id,
+        created_at: row.created_at,
+      };
+    }
     const out = entityInboundPath(deps.inboundDir, row.id);
     const exists = await withFsRetry(() => fs.existsSync(out), { label: `exists ${out}` }).catch(
       () => false,

@@ -223,7 +223,7 @@ export const ArticleGridPickerDialog: React.FC<Props> = ({
         <DialogHeader className="shrink-0 space-y-1 pr-8 text-left">
           <DialogTitle>{kindTitle(itemKind)}</DialogTitle>
           <DialogDescription>
-            Toca una familia o busca por nombre. Las fotos provienen del catálogo Style.
+            Toca una familia o busca por nombre. Las fotos se muestran desde Supabase.
           </DialogDescription>
         </DialogHeader>
 

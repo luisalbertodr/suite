@@ -5,6 +5,9 @@ import { toast } from 'sonner';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { useWorkCenter } from '@/hooks/useWorkCenter';
 import {
+  articlePhotoStoragePath,
+} from '@/lib/articlePhotoStorage';
+import {
   buildFamilyBillingMap,
   filterArticlesForBillingCompany,
 } from '@/lib/billingCompany';
@@ -134,6 +137,30 @@ export const useArticles = (options?: { enabled?: boolean }) => {
     }
   };
 
+  const uploadArticleImage = async (
+    imageFile: File,
+    storageKey: string,
+    companyId: string,
+  ): Promise<{ foto_url: string; legacy_photo_path: string }> => {
+    const fileExt = imageFile.name.split('.').pop() || 'jpg';
+    const fileName = articlePhotoStoragePath(companyId, storageKey, fileExt);
+
+    const { error: uploadError } = await supabase.storage
+      .from('article-photos')
+      .upload(fileName, imageFile, { upsert: true });
+
+    if (uploadError) throw uploadError;
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('article-photos')
+      .getPublicUrl(fileName);
+
+    return {
+      foto_url: publicUrl,
+      legacy_photo_path: `${storageKey}.${fileExt}`,
+    };
+  };
+
   const createArticle = async (articleData: ArticleFormData, imageFile?: File) => {
     try {
       console.log('useArticles: Creating article:', articleData);
@@ -142,37 +169,22 @@ export const useArticles = (options?: { enabled?: boolean }) => {
         throw new Error('No company ID available for creating article');
       }
 
-      let foto_url = null;
+      let foto_url: string | null = null;
+      let legacy_photo_path: string | null = null;
 
-      // Upload image if provided
       if (imageFile) {
-        console.log('useArticles: Uploading image:', imageFile.name);
-        const fileExt = imageFile.name.split('.').pop();
-        const fileName = `${articleData.codigo}-${Date.now()}.${fileExt}`;
-        
-        const { data: uploadData, error: uploadError } = await supabase.storage
-          .from('article-photos')
-          .upload(fileName, imageFile);
-
-        if (uploadError) {
-          console.error('useArticles: Error uploading image:', uploadError);
-          throw uploadError;
-        }
-
-        const { data: { publicUrl } } = supabase.storage
-          .from('article-photos')
-          .getPublicUrl(fileName);
-        
-        foto_url = publicUrl;
-        console.log('useArticles: Image uploaded successfully:', foto_url);
+        const storageKey = articleData.codigo || `new-${Date.now()}`;
+        const uploaded = await uploadArticleImage(imageFile, storageKey, catalogCompanyId);
+        foto_url = uploaded.foto_url;
+        legacy_photo_path = uploaded.legacy_photo_path;
       }
 
-      // Remove talla and color from the data since they're no longer in the table
       const { talla, color, ...dataToInsert } = articleData;
       
       const insertRow = {
         ...dataToInsert,
         foto_url,
+        legacy_photo_path,
         company_id: catalogCompanyId,
         billing_company_id:
           dataToInsert.billing_company_id ??
@@ -205,39 +217,40 @@ export const useArticles = (options?: { enabled?: boolean }) => {
     }
   };
 
-  const updateArticle = async (id: string, articleData: Partial<ArticleFormData>, imageFile?: File) => {
+  const updateArticle = async (
+    id: string,
+    articleData: Partial<ArticleFormData>,
+    imageFile?: File,
+    options?: { clearFoto?: boolean },
+  ) => {
     try {
       console.log('useArticles: Updating article:', id, articleData);
-      let foto_url = undefined;
+      let foto_url: string | null | undefined = undefined;
+      let legacy_photo_path: string | null | undefined = undefined;
 
-      // Upload new image if provided
-      if (imageFile) {
-        console.log('useArticles: Uploading new image for article update');
-        const fileExt = imageFile.name.split('.').pop();
-        const fileName = `${articleData.codigo || id}-${Date.now()}.${fileExt}`;
-        
-        const { data: uploadData, error: uploadError } = await supabase.storage
-          .from('article-photos')
-          .upload(fileName, imageFile);
+      const existing = articles.find((a) => a.id === id);
+      const storageKey =
+        existing?.legacy_codart?.trim() ||
+        articleData.codigo ||
+        existing?.codigo ||
+        id;
 
-        if (uploadError) {
-          console.error('useArticles: Error uploading image for update:', uploadError);
-          throw uploadError;
-        }
-
-        const { data: { publicUrl } } = supabase.storage
-          .from('article-photos')
-          .getPublicUrl(fileName);
-        
-        foto_url = publicUrl;
-        console.log('useArticles: New image uploaded successfully:', foto_url);
+      if (imageFile && catalogCompanyId) {
+        const uploaded = await uploadArticleImage(imageFile, storageKey, catalogCompanyId);
+        foto_url = uploaded.foto_url;
+        legacy_photo_path = uploaded.legacy_photo_path;
+      } else if (options?.clearFoto) {
+        foto_url = null;
+        legacy_photo_path = null;
       }
 
-      // Remove talla and color from the data since they're no longer in the table
       const { talla, color, ...updateData } = articleData;
       
-      if (foto_url) {
+      if (foto_url !== undefined) {
         updateData.foto_url = foto_url;
+      }
+      if (legacy_photo_path !== undefined) {
+        (updateData as { legacy_photo_path?: string | null }).legacy_photo_path = legacy_photo_path;
       }
 
       console.log('useArticles: Updating article with data:', updateData);

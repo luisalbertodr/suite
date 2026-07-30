@@ -19,7 +19,7 @@ const FINGERPRINT_FIELDS: Record<string, string[]> = {
     "nomcli", "ape1cli", "ape2cli", "tel1cli", "tel2cli", "email", "dnicli",
     "dircli", "codposcli", "pobcli", "procli", "pais", "percon", "obscli", "altura", "obsoleto",
   ],
-  articulos: ["desart", "familia1", "pvpa", "coste", "stock", "ivaart", "tiempo", "obsoleto"],
+  articulos: ["desart", "familia1", "pvpa", "coste", "stock", "ivaart", "tiempo", "obsoleto", "foto"],
   bonoscli: ["codcli", "codbon", "desbon", "sesiones", "consumi", "importe", "obsoleto"],
   albcab: ["serie", "seralb", "codcli", "fecha", "total", "totalalb"],
   faccab: ["serie", "serfac", "codcli", "fecha", "fecfac", "totfac", "totimpbas"],
@@ -126,6 +126,9 @@ async function applyHandlerRow(
     deps.log(`dbf-poll ${handler.tabla} CONFLICT key=${key}`);
   } else {
     deps.log(`dbf-poll ${handler.tabla} key=${key} -> ${handler.rpc}`);
+    if (handler.afterApply) {
+      await handler.afterApply(deps, cola, src);
+    }
   }
 }
 
