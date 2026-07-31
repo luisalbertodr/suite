@@ -220,7 +220,7 @@ function Invoke-HardSync {
         return $false
     }
     if (Test-DunaRunning) {
-        Write-SyncLog "HardSync: omitido — UI Style aún abierta (Duna/Duna2/mscomctl)"
+        Write-SyncLog "HardSync: omitido - UI Style aun abierta (Duna/Duna2/mscomctl)"
         return $false
     }
     Write-SyncLog "HardSync: iniciando barrido DBF + outbox..."

@@ -52,9 +52,13 @@ try {
 
 if (-not $registered) {
     $tr = "powershell.exe $psArgs"
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     schtasks /Delete /TN $TaskName /F 2>$null | Out-Null
     $null = schtasks /Create /TN $TaskName /TR $tr /SC DAILY /ST $DailyAt /RU SYSTEM /RL HIGHEST /F 2>&1
-    if ($LASTEXITCODE -eq 0) {
+    $code = $LASTEXITCODE
+    $ErrorActionPreference = $prevEap
+    if ($code -eq 0) {
         Write-Host "OK Task $TaskName (schtasks diaria $DailyAt)" -ForegroundColor Green
     } else {
         throw "No se pudo registrar $TaskName. Ejecuta PowerShell como administrador."

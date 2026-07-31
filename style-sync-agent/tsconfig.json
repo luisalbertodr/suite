@@ -10,5 +10,9 @@
     "esModuleInterop": true
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["src/scripts/resync-entities-from-dbf.ts"]
+  "exclude": [
+    "src/scripts/resync-entities-from-dbf.ts",
+    "src/scripts/backfill-photos-from-dbf.ts",
+    "src/scripts/count-article-photos.ts"
+  ]
 }

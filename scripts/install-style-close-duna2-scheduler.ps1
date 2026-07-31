@@ -54,7 +54,7 @@ if ($VmHost -and -not (Test-IsLocalMachine $VmHost)) {
     Write-Host "Destino remoto: $copyRoot (tarea en $invokeRoot)" -ForegroundColor Cyan
 } else {
     if ($VmHost) {
-        Write-Host "VM local detectada ($VmHost) — sin WinRM ni IP remota" -ForegroundColor Cyan
+        Write-Host "VM local detectada ($VmHost) - sin WinRM ni IP remota" -ForegroundColor Cyan
     }
     if ($StyleRoot) {
         $copyRoot = [IO.Path]::GetFullPath($StyleRoot.TrimEnd('\'))
@@ -83,14 +83,13 @@ $tr = "powershell.exe $psArgs"
 
 if ($installLocal) {
     $installer = Join-Path $copyRoot "install-style-close-duna2-scheduler.ps1"
-    $localArgs = @{
-        StyleRoot      = $invokeRoot
-        TaskName       = $TaskName
-        DailyAt        = $DailyAt
-        NoDrainInbound = $NoDrainInbound
-        NoHardSync     = $NoHardSync
-    }
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer @localArgs
+    $localArgList = @(
+        "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $installer,
+        "-StyleRoot", $invokeRoot, "-TaskName", $TaskName, "-DailyAt", $DailyAt
+    )
+    if ($NoDrainInbound) { $localArgList += "-NoDrainInbound" }
+    if ($NoHardSync) { $localArgList += "-NoHardSync" }
+    & powershell.exe @localArgList
     exit $LASTEXITCODE
 }
 
@@ -101,5 +100,6 @@ if ($LASTEXITCODE -eq 0) {
     Write-Host "OK Task $TaskName en $VmHost (schtasks diaria $DailyAt)" -ForegroundColor Green
     Write-Host "Script: $nightlyScript" -ForegroundColor Cyan
 } else {
-    throw "No se pudo registrar $TaskName en $VmHost. Ejecuta en la VM: cd $ProdStyleRoot; .\install-style-close-duna2-scheduler.ps1`nDetalle: $code"
+    $hint = "cd $ProdStyleRoot; .\install-style-close-duna2-scheduler.ps1"
+    throw "No se pudo registrar $TaskName en $VmHost. Ejecuta en la VM: $hint`nDetalle: $code"
 }
