@@ -5,7 +5,7 @@
 #   .\ensure-style-sync.ps1 -StyleRoot "C:\Duna\Style-Suite-Test" -EnsureAgent
 #   .\ensure-style-sync.ps1 -StyleRoot "..." -DrainInboundBeforeStart
 #   .\ensure-style-sync.ps1 -StyleRoot "..." -DrainInboundAfterShutdown
-#   .\ensure-style-sync.ps1 -StyleRoot "..." -RecoverInboundLock [-ForceRecover]
+#   .\ensure-style-sync.ps1 -StyleRoot "..." -TriggerHardSync
 #
 param(
     [Parameter(Mandatory = $true)]
@@ -15,6 +15,7 @@ param(
     [switch]$DrainInboundAfterShutdown,
     [switch]$RecoverInboundLock,
     [switch]$ForceRecover,
+    [switch]$TriggerHardSync,
     [string]$AgentDir = "",
     [int]$HeartbeatStaleSec = 120,
     [int]$WorkerWaitSec = 45
@@ -199,6 +200,42 @@ function Drain-InboundIfNeeded {
     return Invoke-InboundWorker -WaitSec $WorkerWaitSec
 }
 
+function Invoke-HardSync {
+    param(
+        [string]$Root,
+        [string]$AgentDirPath
+    )
+    if (-not $AgentDirPath) {
+        Write-SyncLog "HardSync: sin AGENT_DIR (SuiteSyncAgent.cfg)"
+        return $false
+    }
+    $nodeExe = Resolve-NodeExe -Root $Root -AgentDirPath $AgentDirPath
+    if (-not $nodeExe) {
+        Write-SyncLog "HardSync: no se encuentra node.exe"
+        return $false
+    }
+    $script = Join-Path $AgentDirPath "dist\scripts\run-hard-sync-once.js"
+    if (-not (Test-Path $script)) {
+        Write-SyncLog "HardSync: falta $script (npm run build en style-sync-agent)"
+        return $false
+    }
+    if (Test-DunaRunning) {
+        Write-SyncLog "HardSync: omitido — UI Style aún abierta (Duna/Duna2/mscomctl)"
+        return $false
+    }
+    Write-SyncLog "HardSync: iniciando barrido DBF + outbox..."
+    Push-Location $AgentDirPath
+    try {
+        $env:STYLE_ROOT = $Root
+        & $nodeExe $script 2>&1 | ForEach-Object { Write-SyncLog "HardSync: $_" }
+        $ok = $LASTEXITCODE -eq 0
+        Write-SyncLog $(if ($ok) { "HardSync: fin ok" } else { "HardSync: fin con errores (exit=$LASTEXITCODE)" })
+        return $ok
+    } finally {
+        Pop-Location
+    }
+}
+
 # --- main ---
 $resolvedAgentDir = Read-AgentDirFromCfg -Root $StyleRoot -Override $AgentDir
 
@@ -242,6 +279,11 @@ if ($RecoverInboundLock) {
     exit $(if ($ok) { 0 } else { 1 })
 }
 
-if (-not ($EnsureAgent -or $DrainInboundBeforeStart -or $DrainInboundAfterShutdown -or $RecoverInboundLock)) {
+if ($TriggerHardSync) {
+    $ok = Invoke-HardSync -Root $StyleRoot -AgentDirPath $resolvedAgentDir
+    exit $(if ($ok) { 0 } else { 1 })
+}
+
+if (-not ($EnsureAgent -or $DrainInboundBeforeStart -or $DrainInboundAfterShutdown -or $RecoverInboundLock -or $TriggerHardSync)) {
     Write-SyncLog 'Sin accion (usa -EnsureAgent o -DrainInboundBeforeStart)'
 }

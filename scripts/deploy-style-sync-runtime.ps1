@@ -33,6 +33,9 @@ Write-Host "Ruta local worker: $LocalStyleRoot"
 
 $copyRoot = @(
     "ensure-style-sync.ps1",
+    "close-duna2-nightly.ps1",
+    "install-style-close-duna2-scheduler.ps1",
+    "InstalarCierreDuna2Nightly.bat",
     "IniciarStyle.bat",
     "RecuperarSyncInbound.bat",
     "SuiteSyncAgent.cfg.example"
@@ -185,6 +188,11 @@ if ($InstallTasks) {
         & (Join-Path $RepoRoot "scripts\install-style-sync-agent.ps1") -StyleRoot $StyleRoot -AgentDir $AgentDir
     } catch {
         Write-Warning "install-style-sync-agent: $_ (ejecutar PowerShell como administrador)"
+    }
+    try {
+        & (Join-Path $RepoRoot "scripts\install-style-close-duna2-scheduler.ps1") -StyleRoot $LocalStyleRoot
+    } catch {
+        Write-Warning "install-style-close-duna2-scheduler: $_ (ejecutar PowerShell como administrador)"
     }
 }
 
