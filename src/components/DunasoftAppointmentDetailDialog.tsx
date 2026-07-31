@@ -12,7 +12,7 @@ import type { Appointment, Employee } from '@/types/agenda';
 import { AppointmentItemTimeline } from '@/components/AppointmentItemTimeline';
 import { ClipboardList, FolderOpen, Pencil, Trash2 } from 'lucide-react';
 import { AppointmentDocumentationDialog } from '@/components/clinical/AppointmentDocumentationDialog';
-import { resolveCustomerIdByLegacyCodcli } from '@/lib/appointmentCustomerResolve';
+import { resolveAppointmentCustomerFromDb } from '@/lib/appointmentCustomerResolve';
 
 type Props = {
   appointment: Appointment | null;
@@ -54,19 +54,21 @@ export function DunasoftAppointmentDetailDialog({
   const [linkPending, setLinkPending] = useState(false);
 
   useEffect(() => {
-    setResolvedCustomerId(appointment?.customerId ?? null);
-  }, [appointment?.id, appointment?.customerId]);
+    setResolvedCustomerId(null);
+  }, [appointment?.id]);
 
   useEffect(() => {
-    if (!open || !appointment || appointment.customerId || !companyId) return;
-    const legacy = appointment.legacyClientCode?.trim();
-    if (!legacy) return;
+    if (!open || !appointment || !companyId) return;
 
     let cancelled = false;
     setLinkPending(true);
-    void resolveCustomerIdByLegacyCodcli(companyId, legacy)
-      .then((id) => {
-        if (!cancelled) setResolvedCustomerId(id);
+    void resolveAppointmentCustomerFromDb(companyId, {
+      clientName: appointment.clientName,
+      customerId: appointment.customerId,
+      legacyCodcli: appointment.legacyClientCode,
+    })
+      .then((customer) => {
+        if (!cancelled) setResolvedCustomerId(customer?.id ?? null);
       })
       .finally(() => {
         if (!cancelled) setLinkPending(false);
@@ -76,7 +78,7 @@ export function DunasoftAppointmentDetailDialog({
     };
   }, [open, appointment, companyId]);
 
-  const effectiveCustomerId = appointment?.customerId ?? resolvedCustomerId;
+  const effectiveCustomerId = resolvedCustomerId;
 
   const appointmentWithCustomer = useMemo(() => {
     if (!appointment || !effectiveCustomerId) return appointment;

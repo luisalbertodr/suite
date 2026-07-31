@@ -13,7 +13,6 @@ import { AppointmentItemsEditor } from '@/components/AppointmentItemsEditor';
 import { AppointmentAttachmentsPanel } from '@/components/AppointmentAttachmentsPanel';
 import { AppointmentCustomerSummaryBar } from '@/components/AppointmentCustomerSummaryBar';
 import { AppointmentSelectContent } from '@/components/AppointmentSelectContent';
-import { APPOINTMENT_CUSTOMER_SUMMARY_FIELDS } from '@/lib/appointmentCustomerSummary';
 import { useAppointmentItems } from '@/hooks/useAppointmentItems';
 import type { AppointmentItemDraft } from '@/types/agenda';
 import type { Appointment as AgendaAppointment } from '@/types/agenda';
@@ -38,7 +37,7 @@ import { useFamilies } from '@/hooks/useFamilies';
 import { ClienteDetailOverlay } from '@/components/cliente/ClienteDetailOverlay';
 import { PermissionButton } from '@/components/PermissionButton';
 import { usePermissionGuard } from '@/hooks/usePermissionGuard';
-import { resolveAppointmentClientPick } from '@/lib/appointmentCustomerResolve';
+import { useAppointmentEffectiveCustomer } from '@/hooks/useAppointmentEffectiveCustomer';
 import { normalizeLegacyAppointmentDescription } from '@/lib/legacyAppointmentItems';
 import { isAppointmentFinanciallyClosed } from '@/lib/appointmentLifecycle';
 import { AppointmentResourceConflictDialog } from '@/components/AppointmentResourceConflictDialog';
@@ -290,62 +289,19 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
   });
 
   const recursosCatalog = useMemo(() => toRecursoCatalogEntries(recursos), [recursos]);
-  const resolvedClient = useMemo(
-    () =>
-      resolveAppointmentClientPick(appointment.clientName, customers, {
-        customerId: appointment.customerId,
-        legacyCodcli: appointment.legacyClientCode,
-      }),
-    [appointment.clientName, appointment.customerId, appointment.legacyClientCode, customers],
-  );
-
-  const selectedCustomerId =
-    appointment.customerId ??
-    (resolvedClient?.kind === 'customer' ? resolvedClient.customerId : null);
   const legacyCodcli = appointment.legacyClientCode?.trim() || null;
 
-  const { data: selectedCustomer } = useQuery({
-    queryKey: ['edit-appointment-customer-summary', selectedCustomerId],
-    enabled: !!selectedCustomerId,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('customers')
-        .select(APPOINTMENT_CUSTOMER_SUMMARY_FIELDS)
-        .eq('id', selectedCustomerId)
-        .single();
-      if (error) throw error;
-      return data;
-    },
+  const {
+    effectiveCustomerId,
+    summaryCustomer,
+    isLoading: customerResolveLoading,
+  } = useAppointmentEffectiveCustomer({
+    companyId,
+    appointment,
+    customers,
+    autoHeal: true,
   });
 
-  const { data: customerByLegacy, isFetched: legacyCustomerFetched } = useQuery({
-    queryKey: ['edit-appointment-customer-by-legacy', companyId, legacyCodcli],
-    enabled: !!companyId && !!legacyCodcli && !selectedCustomerId,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('customers')
-        .select(APPOINTMENT_CUSTOMER_SUMMARY_FIELDS)
-        .eq('company_id', companyId!)
-        .eq('legacy_codcli', legacyCodcli!)
-        .maybeSingle();
-      if (error) throw error;
-      if (data) return data;
-      const norm = legacyCodcli!.replace(/^0+/, '') || '0';
-      const { data: rows, error: err2 } = await supabase
-        .from('customers')
-        .select(APPOINTMENT_CUSTOMER_SUMMARY_FIELDS)
-        .eq('company_id', companyId!)
-        .not('legacy_codcli', 'is', null);
-      if (err2) throw err2;
-      return (rows ?? []).find((c) => {
-        const cCode = String(c.legacy_codcli ?? '').trim();
-        return cCode === legacyCodcli || (cCode.replace(/^0+/, '') || '0') === norm;
-      }) ?? null;
-    },
-  });
-
-  const summaryCustomer = selectedCustomer ?? customerByLegacy ?? null;
-  const effectiveCustomerId = selectedCustomerId ?? summaryCustomer?.id ?? null;
   const stylePhone = String(
     summaryCustomer?.phone_mobile ||
       summaryCustomer?.phone ||
@@ -357,7 +313,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
     Boolean(appointment.legacyClientCode?.trim()) &&
     !effectiveCustomerId &&
     Boolean(companyId) &&
-    (!legacyCodcli || legacyCustomerFetched);
+    !customerResolveLoading;
   const computedEndTime = calcEndFromStart(formData.startTime, effectiveDurationMinutes(items));
   const styleFacturado = paymentStatus === 'paid' || paymentStatus === 'invoiced';
 
@@ -411,7 +367,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
       ...appointment,
       ...formData,
       clientName,
-      customerId: appointment.customerId ?? effectiveCustomerId ?? null,
+      customerId: effectiveCustomerId ?? null,
       endTime,
     }, items.map((it) => ({ ...it, quantity: 1 })));
   };
@@ -514,6 +470,14 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
               <p className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
                 Cliente Style sin ficha en Suite (cód. {appointment.legacyClientCode}). Vincule el
                 cliente en Clientes con el mismo código legacy para usar cuestionarios y documentación.
+              </p>
+            ) : null}
+            {appointment.customerId &&
+            effectiveCustomerId &&
+            appointment.customerId !== effectiveCustomerId ? (
+              <p className="rounded-md border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-[11px] text-sky-900 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200">
+                Enlace de ficha corregido: se mostraba un Paciente InBody por error. Cliente de la cita:{' '}
+                <strong>{appointment.clientName}</strong>.
               </p>
             ) : null}
           </div>
