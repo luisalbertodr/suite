@@ -352,8 +352,9 @@ const AgendaAppointmentBlock = React.memo(function AgendaAppointmentBlock({
           ? {
               backgroundColor: outerRecursoStyle.backgroundColor,
               borderColor: outerRecursoStyle.borderColor,
-              borderLeftWidth: 5,
+              borderLeftWidth: 6,
               borderLeftColor: outerRecursoStyle.borderColor,
+              color: outerRecursoStyle.color,
             }
           : undefined
       }
@@ -398,13 +399,14 @@ const AgendaAppointmentBlock = React.memo(function AgendaAppointmentBlock({
         />
       )}
       <div
-        className={`relative z-[1] rounded px-1.5 py-1 text-foreground font-medium h-full leading-tight overflow-hidden ${
+        className={`relative z-[1] rounded px-1.5 py-1 font-medium h-full leading-tight overflow-hidden ${
           outerRecursoStyle
-            ? 'bg-white/45 dark:bg-black/35'
+            ? 'bg-transparent'
             : multiRecurso
-              ? 'bg-card/70 dark:bg-card/65 pl-2.5'
-              : 'bg-card/95 dark:bg-card/90'
+              ? 'bg-card/70 dark:bg-card/65 pl-2.5 text-foreground'
+              : 'bg-card/95 dark:bg-card/90 text-foreground'
         }`}
+        style={outerRecursoStyle ? { color: outerRecursoStyle.color } : undefined}
       >
         <div className="flex items-center justify-between mb-0.5 gap-1">
           {visibleFields.clientName && (
@@ -419,17 +421,17 @@ const AgendaAppointmentBlock = React.memo(function AgendaAppointmentBlock({
           </div>
         </div>
         {visibleFields.timeRange && (
-          <div className="text-xs text-muted-foreground dark:text-foreground/80 truncate tabular-nums">
+          <div className={`text-xs truncate tabular-nums ${outerRecursoStyle ? 'opacity-90' : 'text-muted-foreground dark:text-foreground/80'}`}>
             {formatSlotTimeRange(appointment)}
           </div>
         )}
         {segments.length > 0 && visibleFields.service && (
-          <div className="text-[10px] text-muted-foreground dark:text-foreground/85 truncate mt-0.5">
+          <div className={`text-[10px] truncate mt-0.5 ${outerRecursoStyle ? 'opacity-90' : 'text-muted-foreground dark:text-foreground/85'}`}>
             {segments.map((s) => (s.recursoName ? `${s.label} [${s.recursoName}]` : s.label)).join(' · ')}
           </div>
         )}
         {visibleFields.service && !segments.length && appointment.serviceName && (
-          <div className="text-xs text-muted-foreground dark:text-foreground/85 truncate mt-0.5 font-medium">
+          <div className={`text-xs truncate mt-0.5 font-medium ${outerRecursoStyle ? 'opacity-90' : 'text-muted-foreground dark:text-foreground/85'}`}>
             {appointment.serviceCode ? `${appointment.serviceCode} - ` : ''}
             {appointment.serviceName}
           </div>
@@ -443,10 +445,10 @@ const AgendaAppointmentBlock = React.memo(function AgendaAppointmentBlock({
           </div>
         )}
         {slotDesc && (
-          <div className="text-xs text-muted-foreground dark:text-foreground/80 truncate mt-0.5">{slotDesc}</div>
+          <div className={`text-xs truncate mt-0.5 ${outerRecursoStyle ? 'opacity-85' : 'text-muted-foreground dark:text-foreground/80'}`}>{slotDesc}</div>
         )}
         {typeof appointment.totalAmount === 'number' && (
-          <div className="text-xs text-foreground font-semibold truncate mt-0.5 tabular-nums">
+          <div className="text-xs font-semibold truncate mt-0.5 tabular-nums">
             {appointment.totalAmount.toFixed(2)} EUR
           </div>
         )}

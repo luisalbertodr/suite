@@ -3,6 +3,12 @@ import type { AppointmentTimeSegment } from '@/types/agenda';
 import { employeeTailwindColor } from '@/lib/dunasoftColors';
 import { normLegacyCodcli } from '@/lib/appointmentCustomerResolve';
 import { repairStyleText } from '@/lib/styleTextEncoding';
+import {
+  matchRecursoByDunasoftCodrec,
+  matchRecursoForServiceLabel,
+  resolveRecursoColor,
+  type RecursoCatalogEntry,
+} from '@/lib/agendaRecursoMatch';
 
 export type DunasoftPlan2009Row = {
   _row_id: number;
@@ -93,8 +99,11 @@ function planArtLabel(row: DunasoftPlanArtRow, articles: Map<string, string>): s
 export function mapPlanArtToSegments(
   planArt: DunasoftPlanArtRow[],
   articles: Map<string, string>,
-  fallbackEnd: string
+  fallbackEnd: string,
+  recursos: RecursoCatalogEntry[] = [],
+  fallbackCodrec?: string | null
 ): AppointmentTimeSegment[] {
+  const fallbackRecurso = matchRecursoByDunasoftCodrec(fallbackCodrec, recursos);
   const sorted = [...planArt].sort((a, b) => normHHMM(a.hora).localeCompare(normHHMM(b.hora)));
   const segments: AppointmentTimeSegment[] = [];
   for (let i = 0; i < sorted.length; i += 1) {
@@ -102,13 +111,19 @@ export function mapPlanArtToSegments(
     const startTime = normHHMM(row.hora);
     const next = sorted[i + 1];
     const endTime = next ? normHHMM(next.hora) : fallbackEnd;
+    const label = planArtLabel(row, articles);
+    const byLabel = recursos.length ? matchRecursoForServiceLabel(label, recursos) : null;
+    const matched = byLabel ?? fallbackRecurso;
     segments.push({
       clientKey: `${row.codart}-${startTime}-${i}`,
-      label: planArtLabel(row, articles),
+      label,
       kind: 'service',
       startTime,
       endTime,
       durationMinutes: 0,
+      recursoId: matched?.id ?? null,
+      recursoName: matched?.nombre ?? null,
+      recursoColor: matched ? resolveRecursoColor(matched) : null,
     });
   }
   return segments;
@@ -129,7 +144,8 @@ export function mapPlan2009ToAppointments(
   plans: DunasoftPlan2009Row[],
   employees: Employee[],
   planArtByPlan: Map<string, DunasoftPlanArtRow[]>,
-  articles: Map<string, string>
+  articles: Map<string, string>,
+  recursos: RecursoCatalogEntry[] = []
 ): Appointment[] {
   const empByNorm = new Map<string, string>();
   for (const e of employees) {
@@ -149,9 +165,10 @@ export function mapPlan2009ToAppointments(
       const endTime = normHHMM(p.horfin, startTime);
       const idplan = p.idplan != null ? String(p.idplan).trim() : String(p._row_id);
       const artRows = planArtByPlan.get(idplan) ?? [];
+      const planRecurso = matchRecursoByDunasoftCodrec(p.codrec, recursos);
       const timeSegments =
         artRows.length > 0
-          ? mapPlanArtToSegments(artRows, articles, endTime)
+          ? mapPlanArtToSegments(artRows, articles, endTime, recursos, p.codrec)
           : [
               {
                 clientKey: `${idplan}-block`,
@@ -160,8 +177,26 @@ export function mapPlan2009ToAppointments(
                 startTime,
                 endTime,
                 durationMinutes: 0,
+                recursoId: planRecurso?.id ?? null,
+                recursoName: planRecurso?.nombre ?? null,
+                recursoColor: planRecurso ? resolveRecursoColor(planRecurso) : null,
               },
             ];
+
+      // Si los tramos no resolvieron color, aplicar el codrec de la cita a todos
+      const coloredSegments =
+        planRecurso && timeSegments.some((s) => !s.recursoColor)
+          ? timeSegments.map((s) =>
+              s.recursoColor
+                ? s
+                : {
+                    ...s,
+                    recursoId: planRecurso.id,
+                    recursoName: planRecurso.nombre,
+                    recursoColor: resolveRecursoColor(planRecurso),
+                  }
+            )
+          : timeSegments;
 
       const serviceLine = artRows.length
         ? artRows
@@ -185,7 +220,7 @@ export function mapPlan2009ToAppointments(
         endTime,
         date: String(p.fecha ?? '').slice(0, 10),
         color: employees.find((e) => e.id === employeeId)?.color ?? '',
-        timeSegments: timeSegments.length ? timeSegments : undefined,
+        timeSegments: coloredSegments.length ? coloredSegments : undefined,
         occupiedEndTime: endTime,
         status: 'confirmed' as const,
         paymentStatus: p.facturado ? ('paid' as const) : ('none' as const),
