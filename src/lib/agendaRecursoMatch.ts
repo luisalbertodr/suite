@@ -1,13 +1,13 @@
 import type { AppointmentItemDraft } from '@/types/agenda';
 
 export type RecursoCatalogEntry = {
-
-
   id: string;
   nombre: string;
   color?: string | null;
   tipo?: string | null;
   match_keywords?: string | null;
+  cabina_id?: string | null;
+  activo?: boolean | null;
 };
 
 export const RECURSO_COLOR_PALETTE = [
@@ -164,15 +164,30 @@ export function toRecursoCatalogEntries(
     color?: string | null;
     tipo?: string | null;
     match_keywords?: string | null;
-  }>
+    cabina_id?: string | null;
+    activo?: boolean | null;
+  }>,
+  options?: { includeInactive?: boolean }
 ): RecursoCatalogEntry[] {
+  const includeInactive = options?.includeInactive === true;
   return (rows || [])
-    .filter((r) => r.id && r.nombre)
+    .filter((r) => r.id && r.nombre && (includeInactive || r.activo !== false))
     .map((r) => ({
       id: String(r.id),
       nombre: String(r.nombre),
       color: r.color ?? null,
       tipo: r.tipo ?? null,
       match_keywords: r.match_keywords ?? null,
+      cabina_id: r.cabina_id ?? null,
+      activo: r.activo ?? true,
     }));
+}
+
+/** Cabina preferida del recurso (si está vinculada en configuración). */
+export function cabinaIdForRecurso(
+  recursoId: string | null | undefined,
+  recursos: RecursoCatalogEntry[]
+): string | null {
+  if (!recursoId) return null;
+  return recursos.find((r) => r.id === recursoId)?.cabina_id ?? null;
 }
