@@ -20,7 +20,7 @@ export function segmentStyleFromHex(hex: string | null | undefined): { backgroun
   const color = String(hex || '').trim();
   if (!/^#[0-9A-Fa-f]{6}$/.test(color)) return undefined;
   return {
-    backgroundColor: hexToRgba(color, 0.78),
+    backgroundColor: hexToRgba(color, 0.88),
     borderColor: color,
   };
 }

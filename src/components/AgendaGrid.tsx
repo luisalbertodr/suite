@@ -340,6 +340,7 @@ const AgendaAppointmentBlock = React.memo(function AgendaAppointmentBlock({
 }: AgendaAppointmentBlockProps) {
   const segments = appointment.timeSegments ?? [];
   const draggable = allowHtml5Drag && !lockedByPayment;
+  const multiRecurso = !outerRecursoStyle && segments.some((s) => !!s.recursoColor);
 
   return (
     <div
@@ -351,6 +352,8 @@ const AgendaAppointmentBlock = React.memo(function AgendaAppointmentBlock({
           ? {
               backgroundColor: outerRecursoStyle.backgroundColor,
               borderColor: outerRecursoStyle.borderColor,
+              borderLeftWidth: 5,
+              borderLeftColor: outerRecursoStyle.borderColor,
             }
           : undefined
       }
@@ -358,7 +361,8 @@ const AgendaAppointmentBlock = React.memo(function AgendaAppointmentBlock({
       onDragStart={(e) => onDragStart(e, appointment)}
       onDragEnd={onDragEnd}
     >
-      {segments.map((seg) => {
+      {!outerRecursoStyle &&
+        segments.map((seg) => {
         const segStart = timeToMinutes(seg.startTime);
         const segEnd = timeToMinutes(seg.endTime);
         const topPct = ((segStart - startMin) / displaySpan) * 100;
@@ -370,8 +374,15 @@ const AgendaAppointmentBlock = React.memo(function AgendaAppointmentBlock({
         return (
           <div
             key={seg.clientKey}
-            className={`absolute left-0.5 right-0.5 pointer-events-none ${barClass}`}
-            style={{ top: `${topPct}%`, height: `${heightPct}%`, ...style }}
+            className={`absolute left-0 pointer-events-none ${barClass}`}
+            style={{
+              top: `${topPct}%`,
+              height: `${heightPct}%`,
+              width: multiRecurso ? 6 : undefined,
+              right: multiRecurso ? undefined : 2,
+              left: multiRecurso ? 0 : 2,
+              ...style,
+            }}
             title={title}
           />
         );
@@ -386,7 +397,15 @@ const AgendaAppointmentBlock = React.memo(function AgendaAppointmentBlock({
           title="Tramo sin reserva de tiempo (solo cobros u holgura)"
         />
       )}
-      <div className="relative z-[1] bg-card/95 dark:bg-card/90 rounded px-1.5 py-1 text-foreground font-medium h-full leading-tight overflow-hidden">
+      <div
+        className={`relative z-[1] rounded px-1.5 py-1 text-foreground font-medium h-full leading-tight overflow-hidden ${
+          outerRecursoStyle
+            ? 'bg-white/45 dark:bg-black/35'
+            : multiRecurso
+              ? 'bg-card/70 dark:bg-card/65 pl-2.5'
+              : 'bg-card/95 dark:bg-card/90'
+        }`}
+      >
         <div className="flex items-center justify-between mb-0.5 gap-1">
           {visibleFields.clientName && (
             <div className="font-semibold truncate flex-1">{appointment.clientName}</div>
@@ -504,8 +523,16 @@ const AgendaAppointmentItem = React.memo(function AgendaAppointmentItem({
   const width = `calc(100% / ${employeeCount} / ${overlap.total})`;
   const slotDesc = visibleFields.description ? slotDescriptionText(appointment) : null;
   const lockedByPayment = appointment.paymentStatus === 'paid' || appointment.paymentStatus === 'invoiced';
-  const singleSegmentColor = segments.length === 1 ? segments[0]?.recursoColor ?? null : null;
-  const outerRecursoStyle = segmentStyleFromHex(singleSegmentColor);
+  const uniqueRecursoColors = Array.from(
+    new Set(segments.map((s) => s.recursoColor).filter((c): c is string => !!c && /^#[0-9A-Fa-f]{6}$/.test(c)))
+  );
+  const blockRecursoColor =
+    uniqueRecursoColors.length === 1
+      ? uniqueRecursoColors[0]!
+      : segments.length === 1
+        ? segments[0]?.recursoColor ?? null
+        : null;
+  const outerRecursoStyle = segmentStyleFromHex(blockRecursoColor);
 
   return (
     <ContextMenu>

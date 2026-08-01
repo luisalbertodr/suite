@@ -8,6 +8,7 @@ export type RecursoCatalogEntry = {
   match_keywords?: string | null;
   cabina_id?: string | null;
   activo?: boolean | null;
+  dunasoft_codrec?: string | null;
 };
 
 export const RECURSO_COLOR_PALETTE = [
@@ -166,6 +167,7 @@ export function toRecursoCatalogEntries(
     match_keywords?: string | null;
     cabina_id?: string | null;
     activo?: boolean | null;
+    dunasoft_codrec?: string | null;
   }>,
   options?: { includeInactive?: boolean }
 ): RecursoCatalogEntry[] {
@@ -180,7 +182,27 @@ export function toRecursoCatalogEntries(
       match_keywords: r.match_keywords ?? null,
       cabina_id: r.cabina_id ?? null,
       activo: r.activo ?? true,
+      dunasoft_codrec: r.dunasoft_codrec ?? null,
     }));
+}
+
+/** Resuelve recurso por código Style/Dunasoft (codrec). */
+export function matchRecursoByDunasoftCodrec(
+  codrec: string | null | undefined,
+  recursos: RecursoCatalogEntry[]
+): RecursoCatalogEntry | null {
+  const raw = String(codrec || '').trim();
+  if (!raw || raw === '0' || !recursos.length) return null;
+  const norm = raw.replace(/^0+/, '') || '0';
+  const exact = recursos.find((r) => String(r.dunasoft_codrec || '').trim() === raw);
+  if (exact) return exact;
+  return (
+    recursos.find((r) => {
+      const c = String(r.dunasoft_codrec || '').trim();
+      if (!c) return false;
+      return (c.replace(/^0+/, '') || '0') === norm;
+    }) ?? null
+  );
 }
 
 /** Cabina preferida del recurso (si está vinculada en configuración). */
