@@ -413,6 +413,11 @@ export const MetaConfig: React.FC = () => {
                   <CalendarCheck className="h-3 w-3" /> Con reservas Meta
                 </Badge>
               ) : null}
+              {form.whatsapp_inbound_default ? (
+                <Badge variant="secondary" className="gap-1 text-[10px] bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-200">
+                  <MessageSquare className="h-3 w-3" /> WhatsApp / CTWA
+                </Badge>
+              ) : null}
               {!form.enabled ? (
                 <Badge variant="outline" className="text-[10px]">
                   Deshabilitado
@@ -574,6 +579,25 @@ export const MetaConfig: React.FC = () => {
                 updateForm.mutate({
                   id: form.id,
                   values: { whatsapp_automation_enabled: v },
+                })
+              }
+            />
+          </div>
+
+          <div className="flex items-start justify-between gap-3 rounded-lg border bg-white/60 px-3 py-2 dark:bg-zinc-950/40">
+            <div>
+              <p className="text-xs font-medium">Formulario para WhatsApp / CTWA</p>
+              <p className="text-[11px] text-muted-foreground">
+                Los contactos que escriben por Click to WhatsApp se vinculan a este formulario
+                (audio de campaña, señal, nombre en Marketing). Solo puede haber uno activo.
+              </p>
+            </div>
+            <Switch
+              checked={form.whatsapp_inbound_default ?? false}
+              onCheckedChange={(v) =>
+                updateForm.mutate({
+                  id: form.id,
+                  values: { whatsapp_inbound_default: v },
                 })
               }
             />
@@ -844,10 +868,9 @@ export const MetaConfig: React.FC = () => {
                 <CardTitle>Integración con Meta</CardTitle>
                 <CardDescription>
                   Consulta automáticamente los formularios de Lead Ads de Facebook /
-                  Instagram y cárgalos en el embudo de Marketing. Las campañas Click to
-                  WhatsApp generan leads al recibir el primer mensaje (origen{' '}
-                  <code className="text-[11px]">ctwa</code> /{' '}
-                  <code className="text-[11px]">whatsapp</code>) o con «Crear lead» en el chat.
+                  Instagram y cárgalos en el embudo de Marketing. Marca un formulario como
+                  «WhatsApp / CTWA» para vincular los clicks de WhatsApp a su audio y
+                  configuración.
                 </CardDescription>
               </div>
             </div>

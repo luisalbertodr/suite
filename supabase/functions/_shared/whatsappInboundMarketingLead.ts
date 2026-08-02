@@ -1,11 +1,15 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { extractWhatsappAdAttribution } from './whatsappAdAttribution.ts';
+import {
+  leadFieldsFromMetaForm,
+  resolveMetaFormForWhatsappInbound,
+} from './metaFormWhatsappInbound.ts';
 import { resolveMarketingLeadForWhatsappChat } from './stripeDeposit.ts';
 
 /**
  * Tras un mensaje entrante 1:1, crea un lead de Marketing si el contacto
  * aún no es cliente ni lead (caso típico Click-to-WhatsApp / Meta).
- * No crea leads para clientes existentes ni para grupos.
+ * Vincula al formulario Meta marcado como default CTWA o por coincidencia de nombre.
  */
 export async function maybeAutoCreateMarketingLeadFromInbound(
   admin: SupabaseClient,
@@ -36,7 +40,16 @@ export async function maybeAutoCreateMarketingLeadFromInbound(
   }
 
   const attribution = extractWhatsappAdAttribution(opts.messageRaw);
-  const source = attribution.fromAd ? 'ctwa' : 'whatsapp';
+  const matchedForm = await resolveMetaFormForWhatsappInbound(admin, companyId, {
+    campaign: attribution.campaign,
+    formName: attribution.formName,
+    attribution,
+  });
+  const formFields = matchedForm
+    ? leadFieldsFromMetaForm(matchedForm, attribution)
+    : null;
+
+  const source = attribution.fromAd || matchedForm ? 'ctwa' : 'whatsapp';
   const externalId = attribution.ctwaClid
     ? `ctwa:${attribution.ctwaClid}`
     : attribution.sourceId
@@ -52,12 +65,13 @@ export async function maybeAutoCreateMarketingLeadFromInbound(
     null,
     {
       source,
-      campaign: attribution.campaign,
-      form_name: attribution.formName,
+      campaign: formFields?.campaign ?? attribution.campaign,
+      form_name: formFields?.form_name ?? attribution.formName,
+      meta_form_id: formFields?.meta_form_id ?? null,
       field_data: attribution.extras.length ? attribution.extras : undefined,
       external_id: externalId,
       external_created_at: opts.messageTimestamp ?? new Date().toISOString(),
-      tags: attribution.fromAd ? ['CTWA', 'Meta'] : ['WhatsApp'],
+      tags: attribution.fromAd || matchedForm ? ['CTWA', 'Meta'] : ['WhatsApp'],
       skipIfCustomer: true,
       allowMissing: true,
     },
@@ -74,6 +88,12 @@ export async function maybeAutoCreateMarketingLeadFromInbound(
   return {
     created: result.created,
     leadId: result.lead.id,
-    reason: result.created ? (attribution.fromAd ? 'created_ctwa' : 'created_whatsapp') : 'linked_existing',
+    reason: result.created
+      ? matchedForm
+        ? `created_linked:${matchedForm.form_name ?? matchedForm.id}`
+        : attribution.fromAd
+          ? 'created_ctwa'
+          : 'created_whatsapp'
+      : 'linked_existing',
   };
 }

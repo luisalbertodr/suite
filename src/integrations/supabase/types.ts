@@ -2845,6 +2845,7 @@ export type Database = {
           whatsapp_reminder_enabled: boolean
           stripe_deposit_enabled: boolean
           stripe_deposit_amount_cents: number | null
+          whatsapp_inbound_default: boolean
         }
         Insert: {
           appointment_stage_id?: string | null
@@ -2876,6 +2877,7 @@ export type Database = {
           whatsapp_reminder_enabled?: boolean
           stripe_deposit_enabled?: boolean
           stripe_deposit_amount_cents?: number | null
+          whatsapp_inbound_default?: boolean
         }
         Update: {
           appointment_stage_id?: string | null
@@ -2907,6 +2909,7 @@ export type Database = {
           whatsapp_reminder_enabled?: boolean
           stripe_deposit_enabled?: boolean
           stripe_deposit_amount_cents?: number | null
+          whatsapp_inbound_default?: boolean
         }
         Relationships: [
           {
