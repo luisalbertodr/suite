@@ -1064,6 +1064,34 @@ async function handleMessage(
     // No bloqueamos el webhook si la auto-vinculación falla
   }
 
+  // Contactos nuevos entrantes (CTWA / WhatsApp Meta) → lead en Marketing
+  if (!m.fromMe && !m.isGroup) {
+    try {
+      const { maybeAutoCreateMarketingLeadFromInbound } = await import(
+        '../_shared/whatsappInboundMarketingLead.ts'
+      );
+      const autoLead = await maybeAutoCreateMarketingLeadFromInbound(
+        admin,
+        companyId,
+        chatId,
+        {
+          messageRaw: payload,
+          messageTimestamp: m.timestamp,
+          chatDisplayName: contactName ?? existingChat?.name ?? null,
+        },
+      );
+      if (autoLead.created) {
+        console.log(
+          'whatsapp inbound marketing lead created:',
+          autoLead.leadId,
+          autoLead.reason,
+        );
+      }
+    } catch (leadErr) {
+      console.error('whatsapp inbound marketing lead failed:', leadErr);
+    }
+  }
+
   if (!m.fromMe) {
     const { data: linkedChat } = await admin
       .from('whatsapp_chats')

@@ -65,6 +65,15 @@ export type WhatsappProxyAction = {
       chat_display_name?: string | null;
     }
   | {
+      action: 'chat.create_marketing_lead';
+      chat_id: string;
+      chat_display_name?: string | null;
+      customer_id?: string | null;
+      campaign?: string | null;
+      form_name?: string | null;
+      source?: string | null;
+    }
+  | {
       action: 'chat.set_link';
       chat_id: string;
       customer_id?: string | null;

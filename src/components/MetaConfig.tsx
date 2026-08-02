@@ -844,7 +844,10 @@ export const MetaConfig: React.FC = () => {
                 <CardTitle>Integración con Meta</CardTitle>
                 <CardDescription>
                   Consulta automáticamente los formularios de Lead Ads de Facebook /
-                  Instagram y cárgalos en el embudo de Marketing.
+                  Instagram y cárgalos en el embudo de Marketing. Las campañas Click to
+                  WhatsApp generan leads al recibir el primer mensaje (origen{' '}
+                  <code className="text-[11px]">ctwa</code> /{' '}
+                  <code className="text-[11px]">whatsapp</code>) o con «Crear lead» en el chat.
                 </CardDescription>
               </div>
             </div>

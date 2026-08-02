@@ -1220,7 +1220,13 @@ export async function runMarketingLeadRemindersForCompany(
 
 function isMetaSourceLead(source: string | null | undefined): boolean {
   const s = (source ?? '').trim().toLowerCase();
-  return s === 'meta' || s === 'facebook' || s === 'instagram';
+  return (
+    s === 'meta' ||
+    s === 'facebook' ||
+    s === 'instagram' ||
+    s === 'ctwa' ||
+    s === 'whatsapp'
+  );
 }
 
 /** Formulario Meta con audio de campaña para un lead (por meta_form_id o nombre de campaña). */

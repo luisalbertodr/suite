@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Search, UserPlus, UserCheck, UserX, Link as LinkIcon, Loader2 } from 'lucide-react';
+import { Search, UserPlus, UserCheck, UserX, Link as LinkIcon, Loader2, Megaphone } from 'lucide-react';
 import {
   Popover,
   PopoverContent,
@@ -15,6 +15,7 @@ import {
   type LinkCandidateLead,
 } from '@/hooks/useWhatsappChatLink';
 import type { WhatsappChatRow } from '@/hooks/useWhatsappChats';
+import { isGroupJid, isSystemChatJid } from './whatsappUtils';
 
 interface Props {
   chat: WhatsappChatRow;
@@ -30,7 +31,7 @@ export const WhatsappLinkPopover: React.FC<Props> = ({
   children,
 }) => {
   const { toast } = useToast();
-  const { search, setLink } = useWhatsappChatLink();
+  const { search, setLink, createMarketingLead } = useWhatsappChatLink();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const [customers, setCustomers] = useState<LinkCandidateCustomer[]>([]);
@@ -74,6 +75,30 @@ export const WhatsappLinkPopover: React.FC<Props> = ({
   };
 
   const hasLink = !!chat.customer_id || !!chat.marketing_lead_id;
+  const canCreateLead =
+    !chat.marketing_lead_id &&
+    !isGroupJid(chat.chat_id) &&
+    !isSystemChatJid(chat.chat_id);
+
+  const handleCreateLead = async () => {
+    try {
+      const res = await createMarketingLead.mutateAsync({
+        chat_id: chat.chat_id,
+        chat_display_name: chat.name,
+        customer_id: chat.customer_id,
+      });
+      toast({
+        title: res.created ? 'Lead creado en Marketing' : 'Lead vinculado',
+        description: res.campaign
+          ? `Campaña: ${res.campaign}`
+          : 'Ya puedes gestionarlo en el embudo de Marketing.',
+      });
+      setOpen(false);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'No se pudo crear el lead';
+      toast({ title: 'Error', description: msg, variant: 'destructive' });
+    }
+  };
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -113,6 +138,23 @@ export const WhatsappLinkPopover: React.FC<Props> = ({
                 Desvincular
               </Button>
             </div>
+          ) : null}
+          {canCreateLead ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-2 h-8 w-full gap-1.5 text-[11px] text-sky-700 hover:bg-sky-50 dark:text-sky-300"
+              disabled={createMarketingLead.isPending}
+              onClick={() => void handleCreateLead()}
+            >
+              {createMarketingLead.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Megaphone className="h-3.5 w-3.5" />
+              )}
+              Crear lead en Marketing
+            </Button>
           ) : null}
         </div>
 
