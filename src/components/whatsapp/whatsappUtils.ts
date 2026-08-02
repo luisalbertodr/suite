@@ -35,12 +35,27 @@ export interface MetaLeadInfo {
 export function isMetaMarketingLead(meta: MetaLeadInfo | null | undefined): boolean {
   if (!meta) return false;
   const s = (meta.source ?? '').trim().toLowerCase();
-  if (s === 'meta' || s === 'facebook' || s === 'instagram') return true;
+  if (
+    s === 'meta' ||
+    s === 'facebook' ||
+    s === 'instagram' ||
+    s === 'ctwa' ||
+    s === 'whatsapp'
+  ) {
+    return true;
+  }
   return !!(meta.campaign?.trim() || meta.formName?.trim());
 }
 
 export function formatMetaLeadLabel(meta: MetaLeadInfo): string {
+  const s = (meta.source ?? '').trim().toLowerCase();
   const label = meta.campaign?.trim() || meta.formName?.trim();
+  if (s === 'ctwa') {
+    return label ? `WhatsApp Meta · ${label}` : 'WhatsApp Meta (CTWA)';
+  }
+  if (s === 'whatsapp') {
+    return label ? `WhatsApp · ${label}` : 'Lead WhatsApp';
+  }
   if (label) return `Lead Meta · ${label}`;
   return 'Lead Meta';
 }
