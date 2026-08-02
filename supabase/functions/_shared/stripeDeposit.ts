@@ -129,6 +129,7 @@ export type ResolveWhatsappMarketingLeadOptions = {
   source?: string | null;
   campaign?: string | null;
   form_name?: string | null;
+  meta_form_id?: string | null;
   tags?: string[] | null;
   field_data?: unknown;
   external_id?: string | null;
@@ -322,6 +323,7 @@ export async function resolveMarketingLeadForWhatsappChat(
   if (options?.form_name?.trim()) insertRow.form_name = options.form_name.trim();
   else if (source === 'ctwa') insertRow.form_name = 'Click to WhatsApp';
 
+  if (options?.meta_form_id?.trim()) insertRow.meta_form_id = options.meta_form_id.trim();
   if (options?.external_id?.trim()) insertRow.external_id = options.external_id.trim();
   if (options?.external_created_at) insertRow.external_created_at = options.external_created_at;
   if (options?.field_data != null) insertRow.field_data = options.field_data;

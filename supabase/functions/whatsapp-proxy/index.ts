@@ -3555,6 +3555,7 @@ serve(async (req) => {
           let attributionFieldData: unknown = undefined;
           let attributionExternalId: string | null = null;
           let attributionAt: string | null = null;
+          let resolvedMetaFormId: string | null = null;
 
           if (!chatRow?.marketing_lead_id) {
             const { data: inboundMsg } = await admin
@@ -3586,6 +3587,34 @@ serve(async (req) => {
                     ? inboundMsg.timestamp
                     : null;
               }
+              const { resolveMetaFormForWhatsappInbound, leadFieldsFromMetaForm } =
+                await import('../_shared/metaFormWhatsappInbound.ts');
+              const matched = await resolveMetaFormForWhatsappInbound(admin, companyId, {
+                campaign: attributionCampaign ?? attr.campaign,
+                formName: attributionForm ?? attr.formName,
+                attribution: attr,
+              });
+              if (matched) {
+                const fields = leadFieldsFromMetaForm(matched, attr);
+                resolvedMetaFormId = fields.meta_form_id;
+                attributionForm = fields.form_name;
+                attributionCampaign = fields.campaign;
+                if (!attributionSource) attributionSource = 'ctwa';
+              }
+            } else {
+              const { resolveMetaFormForWhatsappInbound, leadFieldsFromMetaForm } =
+                await import('../_shared/metaFormWhatsappInbound.ts');
+              const matched = await resolveMetaFormForWhatsappInbound(admin, companyId, {
+                campaign: typeof body.campaign === 'string' ? body.campaign : null,
+                formName: typeof body.form_name === 'string' ? body.form_name : null,
+              });
+              if (matched) {
+                const fields = leadFieldsFromMetaForm(matched, null);
+                resolvedMetaFormId = fields.meta_form_id;
+                attributionForm = fields.form_name;
+                attributionCampaign = fields.campaign;
+                if (!attributionSource) attributionSource = 'ctwa';
+              }
             }
           }
 
@@ -3613,6 +3642,7 @@ serve(async (req) => {
               form_name:
                 (typeof body.form_name === 'string' && body.form_name.trim()) ||
                 attributionForm,
+              meta_form_id: resolvedMetaFormId,
               field_data: attributionFieldData,
               external_id: attributionExternalId,
               external_created_at: attributionAt,
@@ -3620,13 +3650,48 @@ serve(async (req) => {
             },
           );
 
+          let linkedLead = lead;
+          if (!lead.meta_form_id) {
+            if (!resolvedMetaFormId) {
+              const { resolveMetaFormForWhatsappInbound, leadFieldsFromMetaForm } =
+                await import('../_shared/metaFormWhatsappInbound.ts');
+              const matched = await resolveMetaFormForWhatsappInbound(admin, companyId, {
+                campaign: lead.campaign,
+                formName: lead.form_name,
+              });
+              if (matched) {
+                const fields = leadFieldsFromMetaForm(matched, null);
+                resolvedMetaFormId = fields.meta_form_id;
+                attributionForm = fields.form_name;
+                attributionCampaign = fields.campaign;
+              }
+            }
+            if (resolvedMetaFormId) {
+              const { data: patched } = await admin
+                .from('marketing_leads')
+                .update({
+                  meta_form_id: resolvedMetaFormId,
+                  form_name: attributionForm ?? lead.form_name,
+                  campaign: attributionCampaign ?? lead.campaign,
+                })
+                .eq('id', lead.id)
+                .eq('company_id', companyId)
+                .select(
+                  'id, phone, first_name, last_name, email, campaign, form_name, appointment_at, appointment_label, source, field_data, meta_form_id, stripe_deposit_paid_at, customer_id',
+                )
+                .single();
+              if (patched) linkedLead = patched as typeof lead;
+            }
+          }
+
           return json({
             ok: true,
             created,
-            marketing_lead_id: lead.id,
-            source: lead.source,
-            campaign: lead.campaign,
-            form_name: lead.form_name,
+            marketing_lead_id: linkedLead.id,
+            source: linkedLead.source,
+            campaign: linkedLead.campaign,
+            form_name: linkedLead.form_name,
+            meta_form_id: linkedLead.meta_form_id,
           });
         } catch (e) {
           return err(

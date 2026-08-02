@@ -175,6 +175,15 @@ export const useMetaConfig = (scopeCompanyId?: string | null) => {
 
   const updateForm = useMutation({
     mutationFn: async (input: { id: string; values: MetaFormUpdate }) => {
+      if (input.values.whatsapp_inbound_default === true && companyId) {
+        const { error: clearErr } = await supabase
+          .from('meta_forms')
+          .update({ whatsapp_inbound_default: false })
+          .eq('company_id', companyId)
+          .eq('whatsapp_inbound_default', true)
+          .neq('id', input.id);
+        if (clearErr) throw clearErr;
+      }
       const { data, error } = await supabase
         .from('meta_forms')
         .update(input.values)
