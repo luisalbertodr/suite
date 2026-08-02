@@ -46,6 +46,7 @@ export type AutomationSendType =
   | 'meta_invalid'
   | 'meta_reminder'
   | 'meta_payment_success'
+  | 'ctwa_intro'
   | 'test_manual'
   | 'phone_missed'
   | 'phone_voicemail';

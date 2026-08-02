@@ -2615,6 +2615,7 @@ export type Database = {
           company_id: string
           created_at: string
           customer_id: string | null
+          ctwa_campaign_id: string | null
           email: string | null
           external_created_at: string | null
           external_id: string | null
@@ -2654,6 +2655,7 @@ export type Database = {
           company_id: string
           created_at?: string
           customer_id?: string | null
+          ctwa_campaign_id?: string | null
           email?: string | null
           external_created_at?: string | null
           external_id?: string | null
@@ -2691,6 +2693,7 @@ export type Database = {
           company_id?: string
           created_at?: string
           customer_id?: string | null
+          ctwa_campaign_id?: string | null
           email?: string | null
           external_created_at?: string | null
           external_id?: string | null
@@ -2735,10 +2738,77 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "marketing_leads_ctwa_campaign_id_fkey"
+            columns: ["ctwa_campaign_id"]
+            isOneToOne: false
+            referencedRelation: "marketing_ctwa_campaigns"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "marketing_leads_stage_id_fkey"
             columns: ["stage_id"]
             isOneToOne: false
             referencedRelation: "marketing_lead_stages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      marketing_ctwa_campaigns: {
+        Row: {
+          id: string
+          company_id: string
+          name: string
+          match_keywords: string
+          intro_message: string | null
+          intro_enabled: boolean
+          meta_form_id: string | null
+          is_default: boolean
+          enabled: boolean
+          sort_order: number
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          company_id: string
+          name: string
+          match_keywords?: string
+          intro_message?: string | null
+          intro_enabled?: boolean
+          meta_form_id?: string | null
+          is_default?: boolean
+          enabled?: boolean
+          sort_order?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          company_id?: string
+          name?: string
+          match_keywords?: string
+          intro_message?: string | null
+          intro_enabled?: boolean
+          meta_form_id?: string | null
+          is_default?: boolean
+          enabled?: boolean
+          sort_order?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "marketing_ctwa_campaigns_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketing_ctwa_campaigns_meta_form_id_fkey"
+            columns: ["meta_form_id"]
+            isOneToOne: false
+            referencedRelation: "meta_forms"
             referencedColumns: ["id"]
           },
         ]
