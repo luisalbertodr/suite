@@ -183,7 +183,11 @@ export async function runMarketingPresentadaInvoicedSync(input: {
   if (updates.length > 0) {
     const results = await Promise.all(
       updates.map((u) => {
-        const payload: Record<string, unknown> = { value: u.value };
+        const payload: {
+          value: number;
+          stage_id?: string;
+          position_in_stage?: number;
+        } = { value: u.value };
         if (u.stage_id) payload.stage_id = u.stage_id;
         if (typeof u.position_in_stage === 'number') {
           payload.position_in_stage = u.position_in_stage;

@@ -1077,6 +1077,7 @@ async function handleMessage(
         {
           messageRaw: payload,
           messageTimestamp: m.timestamp,
+          messageBody: m.body ?? m.caption ?? null,
           chatDisplayName: contactName ?? existingChat?.name ?? null,
         },
       );

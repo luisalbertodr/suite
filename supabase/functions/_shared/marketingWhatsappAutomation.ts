@@ -47,7 +47,7 @@ export type WhatsappConfigRow = {
   me_jid: string | null;
 };
 
-function asProviderConfig(cfg: WhatsappConfigRow): WhatsappProviderConfig {
+export function asProviderConfig(cfg: WhatsappConfigRow): WhatsappProviderConfig {
   return resolveWhatsappCredentials(cfg);
 }
 
@@ -566,6 +566,22 @@ async function sendAutomatedLeadMessage(
     });
     throw e;
   }
+}
+
+/** Exportado para intros CTWA y otros envíos de texto automatizados. */
+export async function sendAutomatedLeadMessageForExternal(
+  admin: SupabaseClient,
+  cfg: WhatsappConfigRow,
+  companyId: string,
+  intendedPhone: string,
+  text: string,
+  meta: {
+    automation_type: AutomationSendType;
+    reference_id: string;
+    contactName?: string | null;
+  },
+): Promise<{ chatId: string; wahaId: string | null }> {
+  return sendAutomatedLeadMessage(admin, cfg, companyId, intendedPhone, text, meta);
 }
 
 async function sendAutomatedLeadAudio(

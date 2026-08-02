@@ -3556,22 +3556,31 @@ serve(async (req) => {
           let attributionExternalId: string | null = null;
           let attributionAt: string | null = null;
           let resolvedMetaFormId: string | null = null;
+          let resolvedCtwaCampaignId: string | null = null;
 
           if (!chatRow?.marketing_lead_id) {
             const { data: inboundMsg } = await admin
               .from('whatsapp_messages')
-              .select('raw, timestamp')
+              .select('raw, timestamp, body, caption')
               .eq('company_id', companyId)
               .eq('chat_id', chatId)
               .eq('from_me', false)
               .order('timestamp', { ascending: true })
               .limit(1)
               .maybeSingle();
+
+            const firstBody =
+              (typeof inboundMsg?.body === 'string' && inboundMsg.body) ||
+              (typeof inboundMsg?.caption === 'string' && inboundMsg.caption) ||
+              null;
+
+            let attr: import('../_shared/whatsappAdAttribution.ts').WhatsappAdAttribution | null =
+              null;
             if (inboundMsg?.raw) {
               const { extractWhatsappAdAttribution } = await import(
                 '../_shared/whatsappAdAttribution.ts'
               );
-              const attr = extractWhatsappAdAttribution(inboundMsg.raw);
+              attr = extractWhatsappAdAttribution(inboundMsg.raw);
               if (attr.fromAd) {
                 attributionSource = 'ctwa';
                 attributionCampaign = attr.campaign;
@@ -3587,29 +3596,47 @@ serve(async (req) => {
                     ? inboundMsg.timestamp
                     : null;
               }
-              const { resolveMetaFormForWhatsappInbound, leadFieldsFromMetaForm } =
-                await import('../_shared/metaFormWhatsappInbound.ts');
-              const matched = await resolveMetaFormForWhatsappInbound(admin, companyId, {
-                campaign: attributionCampaign ?? attr.campaign,
-                formName: attributionForm ?? attr.formName,
-                attribution: attr,
-              });
-              if (matched) {
-                const fields = leadFieldsFromMetaForm(matched, attr);
-                resolvedMetaFormId = fields.meta_form_id;
-                attributionForm = fields.form_name;
-                attributionCampaign = fields.campaign;
-                if (!attributionSource) attributionSource = 'ctwa';
+            }
+
+            const { resolveMarketingCtwaCampaign } = await import(
+              '../_shared/marketingCtwaCampaigns.ts'
+            );
+            const ctwaCampaign = await resolveMarketingCtwaCampaign(admin, companyId, {
+              campaign:
+                (typeof body.campaign === 'string' && body.campaign) ||
+                attributionCampaign,
+              formName:
+                (typeof body.form_name === 'string' && body.form_name) ||
+                attributionForm,
+              firstMessageBody: firstBody,
+              attribution: attr,
+            });
+
+            if (ctwaCampaign) {
+              resolvedCtwaCampaignId = ctwaCampaign.id;
+              attributionCampaign = ctwaCampaign.name;
+              attributionSource = attributionSource || 'ctwa';
+              if (ctwaCampaign.meta_form_id) {
+                resolvedMetaFormId = ctwaCampaign.meta_form_id;
+                const { data: linkedForm } = await admin
+                  .from('meta_forms')
+                  .select('form_name')
+                  .eq('id', ctwaCampaign.meta_form_id)
+                  .maybeSingle();
+                attributionForm = linkedForm?.form_name ?? 'Click to WhatsApp';
+              } else {
+                attributionForm = attributionForm || 'Click to WhatsApp';
               }
             } else {
               const { resolveMetaFormForWhatsappInbound, leadFieldsFromMetaForm } =
                 await import('../_shared/metaFormWhatsappInbound.ts');
               const matched = await resolveMetaFormForWhatsappInbound(admin, companyId, {
-                campaign: typeof body.campaign === 'string' ? body.campaign : null,
-                formName: typeof body.form_name === 'string' ? body.form_name : null,
+                campaign: attributionCampaign,
+                formName: attributionForm,
+                attribution: attr,
               });
               if (matched) {
-                const fields = leadFieldsFromMetaForm(matched, null);
+                const fields = leadFieldsFromMetaForm(matched, attr);
                 resolvedMetaFormId = fields.meta_form_id;
                 attributionForm = fields.form_name;
                 attributionCampaign = fields.campaign;
@@ -3643,12 +3670,33 @@ serve(async (req) => {
                 (typeof body.form_name === 'string' && body.form_name.trim()) ||
                 attributionForm,
               meta_form_id: resolvedMetaFormId,
+              ctwa_campaign_id: resolvedCtwaCampaignId,
               field_data: attributionFieldData,
               external_id: attributionExternalId,
               external_created_at: attributionAt,
               tags: source === 'ctwa' ? ['CTWA', 'Meta'] : ['WhatsApp'],
             },
           );
+
+          if (created && resolvedCtwaCampaignId) {
+            try {
+              const { data: ctwaRow } = await admin
+                .from('marketing_ctwa_campaigns')
+                .select(
+                  'id, company_id, name, match_keywords, intro_message, intro_enabled, meta_form_id, is_default, enabled, sort_order',
+                )
+                .eq('id', resolvedCtwaCampaignId)
+                .maybeSingle();
+              if (ctwaRow) {
+                const { sendCtwaIntroMessageForLead } = await import(
+                  '../_shared/marketingCtwaIntro.ts'
+                );
+                await sendCtwaIntroMessageForLead(admin, companyId, lead.id, ctwaRow);
+              }
+            } catch (introErr) {
+              console.error('CTWA intro on create_marketing_lead failed:', introErr);
+            }
+          }
 
           let linkedLead = lead;
           if (!lead.meta_form_id) {

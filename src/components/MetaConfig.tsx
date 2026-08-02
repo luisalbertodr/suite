@@ -64,6 +64,7 @@ import { findMarketingIntakeStage } from '@/lib/marketingIntakeStage';
 import { MarketingImportDialog } from './marketing/MarketingImportDialog';
 import { MarketingFieldsConfigDialog } from './marketing/MarketingFieldsConfigDialog';
 import { MarketingStagesManager } from './marketing/MarketingStagesManager';
+import { MarketingCtwaCampaignsConfig } from './marketing/MarketingCtwaCampaignsConfig';
 import { WHATSAPP_MESSAGE_TEMPLATE_VARS } from '@/lib/whatsappMessageTemplates';
 import { MetaFormWhatsappAudioField } from '@/components/meta/MetaFormWhatsappAudioField';
 import { centsToEurosInput, eurosToCents } from '@/hooks/useStripeConfig';
@@ -1190,6 +1191,8 @@ export const MetaConfig: React.FC = () => {
           )}
         </CardContent>
       </Card>
+
+      <MarketingCtwaCampaignsConfig />
 
       <MarketingImportDialog
         open={openImport}

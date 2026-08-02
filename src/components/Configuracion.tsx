@@ -22,6 +22,7 @@ import { AgendaCenterHoursConfig } from './AgendaCenterHoursConfig';
 import { AgendaEmployeeHoursConfig } from './AgendaEmployeeHoursConfig';
 import { UserManagement } from './UserManagement';
 import { MetaConfig } from './MetaConfig';
+import { MarketingCtwaCampaignsConfig } from './marketing/MarketingCtwaCampaignsConfig';
 import { WhatsappConfig } from './WhatsappConfig';
 import { WhatsappAutomationConfig } from './WhatsappAutomationConfig';
 import { WorkCenterAuditPanel } from './WorkCenterAuditPanel';
@@ -57,6 +58,7 @@ type ConfigTab = (typeof VALID_TABS)[number];
 /** Pestañas antiguas → pestaña principal + subpestaña */
 const TAB_ALIASES: Record<string, { tab: ConfigTab; subtab: string }> = {
   meta: { tab: 'marketing', subtab: 'meta' },
+  ctwa: { tab: 'marketing', subtab: 'ctwa' },
   apariencia: { tab: 'general', subtab: 'apariencia' },
   email: { tab: 'marketing', subtab: 'email' },
   whatsapp: { tab: 'marketing', subtab: 'whatsapp-conexion' },
@@ -261,12 +263,16 @@ export const Configuracion: React.FC = () => {
           >
             <TabsList className="flex flex-wrap">
               <TabsTrigger value="meta">Meta / Leads</TabsTrigger>
+              <TabsTrigger value="ctwa">WhatsApp campañas</TabsTrigger>
               <TabsTrigger value="email">Email</TabsTrigger>
               <TabsTrigger value="whatsapp-conexion">WhatsApp conexión</TabsTrigger>
               <TabsTrigger value="whatsapp-automatizacion">WhatsApp (citas y alertas)</TabsTrigger>
             </TabsList>
             <TabsContent value="meta" className="mt-4 space-y-4">
               <MetaConfig />
+            </TabsContent>
+            <TabsContent value="ctwa" className="mt-4 space-y-4">
+              <MarketingCtwaCampaignsConfig />
             </TabsContent>
             <TabsContent value="email" className="mt-4 space-y-4">
               <EmailConfig />
