@@ -26,16 +26,31 @@ const phoneVariants = (raw: string | null | undefined): string[] => {
 const emailKey = (raw: string | null | undefined): string =>
   (raw ?? '').trim().toLowerCase();
 
+export const normalizePersonName = (name: string | null | undefined): string =>
+  (name ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/\s+/g, ' ');
+
 export type CustomerLookupIndex = {
   byPhone: Map<string, CustomerLookupRow>;
   byEmail: Map<string, CustomerLookupRow>;
+  /** Solo nombres que identifican a un único cliente. */
+  byUniqueName: Map<string, CustomerLookupRow>;
   customers: CustomerLookupRow[];
-  match: (criteria: { phone?: string | null; email?: string | null }) => CustomerLookupRow | null;
+  match: (criteria: {
+    phone?: string | null;
+    email?: string | null;
+    name?: string | null;
+  }) => CustomerLookupRow | null;
 };
 
 export function buildCustomerLookupIndex(customers: CustomerLookupRow[]): CustomerLookupIndex {
   const byPhone = new Map<string, CustomerLookupRow>();
   const byEmail = new Map<string, CustomerLookupRow>();
+  const nameBuckets = new Map<string, CustomerLookupRow[]>();
 
   for (const c of customers) {
     for (const ph of [c.phone, c.phone_mobile, c.phone_home]) {
@@ -45,9 +60,20 @@ export function buildCustomerLookupIndex(customers: CustomerLookupRow[]): Custom
     }
     const e = emailKey(c.email);
     if (e) byEmail.set(e, c);
+    const nk = normalizePersonName(c.name);
+    if (nk) {
+      const bucket = nameBuckets.get(nk) ?? [];
+      bucket.push(c);
+      nameBuckets.set(nk, bucket);
+    }
   }
 
-  const match: CustomerLookupIndex['match'] = ({ phone, email }) => {
+  const byUniqueName = new Map<string, CustomerLookupRow>();
+  for (const [nk, bucket] of nameBuckets) {
+    if (bucket.length === 1) byUniqueName.set(nk, bucket[0]!);
+  }
+
+  const match: CustomerLookupIndex['match'] = ({ phone, email, name }) => {
     for (const variant of phoneVariants(phone)) {
       const hit = byPhone.get(variant);
       if (hit) return hit;
@@ -57,10 +83,15 @@ export function buildCustomerLookupIndex(customers: CustomerLookupRow[]): Custom
       const hit = byEmail.get(e);
       if (hit) return hit;
     }
+    const nk = normalizePersonName(name);
+    if (nk) {
+      const hit = byUniqueName.get(nk);
+      if (hit) return hit;
+    }
     return null;
   };
 
-  return { byPhone, byEmail, customers, match };
+  return { byPhone, byEmail, byUniqueName, customers, match };
 }
 
 export async function fetchCustomerLookupRows(companyId: string): Promise<CustomerLookupRow[]> {

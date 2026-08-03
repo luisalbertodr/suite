@@ -11,9 +11,12 @@ import { MARKETING_BILLING_COMPANY_IDS } from '@/lib/marketingScope';
 
 export type MarketingInvoicedValueSyncResult = MarketingPresentadaSyncResult;
 
-type MatchCustomer = (
-  lead: Pick<MarketingLead, 'phone' | 'email' | 'customer_id'>,
-) => CustomerLookupRow | null;
+type MatchCustomer = (criteria: {
+  phone?: string | null;
+  email?: string | null;
+  name?: string | null;
+  customer_id?: string | null;
+}) => CustomerLookupRow | null;
 
 export const useMarketingInvoicedValueSync = (input: {
   companyId: string | null | undefined;
@@ -78,7 +81,7 @@ export const useMarketingInvoicedValueSync = (input: {
 
   const runSync = useCallback(async (): Promise<MarketingInvoicedValueSyncResult> => {
     if (!companyId) {
-      return { moved: 0, updated: 0, skipped: 0, stageName: null };
+      return { moved: 0, updated: 0, skipped: 0, linked: 0, stageName: null };
     }
 
     const result = await runMarketingPresentadaInvoicedSync({
@@ -89,7 +92,7 @@ export const useMarketingInvoicedValueSync = (input: {
       customerLookupRows: customerLookupRowsRef.current,
     });
 
-    if (result.moved > 0 || result.updated > 0) {
+    if (result.moved > 0 || result.updated > 0 || result.linked > 0) {
       await queryClient.refetchQueries({ queryKey: ['marketing-leads', companyId] });
     }
 

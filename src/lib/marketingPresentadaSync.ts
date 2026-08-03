@@ -4,6 +4,7 @@ import type { CustomerLookupRow } from '@/lib/customerLookupMatch';
 import {
   buildCustomerLookupIndex,
   fetchCustomerLookupRowsForCompanies,
+  normalizePersonName,
 } from '@/lib/customerLookupMatch';
 import { isPresentadaExitoStageName } from '@/lib/marketingPresentadaStage';
 import {
@@ -30,12 +31,16 @@ export type MarketingPresentadaSyncResult = {
   moved: number;
   updated: number;
   skipped: number;
+  linked: number;
   stageName: string | null;
 };
 
-type MatchCustomer = (
-  lead: Pick<MarketingLead, 'phone' | 'email' | 'customer_id'>,
-) => CustomerLookupRow | null;
+type MatchCustomer = (criteria: {
+  phone?: string | null;
+  email?: string | null;
+  name?: string | null;
+  customer_id?: string | null;
+}) => CustomerLookupRow | null;
 
 type StageLike = { id: string; name: string };
 
@@ -45,6 +50,10 @@ type LeadUpdate = {
   stage_id?: string;
   position_in_stage?: number;
 };
+
+function leadFullName(lead: Pick<MarketingLead, 'first_name' | 'last_name'>): string {
+  return [lead.first_name, lead.last_name].filter(Boolean).join(' ').trim();
+}
 
 function customerChargeMetaForIds(
   customerIds: string[],
@@ -67,7 +76,14 @@ function customerChargeMetaForIds(
     let row = byId.get(customerId);
     if (!row) {
       const pair = leadCustomerPairs.find((p) => p.customerId === customerId);
-      if (pair) row = matchCustomer(pair.lead) ?? undefined;
+      if (pair) {
+        row =
+          matchCustomer({
+            phone: pair.lead.phone,
+            email: pair.lead.email,
+            name: leadFullName(pair.lead),
+          }) ?? undefined;
+      }
     }
     if (!row) continue;
     added.add(customerId);
@@ -80,6 +96,59 @@ function customerChargeMetaForIds(
     });
   }
   return out;
+}
+
+async function fetchWhatsappChatNamesByLeadId(
+  companyId: string,
+  leadIds: string[],
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (!leadIds.length) return out;
+  const CHUNK = 200;
+  for (let i = 0; i < leadIds.length; i += CHUNK) {
+    const slice = leadIds.slice(i, i + CHUNK);
+    const { data, error } = await supabase
+      .from('whatsapp_chats')
+      .select('marketing_lead_id, name')
+      .eq('company_id', companyId)
+      .in('marketing_lead_id', slice);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      const leadId = row.marketing_lead_id as string | null;
+      const name = (row.name as string | null)?.trim();
+      if (leadId && name && !out.has(leadId)) out.set(leadId, name);
+    }
+  }
+  return out;
+}
+
+function resolveLeadCustomer(
+  lead: MarketingLead,
+  matchCustomer: MatchCustomer,
+  chatNameByLeadId: Map<string, string>,
+): CustomerLookupRow | null {
+  if (lead.customer_id) {
+    return matchCustomer({ phone: lead.phone, email: lead.email, name: leadFullName(lead) }) ??
+      ({ id: lead.customer_id } as CustomerLookupRow);
+  }
+  const byPhoneOrEmail = matchCustomer({
+    phone: lead.phone,
+    email: lead.email,
+  });
+  if (byPhoneOrEmail) return byPhoneOrEmail;
+
+  const full = leadFullName(lead);
+  if (full && normalizePersonName(full).includes(' ')) {
+    const byLeadName = matchCustomer({ name: full });
+    if (byLeadName) return byLeadName;
+  }
+
+  const chatName = chatNameByLeadId.get(lead.id);
+  if (chatName) {
+    const byChat = matchCustomer({ name: chatName });
+    if (byChat) return byChat;
+  }
+  return null;
 }
 
 export async function runMarketingPresentadaInvoicedSync(input: {
@@ -96,18 +165,32 @@ export async function runMarketingPresentadaInvoicedSync(input: {
 
   const presentadaStage = stages.find((s) => isPresentadaExitoStageName(s.name));
   if (!presentadaStage) {
-    return { moved: 0, updated: 0, skipped: 0, stageName: null };
+    return { moved: 0, updated: 0, skipped: 0, linked: 0, stageName: null };
   }
 
   const filterSet = customerIdsFilter?.length
     ? new Set(customerIdsFilter.filter(Boolean))
     : null;
 
-  const leadCustomerPairs: Array<{ lead: MarketingLead; customerId: string }> = [];
+  const needsNameFallback = leads.filter((l) => !l.customer_id && !l.phone && !l.email);
+  const maybeUnlinked = leads.filter((l) => !l.customer_id);
+  const chatNameByLeadId = await fetchWhatsappChatNamesByLeadId(
+    companyId,
+    maybeUnlinked.map((l) => l.id),
+  );
+  void needsNameFallback;
+
+  const leadCustomerPairs: Array<{
+    lead: MarketingLead;
+    customerId: string;
+    newlyLinked: boolean;
+    matched: CustomerLookupRow | null;
+  }> = [];
   let skipped = 0;
 
   for (const lead of leads) {
-    const customerId = lead.customer_id ?? matchCustomer(lead)?.id ?? null;
+    const matched = resolveLeadCustomer(lead, matchCustomer, chatNameByLeadId);
+    const customerId = lead.customer_id ?? matched?.id ?? null;
     if (!customerId) {
       skipped++;
       continue;
@@ -116,11 +199,52 @@ export async function runMarketingPresentadaInvoicedSync(input: {
       skipped++;
       continue;
     }
-    leadCustomerPairs.push({ lead, customerId });
+    leadCustomerPairs.push({
+      lead,
+      customerId,
+      newlyLinked: !lead.customer_id && !!matched?.id,
+      matched: matched?.id === customerId ? matched : null,
+    });
+  }
+
+  // Persistimos vínculos lead → cliente (y teléfono vacío del cliente si el lead lo trae).
+  let linked = 0;
+  const linkOps = leadCustomerPairs.filter((p) => p.newlyLinked);
+  if (linkOps.length > 0) {
+    const results = await Promise.all(
+      linkOps.map(async ({ lead, customerId, matched }) => {
+        const { error: leadErr } = await supabase
+          .from('marketing_leads')
+          .update({ customer_id: customerId })
+          .eq('id', lead.id)
+          .eq('company_id', companyId);
+        if (leadErr) return leadErr;
+
+        if (lead.phone?.trim() && matched && !matched.phone && !matched.phone_mobile && !matched.phone_home) {
+          const { error: custErr } = await supabase
+            .from('customers')
+            .update({ phone: lead.phone.trim(), phone_mobile: lead.phone.trim() })
+            .eq('id', customerId);
+          if (custErr) return custErr;
+        }
+
+        await supabase
+          .from('whatsapp_chats')
+          .update({ customer_id: customerId })
+          .eq('company_id', companyId)
+          .eq('marketing_lead_id', lead.id)
+          .is('customer_id', null);
+
+        return null;
+      }),
+    );
+    const firstErr = results.find(Boolean);
+    if (firstErr) throw firstErr;
+    linked = linkOps.length;
   }
 
   if (!leadCustomerPairs.length) {
-    return { moved: 0, updated: 0, skipped, stageName: presentadaStage.name };
+    return { moved: 0, updated: 0, skipped, linked, stageName: presentadaStage.name };
   }
 
   const customerIds = [...new Set(leadCustomerPairs.map((p) => p.customerId))];
@@ -183,7 +307,11 @@ export async function runMarketingPresentadaInvoicedSync(input: {
   if (updates.length > 0) {
     const results = await Promise.all(
       updates.map((u) => {
-        const payload: Record<string, unknown> = { value: u.value };
+        const payload: {
+          value: number;
+          stage_id?: string;
+          position_in_stage?: number;
+        } = { value: u.value };
         if (u.stage_id) payload.stage_id = u.stage_id;
         if (typeof u.position_in_stage === 'number') {
           payload.position_in_stage = u.position_in_stage;
@@ -206,6 +334,7 @@ export async function runMarketingPresentadaInvoicedSync(input: {
     moved,
     updated,
     skipped,
+    linked,
     stageName: presentadaStage.name,
   };
 }
