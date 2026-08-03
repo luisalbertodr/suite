@@ -1,13 +1,14 @@
 import type { AppointmentItemDraft } from '@/types/agenda';
 
 export type RecursoCatalogEntry = {
-
-
   id: string;
   nombre: string;
   color?: string | null;
   tipo?: string | null;
   match_keywords?: string | null;
+  dunasoft_codrec?: string | null;
+  cabina_id?: string | null;
+  activo?: boolean | null;
 };
 
 export const RECURSO_COLOR_PALETTE = [
@@ -164,15 +165,47 @@ export function toRecursoCatalogEntries(
     color?: string | null;
     tipo?: string | null;
     match_keywords?: string | null;
-  }>
+    dunasoft_codrec?: string | null;
+    cabina_id?: string | null;
+    activo?: boolean | null;
+  }>,
+  options?: { includeInactive?: boolean }
 ): RecursoCatalogEntry[] {
+  const includeInactive = options?.includeInactive === true;
   return (rows || [])
-    .filter((r) => r.id && r.nombre)
+    .filter((r) => r.id && r.nombre && (includeInactive || r.activo !== false))
     .map((r) => ({
       id: String(r.id),
       nombre: String(r.nombre),
       color: r.color ?? null,
       tipo: r.tipo ?? null,
       match_keywords: r.match_keywords ?? null,
+      dunasoft_codrec: r.dunasoft_codrec ?? null,
+      cabina_id: r.cabina_id ?? null,
+      activo: r.activo ?? true,
     }));
+}
+
+/** Resuelve recurso por código Style/Dunasoft (codrec). */
+export function matchRecursoByDunasoftCodrec(
+  codrec: string | null | undefined,
+  recursos: RecursoCatalogEntry[]
+): RecursoCatalogEntry | null {
+  const raw = String(codrec || '').trim();
+  if (!raw || raw === '0' || !recursos.length) return null;
+  const rawLower = raw.toLowerCase();
+  const norm = raw.replace(/^0+/, '') || '0';
+  const exact = recursos.find((r) => String(r.dunasoft_codrec || '').trim() === raw);
+  if (exact) return exact;
+  const caseInsensitive = recursos.find(
+    (r) => String(r.dunasoft_codrec || '').trim().toLowerCase() === rawLower
+  );
+  if (caseInsensitive) return caseInsensitive;
+  return (
+    recursos.find((r) => {
+      const c = String(r.dunasoft_codrec || '').trim();
+      if (!c) return false;
+      return (c.replace(/^0+/, '') || '0') === norm;
+    }) ?? null
+  );
 }
