@@ -2507,8 +2507,10 @@ export type Database = {
           created_at: string
           description: string | null
           id: string
+          is_appointment_intake: boolean
           is_default_intake: boolean
           is_lost: boolean
+          is_presentada: boolean
           is_won: boolean
           name: string
           position: number
@@ -2520,8 +2522,10 @@ export type Database = {
           created_at?: string
           description?: string | null
           id?: string
+          is_appointment_intake?: boolean
           is_default_intake?: boolean
           is_lost?: boolean
+          is_presentada?: boolean
           is_won?: boolean
           name: string
           position?: number
@@ -2533,8 +2537,10 @@ export type Database = {
           created_at?: string
           description?: string | null
           id?: string
+          is_appointment_intake?: boolean
           is_default_intake?: boolean
           is_lost?: boolean
+          is_presentada?: boolean
           is_won?: boolean
           name?: string
           position?: number

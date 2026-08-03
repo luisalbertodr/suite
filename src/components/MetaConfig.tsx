@@ -61,6 +61,7 @@ import {
 } from '@/hooks/useMetaConfig';
 import { useMarketingStages } from '@/hooks/useMarketingStages';
 import { findMarketingIntakeStage } from '@/lib/marketingIntakeStage';
+import { findMarketingAppointmentStage } from '@/lib/marketingStageRoles';
 import { MarketingImportDialog } from './marketing/MarketingImportDialog';
 import { MarketingFieldsConfigDialog } from './marketing/MarketingFieldsConfigDialog';
 import { MarketingStagesManager } from './marketing/MarketingStagesManager';
@@ -200,11 +201,7 @@ export const MetaConfig: React.FC = () => {
   const intakeStage = useMemo(() => findMarketingIntakeStage(stages), [stages]);
 
   const appointmentStage = useMemo(
-    () =>
-      stages.find((s) =>
-        s.name.toLowerCase().replace(/\s+/g, ' ').includes('formulario+agenda ficticia') ||
-        s.name.toLowerCase().replace(/\s+/g, ' ').includes('formulario + agenda ficticia'),
-      ) ?? null,
+    () => findMarketingAppointmentStage(stages),
     [stages],
   );
 

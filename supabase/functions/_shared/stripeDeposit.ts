@@ -11,6 +11,7 @@ import {
 } from './whatsappAutomationDispatch.ts';
 import { providerSendText } from './whatsappProviderClient.ts';
 import { resolveWhatsappCredentials, type WhatsappProviderConfig } from './whatsappProviderTypes.ts';
+import { loadMarketingIntakeStageId } from './marketingIntakeStage.ts';
 
 export type StripeConfigRow = {
   company_id: string;
@@ -98,23 +99,7 @@ async function getIntakeStageId(
   admin: SupabaseClient,
   companyId: string,
 ): Promise<string | null> {
-  const { data: nuevoLead } = await admin
-    .from('marketing_lead_stages')
-    .select('id')
-    .eq('company_id', companyId)
-    .ilike('name', 'nuevo lead')
-    .maybeSingle();
-  if (nuevoLead?.id) return nuevoLead.id as string;
-
-  const { data: intake } = await admin
-    .from('marketing_lead_stages')
-    .select('id')
-    .eq('company_id', companyId)
-    .eq('is_default_intake', true)
-    .order('position', { ascending: true })
-    .limit(1)
-    .maybeSingle();
-  return (intake?.id as string | undefined) ?? null;
+  return loadMarketingIntakeStageId(admin, companyId);
 }
 
 type LeadDepositRow = WhatsappTemplateContext & {

@@ -731,15 +731,30 @@ export const useMarketingLeads = (scopeCompanyId?: string | null) => {
         '#a855f7', '#10b981', '#ef4444', '#ec4899', '#94a3b8',
       ];
 
-      const stagesToInsert: Array<{ company_id: string; name: string; position: number; color: string; is_default_intake: boolean; is_won: boolean }> = [];
+      const stagesToInsert: Array<{
+        company_id: string;
+        name: string;
+        position: number;
+        color: string;
+        is_default_intake: boolean;
+        is_appointment_intake: boolean;
+        is_presentada: boolean;
+        is_won: boolean;
+      }> = [];
       for (const [name, position] of uniqueStages) {
         if (!stageByName.has(name)) {
+          const isPresentada =
+            /presentad[oa]s?/i.test(name) && !/no\s+presentad/i.test(name);
+          const isAppointment =
+            /agenda ficticia|cita sin pago|cita confirmada.*sin pago/i.test(name);
           stagesToInsert.push({
             company_id: companyId,
             name,
             position,
             color: DEFAULT_COLORS[position % DEFAULT_COLORS.length],
             is_default_intake: position === 0,
+            is_appointment_intake: isAppointment,
+            is_presentada: isPresentada,
             is_won: /confirmada|ganado|éxito|exito|presentada/i.test(name),
           });
         }

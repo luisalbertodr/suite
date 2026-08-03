@@ -6,7 +6,7 @@ import {
   fetchCustomerLookupRowsForCompanies,
   normalizePersonName,
 } from '@/lib/customerLookupMatch';
-import { isPresentadaExitoStageName } from '@/lib/marketingPresentadaStage';
+import { findMarketingPresentadaStage } from '@/lib/marketingPresentadaStage';
 import {
   MARKETING_ACCESS_COMPANY_IDS,
   MARKETING_BILLING_COMPANY_IDS,
@@ -163,7 +163,7 @@ export async function runMarketingPresentadaInvoicedSync(input: {
   const { companyId, stages, leads, matchCustomer, customerLookupRows, customerIdsFilter } =
     input;
 
-  const presentadaStage = stages.find((s) => isPresentadaExitoStageName(s.name));
+  const presentadaStage = findMarketingPresentadaStage(stages);
   if (!presentadaStage) {
     return { moved: 0, updated: 0, skipped: 0, linked: 0, stageName: null };
   }
