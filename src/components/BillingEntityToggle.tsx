@@ -24,14 +24,14 @@ export const BillingEntityToggle: React.FC<BillingEntityToggleProps> = ({
   className,
   disabled = false,
 }) => {
-  const { isMultiEntity, billingCompanies, loading } = useWorkCenter();
+  const { isMultiEntity, assignedBillingCompanies, loading } = useWorkCenter();
 
-  if (loading || !isMultiEntity || billingCompanies.length <= 1) {
+  if (loading || !isMultiEntity || assignedBillingCompanies.length <= 1) {
     return null;
   }
 
   const labelFor = (id: string) => {
-    const c = billingCompanies.find((x) => x.id === id);
+    const c = assignedBillingCompanies.find((x) => x.id === id);
     return c?.short_name?.trim() || companyDisplayName(c ?? { short_name: null, name: '?' });
   };
 
@@ -60,7 +60,7 @@ export const BillingEntityToggle: React.FC<BillingEntityToggleProps> = ({
           {allLabel}
         </button>
       )}
-      {billingCompanies.map((c) => (
+      {assignedBillingCompanies.map((c) => (
         <button
           key={c.id}
           type="button"

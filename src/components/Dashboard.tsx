@@ -54,6 +54,11 @@ import {
   ESTETICA_COMPANY_ID,
   MEDICINA_COMPANY_ID,
 } from '@/lib/workCenterBilling';
+import {
+  assignedCompanyIds,
+  defaultBillingViewForAssigned,
+  resolveAllowedBillingViews,
+} from '@/lib/billingEntityAccess';
 
 function billingCompanyIdForView(view: BillingEntityView): string | null {
   if (view === 'medicina') return MEDICINA_COMPANY_ID;
@@ -288,9 +293,6 @@ export const Dashboard: React.FC = () => {
     return years;
   }, [nowYear]);
   const [selectedYears, setSelectedYears] = useState<number[]>([nowYear, nowYear - 1]);
-  const [billingView, setBillingView] = useState<BillingEntityView>('both');
-  const [comparisonPreset, setComparisonPreset] = useState<ComparisonPeriodPreset>('days15');
-  const [comparisonMonth, setComparisonMonth] = useState(new Date().getMonth() + 1);
   const [selectedFamilies, setSelectedFamilies] = useState<string[] | null>(null);
   const [activityTypeFilter, setActivityTypeFilter] = useState<DashboardRecentActivityFilter>('all');
   const defaultRange = useMemo(() => currentMonthRange(), []);
@@ -298,11 +300,32 @@ export const Dashboard: React.FC = () => {
   const [boardToDate, setBoardToDate] = useState(defaultRange.to);
   const boardRangeValid = Boolean(boardFromDate && boardToDate && boardFromDate <= boardToDate);
 
-  const { companyId, loading: companyLoading } = useCompanyFilter();
+  const { companyId, accessibleCompanies, loading: companyLoading } = useCompanyFilter();
   const { operationalCompanyId, catalogHostCompanyId, loading: wcLoading } = useWorkCenter();
   const opCompanyId = operationalCompanyId ?? companyId;
   const catalogCompanyId = catalogHostCompanyId ?? companyId;
   const commandBoardReady = Boolean(opCompanyId && catalogCompanyId && !companyLoading && !wcLoading);
+
+  const assignedIds = useMemo(
+    () => assignedCompanyIds(accessibleCompanies),
+    [accessibleCompanies],
+  );
+  const allowedBillingViews = useMemo(
+    () => resolveAllowedBillingViews(assignedIds),
+    [assignedIds],
+  );
+  const [billingView, setBillingView] = useState<BillingEntityView>('both');
+  const [comparisonPreset, setComparisonPreset] = useState<ComparisonPeriodPreset>('days15');
+  const [comparisonMonth, setComparisonMonth] = useState(new Date().getMonth() + 1);
+
+  useEffect(() => {
+    if (companyLoading || assignedIds.length === 0) return;
+    setBillingView((prev) => {
+      const allowed = resolveAllowedBillingViews(assignedIds);
+      if (allowed.length === 1) return allowed[0];
+      return allowed.includes(prev) ? prev : defaultBillingViewForAssigned(assignedIds);
+    });
+  }, [assignedIds, companyLoading]);
 
   const commandBoardBillingCompanyId = billingCompanyIdForView(billingView);
   const commandBoardQueryKey = [
@@ -432,10 +455,11 @@ export const Dashboard: React.FC = () => {
     </div>
   );
 
-  const entitySelector = isMultiEntity ? (
+  const entitySelector =
+    isMultiEntity && allowedBillingViews.length > 1 ? (
     <div className="flex flex-wrap items-center gap-1.5">
       <span className="text-xs text-muted-foreground mr-1">Empresa:</span>
-      {BILLING_VIEW_OPTIONS.map(({ id, label }) => (
+      {BILLING_VIEW_OPTIONS.filter((o) => allowedBillingViews.includes(o.id)).map(({ id, label }) => (
         <button
           key={id}
           type="button"

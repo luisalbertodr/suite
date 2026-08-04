@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import type { BillingCompanyOption } from '@/lib/billingCompany';
+import { useMemo } from 'react';
 
 export type WorkCenterInfo = {
   id: string;
@@ -10,7 +11,11 @@ export type WorkCenterInfo = {
 } | null;
 
 export function useWorkCenter() {
-  const { companyId, loading: companyLoading } = useCompanyFilter();
+  const {
+    companyId,
+    accessibleCompanies,
+    loading: companyLoading,
+  } = useCompanyFilter();
 
   const hostCompanyQuery = useQuery({
     queryKey: ['host-company', companyId],
@@ -93,6 +98,17 @@ export function useWorkCenter() {
   });
 
   const billingCompanies = billingCompaniesQuery.data ?? [];
+
+  /** Solo empresas con asignación explícita (no hermanas del centro laboral). */
+  const assignedBillingCompanies = useMemo(() => {
+    const assigned = new Set(
+      accessibleCompanies.filter((c) => c.is_assigned).map((c) => c.id),
+    );
+    if (assigned.size === 0) return billingCompanies;
+    const filtered = billingCompanies.filter((c) => assigned.has(c.id));
+    return filtered.length > 0 ? filtered : billingCompanies;
+  }, [accessibleCompanies, billingCompanies]);
+
   const companyLabels = new Map(
     billingCompanies.map((c) => [c.id, c.short_name?.trim() || c.name]),
   );
@@ -134,6 +150,8 @@ export function useWorkCenter() {
     workCenterId,
     isMultiEntity,
     billingCompanies,
+    /** Empresas M/E que el usuario tiene asignadas (para toggles de facturación). */
+    assignedBillingCompanies,
     companyLabels,
     hostCompany: hostCompanyQuery.data ?? null,
     catalogHostCompanyId,

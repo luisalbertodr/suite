@@ -15,11 +15,15 @@ import { toast } from 'sonner';
 export const CompanySwitcher: React.FC = () => {
   const { companyId, accessibleCompanies, loading, switching, switchCompany } = useCompanyFilter();
 
-  if (loading || accessibleCompanies.length <= 1) {
+  // Solo empresas asignadas: las hermanas del centro no deben usarse para cambiar de ámbito.
+  const switchableCompanies = accessibleCompanies.filter((c) => c.is_assigned);
+
+  if (loading || switchableCompanies.length <= 1) {
     return null;
   }
 
-  const active = accessibleCompanies.find((c) => c.id === companyId);
+  const active = switchableCompanies.find((c) => c.id === companyId)
+    ?? accessibleCompanies.find((c) => c.id === companyId);
 
   const handleSwitch = async (id: string) => {
     const ok = await switchCompany(id);
@@ -27,7 +31,7 @@ export const CompanySwitcher: React.FC = () => {
       toast.error('No se pudo cambiar de empresa');
       return;
     }
-    const name = accessibleCompanies.find((c) => c.id === id)?.name ?? 'Empresa';
+    const name = switchableCompanies.find((c) => c.id === id)?.name ?? 'Empresa';
     toast.success(`Empresa activa: ${name}`);
   };
 
@@ -53,7 +57,7 @@ export const CompanySwitcher: React.FC = () => {
           Cambiar empresa / centro
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        {accessibleCompanies.map((company) => (
+        {switchableCompanies.map((company) => (
           <DropdownMenuItem
             key={company.id}
             className="flex items-start gap-2 cursor-pointer"
@@ -63,7 +67,6 @@ export const CompanySwitcher: React.FC = () => {
               <p className="text-sm font-medium truncate">{company.name}</p>
               <p className="text-xs text-muted-foreground truncate">
                 {[company.tax_id, company.work_center_name].filter(Boolean).join(' · ')}
-                {!company.is_assigned && company.work_center_name ? ' · centro laboral' : ''}
               </p>
             </div>
             {company.id === companyId && <Check className="h-4 w-4 shrink-0 text-primary" />}
