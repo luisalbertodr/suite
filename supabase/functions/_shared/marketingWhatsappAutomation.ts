@@ -1240,8 +1240,7 @@ function isMetaSourceLead(source: string | null | undefined): boolean {
     s === 'meta' ||
     s === 'facebook' ||
     s === 'instagram' ||
-    s === 'ctwa' ||
-    s === 'whatsapp'
+    s === 'ctwa'
   );
 }
 
@@ -1262,9 +1261,15 @@ export async function resolveMetaFormForCampaignLead(
   }
   const campaign = lead.campaign?.trim();
   const formName = lead.form_name?.trim();
+  const source = (lead.source ?? '').trim().toLowerCase();
+  const allowDefaultFallback = source === 'ctwa';
+
   if (!campaign && !formName) {
+    if (!allowDefaultFallback) return null;
     const { resolveMetaFormForWhatsappInbound } = await import('./metaFormWhatsappInbound.ts');
-    const inbound = await resolveMetaFormForWhatsappInbound(admin, companyId, {});
+    const inbound = await resolveMetaFormForWhatsappInbound(admin, companyId, {
+      allowDefaultFallback: true,
+    });
     if (inbound) return loadMetaFormAutomation(admin, inbound.id);
     return null;
   }
@@ -1314,14 +1319,14 @@ export async function resolveMetaFormForCampaignLead(
   }
   if (best && best.score >= 55) return best.row;
 
-  const source = (lead.source ?? '').trim().toLowerCase();
-  if (source === 'ctwa' || source === 'whatsapp') {
+  if (source === 'ctwa') {
     const inboundDefault = rows.find((r) => r.whatsapp_inbound_default);
     if (inboundDefault) return inboundDefault;
     const { resolveMetaFormForWhatsappInbound } = await import('./metaFormWhatsappInbound.ts');
     const inbound = await resolveMetaFormForWhatsappInbound(admin, companyId, {
       campaign,
       formName,
+      allowDefaultFallback: true,
     });
     if (inbound) {
       const full = rows.find((r) => r.id === inbound.id);

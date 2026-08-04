@@ -225,6 +225,13 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
     );
 
   const valueLabel = formatLeadValue(lead.value);
+  const sourceKey = String(lead.source ?? '').trim().toLowerCase();
+  const sourceCornerLabel =
+    sourceKey === 'whatsapp'
+      ? 'WhatsApp'
+      : sourceKey === 'ctwa'
+        ? 'WhatsApp Meta'
+        : null;
   const iconBtnClass = compact ? 'h-6 w-6' : 'h-7 w-7';
   const iconClass = compact ? 'h-3.5 w-3.5' : 'h-3.5 w-3.5';
   const cardFields = compact
@@ -363,21 +370,40 @@ export const MarketingLeadCard = memo(function MarketingLeadCard({
                 ) : null}
               </div>
             </div>
-            <div className="flex shrink-0 items-center gap-0.5">
-              {compact && valueLabel ? (
+            <div className="flex shrink-0 flex-col items-end gap-0.5">
+              <div className="flex items-center gap-0.5">
+                {compact && valueLabel ? (
+                  <span
+                    className="max-w-[72px] truncate text-[11px] font-semibold tabular-nums text-foreground"
+                    title={valueLabel}
+                  >
+                    {valueLabel}
+                  </span>
+                ) : null}
+                <GripVertical
+                  className={[
+                    'h-4 w-4 shrink-0 text-muted-foreground/50',
+                    compact ? 'opacity-50' : 'opacity-0 transition-opacity group-hover:opacity-100',
+                  ].join(' ')}
+                />
+              </div>
+              {sourceCornerLabel ? (
                 <span
-                  className="max-w-[72px] truncate text-[11px] font-semibold tabular-nums text-foreground"
-                  title={valueLabel}
+                  className={[
+                    'rounded px-1 py-px text-[9px] font-semibold uppercase tracking-wide',
+                    sourceKey === 'ctwa'
+                      ? 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-200'
+                      : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200',
+                  ].join(' ')}
+                  title={
+                    sourceKey === 'ctwa'
+                      ? 'Lead verificado desde anuncio Meta (CTWA)'
+                      : 'Lead procedente de WhatsApp'
+                  }
                 >
-                  {valueLabel}
+                  {sourceCornerLabel}
                 </span>
               ) : null}
-              <GripVertical
-                className={[
-                  'h-4 w-4 shrink-0 text-muted-foreground/50',
-                  compact ? 'opacity-50' : 'opacity-0 transition-opacity group-hover:opacity-100',
-                ].join(' ')}
-              />
             </div>
           </div>
 
