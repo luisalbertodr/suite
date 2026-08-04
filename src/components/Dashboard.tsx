@@ -50,7 +50,16 @@ import {
   yearBillingDataKey,
   yearBillingLegend,
 } from '@/lib/salesRevenue';
+import {
+  ESTETICA_COMPANY_ID,
+  MEDICINA_COMPANY_ID,
+} from '@/lib/workCenterBilling';
 
+function billingCompanyIdForView(view: BillingEntityView): string | null {
+  if (view === 'medicina') return MEDICINA_COMPANY_ID;
+  if (view === 'estetica') return ESTETICA_COMPANY_ID;
+  return null;
+}
 const YEAR_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#ef4444'];
 
 function yearColorForIndex(idx: number): string {
@@ -295,12 +304,14 @@ export const Dashboard: React.FC = () => {
   const catalogCompanyId = catalogHostCompanyId ?? companyId;
   const commandBoardReady = Boolean(opCompanyId && catalogCompanyId && !companyLoading && !wcLoading);
 
+  const commandBoardBillingCompanyId = billingCompanyIdForView(billingView);
   const commandBoardQueryKey = [
     'dashboard-command-board',
     opCompanyId,
     catalogCompanyId,
     boardFromDate,
     boardToDate,
+    commandBoardBillingCompanyId ?? 'both',
   ] as const;
 
   const commandBoardCacheOptions = useMemo(() => {
@@ -329,6 +340,7 @@ export const Dashboard: React.FC = () => {
         catalogCompanyId: catalogCompanyId!,
         fromDate: boardFromDate,
         toDate: boardToDate,
+        billingCompanyId: commandBoardBillingCompanyId,
       }),
     enabled: commandBoardReady && boardRangeValid,
     staleTime: 5 * 60 * 1000,
@@ -642,7 +654,10 @@ export const Dashboard: React.FC = () => {
                 </Button>
               </div>
             ) : commandBoard ? (
-              <DashboardCommandBoard data={commandBoard} />
+              <DashboardCommandBoard
+                data={commandBoard}
+                billingView={billingView}
+              />
             ) : (
               <p className="text-sm text-muted-foreground">No hay datos para el periodo seleccionado.</p>
             )}
