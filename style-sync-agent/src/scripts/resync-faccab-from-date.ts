@@ -1,6 +1,8 @@
 /**
  * One-shot: apply faccab rows with fecfac >= FROM_DATE (default 2026-07-24).
- * Includes serfac 00. Skips empty ejefac/fecha.
+ * Incluye serie 00 (documentos de consumo de bono) para que existan en Suite;
+ * el dashboard de ingreso/beneficio las excluye (solo serie ≠ 00).
+ * Skips empty ejefac/fecha.
  */
 import "dotenv/config";
 import { createClient } from "@supabase/supabase-js";

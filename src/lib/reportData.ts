@@ -16,6 +16,15 @@ import {
 import { fetchCatalogCustomers } from '@/lib/customerSearch';
 import { fetchSalesWithoutInvoiceRows, usesWorkCenterStyleBillingRpc } from '@/lib/salesRevenue';
 
+/** Serie 00 = consumo de bono (sin ingreso nuevo). No entra en totales de beneficio. */
+function invoiceCountsAsRevenue(inv: { number?: unknown; status?: unknown }): boolean {
+  const status = String(inv.status ?? '').toLowerCase();
+  if (['cancelled', 'void', 'anulada'].includes(status)) return false;
+  const num = String(inv.number ?? '').trim();
+  if (num.startsWith('00-') || num.startsWith('00/')) return false;
+  return true;
+}
+
 export type ReportFilters = {
   fechaDesde?: Date;
   fechaHasta?: Date;
@@ -419,7 +428,7 @@ async function fetchFacturacionMensual(scope: Scope, filters: ReportFilters) {
 
   let query = supabase
     .from('invoices')
-    .select('issue_date, total_amount, status, customers:customer_id (name)')
+    .select('number, issue_date, total_amount, status, customers:customer_id (name)')
     .order('issue_date', { ascending: false });
   query = applyCompanyScope(query, scope);
   if (filters.cliente && filters.cliente !== 'todos') query = query.eq('customer_id', filters.cliente);
@@ -430,8 +439,7 @@ async function fetchFacturacionMensual(scope: Scope, filters: ReportFilters) {
 
   const monthly: Record<string, { totalFacturado: number; numFacturas: number; numTickets: number }> = {};
   for (const inv of data ?? []) {
-    const status = String((inv as any).status ?? '').toLowerCase();
-    if (['cancelled', 'void', 'anulada'].includes(status)) continue;
+    if (!invoiceCountsAsRevenue(inv as { number?: unknown; status?: unknown })) continue;
     const mes = format(new Date((inv as any).issue_date), 'MMMM yyyy', { locale: es });
     if (!monthly[mes]) monthly[mes] = { totalFacturado: 0, numFacturas: 0, numTickets: 0 };
     monthly[mes].totalFacturado += Number((inv as any).total_amount);
@@ -447,13 +455,14 @@ async function fetchFacturacionMensual(scope: Scope, filters: ReportFilters) {
 }
 
 async function fetchFacturacionPorCliente(scope: Scope, filters: ReportFilters) {
-  let query = supabase.from('invoices').select('total_amount, customers:customer_id (name)');
+  let query = supabase.from('invoices').select('number, total_amount, status, customers:customer_id (name)');
   query = applyCompanyScope(query, scope);
   const { data, error } = await query;
   if (error) throw error;
 
   const byClient: Record<string, { totalFacturado: number; numFacturas: number; numTickets: number }> = {};
   for (const inv of data ?? []) {
+    if (!invoiceCountsAsRevenue(inv as { number?: unknown; status?: unknown })) continue;
     const name = (inv as any).customers?.name || 'Cliente desconocido';
     if (!byClient[name]) byClient[name] = { totalFacturado: 0, numFacturas: 0, numTickets: 0 };
     byClient[name].totalFacturado += Number((inv as any).total_amount);
@@ -816,7 +825,7 @@ async function fetchComprasProveedor(scope: Scope, filters: ReportFilters) {
 async function fetchFlujoCaja(scope: Scope, filters: ReportFilters) {
   const monthly: Record<string, { ingresos: number; gastos: number }> = {};
 
-  let invQ = supabase.from('invoices').select('issue_date, total_amount, paid_status');
+  let invQ = supabase.from('invoices').select('number, issue_date, total_amount, paid_status, status');
   invQ = applyCompanyScope(invQ, scope);
   const from = dateFrom(filters);
   const to = dateTo(filters);
@@ -827,6 +836,7 @@ async function fetchFlujoCaja(scope: Scope, filters: ReportFilters) {
   for (const inv of invs ?? []) {
     const row = inv as any;
     if (row.paid_status === false) continue;
+    if (!invoiceCountsAsRevenue(row)) continue;
     const p = format(new Date(row.issue_date), 'MMMM yyyy', { locale: es });
     if (!monthly[p]) monthly[p] = { ingresos: 0, gastos: 0 };
     monthly[p].ingresos += Number(row.total_amount);
