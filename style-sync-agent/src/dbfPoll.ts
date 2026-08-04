@@ -175,7 +175,10 @@ export async function pollDbfEntityChanges(
     const seeded = enabled.get(tabla) ?? false;
     const prevMtime = lastMtime.get(tabla) ?? 0;
     if (seeded && mtime === prevMtime) continue;
-    lastMtime.set(tabla, mtime);
+    // Solo marcamos mtime como “visto” cuando el lote queda drenado; si hay
+    // pendientes, el siguiente tick debe reescanear aunque el archivo no cambie.
+    const markMtimeSeen = () => lastMtime.set(tabla, mtime);
+    const keepPendingForNextTick = () => lastMtime.delete(tabla);
 
     const fields = FINGERPRINT_FIELDS[tabla] ?? [handler.source.keyField];
     const index = await loadDbfIndexed(deps.styleRoot, handler.source.table, handler.source.keyField);
@@ -217,15 +220,22 @@ export async function pollDbfEntityChanges(
             );
           }
         }
-        if (changed.length > batch) continue;
+        if (changed.length > batch) {
+          keepPendingForNextTick();
+          continue;
+        }
       }
       await upsertFingerprints(deps, tabla, allEntries);
       await markBaselineSeeded(deps, tabla);
+      markMtimeSeen();
       deps.log(`dbf-poll ${tabla}: baseline completo (${allEntries.length} huellas)`);
       continue;
     }
 
-    if (changed.length === 0) continue;
+    if (changed.length === 0) {
+      markMtimeSeen();
+      continue;
+    }
 
     deps.log(`dbf-poll ${tabla}: ${changed.length} cambio(s) detectado(s)`);
     for (const item of changed.slice(0, batch)) {
@@ -244,6 +254,9 @@ export async function pollDbfEntityChanges(
     }
     if (changed.length > batch) {
       deps.log(`dbf-poll ${tabla}: quedan ${changed.length - batch} pendientes (siguiente tick)`);
+      keepPendingForNextTick();
+    } else {
+      markMtimeSeen();
     }
   }
 }
