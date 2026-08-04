@@ -3,6 +3,10 @@ import React, { createContext, useContext, useEffect, useRef, useState } from 'r
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { waitForAuthBootstrap, markAuthReady, resetAuthReadyBarrier } from '@/lib/authSession';
+import {
+  checkNetworkAccess,
+  NETWORK_ACCESS_DENIED_MESSAGE,
+} from '@/lib/networkAccess';
 
 const debugLog = (...args: unknown[]) => {
   if (import.meta.env.DEV && import.meta.env.VITE_DEBUG_AUTH === '1') {
@@ -90,12 +94,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
+  const enforceNetworkOrSignOut = async (): Promise<{ error: { message: string } | null }> => {
+    const result = await checkNetworkAccess();
+    if (result.allowed) return { error: null };
+    await supabase.auth.signOut();
+    return {
+      error: {
+        message: NETWORK_ACCESS_DENIED_MESSAGE +
+          (result.clientIp ? ` (IP: ${result.clientIp})` : ''),
+      },
+    };
+  };
+
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
-    return { error };
+    if (error) return { error };
+
+    const networkGate = await enforceNetworkOrSignOut();
+    if (networkGate.error) return networkGate;
+
+    return { error: null };
   };
 
   const signUp = async (email: string, password: string) => {
@@ -161,6 +182,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
           sessionStorage.setItem('current_user_id', nextSession.user.id);
           scheduleSuperuserCheck();
+
+          // Revalidar red en restore de sesión (JWT robado desde otra red).
+          void checkNetworkAccess().then(async (result) => {
+            if (cancelled || result.allowed) return;
+            debugLog('Network access denied on session restore', result);
+            await supabase.auth.signOut();
+          });
         }
         markAuthReady();
       }
@@ -170,8 +198,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
+    // Recomprobar red periódicamente mientras hay sesión.
+    const intervalId = window.setInterval(() => {
+      void supabase.auth.getSession().then(({ data: { session: s } }) => {
+        if (!s?.user || cancelled) return;
+        void checkNetworkAccess().then(async (result) => {
+          if (cancelled || result.allowed) return;
+          debugLog('Network access denied on periodic check', result);
+          await supabase.auth.signOut();
+        });
+      });
+    }, 5 * 60 * 1000);
+
     return () => {
       cancelled = true;
+      window.clearInterval(intervalId);
       subscription.unsubscribe();
     };
   }, []);

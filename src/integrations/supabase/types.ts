@@ -4021,6 +4021,33 @@ export type Database = {
           },
         ]
       }
+      user_allowed_networks: {
+        Row: {
+          id: string
+          user_id: string
+          cidr: string
+          label: string | null
+          created_by: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          cidr: string
+          label?: string | null
+          created_by?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          cidr?: string
+          label?: string | null
+          created_by?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
       user_permission_overrides: {
         Row: {
           id: string
@@ -4809,6 +4836,14 @@ export type Database = {
           resource: string
           action: string
         }[]
+      }
+      user_client_ip_allowed: {
+        Args: { p_user_id: string; p_ip: string }
+        Returns: boolean
+      }
+      can_manage_user_networks: {
+        Args: { p_target_user_id: string }
+        Returns: boolean
       }
       user_has_effective_permission: {
         Args: { p_user_id: string; p_resource: string; p_action: string }
