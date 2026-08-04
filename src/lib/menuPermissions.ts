@@ -25,7 +25,9 @@ export const MENU_PERMISSIONS: MenuPermission[] = [
   { resource: 'phone', action: 'read_missed', label: 'Llamadas (solo perdidas)', description: 'Ver solo llamadas perdidas y buzón de voz' },
   { resource: 'attendance', action: 'read', label: 'Fichaje', description: 'Registrar y ver fichajes' },
   { resource: 'documents', action: 'read', label: 'Gestión Documental', description: 'Gestionar documentos' },
-  { resource: 'reports', action: 'read', label: 'Reportes', description: 'Ver reportes y estadísticas' },
+  { resource: 'reports', action: 'read', label: 'Ver reportes', description: 'Acceso a la pestaña y sección de reportes' },
+  { resource: 'recent_activity', action: 'read', label: 'Ver actividad reciente', description: 'Ver el historial de actividad en Inicio' },
+  { resource: 'statistics', action: 'read', label: 'Ver estadísticas', description: 'Ver cuadro de mandos, tarjetas y gráficos de Inicio' },
   { resource: 'companies', action: 'read', label: 'Empresas', description: 'Gestionar información de empresas' },
   { resource: 'settings', action: 'read', label: 'Configuración', description: 'Acceso a configuración del sistema' },
 ];
