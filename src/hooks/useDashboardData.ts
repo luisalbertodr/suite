@@ -71,7 +71,7 @@ export const useDashboardData = (
   const {
     operationalCompanyId,
     catalogHostCompanyId,
-    billingCompanies,
+    assignedBillingCompanies,
     loading: wcLoading,
     isMultiEntity,
   } = useWorkCenter();
@@ -93,8 +93,8 @@ export const useDashboardData = (
   const familiesKey = familiesCacheKey(selectedFamilies);
 
   const billingCompanyIds = useMemo(
-    () => billingCompanies.map((company) => company.id),
-    [billingCompanies],
+    () => assignedBillingCompanies.map((company) => company.id),
+    [assignedBillingCompanies],
   );
 
   const familiesQueryKey = ['dashboard-families', catalogCompanyId, billingCompanyIds.join(',')] as const;

@@ -54,12 +54,12 @@ export const ReporteResults: React.FC<ReporteResultsProps> = ({ report, filters,
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(report.id === 'listado-facturas-emitidas' ? 25 : 10);
   const { companyId, loading: companyLoading } = useCompanyFilter();
-  const { isMultiEntity, billingCompanies, operationalCompanyId } = useWorkCenter();
+  const { isMultiEntity, assignedBillingCompanies, operationalCompanyId } = useWorkCenter();
   const catalogCompanyId = operationalCompanyId ?? companyId;
 
   const billingCompanyIds = resolveBillingScope(
     companyId,
-    billingCompanies,
+    assignedBillingCompanies,
     isMultiEntity,
     filters.empresaEmisora as string | undefined,
   );
@@ -73,7 +73,7 @@ export const ReporteResults: React.FC<ReporteResultsProps> = ({ report, filters,
         {
           billingCompanyIds,
           catalogCompanyId,
-          allBillingCompanyIds: billingCompanies.map((c) => c.id),
+          allBillingCompanyIds: assignedBillingCompanies.map((c) => c.id),
         },
         filters as ReportFilters,
       );

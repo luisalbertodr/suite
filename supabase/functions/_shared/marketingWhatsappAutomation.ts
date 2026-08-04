@@ -47,7 +47,7 @@ export type WhatsappConfigRow = {
   me_jid: string | null;
 };
 
-function asProviderConfig(cfg: WhatsappConfigRow): WhatsappProviderConfig {
+export function asProviderConfig(cfg: WhatsappConfigRow): WhatsappProviderConfig {
   return resolveWhatsappCredentials(cfg);
 }
 
@@ -568,6 +568,22 @@ async function sendAutomatedLeadMessage(
   }
 }
 
+/** Exportado para intros CTWA y otros envíos de texto automatizados. */
+export async function sendAutomatedLeadMessageForExternal(
+  admin: SupabaseClient,
+  cfg: WhatsappConfigRow,
+  companyId: string,
+  intendedPhone: string,
+  text: string,
+  meta: {
+    automation_type: AutomationSendType;
+    reference_id: string;
+    contactName?: string | null;
+  },
+): Promise<{ chatId: string; wahaId: string | null }> {
+  return sendAutomatedLeadMessage(admin, cfg, companyId, intendedPhone, text, meta);
+}
+
 async function sendAutomatedLeadAudio(
   admin: SupabaseClient,
   cfg: WhatsappConfigRow,
@@ -1042,8 +1058,14 @@ export async function processAutomationReply(
 
   try {
     await linkChatToLead(admin, companyId, chatId, lead.id, leadDisplayName(lead));
-    const { renderWhatsappTemplateWithPaymentLinks, loadStripeConfig, resolveDepositAmountCents } =
+    const { renderWhatsappTemplateWithPaymentLinks, loadStripeConfig } =
       await import('./stripeDeposit.ts');
+    const {
+      loadRedsysConfig,
+      isRedsysOnlineReady,
+      isStripeOnlineReady,
+      resolveUnifiedDepositAmountCents,
+    } = await import('./redsysDeposit.ts');
     const replyText = await renderWhatsappTemplateWithPaymentLinks(
       admin,
       companyId,
@@ -1066,9 +1088,13 @@ export async function processAutomationReply(
       },
     );
 
-    const stripeCfg = await loadStripeConfig(admin, companyId);
-    const depositAmount = stripeCfg ? resolveDepositAmountCents(stripeCfg, form) : null;
-    const waitsPayment = choice === '1' && !!depositAmount && !!stripeCfg?.enabled;
+    const [stripeCfg, redsysCfg] = await Promise.all([
+      loadStripeConfig(admin, companyId),
+      loadRedsysConfig(admin, companyId),
+    ]);
+    const depositAmount = resolveUnifiedDepositAmountCents(stripeCfg, redsysCfg, form);
+    const onlineReady = isStripeOnlineReady(stripeCfg) || isRedsysOnlineReady(redsysCfg);
+    const waitsPayment = choice === '1' && !!depositAmount && onlineReady;
 
     const { data: locked } = await admin
       .from('marketing_leads')
@@ -1220,7 +1246,12 @@ export async function runMarketingLeadRemindersForCompany(
 
 function isMetaSourceLead(source: string | null | undefined): boolean {
   const s = (source ?? '').trim().toLowerCase();
-  return s === 'meta' || s === 'facebook' || s === 'instagram';
+  return (
+    s === 'meta' ||
+    s === 'facebook' ||
+    s === 'instagram' ||
+    s === 'ctwa'
+  );
 }
 
 /** Formulario Meta con audio de campaña para un lead (por meta_form_id o nombre de campaña). */
@@ -1240,31 +1271,78 @@ export async function resolveMetaFormForCampaignLead(
   }
   const campaign = lead.campaign?.trim();
   const formName = lead.form_name?.trim();
-  if (!campaign && !formName) return null;
+  const source = (lead.source ?? '').trim().toLowerCase();
+  const allowDefaultFallback = source === 'ctwa';
+
+  if (!campaign && !formName) {
+    if (!allowDefaultFallback) return null;
+    const { resolveMetaFormForWhatsappInbound } = await import('./metaFormWhatsappInbound.ts');
+    const inbound = await resolveMetaFormForWhatsappInbound(admin, companyId, {
+      allowDefaultFallback: true,
+    });
+    if (inbound) return loadMetaFormAutomation(admin, inbound.id);
+    return null;
+  }
 
   const { data: forms, error } = await admin
     .from('meta_forms')
     .select(
-      'id, form_id, form_name, whatsapp_automation_enabled, whatsapp_initial_message, whatsapp_initial_audio_enabled, whatsapp_initial_audio_path, whatsapp_initial_audio_filename, whatsapp_initial_audio_mime, whatsapp_reply_1_message, whatsapp_reply_2_message, whatsapp_reply_invalid_message, whatsapp_reminder_message, whatsapp_reminder_delay_hours, whatsapp_reminder_enabled, stripe_deposit_enabled, stripe_deposit_amount_cents',
+      'id, form_id, form_name, whatsapp_automation_enabled, whatsapp_initial_message, whatsapp_initial_audio_enabled, whatsapp_initial_audio_path, whatsapp_initial_audio_filename, whatsapp_initial_audio_mime, whatsapp_reply_1_message, whatsapp_reply_2_message, whatsapp_reply_invalid_message, whatsapp_reminder_message, whatsapp_reminder_delay_hours, whatsapp_reminder_enabled, stripe_deposit_enabled, stripe_deposit_amount_cents, whatsapp_inbound_default',
     )
     .eq('company_id', companyId);
   if (error) throw error;
-  const rows = (forms ?? []) as MetaFormAutomation[];
-  const norm = (s: string) => s.trim().toLowerCase();
-  if (campaign) {
-    const c = norm(campaign);
-    const hit = rows.find((f) => {
-      const fn = f.form_name?.trim();
-      if (!fn) return false;
-      const n = norm(fn);
-      return n === c || n.includes(c) || c.includes(n);
-    });
-    if (hit) return hit;
+  const rows = (forms ?? []) as Array<MetaFormAutomation & { whatsapp_inbound_default?: boolean }>;
+  const norm = (s: string) =>
+    s
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '');
+
+  const score = (formLabel: string, needle: string): number => {
+    const h = norm(formLabel);
+    const n = norm(needle);
+    if (!h || !n) return 0;
+    if (h === n) return 100;
+    if (h.includes(n) || n.includes(h)) return 80;
+    const stop = new Set(['form', 'formulario', 'meta', 'lead', 'ads']);
+    const ht = new Set(
+      h.split(/[^a-z0-9]+/).filter((t) => t.length >= 3 && !stop.has(t)),
+    );
+    const nt = n.split(/[^a-z0-9]+/).filter((t) => t.length >= 3 && !stop.has(t));
+    if (!nt.length) return 0;
+    let hit = 0;
+    for (const t of nt) if (ht.has(t)) hit += 1;
+    const ratio = hit / nt.length;
+    if (ratio >= 0.6 && hit >= 2) return Math.round(50 + ratio * 30);
+    return 0;
+  };
+
+  let best: { row: (typeof rows)[number]; score: number } | null = null;
+  for (const f of rows) {
+    const fn = f.form_name?.trim();
+    if (!fn) continue;
+    for (const needle of [campaign, formName].filter(Boolean) as string[]) {
+      const s = score(fn, needle);
+      if (s > 0 && (!best || s > best.score)) best = { row: f, score: s };
+    }
   }
-  if (formName) {
-    const f = norm(formName);
-    const hit = rows.find((x) => x.form_name && norm(x.form_name) === f);
-    if (hit) return hit;
+  if (best && best.score >= 55) return best.row;
+
+  if (source === 'ctwa') {
+    const inboundDefault = rows.find((r) => r.whatsapp_inbound_default);
+    if (inboundDefault) return inboundDefault;
+    const { resolveMetaFormForWhatsappInbound } = await import('./metaFormWhatsappInbound.ts');
+    const inbound = await resolveMetaFormForWhatsappInbound(admin, companyId, {
+      campaign,
+      formName,
+      allowDefaultFallback: true,
+    });
+    if (inbound) {
+      const full = rows.find((r) => r.id === inbound.id);
+      if (full) return full;
+      return loadMetaFormAutomation(admin, inbound.id);
+    }
   }
   return null;
 }
@@ -1307,6 +1385,20 @@ export async function sendManualCampaignAudioForChat(
       ok: false,
       error: `No hay audio configurado para «${label}». Súbelo en Configuración → WhatsApp → Audios campaña.`,
     };
+  }
+
+  // Persistimos el vínculo al formulario Meta si el lead aún no lo tenía.
+  if (form?.id && !lead.meta_form_id) {
+    await admin
+      .from('marketing_leads')
+      .update({
+        meta_form_id: form.id,
+        form_name: form.form_name ?? lead.form_name,
+        campaign: lead.campaign?.trim() || form.form_name || lead.campaign,
+      })
+      .eq('id', lead.id)
+      .eq('company_id', companyId);
+    lead.meta_form_id = form.id;
   }
 
   const cfg = await loadWhatsappConfig(admin, companyId);

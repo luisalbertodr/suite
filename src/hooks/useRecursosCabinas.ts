@@ -98,8 +98,13 @@ export const useRecursos = () => {
       color?: string;
       match_keywords?: string;
     }) => {
-      const { error } = await supabase.from('recursos').insert({ ...values, company_id: scopeCompanyId! });
+      const { data, error } = await supabase
+        .from('recursos')
+        .insert({ ...values, company_id: scopeCompanyId! })
+        .select('id')
+        .single();
       if (error) throw error;
+      return data as { id: string };
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['recursos'] }); toast({ title: 'Recurso creado' }); },
     onError: () => toast({ title: 'Error', variant: 'destructive' }),
@@ -114,6 +119,45 @@ export const useRecursos = () => {
     onError: () => toast({ title: 'Error', variant: 'destructive' }),
   });
 
+  /** Asigna/quita tratamientos (artículos servicio) con recurso exclusivo. */
+  const syncTratamientos = useMutation({
+    mutationFn: async ({
+      recursoId,
+      articleIds,
+      previousArticleIds,
+    }: {
+      recursoId: string;
+      articleIds: string[];
+      previousArticleIds: string[];
+    }) => {
+      const next = new Set(articleIds);
+      const prev = new Set(previousArticleIds);
+      const toLink = articleIds.filter((id) => !prev.has(id));
+      const toUnlink = previousArticleIds.filter((id) => !next.has(id));
+
+      if (toLink.length) {
+        const { error } = await supabase
+          .from('articles')
+          .update({ recurso_id: recursoId })
+          .in('id', toLink);
+        if (error) throw error;
+      }
+      if (toUnlink.length) {
+        const { error } = await supabase
+          .from('articles')
+          .update({ recurso_id: null })
+          .in('id', toUnlink)
+          .eq('recurso_id', recursoId);
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['recursos'] });
+      qc.invalidateQueries({ queryKey: ['articles'] });
+    },
+    onError: () => toast({ title: 'Error al vincular tratamientos', variant: 'destructive' }),
+  });
+
   const remove = useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase.from('recursos').delete().eq('id', id);
@@ -123,5 +167,5 @@ export const useRecursos = () => {
     onError: () => toast({ title: 'Error', variant: 'destructive' }),
   });
 
-  return { recursos, create, update, remove, companyId: scopeCompanyId };
+  return { recursos, create, update, remove, syncTratamientos, companyId: scopeCompanyId };
 };

@@ -157,7 +157,7 @@ serve(async (req) => {
     const { data, error } = await admin
       .from('stripe_deposit_sessions')
       .select(
-        'amount_cents, currency, status, paid_at, marketing_leads(first_name, last_name, campaign, form_name)',
+        'company_id, amount_cents, currency, status, paid_at, marketing_leads(first_name, last_name, campaign, form_name)',
       )
       .eq('public_token', body.token.trim())
       .maybeSingle();
@@ -170,6 +170,8 @@ serve(async (req) => {
       form_name?: string | null;
     } | null;
     const leadName = [lead?.first_name, lead?.last_name].filter(Boolean).join(' ').trim();
+    const { getDepositPaymentMethods } = await import('../_shared/redsysDeposit.ts');
+    const methods = await getDepositPaymentMethods(admin, String(data.company_id));
     return json({
       ok: true,
       amount_cents: data.amount_cents,
@@ -178,6 +180,7 @@ serve(async (req) => {
       paid_at: data.paid_at,
       lead_name: leadName || null,
       offer_name: lead?.campaign ?? lead?.form_name ?? null,
+      methods,
     });
   }
 

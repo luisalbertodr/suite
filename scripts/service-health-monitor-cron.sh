@@ -4,6 +4,7 @@ set -euo pipefail
 
 ENV_FILE="${SUITE_SUPABASE_ENV:-/root/supabase-project/.env}"
 LOG=/var/log/suite-service-monitor.log
+RECOVER_SCRIPT="${WAHA_RECOVER_SCRIPT:-/usr/local/bin/suite-waha-recover.sh}"
 
 read_env() {
   local key="$1"
@@ -29,9 +30,28 @@ if [[ -z "$SECRET" ]]; then
   exit 1
 fi
 
-curl -sS -X POST "$URL" \
+RESP_FILE="$(mktemp)"
+trap 'rm -f "$RESP_FILE"' EXIT
+
+HTTP_CODE="$(curl -sS -o "$RESP_FILE" -w "%{http_code}" -X POST "$URL" \
   -H "Content-Type: application/json" \
   -H "x-monitor-secret: ${SECRET}" \
   -d '{"source":"cron","run_recovery":true}' \
-  >> "$LOG" 2>&1
-echo "" >> "$LOG"
+  || echo "000")"
+
+{
+  echo "$(date -Is) HTTP ${HTTP_CODE}"
+  cat "$RESP_FILE"
+  echo
+} >> "$LOG"
+
+# Fallback local: si el monitor pide recuperación de host y el agente HTTP no arrancó,
+# ejecuta el script directamente (tiene cooldown propio).
+if [[ -x "$RECOVER_SCRIPT" ]] && [[ "$HTTP_CODE" == "200" ]]; then
+  if grep -q '"host_recovery_needed"[[:space:]]*:[[:space:]]*true' "$RESP_FILE"; then
+    if ! grep -q '"host_recovery_started"[[:space:]]*:[[:space:]]*true' "$RESP_FILE"; then
+      echo "$(date -Is) Fallback host: suite-waha-recover.sh" >> "$LOG"
+      "$RECOVER_SCRIPT" >> "$LOG" 2>&1 || true
+    fi
+  fi
+fi

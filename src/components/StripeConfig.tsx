@@ -136,7 +136,8 @@ export const StripeConfigPanel: React.FC = () => {
               <CardTitle>Pagos Stripe · Señal de reserva</CardTitle>
               <CardDescription>
                 Cobro online de la señal para confirmar la cita. Enlaza con WhatsApp
-                automático usando {'{link_pago}'} y {'{importe_senal}'} en los mensajes Meta.
+                automático usando {'{link_pago}'} y {'{importe_senal}'}. Convive con Redsys
+                (Configuración → Pagos → Redsys): la página /pago ofrece los métodos activos.
               </CardDescription>
             </div>
           </div>

@@ -16,12 +16,26 @@ export function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-export function segmentStyleFromHex(hex: string | null | undefined): { backgroundColor: string; borderColor: string } | undefined {
+/** Texto legible sobre fondo hex (oscuro o claro). */
+export function contrastTextForHex(hex: string | null | undefined): string {
+  const color = String(hex || '').trim();
+  if (!/^#[0-9A-Fa-f]{6}$/.test(color)) return 'inherit';
+  const r = parseInt(color.slice(1, 3), 16);
+  const g = parseInt(color.slice(3, 5), 16);
+  const b = parseInt(color.slice(5, 7), 16);
+  const yiq = (r * 299 + g * 587 + b * 114) / 1000;
+  return yiq >= 150 ? '#111827' : '#ffffff';
+}
+
+export function segmentStyleFromHex(
+  hex: string | null | undefined
+): { backgroundColor: string; borderColor: string; color: string } | undefined {
   const color = String(hex || '').trim();
   if (!/^#[0-9A-Fa-f]{6}$/.test(color)) return undefined;
   return {
-    backgroundColor: hexToRgba(color, 0.78),
+    backgroundColor: color,
     borderColor: color,
+    color: contrastTextForHex(color),
   };
 }
 
@@ -33,7 +47,7 @@ export function segmentColorForRecursoTipo(itemKind?: string): string {
 export function segmentAppearance(
   hex: string | null | undefined,
   itemKind?: string
-): { className: string; style?: { backgroundColor: string; borderColor: string } } {
+): { className: string; style?: { backgroundColor: string; borderColor: string; color?: string } } {
   const style = segmentStyleFromHex(hex);
   if (style) {
     return { className: 'border rounded-sm', style };

@@ -22,6 +22,7 @@ import { AgendaCenterHoursConfig } from './AgendaCenterHoursConfig';
 import { AgendaEmployeeHoursConfig } from './AgendaEmployeeHoursConfig';
 import { UserManagement } from './UserManagement';
 import { MetaConfig } from './MetaConfig';
+import { MarketingCtwaCampaignsConfig } from './marketing/MarketingCtwaCampaignsConfig';
 import { WhatsappConfig } from './WhatsappConfig';
 import { WhatsappAutomationConfig } from './WhatsappAutomationConfig';
 import { WorkCenterAuditPanel } from './WorkCenterAuditPanel';
@@ -30,6 +31,7 @@ import { LegacyImportPanel } from './LegacyImportPanel';
 import { InbodyCsvImportPanel } from './InbodyCsvImportPanel';
 import { TpvSettingsConfig } from './TpvSettingsConfig';
 import { StripeConfigPanel } from './StripeConfig';
+import { RedsysConfigPanel } from './RedsysConfig';
 import { ServidoresMonitorPanel } from './ServidoresMonitorPanel';
 import { SmartPssEventsPanel } from './SmartPssEventsPanel';
 import { ConsentimientoPlantillasConfig } from './consentimiento/ConsentimientoPlantillasConfig';
@@ -57,10 +59,12 @@ type ConfigTab = (typeof VALID_TABS)[number];
 /** Pestañas antiguas → pestaña principal + subpestaña */
 const TAB_ALIASES: Record<string, { tab: ConfigTab; subtab: string }> = {
   meta: { tab: 'marketing', subtab: 'meta' },
+  ctwa: { tab: 'marketing', subtab: 'ctwa' },
   apariencia: { tab: 'general', subtab: 'apariencia' },
   email: { tab: 'marketing', subtab: 'email' },
   whatsapp: { tab: 'marketing', subtab: 'whatsapp-conexion' },
   stripe: { tab: 'pagos', subtab: 'stripe' },
+  redsys: { tab: 'pagos', subtab: 'redsys' },
   tpv: { tab: 'pagos', subtab: 'tpv' },
   empleados: { tab: 'usuarios', subtab: 'empleados' },
   'usuarios-permisos': { tab: 'usuarios', subtab: 'permisos' },
@@ -261,12 +265,16 @@ export const Configuracion: React.FC = () => {
           >
             <TabsList className="flex flex-wrap">
               <TabsTrigger value="meta">Meta / Leads</TabsTrigger>
+              <TabsTrigger value="ctwa">WhatsApp campañas</TabsTrigger>
               <TabsTrigger value="email">Email</TabsTrigger>
               <TabsTrigger value="whatsapp-conexion">WhatsApp conexión</TabsTrigger>
               <TabsTrigger value="whatsapp-automatizacion">WhatsApp (citas y alertas)</TabsTrigger>
             </TabsList>
             <TabsContent value="meta" className="mt-4 space-y-4">
               <MetaConfig />
+            </TabsContent>
+            <TabsContent value="ctwa" className="mt-4 space-y-4">
+              <MarketingCtwaCampaignsConfig />
             </TabsContent>
             <TabsContent value="email" className="mt-4 space-y-4">
               <EmailConfig />
@@ -288,10 +296,14 @@ export const Configuracion: React.FC = () => {
           >
             <TabsList>
               <TabsTrigger value="stripe">Stripe</TabsTrigger>
+              <TabsTrigger value="redsys">Redsys</TabsTrigger>
               <TabsTrigger value="tpv">TPV</TabsTrigger>
             </TabsList>
             <TabsContent value="stripe" className="mt-4 space-y-4">
               <StripeConfigPanel />
+            </TabsContent>
+            <TabsContent value="redsys" className="mt-4 space-y-4">
+              <RedsysConfigPanel />
             </TabsContent>
             <TabsContent value="tpv" className="mt-4 space-y-4">
               <TpvSettingsConfig />

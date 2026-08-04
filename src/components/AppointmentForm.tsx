@@ -284,8 +284,8 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
   };
 
   return (
-    <div className={`fixed inset-x-0 top-0 ${DOCK_CLEARANCE_BOTTOM} bg-black/50 flex items-start sm:items-center justify-center ${AGENDA_APPOINTMENT_MODAL_Z} px-3 pt-2 pb-24 sm:p-4`}>
-      <Card className="w-full max-w-md overflow-visible">
+    <div className={`fixed inset-x-0 top-0 ${DOCK_CLEARANCE_BOTTOM} bg-black/50 flex items-start sm:items-center justify-center ${AGENDA_APPOINTMENT_MODAL_Z} px-3 pt-2 pb-4 sm:p-4`}>
+      <Card className="suite-max-h-dialog w-full max-w-md overflow-y-auto">
         <CardHeader className="pb-2 pt-3 px-4">
           <div className="flex items-start gap-2">
             <CardTitle className="text-base flex items-center gap-2 shrink-0 pt-1">

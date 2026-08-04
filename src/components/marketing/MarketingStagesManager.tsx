@@ -11,6 +11,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
 import {
   useMarketingStages,
@@ -27,6 +28,14 @@ const PRESET_COLORS = [
   '#a855f7', '#10b981', '#ef4444', '#ec4899', '#94a3b8',
 ];
 
+type RoleKey = 'is_default_intake' | 'is_appointment_intake' | 'is_presentada';
+
+const ROLE_LABELS: Record<RoleKey, string> = {
+  is_default_intake: 'Entrada',
+  is_appointment_intake: 'Cita/agenda',
+  is_presentada: 'Presentada',
+};
+
 export const MarketingStagesManager: React.FC<MarketingStagesManagerProps> = ({
   open,
   onOpenChange,
@@ -37,6 +46,7 @@ export const MarketingStagesManager: React.FC<MarketingStagesManagerProps> = ({
   const [newName, setNewName] = useState('');
   const [newColor, setNewColor] = useState(PRESET_COLORS[0]);
   const [editing, setEditing] = useState<Record<string, { name: string; color: string }>>({});
+  const [roleBusyId, setRoleBusyId] = useState<string | null>(null);
 
   const handleAdd = async () => {
     const name = newName.trim();
@@ -83,6 +93,24 @@ export const MarketingStagesManager: React.FC<MarketingStagesManagerProps> = ({
     }
   };
 
+  const handleRoleToggle = async (stage: MarketingLeadStage, role: RoleKey, enabled: boolean) => {
+    setRoleBusyId(stage.id);
+    try {
+      if (enabled) {
+        const others = stages.filter((s) => s.id !== stage.id && s[role]);
+        for (const other of others) {
+          await updateStage.mutateAsync({ id: other.id, values: { [role]: false } });
+        }
+      }
+      await updateStage.mutateAsync({ id: stage.id, values: { [role]: enabled } });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Error al actualizar rol';
+      toast({ title: 'Error', description: message, variant: 'destructive' });
+    } finally {
+      setRoleBusyId(null);
+    }
+  };
+
   const handleDelete = async (stage: MarketingLeadStage) => {
     if (!window.confirm(`¿Eliminar la etapa "${stage.name}"? Los leads se quedarán sin etapa.`)) {
       return;
@@ -122,11 +150,12 @@ export const MarketingStagesManager: React.FC<MarketingStagesManagerProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-3xl">
         <DialogHeader>
           <DialogTitle>Gestionar etapas</DialogTitle>
           <DialogDescription>
-            Define las columnas del embudo y su orden. Cada etapa puede tener un color propio.
+            El nombre es solo visual. Los roles (Entrada, Cita/agenda, Presentada) fijan el
+            comportamiento al renombrar columnas.
           </DialogDescription>
         </DialogHeader>
 
@@ -166,105 +195,121 @@ export const MarketingStagesManager: React.FC<MarketingStagesManagerProps> = ({
             </div>
           </div>
 
-          <div className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
+          <div className="max-h-[480px] space-y-2 overflow-y-auto pr-1">
             {ordered.map((stage, idx) => {
               const draft = editing[stage.id];
               const isEditing = !!draft;
+              const rolesBusy = roleBusyId === stage.id || updateStage.isPending;
               return (
                 <div
                   key={stage.id}
-                  className="flex flex-wrap items-center gap-2 rounded-lg border bg-card px-3 py-2"
+                  className="space-y-2 rounded-lg border bg-card px-3 py-2"
                 >
-                  <div className="flex items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                      onClick={() => handleMove(stage, -1)}
-                      disabled={idx === 0 || reorderStages.isPending}
-                      title="Subir"
-                    >
-                      <ArrowUp className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                      onClick={() => handleMove(stage, 1)}
-                      disabled={idx === ordered.length - 1 || reorderStages.isPending}
-                      title="Bajar"
-                    >
-                      <ArrowDown className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-
-                  <div className="flex flex-1 items-center gap-2 min-w-[200px]">
-                    <span
-                      className="h-3 w-3 shrink-0 rounded-full"
-                      style={{ backgroundColor: isEditing ? draft.color : stage.color }}
-                    />
-                    {isEditing ? (
-                      <Input
-                        value={draft.name}
-                        onChange={(e) =>
-                          setEditing((prev) => ({
-                            ...prev,
-                            [stage.id]: { ...prev[stage.id], name: e.target.value },
-                          }))
-                        }
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                    ) : (
-                      <button
-                        type="button"
-                        className="text-left text-sm font-medium hover:underline"
-                        onClick={() => startEdit(stage)}
-                      >
-                        {stage.name}
-                      </button>
-                    )}
-                  </div>
-
-                  {isEditing ? (
-                    <div className="flex flex-wrap gap-1">
-                      {PRESET_COLORS.map((c) => (
-                        <button
-                          type="button"
-                          key={c}
-                          className={[
-                            'h-5 w-5 rounded-full border-2',
-                            draft.color === c ? 'border-foreground' : 'border-transparent',
-                          ].join(' ')}
-                          style={{ backgroundColor: c }}
-                          onClick={() =>
-                            setEditing((prev) => ({
-                              ...prev,
-                              [stage.id]: { ...prev[stage.id], color: c },
-                            }))
-                          }
-                          aria-label={`Color ${c}`}
-                        />
-                      ))}
-                    </div>
-                  ) : null}
-
-                  <div className="flex gap-1">
-                    {isEditing ? (
-                      <Button size="sm" onClick={() => handleSave(stage)} disabled={updateStage.isPending}>
-                        <Save className="mr-1 h-3.5 w-3.5" /> Guardar
-                      </Button>
-                    ) : (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex items-center gap-1">
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-7 w-7 text-destructive hover:text-destructive"
-                        onClick={() => handleDelete(stage)}
-                        disabled={deleteStage.isPending}
-                        title="Eliminar"
+                        className="h-7 w-7"
+                        onClick={() => handleMove(stage, -1)}
+                        disabled={idx === 0 || reorderStages.isPending}
+                        title="Subir"
                       >
-                        <Trash2 className="h-3.5 w-3.5" />
+                        <ArrowUp className="h-3.5 w-3.5" />
                       </Button>
-                    )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => handleMove(stage, 1)}
+                        disabled={idx === ordered.length - 1 || reorderStages.isPending}
+                        title="Bajar"
+                      >
+                        <ArrowDown className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+
+                    <div className="flex flex-1 items-center gap-2 min-w-[200px]">
+                      <span
+                        className="h-3 w-3 shrink-0 rounded-full"
+                        style={{ backgroundColor: isEditing ? draft.color : stage.color }}
+                      />
+                      {isEditing ? (
+                        <Input
+                          value={draft.name}
+                          onChange={(e) =>
+                            setEditing((prev) => ({
+                              ...prev,
+                              [stage.id]: { ...prev[stage.id], name: e.target.value },
+                            }))
+                          }
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          className="text-left text-sm font-medium hover:underline"
+                          onClick={() => startEdit(stage)}
+                        >
+                          {stage.name}
+                        </button>
+                      )}
+                    </div>
+
+                    {isEditing ? (
+                      <div className="flex flex-wrap gap-1">
+                        {PRESET_COLORS.map((c) => (
+                          <button
+                            type="button"
+                            key={c}
+                            className={[
+                              'h-5 w-5 rounded-full border-2',
+                              draft.color === c ? 'border-foreground' : 'border-transparent',
+                            ].join(' ')}
+                            style={{ backgroundColor: c }}
+                            onClick={() =>
+                              setEditing((prev) => ({
+                                ...prev,
+                                [stage.id]: { ...prev[stage.id], color: c },
+                              }))
+                            }
+                            aria-label={`Color ${c}`}
+                          />
+                        ))}
+                      </div>
+                    ) : null}
+
+                    <div className="flex gap-1">
+                      {isEditing ? (
+                        <Button size="sm" onClick={() => handleSave(stage)} disabled={updateStage.isPending}>
+                          <Save className="mr-1 h-3.5 w-3.5" /> Guardar
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-destructive hover:text-destructive"
+                          onClick={() => handleDelete(stage)}
+                          disabled={deleteStage.isPending}
+                          title="Eliminar"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-4 pl-9 text-xs text-muted-foreground">
+                    {(Object.keys(ROLE_LABELS) as RoleKey[]).map((role) => (
+                      <label key={role} className="inline-flex items-center gap-2">
+                        <Switch
+                          checked={Boolean(stage[role])}
+                          disabled={rolesBusy}
+                          onCheckedChange={(v) => handleRoleToggle(stage, role, v)}
+                        />
+                        <span>{ROLE_LABELS[role]}</span>
+                      </label>
+                    ))}
                   </div>
                 </div>
               );

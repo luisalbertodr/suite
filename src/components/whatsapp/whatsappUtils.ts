@@ -32,17 +32,33 @@ export interface MetaLeadInfo {
   campaignAudioFilename?: string | null;
 }
 
+/** Lead con origen Meta Ads / CTWA (no chats WhatsApp orgánicos). */
 export function isMetaMarketingLead(meta: MetaLeadInfo | null | undefined): boolean {
   if (!meta) return false;
   const s = (meta.source ?? '').trim().toLowerCase();
-  if (s === 'meta' || s === 'facebook' || s === 'instagram') return true;
-  return !!(meta.campaign?.trim() || meta.formName?.trim());
+  return (
+    s === 'meta' ||
+    s === 'facebook' ||
+    s === 'instagram' ||
+    s === 'ctwa'
+  );
 }
 
 export function formatMetaLeadLabel(meta: MetaLeadInfo): string {
+  const s = (meta.source ?? '').trim().toLowerCase();
   const label = meta.campaign?.trim() || meta.formName?.trim();
-  if (label) return `Lead Meta · ${label}`;
-  return 'Lead Meta';
+  if (s === 'ctwa') {
+    return label ? `WhatsApp Meta · ${label}` : 'WhatsApp Meta (CTWA)';
+  }
+  if (s === 'whatsapp') {
+    return label ? `WhatsApp · ${label}` : 'Lead WhatsApp';
+  }
+  if (s === 'meta' || s === 'facebook' || s === 'instagram') {
+    if (label) return `Lead Meta · ${label}`;
+    return 'Lead Meta';
+  }
+  if (label) return `Lead · ${label}`;
+  return 'Lead Marketing';
 }
 
 export function isRecentMetaLead(

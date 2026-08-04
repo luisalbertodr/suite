@@ -8,6 +8,7 @@ import {
   type DunasoftPlanArtRow,
 } from '@/lib/dunasoftAgendaMap';
 import { resolveCustomerIdsByLegacyCodcli } from '@/lib/appointmentCustomerResolve';
+import { toRecursoCatalogEntries, type RecursoCatalogEntry } from '@/lib/agendaRecursoMatch';
 import type { Appointment, Employee } from '@/types/agenda';
 
 type DayBundlePlanArtRow = DunasoftPlanArtRow & { desart?: string | null };
@@ -16,6 +17,20 @@ type DayBundleResponse = {
   plans: DunasoftPlan2009Row[];
   planart: DayBundlePlanArtRow[];
 };
+
+async function fetchRecursosCatalog(companyId: string | null): Promise<RecursoCatalogEntry[]> {
+  if (!companyId) return [];
+  const { data, error } = await supabase
+    .from('recursos')
+    .select('id,nombre,color,match_keywords,dunasoft_codrec,activo,cabina_id')
+    .eq('company_id', companyId)
+    .order('nombre');
+  if (error) {
+    console.warn('[dunasoftAgendaDay] No se pudieron cargar recursos:', error.message);
+    return [];
+  }
+  return toRecursoCatalogEntries(data || []);
+}
 
 function buildPlanArtMaps(planArtRows: DayBundlePlanArtRow[]) {
   const planArtByPlan = new Map<string, DunasoftPlanArtRow[]>();
@@ -42,6 +57,7 @@ async function fetchDunasoftDayAppointmentsViaRpc(
   dateYmd: string,
   companyId: string | null,
   employees: Employee[],
+  recursos: RecursoCatalogEntry[],
 ): Promise<Appointment[] | null> {
   // La firma aún no está en los types generados; fallback legacy si la RPC no existe.
   const { data, error } = await (supabase as unknown as {
@@ -63,7 +79,7 @@ async function fetchDunasoftDayAppointmentsViaRpc(
   const planArtRows = Array.isArray(bundle.planart) ? bundle.planart : [];
   const { planArtByPlan, articles } = buildPlanArtMaps(planArtRows);
 
-  let appointments = mapPlan2009ToAppointments(plans, employees, planArtByPlan, articles);
+  let appointments = mapPlan2009ToAppointments(plans, employees, planArtByPlan, articles, recursos);
 
   if (companyId) {
     const legacyCodes = appointments
@@ -82,6 +98,7 @@ async function fetchDunasoftDayAppointmentsLegacy(
   dateYmd: string,
   companyId: string | null,
   employees: Employee[],
+  recursos: RecursoCatalogEntry[],
 ): Promise<Appointment[]> {
   // schema dunasoft no está tipado en el cliente generado.
   const ds = dunasoftSupabase as unknown as {
@@ -152,7 +169,7 @@ async function fetchDunasoftDayAppointmentsLegacy(
     planArtByPlan.set(key, list);
   }
 
-  let appointments = mapPlan2009ToAppointments(plans, employees, planArtByPlan, articles);
+  let appointments = mapPlan2009ToAppointments(plans, employees, planArtByPlan, articles, recursos);
 
   if (companyId) {
     const legacyCodes = appointments
@@ -172,11 +189,12 @@ export async function fetchDunasoftDayAppointments(
   companyId: string | null,
   employees: Employee[],
 ): Promise<Appointment[]> {
+  const recursos = await fetchRecursosCatalog(companyId);
   try {
-    const viaRpc = await fetchDunasoftDayAppointmentsViaRpc(dateYmd, companyId, employees);
+    const viaRpc = await fetchDunasoftDayAppointmentsViaRpc(dateYmd, companyId, employees, recursos);
     if (viaRpc) return viaRpc;
   } catch (rpcError) {
     console.warn('[dunasoftAgendaDay] RPC bundle falló, usando fetch legacy:', rpcError);
   }
-  return fetchDunasoftDayAppointmentsLegacy(dateYmd, companyId, employees);
+  return fetchDunasoftDayAppointmentsLegacy(dateYmd, companyId, employees, recursos);
 }

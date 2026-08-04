@@ -74,6 +74,11 @@ def choose_texto(plan2009_text: str, planinc_text: str) -> str:
 
 
 CORRUPTION_RE = re.compile(r"\bzltima\b|\btenma\b|valoraisn|\bpidis\b|csdigo", re.IGNORECASE)
+INBODY_PLACEHOLDER_RE = re.compile(r"^paciente\s+in\s*body\b", re.IGNORECASE)
+
+
+def is_inbody_placeholder_name(value: str) -> bool:
+    return bool(INBODY_PLACEHOLDER_RE.search((value or "").strip()))
 
 
 def is_corrupted(value: str) -> bool:
@@ -99,10 +104,19 @@ def should_update_text(current: str, fixed: str) -> bool:
 
 
 def choose_name(plan2009_name: str, planinc_name: str, clientes_name: str) -> str:
-    for candidate in (clientes_name.strip(), planinc_name.strip(), plan2009_name.strip()):
-        if candidate and "\ufffd" not in candidate:
-            if has_spanish_accents(candidate) or candidate == plan2009_name.strip():
-                return candidate
+    candidates = (
+        clientes_name.strip(),
+        planinc_name.strip(),
+        plan2009_name.strip(),
+    )
+    for candidate in candidates:
+        if not candidate or "\ufffd" in candidate or is_inbody_placeholder_name(candidate):
+            continue
+        if has_spanish_accents(candidate) or candidate == plan2009_name.strip():
+            return candidate
+    for candidate in (plan2009_name.strip(), planinc_name.strip(), clientes_name.strip()):
+        if candidate and "\ufffd" not in candidate and not is_inbody_placeholder_name(candidate):
+            return candidate
     return plan2009_name.strip() or planinc_name.strip() or clientes_name.strip()
 
 

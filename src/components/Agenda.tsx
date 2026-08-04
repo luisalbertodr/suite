@@ -46,7 +46,7 @@ import {
   prepareItemsForPaste,
 } from '@/lib/agendaAppointmentClipboard';
 import { useAgendaAppointmentClipboard } from '@/hooks/useAgendaAppointmentClipboard';
-import { toRecursoCatalogEntries, type ArticleResourceHint } from '@/lib/agendaRecursoMatch';
+import { toRecursoCatalogEntries, matchRecursoByDunasoftCodrec, resolveRecursoColor, type ArticleResourceHint } from '@/lib/agendaRecursoMatch';
 import { checkAppointmentItemsResourceConflict } from '@/lib/agendaResourceConflicts';
 import { useAuth } from '@/hooks/useAuth';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
@@ -713,7 +713,31 @@ export const Agenda: React.FC = () => {
         recursos: recursoCatalog,
         cabinas: cabinaCatalog,
         articleHints: agendaArticleHints,
+        fallbackCodrec: row.legacy_codrec ?? null,
       });
+      // Si no hay ítems con tiempo pero la cita tiene codrec Style, tramo sintético coloreado
+      const segmentsOrFallback =
+        timeSegments.length > 0
+          ? timeSegments
+          : (() => {
+              const matched = matchRecursoByDunasoftCodrec(row.legacy_codrec, recursoCatalog);
+              if (!matched) return timeSegments;
+              return [
+                {
+                  clientKey: `${row.id}-codrec`,
+                  label: parsedService.service || description || 'Cita',
+                  kind: 'service' as const,
+                  startTime,
+                  endTime,
+                  durationMinutes: 0,
+                  recursoId: matched.id,
+                  recursoName: matched.nombre,
+                  recursoColor: resolveRecursoColor(matched),
+                  cabinaId: null,
+                  cabinaName: null,
+                },
+              ];
+            })();
       const occupiedEndTime = occupiedEndTimeFromItems(startTime, itemDrafts);
       const paymentOnlyLabels = itemDrafts
         .filter((it) => !it.occupies_time || Number(it.duration_minutes || 0) <= 0)
@@ -736,7 +760,7 @@ export const Agenda: React.FC = () => {
         legacyHourInText: parsedService.hourInText || undefined,
         startTime,
         endTime,
-        timeSegments,
+        timeSegments: segmentsOrFallback,
         occupiedEndTime,
         paymentOnlyLabels,
         date: normalizeAgendaDate(row.start_time, row.appointment_date, selectedDateYmd),

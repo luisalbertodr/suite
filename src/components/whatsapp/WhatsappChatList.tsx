@@ -8,6 +8,7 @@ import {
   formatChatListTime,
   formatMetaLeadLabel,
   isGroupJid,
+  isMetaMarketingLead,
   isRecentMetaLead,
   jidToDisplay,
   displayNameForChat,
@@ -293,13 +294,20 @@ export const WhatsappChatList: React.FC<Props> = ({
                       {leadMeta ? (
                         <span
                           className={`mb-0.5 inline-flex max-w-full items-center gap-0.5 truncate rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                            isMetaMarketingLead(leadMeta) &&
                             isRecentMetaLead(leadMeta.externalCreatedAt)
                               ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200'
-                              : 'bg-sky-50 text-sky-700 dark:bg-sky-950 dark:text-sky-300'
+                              : isMetaMarketingLead(leadMeta)
+                                ? 'bg-sky-50 text-sky-700 dark:bg-sky-950 dark:text-sky-300'
+                                : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'
                           }`}
                           title={formatMetaLeadLabel(leadMeta)}
                         >
-                          <Megaphone className="h-2.5 w-2.5 shrink-0" />
+                          {isMetaMarketingLead(leadMeta) ? (
+                            <Megaphone className="h-2.5 w-2.5 shrink-0" />
+                          ) : (
+                            <UserPlus className="h-2.5 w-2.5 shrink-0" />
+                          )}
                           <span className="truncate">{formatMetaLeadLabel(leadMeta)}</span>
                         </span>
                       ) : leadName ? (

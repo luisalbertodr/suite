@@ -197,6 +197,15 @@ type ActionBody = {
       chat_display_name?: string | null;
     }
   | {
+      action: 'chat.create_marketing_lead';
+      chat_id: string;
+      chat_display_name?: string | null;
+      customer_id?: string | null;
+      campaign?: string | null;
+      form_name?: string | null;
+      source?: string | null;
+    }
+  | {
       action: 'chat.set_link';
       chat_id: string;
       customer_id?: string | null;
@@ -3522,6 +3531,255 @@ serve(async (req) => {
           return json({ ok: true, ...result });
         } catch (e) {
           return err(e instanceof Error ? e.message : 'No se pudo enviar el audio', 500);
+        }
+      }
+
+      case 'chat.create_marketing_lead': {
+        if (!body.chat_id?.trim()) return err('Falta chat_id');
+        try {
+          const chatId = normalizeChatId(body.chat_id, cfg.default_country_code);
+          if (/@g\.us$/i.test(chatId)) {
+            return err('No se puede crear un lead desde un grupo');
+          }
+
+          const { data: chatRow } = await admin
+            .from('whatsapp_chats')
+            .select('marketing_lead_id, customer_id, name')
+            .eq('company_id', companyId)
+            .eq('chat_id', chatId)
+            .maybeSingle();
+
+          let attributionCampaign: string | null = null;
+          let attributionForm: string | null = null;
+          let attributionSource: string | null = null;
+          let attributionFieldData: unknown = undefined;
+          let attributionExternalId: string | null = null;
+          let attributionAt: string | null = null;
+          let resolvedMetaFormId: string | null = null;
+          let resolvedCtwaCampaignId: string | null = null;
+
+          if (!chatRow?.marketing_lead_id) {
+            const { data: inboundMsg } = await admin
+              .from('whatsapp_messages')
+              .select('raw, timestamp, body, caption')
+              .eq('company_id', companyId)
+              .eq('chat_id', chatId)
+              .eq('from_me', false)
+              .order('timestamp', { ascending: true })
+              .limit(1)
+              .maybeSingle();
+
+            const firstBody =
+              (typeof inboundMsg?.body === 'string' && inboundMsg.body) ||
+              (typeof inboundMsg?.caption === 'string' && inboundMsg.caption) ||
+              null;
+
+            let attr: import('../_shared/whatsappAdAttribution.ts').WhatsappAdAttribution | null =
+              null;
+            let fromMetaAd = false;
+            if (inboundMsg?.raw) {
+              const {
+                extractWhatsappAdAttribution,
+                isVerifiedMetaAdAttribution,
+              } = await import('../_shared/whatsappAdAttribution.ts');
+              attr = extractWhatsappAdAttribution(inboundMsg.raw);
+              fromMetaAd = isVerifiedMetaAdAttribution(attr);
+              if (fromMetaAd) {
+                attributionSource = 'ctwa';
+                attributionCampaign = attr.campaign;
+                attributionForm = attr.formName;
+                attributionFieldData = attr.extras.length ? attr.extras : undefined;
+                attributionExternalId = attr.ctwaClid
+                  ? `ctwa:${attr.ctwaClid}`
+                  : attr.sourceId
+                    ? `ctwa-ad:${attr.sourceId}`
+                    : null;
+                attributionAt =
+                  typeof inboundMsg.timestamp === 'string'
+                    ? inboundMsg.timestamp
+                    : null;
+              } else if (attr.extras.length) {
+                // Conservar señales parciales en field_data sin marcar CTWA.
+                attributionFieldData = attr.extras;
+              }
+            }
+
+            const { resolveMarketingCtwaCampaign } = await import(
+              '../_shared/marketingCtwaCampaigns.ts'
+            );
+            const ctwaCampaign = await resolveMarketingCtwaCampaign(admin, companyId, {
+              campaign:
+                (typeof body.campaign === 'string' && body.campaign) ||
+                attributionCampaign,
+              formName:
+                (typeof body.form_name === 'string' && body.form_name) ||
+                attributionForm,
+              firstMessageBody: firstBody,
+              attribution: attr,
+              allowDefaultFallback: fromMetaAd,
+            });
+
+            // Campaña/formulario enriquecen el lead; source=ctwa solo con evidencia Meta.
+            if (ctwaCampaign && fromMetaAd) {
+              resolvedCtwaCampaignId = ctwaCampaign.id;
+              attributionCampaign = ctwaCampaign.name;
+              if (ctwaCampaign.meta_form_id) {
+                resolvedMetaFormId = ctwaCampaign.meta_form_id;
+                const { data: linkedForm } = await admin
+                  .from('meta_forms')
+                  .select('form_name')
+                  .eq('id', ctwaCampaign.meta_form_id)
+                  .maybeSingle();
+                attributionForm = linkedForm?.form_name ?? 'Click to WhatsApp';
+              } else {
+                attributionForm = attributionForm || 'Click to WhatsApp';
+              }
+            } else if (fromMetaAd) {
+              const { resolveMetaFormForWhatsappInbound, leadFieldsFromMetaForm } =
+                await import('../_shared/metaFormWhatsappInbound.ts');
+              const matched = await resolveMetaFormForWhatsappInbound(admin, companyId, {
+                campaign: attributionCampaign,
+                formName: attributionForm,
+                attribution: attr,
+                allowDefaultFallback: true,
+              });
+              if (matched) {
+                const fields = leadFieldsFromMetaForm(matched, attr);
+                resolvedMetaFormId = fields.meta_form_id;
+                attributionForm = fields.form_name;
+                attributionCampaign = fields.campaign;
+              }
+            } else {
+              // Orgánico: matching por keywords/nombre sin fallback default ni source=ctwa.
+              const { resolveMetaFormForWhatsappInbound, leadFieldsFromMetaForm } =
+                await import('../_shared/metaFormWhatsappInbound.ts');
+              const matched = await resolveMetaFormForWhatsappInbound(admin, companyId, {
+                campaign:
+                  (typeof body.campaign === 'string' && body.campaign) ||
+                  attributionCampaign ||
+                  ctwaCampaign?.name,
+                formName:
+                  (typeof body.form_name === 'string' && body.form_name) ||
+                  attributionForm,
+                attribution: attr,
+                allowDefaultFallback: false,
+              });
+              if (ctwaCampaign) {
+                attributionCampaign = attributionCampaign || ctwaCampaign.name;
+              }
+              if (matched) {
+                const fields = leadFieldsFromMetaForm(matched, attr);
+                resolvedMetaFormId = fields.meta_form_id;
+                attributionForm = fields.form_name;
+                attributionCampaign = fields.campaign;
+              }
+            }
+          }
+
+          const { resolveMarketingLeadForWhatsappChat } = await import(
+            '../_shared/stripeDeposit.ts'
+          );
+          const source =
+            (typeof body.source === 'string' && body.source.trim()
+              ? body.source.trim()
+              : null) ||
+            attributionSource ||
+            'whatsapp';
+          const { lead, created } = await resolveMarketingLeadForWhatsappChat(
+            admin,
+            companyId,
+            chatId,
+            chatRow?.marketing_lead_id ?? null,
+            body.chat_display_name ?? chatRow?.name ?? null,
+            body.customer_id ?? chatRow?.customer_id ?? null,
+            {
+              source,
+              campaign:
+                (typeof body.campaign === 'string' && body.campaign.trim()) ||
+                attributionCampaign,
+              form_name:
+                (typeof body.form_name === 'string' && body.form_name.trim()) ||
+                attributionForm,
+              meta_form_id: resolvedMetaFormId,
+              ctwa_campaign_id: resolvedCtwaCampaignId,
+              field_data: attributionFieldData,
+              external_id: attributionExternalId,
+              external_created_at: attributionAt,
+              tags: source === 'ctwa' ? ['CTWA', 'Meta'] : ['WhatsApp'],
+            },
+          );
+
+          // Intro CTWA solo para leads con source=ctwa (evidencia Meta).
+          if (created && resolvedCtwaCampaignId && source === 'ctwa') {
+            try {
+              const { data: ctwaRow } = await admin
+                .from('marketing_ctwa_campaigns')
+                .select(
+                  'id, company_id, name, match_keywords, intro_message, intro_enabled, meta_form_id, is_default, enabled, sort_order',
+                )
+                .eq('id', resolvedCtwaCampaignId)
+                .maybeSingle();
+              if (ctwaRow) {
+                const { sendCtwaIntroMessageForLead } = await import(
+                  '../_shared/marketingCtwaIntro.ts'
+                );
+                await sendCtwaIntroMessageForLead(admin, companyId, lead.id, ctwaRow);
+              }
+            } catch (introErr) {
+              console.error('CTWA intro on create_marketing_lead failed:', introErr);
+            }
+          }
+
+          let linkedLead = lead;
+          if (!lead.meta_form_id) {
+            if (!resolvedMetaFormId) {
+              const { resolveMetaFormForWhatsappInbound, leadFieldsFromMetaForm } =
+                await import('../_shared/metaFormWhatsappInbound.ts');
+              const matched = await resolveMetaFormForWhatsappInbound(admin, companyId, {
+                campaign: lead.campaign,
+                formName: lead.form_name,
+                // No aplicar formulario default a leads orgánicos ya creados.
+                allowDefaultFallback: source === 'ctwa',
+              });
+              if (matched) {
+                const fields = leadFieldsFromMetaForm(matched, null);
+                resolvedMetaFormId = fields.meta_form_id;
+                attributionForm = fields.form_name;
+                attributionCampaign = fields.campaign;
+              }
+            }
+            if (resolvedMetaFormId) {
+              const { data: patched } = await admin
+                .from('marketing_leads')
+                .update({
+                  meta_form_id: resolvedMetaFormId,
+                  form_name: attributionForm ?? lead.form_name,
+                  campaign: attributionCampaign ?? lead.campaign,
+                })
+                .eq('id', lead.id)
+                .eq('company_id', companyId)
+                .select(
+                  'id, phone, first_name, last_name, email, campaign, form_name, appointment_at, appointment_label, source, field_data, meta_form_id, stripe_deposit_paid_at, customer_id',
+                )
+                .single();
+              if (patched) linkedLead = patched as typeof lead;
+            }
+          }
+
+          return json({
+            ok: true,
+            created,
+            marketing_lead_id: linkedLead.id,
+            source: linkedLead.source,
+            campaign: linkedLead.campaign,
+            form_name: linkedLead.form_name,
+            meta_form_id: linkedLead.meta_form_id,
+          });
+        } catch (e) {
+          return err(
+            e instanceof Error ? e.message : 'No se pudo crear el lead de marketing',
+            500,
+          );
         }
       }
 

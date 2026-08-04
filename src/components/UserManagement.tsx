@@ -12,14 +12,16 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { UserPlus, Shield, RefreshCw, Eye, EyeOff, KeyRound } from 'lucide-react';
+import { UserPlus, Shield, RefreshCw, Eye, EyeOff, KeyRound, Network } from 'lucide-react';
 import { toast } from 'sonner';
 import { UserListTable } from '@/components/UserListTable';
 import { useAgendaEmployees } from '@/hooks/useAgendaEmployees';
 import { UserPermissionsPanel } from '@/components/UserPermissionsPanel';
 import { UserCompanyAccessPanel } from '@/components/UserCompanyAccessPanel';
+import { UserAllowedNetworksPanel } from '@/components/UserAllowedNetworksPanel';
 import { useWorkCenter } from '@/hooks/useWorkCenter';
 import { RECEPTION_ROLE_NAME } from '@/lib/receptionUserAccess';
+import { applyInternalNetworksToUsers } from '@/hooks/useUserAllowedNetworks';
 
 export const UserManagement = () => {
   const { roles, permissions, loading: rolesLoading } = useRoles();
@@ -48,8 +50,10 @@ export const UserManagement = () => {
   const [showEditPassword, setShowEditPassword] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
   const [permissionsCompanyId, setPermissionsCompanyId] = useState('');
+  const [applyingInternalNetworks, setApplyingInternalNetworks] = useState(false);
 
   const canChangePasswords = hasPermission('users', 'update');
+  const canManageNetworks = hasPermission('users', 'update');
 
   const rolePermissionIdsSet = useMemo(
     () => new Set(editRolePermissionIds),
@@ -74,6 +78,29 @@ export const UserManagement = () => {
   const handleDeleteUser = async (userId: string, email: string) => {
     if (window.confirm(`¿Estás seguro de que quieres eliminar el usuario ${email}?`)) {
       await deleteUser(userId);
+    }
+  };
+
+  const handleApplyInternalNetworks = async () => {
+    if (!canManageNetworks || users.length === 0) return;
+    const ok = window.confirm(
+      `¿Asignar redes internas (192.168.99.0/24 y 192.168.1.0/24) a los ${users.length} usuarios listados?\n\n` +
+        'No se modificará quien ya tenga «Cualquier IP (0.0.0.0/0)».',
+    );
+    if (!ok) return;
+    setApplyingInternalNetworks(true);
+    try {
+      const applied = await applyInternalNetworksToUsers(users.map((u) => u.id));
+      toast.success(
+        applied > 0
+          ? `Se añadieron ${applied} asignaciones de red interna`
+          : 'No había redes internas pendientes de asignar',
+      );
+    } catch (e) {
+      console.error(e);
+      toast.error('No se pudieron aplicar las redes internas');
+    } finally {
+      setApplyingInternalNetworks(false);
     }
   };
 
@@ -374,6 +401,18 @@ export const UserManagement = () => {
             <RefreshCw className="h-4 w-4 mr-2" />
             Actualizar
           </Button>
+          {canManageNetworks && (
+            <Button
+              onClick={() => void handleApplyInternalNetworks()}
+              variant="outline"
+              size="sm"
+              disabled={applyingInternalNetworks || usersLoading || users.length === 0}
+              title="Asigna 192.168.99.0/24 y 192.168.1.0/24 a todos (omite quien ya tenga acceso externo)"
+            >
+              <Network className="h-4 w-4 mr-2" />
+              {applyingInternalNetworks ? 'Aplicando…' : 'Redes internas a todos'}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -385,16 +424,24 @@ export const UserManagement = () => {
           <p className="text-sm text-muted-foreground -mt-1">{editingUser?.email}</p>
 
           <Tabs defaultValue="datos" className="mt-2">
-            <TabsList className={`grid w-full ${canChangePasswords ? 'grid-cols-3' : 'grid-cols-2'}`}>
-              <TabsTrigger value="datos">Datos y rol</TabsTrigger>
-              <TabsTrigger
-                value="excepciones"
-                disabled={(!permissionsCompanyId && !resolveUserCompanyId(editingUser)) || !editingUser?.id}
-              >
-                Excepciones de permisos
+            <TabsList disableScroll className="flex h-auto w-full flex-wrap justify-stretch gap-1">
+              <TabsTrigger value="datos" className="flex-1">
+                Datos
               </TabsTrigger>
               {canChangePasswords && (
-                <TabsTrigger value="password" disabled={!editingUser?.id}>
+                <TabsTrigger value="redes" className="flex-1" disabled={!editingUser?.id}>
+                  Redes
+                </TabsTrigger>
+              )}
+              <TabsTrigger
+                value="excepciones"
+                className="flex-1"
+                disabled={(!permissionsCompanyId && !resolveUserCompanyId(editingUser)) || !editingUser?.id}
+              >
+                Excepciones
+              </TabsTrigger>
+              {canChangePasswords && (
+                <TabsTrigger value="password" className="flex-1" disabled={!editingUser?.id}>
                   Contraseña
                 </TabsTrigger>
               )}
@@ -543,6 +590,18 @@ export const UserManagement = () => {
                 </div>
               )}
             </TabsContent>
+
+            {canChangePasswords && (
+              <TabsContent value="redes">
+                {editingUser?.id ? (
+                  <UserAllowedNetworksPanel userId={editingUser.id} />
+                ) : (
+                  <div className="p-4 text-center text-sm text-muted-foreground">
+                    Selecciona un usuario para configurar sus redes de acceso.
+                  </div>
+                )}
+              </TabsContent>
+            )}
 
             {canChangePasswords && (
               <TabsContent value="password" className="space-y-3">

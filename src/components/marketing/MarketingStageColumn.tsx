@@ -15,6 +15,7 @@ import {
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { MarketingLeadCardSlot } from './MarketingLeadCardSlot';
 import { isMarketingLeadUnread } from '@/hooks/useMarketingUnread';
+import { stageExpectsAgendaContext } from '@/lib/marketingStageRoles';
 
 interface MarketingStageColumnProps {
   stage: MarketingLeadStage;
@@ -48,9 +49,6 @@ const currencyFormatter = new Intl.NumberFormat('es-ES', {
   maximumFractionDigits: 0,
 });
 
-const stageExpectsAgendaContext = (stageName: string): boolean =>
-  /formulario\s*\+\s*agenda ficticia|formulario\+agenda ficticia/i.test(stageName);
-
 export const MarketingStageColumn = memo(function MarketingStageColumn({
   stage,
   leads,
@@ -78,7 +76,7 @@ export const MarketingStageColumn = memo(function MarketingStageColumn({
 }: MarketingStageColumnProps) {
   const totalValue = leads.reduce((acc, l) => acc + Number(l.value ?? 0), 0);
   const isDropTarget = dragOverStageId === stage.id;
-  const expectAgendaContext = stageExpectsAgendaContext(stage.name);
+  const expectAgendaContext = stageExpectsAgendaContext(stage);
 
   return (
     <div

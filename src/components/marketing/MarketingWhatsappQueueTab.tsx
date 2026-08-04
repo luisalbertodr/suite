@@ -129,10 +129,11 @@ export const MarketingWhatsappQueueTab: React.FC<{
     [metaForms],
   );
   const { stages } = useMarketingStages(companyId);
-  const intakeStageId = useMemo(
-    () => findMarketingIntakeStage(stages ?? [])?.id ?? null,
+  const intakeStage = useMemo(
+    () => findMarketingIntakeStage(stages ?? []),
     [stages],
   );
+  const intakeStageId = intakeStage?.id ?? null;
 
   const pendingRows = useMemo(
     () =>
@@ -283,7 +284,7 @@ export const MarketingWhatsappQueueTab: React.FC<{
         </Button>
         <p className="text-[11px] text-muted-foreground">
           Máx. {stats?.daily_limit ?? 100}/día · pausas aleatorias 3–15 min · solo etapa{' '}
-          <strong>Nuevo lead</strong> · orden: más recientes primero. Horario en Configuración →
+          <strong>{intakeStage?.name ?? 'de entrada'}</strong> · orden: más recientes primero. Horario en Configuración →
           Marketing → WhatsApp (citas y alertas). El recordatorio (mensaje 2) depende de la
           configuración de cada formulario Meta.
         </p>
