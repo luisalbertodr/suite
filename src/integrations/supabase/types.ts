@@ -3839,7 +3839,11 @@ export type Database = {
           marketing_lead_id: string | null
           metadata: Json
           paid_at: string | null
+          payment_provider: string | null
           public_token: string
+          redsys_auth_code: string | null
+          redsys_order: string | null
+          redsys_pay_method: string | null
           status: string
           stripe_checkout_session_id: string | null
           stripe_payment_intent_id: string | null
@@ -3856,7 +3860,11 @@ export type Database = {
           marketing_lead_id?: string | null
           metadata?: Json
           paid_at?: string | null
+          payment_provider?: string | null
           public_token: string
+          redsys_auth_code?: string | null
+          redsys_order?: string | null
+          redsys_pay_method?: string | null
           status?: string
           stripe_checkout_session_id?: string | null
           stripe_payment_intent_id?: string | null
@@ -3873,7 +3881,11 @@ export type Database = {
           marketing_lead_id?: string | null
           metadata?: Json
           paid_at?: string | null
+          payment_provider?: string | null
           public_token?: string
+          redsys_auth_code?: string | null
+          redsys_order?: string | null
+          redsys_pay_method?: string | null
           status?: string
           stripe_checkout_session_id?: string | null
           stripe_payment_intent_id?: string | null
@@ -3892,6 +3904,81 @@ export type Database = {
             columns: ["marketing_lead_id"]
             isOneToOne: false
             referencedRelation: "marketing_leads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      redsys_config: {
+        Row: {
+          bizum_enabled: boolean
+          company_id: string
+          confirmed_stage_id: string | null
+          created_at: string
+          currency: string
+          default_deposit_amount_cents: number
+          enabled: boolean
+          environment: string
+          last_notification_at: string | null
+          merchant_code: string | null
+          payment_success_whatsapp_message: string | null
+          product_description: string | null
+          public_app_url: string | null
+          signature_key: string | null
+          signature_version: string
+          terminal: string
+          updated_at: string
+        }
+        Insert: {
+          bizum_enabled?: boolean
+          company_id: string
+          confirmed_stage_id?: string | null
+          created_at?: string
+          currency?: string
+          default_deposit_amount_cents?: number
+          enabled?: boolean
+          environment?: string
+          last_notification_at?: string | null
+          merchant_code?: string | null
+          payment_success_whatsapp_message?: string | null
+          product_description?: string | null
+          public_app_url?: string | null
+          signature_key?: string | null
+          signature_version?: string
+          terminal?: string
+          updated_at?: string
+        }
+        Update: {
+          bizum_enabled?: boolean
+          company_id?: string
+          confirmed_stage_id?: string | null
+          created_at?: string
+          currency?: string
+          default_deposit_amount_cents?: number
+          enabled?: boolean
+          environment?: string
+          last_notification_at?: string | null
+          merchant_code?: string | null
+          payment_success_whatsapp_message?: string | null
+          product_description?: string | null
+          public_app_url?: string | null
+          signature_key?: string | null
+          signature_version?: string
+          terminal?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "redsys_config_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "redsys_config_confirmed_stage_id_fkey"
+            columns: ["confirmed_stage_id"]
+            isOneToOne: false
+            referencedRelation: "marketing_lead_stages"
             referencedColumns: ["id"]
           },
         ]
@@ -4840,6 +4927,28 @@ export type Database = {
           payment_success_whatsapp_message: string | null
           public_app_url: string | null
           publishable_key: string | null
+          updated_at: string
+        }
+        Relationships: []
+      }
+      redsys_config_safe: {
+        Row: {
+          bizum_enabled: boolean
+          company_id: string
+          confirmed_stage_id: string | null
+          created_at: string
+          currency: string
+          default_deposit_amount_cents: number
+          enabled: boolean
+          environment: string
+          has_signature_key: boolean
+          last_notification_at: string | null
+          merchant_code: string | null
+          payment_success_whatsapp_message: string | null
+          product_description: string | null
+          public_app_url: string | null
+          signature_version: string
+          terminal: string
           updated_at: string
         }
         Relationships: []
