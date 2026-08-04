@@ -340,6 +340,7 @@ const AgendaAppointmentBlock = React.memo(function AgendaAppointmentBlock({
 }: AgendaAppointmentBlockProps) {
   const segments = appointment.timeSegments ?? [];
   const draggable = allowHtml5Drag && !lockedByPayment;
+  const multiRecurso = !outerRecursoStyle && segments.some((s) => !!s.recursoColor);
 
   return (
     <div
@@ -351,6 +352,9 @@ const AgendaAppointmentBlock = React.memo(function AgendaAppointmentBlock({
           ? {
               backgroundColor: outerRecursoStyle.backgroundColor,
               borderColor: outerRecursoStyle.borderColor,
+              borderLeftWidth: 6,
+              borderLeftColor: outerRecursoStyle.borderColor,
+              color: outerRecursoStyle.color,
             }
           : undefined
       }
@@ -358,7 +362,8 @@ const AgendaAppointmentBlock = React.memo(function AgendaAppointmentBlock({
       onDragStart={(e) => onDragStart(e, appointment)}
       onDragEnd={onDragEnd}
     >
-      {segments.map((seg) => {
+      {!outerRecursoStyle &&
+        segments.map((seg) => {
         const segStart = timeToMinutes(seg.startTime);
         const segEnd = timeToMinutes(seg.endTime);
         const topPct = ((segStart - startMin) / displaySpan) * 100;
@@ -370,8 +375,15 @@ const AgendaAppointmentBlock = React.memo(function AgendaAppointmentBlock({
         return (
           <div
             key={seg.clientKey}
-            className={`absolute left-0.5 right-0.5 pointer-events-none ${barClass}`}
-            style={{ top: `${topPct}%`, height: `${heightPct}%`, ...style }}
+            className={`absolute left-0 pointer-events-none ${barClass}`}
+            style={{
+              top: `${topPct}%`,
+              height: `${heightPct}%`,
+              width: multiRecurso ? 6 : undefined,
+              right: multiRecurso ? undefined : 2,
+              left: multiRecurso ? 0 : 2,
+              ...style,
+            }}
             title={title}
           />
         );
@@ -386,7 +398,16 @@ const AgendaAppointmentBlock = React.memo(function AgendaAppointmentBlock({
           title="Tramo sin reserva de tiempo (solo cobros u holgura)"
         />
       )}
-      <div className="relative z-[1] bg-card/95 dark:bg-card/90 rounded px-1.5 py-1 text-foreground font-medium h-full leading-tight overflow-hidden">
+      <div
+        className={`relative z-[1] rounded px-1.5 py-1 font-medium h-full leading-tight overflow-hidden ${
+          outerRecursoStyle
+            ? 'bg-transparent'
+            : multiRecurso
+              ? 'bg-card/70 dark:bg-card/65 pl-2.5 text-foreground'
+              : 'bg-card/95 dark:bg-card/90 text-foreground'
+        }`}
+        style={outerRecursoStyle ? { color: outerRecursoStyle.color } : undefined}
+      >
         <div className="flex items-center justify-between mb-0.5 gap-1">
           {visibleFields.clientName && (
             <div className="font-semibold truncate flex-1">{appointment.clientName}</div>
@@ -400,17 +421,17 @@ const AgendaAppointmentBlock = React.memo(function AgendaAppointmentBlock({
           </div>
         </div>
         {visibleFields.timeRange && (
-          <div className="text-xs text-muted-foreground dark:text-foreground/80 truncate tabular-nums">
+          <div className={`text-xs truncate tabular-nums ${outerRecursoStyle ? 'opacity-90' : 'text-muted-foreground dark:text-foreground/80'}`}>
             {formatSlotTimeRange(appointment)}
           </div>
         )}
         {segments.length > 0 && visibleFields.service && (
-          <div className="text-[10px] text-muted-foreground dark:text-foreground/85 truncate mt-0.5">
+          <div className={`text-[10px] truncate mt-0.5 ${outerRecursoStyle ? 'opacity-90' : 'text-muted-foreground dark:text-foreground/85'}`}>
             {segments.map((s) => (s.recursoName ? `${s.label} [${s.recursoName}]` : s.label)).join(' · ')}
           </div>
         )}
         {visibleFields.service && !segments.length && appointment.serviceName && (
-          <div className="text-xs text-muted-foreground dark:text-foreground/85 truncate mt-0.5 font-medium">
+          <div className={`text-xs truncate mt-0.5 font-medium ${outerRecursoStyle ? 'opacity-90' : 'text-muted-foreground dark:text-foreground/85'}`}>
             {appointment.serviceCode ? `${appointment.serviceCode} - ` : ''}
             {appointment.serviceName}
           </div>
@@ -424,10 +445,10 @@ const AgendaAppointmentBlock = React.memo(function AgendaAppointmentBlock({
           </div>
         )}
         {slotDesc && (
-          <div className="text-xs text-muted-foreground dark:text-foreground/80 truncate mt-0.5">{slotDesc}</div>
+          <div className={`text-xs truncate mt-0.5 ${outerRecursoStyle ? 'opacity-85' : 'text-muted-foreground dark:text-foreground/80'}`}>{slotDesc}</div>
         )}
         {typeof appointment.totalAmount === 'number' && (
-          <div className="text-xs text-foreground font-semibold truncate mt-0.5 tabular-nums">
+          <div className="text-xs font-semibold truncate mt-0.5 tabular-nums">
             {appointment.totalAmount.toFixed(2)} EUR
           </div>
         )}
@@ -504,8 +525,16 @@ const AgendaAppointmentItem = React.memo(function AgendaAppointmentItem({
   const width = `calc(100% / ${employeeCount} / ${overlap.total})`;
   const slotDesc = visibleFields.description ? slotDescriptionText(appointment) : null;
   const lockedByPayment = appointment.paymentStatus === 'paid' || appointment.paymentStatus === 'invoiced';
-  const singleSegmentColor = segments.length === 1 ? segments[0]?.recursoColor ?? null : null;
-  const outerRecursoStyle = segmentStyleFromHex(singleSegmentColor);
+  const uniqueRecursoColors = Array.from(
+    new Set(segments.map((s) => s.recursoColor).filter((c): c is string => !!c && /^#[0-9A-Fa-f]{6}$/.test(c)))
+  );
+  const blockRecursoColor =
+    uniqueRecursoColors.length === 1
+      ? uniqueRecursoColors[0]!
+      : segments.length === 1
+        ? segments[0]?.recursoColor ?? null
+        : null;
+  const outerRecursoStyle = segmentStyleFromHex(blockRecursoColor);
 
   return (
     <ContextMenu>

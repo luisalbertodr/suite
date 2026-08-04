@@ -17,6 +17,7 @@ import {
 } from '@/lib/agendaAppointmentItems';
 import {
   autoAssignItemRecurso,
+  cabinaIdForRecurso,
   toRecursoCatalogEntries,
   type ArticleResourceHint,
   type RecursoCatalogEntry,
@@ -341,6 +342,8 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
         !isBonusKind && !isProductKind
           ? autoAssignItemRecurso(draftBase, recursosCatalog, hint)
           : null;
+      const resolvedRecursoId = a.recurso_id ?? autoRecurso;
+      const autoCabina = cabinaIdForRecurso(resolvedRecursoId, recursosCatalog);
       updateAt(index, {
         article_id: a.id,
         label: nextLabel,
@@ -352,7 +355,8 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
           : (Math.max(0, Number(a.duration_minutes || 0))
             || items[index]?.duration_minutes
             || DEFAULT_APPOINTMENT_SERVICE_MINUTES),
-        recurso_id: a.recurso_id ?? autoRecurso,
+        recurso_id: resolvedRecursoId,
+        cabina_id: items[index]?.cabina_id || autoCabina || null,
       });
     },
     [articleById, items, updateAt, recursosCatalog, useFamilyPicker]
@@ -516,12 +520,15 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
       const autoRecurso = hint
         ? autoAssignItemRecurso(draftBase, recursosCatalog, hint)
         : null;
+      const resolvedRecursoId = article?.recurso_id ?? autoRecurso;
+      const autoCabina = cabinaIdForRecurso(resolvedRecursoId, recursosCatalog);
 
       onChange([
         ...items,
         {
           ...draftBase,
-          recurso_id: article?.recurso_id ?? autoRecurso,
+          recurso_id: resolvedRecursoId,
+          cabina_id: autoCabina,
         },
       ]);
     },
@@ -805,7 +812,16 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
               {recursosCatalog.length > 0 && (
                 <Select
                   value={item.recurso_id || 'none'}
-                  onValueChange={(v) => updateAt(index, { recurso_id: v === 'none' ? null : v })}
+                  onValueChange={(v) => {
+                    const recursoId = v === 'none' ? null : v;
+                    const autoCabina = cabinaIdForRecurso(recursoId, recursosCatalog);
+                    updateAt(index, {
+                      recurso_id: recursoId,
+                      ...(recursoId && autoCabina && !item.cabina_id
+                        ? { cabina_id: autoCabina }
+                        : {}),
+                    });
+                  }}
                 >
                   <SelectTrigger className="h-7 w-[88px] text-[10px] px-1 shrink-0">
                     <SelectValue placeholder="Recurso" />
