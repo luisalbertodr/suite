@@ -42,6 +42,7 @@ import {
   isGroupJid,
   isLidJid,
   isSystemChatJid,
+  isMetaMarketingLead,
   isRecentMetaLead,
   jidToDisplay,
   jidsSameContact,
@@ -366,13 +367,20 @@ export const WhatsappChatView: React.FC<Props> = ({
               {leadMeta ? (
                 <span
                   className={`inline-flex max-w-full items-center gap-0.5 truncate rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                    isMetaMarketingLead(leadMeta) &&
                     isRecentMetaLead(leadMeta.externalCreatedAt)
                       ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200'
-                      : 'bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300'
+                      : isMetaMarketingLead(leadMeta)
+                        ? 'bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300'
+                        : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'
                   }`}
                   title={formatMetaLeadLabel(leadMeta)}
                 >
-                  <Megaphone className="h-3 w-3 shrink-0" />
+                  {isMetaMarketingLead(leadMeta) ? (
+                    <Megaphone className="h-3 w-3 shrink-0" />
+                  ) : (
+                    <UserPlus className="h-3 w-3 shrink-0" />
+                  )}
                   {formatMetaLeadLabel(leadMeta)}
                 </span>
               ) : customerName && effectiveCustomerId ? (

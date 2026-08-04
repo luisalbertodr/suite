@@ -58,7 +58,11 @@ function isGenericLabel(value: string | null | undefined): boolean {
   return GENERIC_FORM_NAMES.has(norm(value));
 }
 
-/** Busca el meta_form al que deben asociarse leads WhatsApp / CTWA. */
+/**
+ * Busca el meta_form al que deben asociarse leads WhatsApp / CTWA.
+ * Sin `allowDefaultFallback`, no usa formulario inbound-default ni el único con audio
+ * (evita marcar chats orgánicos como Meta).
+ */
 export async function resolveMetaFormForWhatsappInbound(
   admin: SupabaseClient,
   companyId: string,
@@ -66,6 +70,8 @@ export async function resolveMetaFormForWhatsappInbound(
     campaign?: string | null;
     formName?: string | null;
     attribution?: WhatsappAdAttribution | null;
+    /** Solo true con señal Meta verificable en el raw del mensaje. */
+    allowDefaultFallback?: boolean;
   } = {},
 ): Promise<MetaFormInboundRow | null> {
   const { data, error } = await admin
@@ -101,10 +107,12 @@ export async function resolveMetaFormForWhatsappInbound(
   }
   if (best && best.score >= 55) return best.row;
 
+  if (!hints.allowDefaultFallback) return null;
+
   const inboundDefault = rows.find((r) => r.whatsapp_inbound_default);
   if (inboundDefault) return inboundDefault;
 
-  // Un solo formulario con audio de campaña → usarlo para CTWA.
+  // Un solo formulario con audio de campaña → usarlo para CTWA verificado.
   const withAudio = rows.filter(
     (r) => !!(r.whatsapp_initial_audio_path && r.whatsapp_initial_audio_path.trim()),
   );

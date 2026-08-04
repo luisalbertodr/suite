@@ -3576,12 +3576,15 @@ serve(async (req) => {
 
             let attr: import('../_shared/whatsappAdAttribution.ts').WhatsappAdAttribution | null =
               null;
+            let fromMetaAd = false;
             if (inboundMsg?.raw) {
-              const { extractWhatsappAdAttribution } = await import(
-                '../_shared/whatsappAdAttribution.ts'
-              );
+              const {
+                extractWhatsappAdAttribution,
+                isVerifiedMetaAdAttribution,
+              } = await import('../_shared/whatsappAdAttribution.ts');
               attr = extractWhatsappAdAttribution(inboundMsg.raw);
-              if (attr.fromAd) {
+              fromMetaAd = isVerifiedMetaAdAttribution(attr);
+              if (fromMetaAd) {
                 attributionSource = 'ctwa';
                 attributionCampaign = attr.campaign;
                 attributionForm = attr.formName;
@@ -3595,6 +3598,9 @@ serve(async (req) => {
                   typeof inboundMsg.timestamp === 'string'
                     ? inboundMsg.timestamp
                     : null;
+              } else if (attr.extras.length) {
+                // Conservar señales parciales en field_data sin marcar CTWA.
+                attributionFieldData = attr.extras;
               }
             }
 
@@ -3610,12 +3616,13 @@ serve(async (req) => {
                 attributionForm,
               firstMessageBody: firstBody,
               attribution: attr,
+              allowDefaultFallback: fromMetaAd,
             });
 
-            if (ctwaCampaign) {
+            // Campaña/formulario enriquecen el lead; source=ctwa solo con evidencia Meta.
+            if (ctwaCampaign && fromMetaAd) {
               resolvedCtwaCampaignId = ctwaCampaign.id;
               attributionCampaign = ctwaCampaign.name;
-              attributionSource = attributionSource || 'ctwa';
               if (ctwaCampaign.meta_form_id) {
                 resolvedMetaFormId = ctwaCampaign.meta_form_id;
                 const { data: linkedForm } = await admin
@@ -3627,20 +3634,44 @@ serve(async (req) => {
               } else {
                 attributionForm = attributionForm || 'Click to WhatsApp';
               }
-            } else {
+            } else if (fromMetaAd) {
               const { resolveMetaFormForWhatsappInbound, leadFieldsFromMetaForm } =
                 await import('../_shared/metaFormWhatsappInbound.ts');
               const matched = await resolveMetaFormForWhatsappInbound(admin, companyId, {
                 campaign: attributionCampaign,
                 formName: attributionForm,
                 attribution: attr,
+                allowDefaultFallback: true,
               });
               if (matched) {
                 const fields = leadFieldsFromMetaForm(matched, attr);
                 resolvedMetaFormId = fields.meta_form_id;
                 attributionForm = fields.form_name;
                 attributionCampaign = fields.campaign;
-                if (!attributionSource) attributionSource = 'ctwa';
+              }
+            } else {
+              // Orgánico: matching por keywords/nombre sin fallback default ni source=ctwa.
+              const { resolveMetaFormForWhatsappInbound, leadFieldsFromMetaForm } =
+                await import('../_shared/metaFormWhatsappInbound.ts');
+              const matched = await resolveMetaFormForWhatsappInbound(admin, companyId, {
+                campaign:
+                  (typeof body.campaign === 'string' && body.campaign) ||
+                  attributionCampaign ||
+                  ctwaCampaign?.name,
+                formName:
+                  (typeof body.form_name === 'string' && body.form_name) ||
+                  attributionForm,
+                attribution: attr,
+                allowDefaultFallback: false,
+              });
+              if (ctwaCampaign) {
+                attributionCampaign = attributionCampaign || ctwaCampaign.name;
+              }
+              if (matched) {
+                const fields = leadFieldsFromMetaForm(matched, attr);
+                resolvedMetaFormId = fields.meta_form_id;
+                attributionForm = fields.form_name;
+                attributionCampaign = fields.campaign;
               }
             }
           }
@@ -3678,7 +3709,8 @@ serve(async (req) => {
             },
           );
 
-          if (created && resolvedCtwaCampaignId) {
+          // Intro CTWA solo para leads con source=ctwa (evidencia Meta).
+          if (created && resolvedCtwaCampaignId && source === 'ctwa') {
             try {
               const { data: ctwaRow } = await admin
                 .from('marketing_ctwa_campaigns')
@@ -3706,6 +3738,8 @@ serve(async (req) => {
               const matched = await resolveMetaFormForWhatsappInbound(admin, companyId, {
                 campaign: lead.campaign,
                 formName: lead.form_name,
+                // No aplicar formulario default a leads orgánicos ya creados.
+                allowDefaultFallback: source === 'ctwa',
               });
               if (matched) {
                 const fields = leadFieldsFromMetaForm(matched, null);

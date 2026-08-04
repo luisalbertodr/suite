@@ -84,7 +84,12 @@ export async function listMarketingCtwaCampaigns(
   return (data ?? []) as MarketingCtwaCampaignRow[];
 }
 
-/** Empareja una campaña CTWA por keywords / nombre / default. */
+/**
+ * Empareja una campaña CTWA por keywords / nombre.
+ * El fallback a `is_default` / única campaña solo aplica si `allowDefaultFallback`
+ * (p. ej. cuando ya hay evidencia Meta/CTWA en el mensaje). Sin eso, no atribuir
+ * campañas por defecto a chats orgánicos.
+ */
 export async function resolveMarketingCtwaCampaign(
   admin: SupabaseClient,
   companyId: string,
@@ -93,6 +98,8 @@ export async function resolveMarketingCtwaCampaign(
     formName?: string | null;
     firstMessageBody?: string | null;
     attribution?: WhatsappAdAttribution | null;
+    /** Solo true con señal Meta verificable en el raw del mensaje. */
+    allowDefaultFallback?: boolean;
   } = {},
 ): Promise<MarketingCtwaCampaignRow | null> {
   const rows = await listMarketingCtwaCampaigns(admin, companyId, true);
@@ -105,6 +112,8 @@ export async function resolveMarketingCtwaCampaign(
     if (score > 0 && (!best || score > best.score)) best = { row, score };
   }
   if (best && best.score >= 70) return best.row;
+
+  if (!hints.allowDefaultFallback) return null;
 
   const fallback = rows.find((r) => r.is_default) ?? (rows.length === 1 ? rows[0] : null);
   return fallback ?? null;
