@@ -5,11 +5,24 @@ import {
   dniNumericKey,
   extractInbodyDni,
   dedupeInbodyMeasurements,
+  isMorphoScanMeasurement,
   normalizeInbodyMeasurement,
   normInbodyUserId,
   type InbodyMeasurement,
 } from '@/lib/inbodyMeasurements';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+
+/** Clave de persona (DNI/NIE), no IDs de báscula tipo SCALE+MAC. */
+function looksLikePersonDocumentKey(key: string | null | undefined): boolean {
+  if (!key) return false;
+  return /^\d{7,8}$/.test(key) || /^[XYZ]\d{7}$/i.test(key);
+}
+
+/** IDs del puente BLE / MorphoScan (no son DNI LookInBody). */
+function isScaleBridgeUserId(userId: string | null | undefined): boolean {
+  const s = normInbodyUserId(userId);
+  return /^SCALE[0-9A-F]{12}$/i.test(s) || /^SCALE-/i.test(s);
+}
 
 function measurementBelongsToCustomer(
   row: InbodyMeasurement,
@@ -20,7 +33,16 @@ function measurementBelongsToCustomer(
   const measureDni = dniNumericKey(extractInbodyDni(row.inbody_user_id));
 
   if (row.customer_id === customerId) {
-    if (!customerDni || !measureDni) return true;
+    // MorphoScan usa inbody_user_id=SCALEMAC. dniNumericKey() no es null para ese
+    // string y el cruce DNI lo descartaba aunque customer_id ya coincidiera.
+    if (
+      isMorphoScanMeasurement(row) ||
+      isScaleBridgeUserId(row.inbody_user_id) ||
+      !customerDni ||
+      !looksLikePersonDocumentKey(measureDni)
+    ) {
+      return true;
+    }
     return customerDni === measureDni;
   }
 
