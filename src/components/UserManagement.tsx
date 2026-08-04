@@ -424,25 +424,24 @@ export const UserManagement = () => {
           <p className="text-sm text-muted-foreground -mt-1">{editingUser?.email}</p>
 
           <Tabs defaultValue="datos" className="mt-2">
-            <TabsList
-              className={`grid w-full ${
-                canChangePasswords ? 'grid-cols-4' : canManageNetworks ? 'grid-cols-3' : 'grid-cols-2'
-              }`}
-            >
-              <TabsTrigger value="datos">Datos y rol</TabsTrigger>
-              <TabsTrigger
-                value="excepciones"
-                disabled={(!permissionsCompanyId && !resolveUserCompanyId(editingUser)) || !editingUser?.id}
-              >
-                Excepciones de permisos
+            <TabsList disableScroll className="flex h-auto w-full flex-wrap justify-stretch gap-1">
+              <TabsTrigger value="datos" className="flex-1">
+                Datos
               </TabsTrigger>
-              {canManageNetworks && (
-                <TabsTrigger value="redes" disabled={!editingUser?.id}>
+              {canChangePasswords && (
+                <TabsTrigger value="redes" className="flex-1" disabled={!editingUser?.id}>
                   Redes
                 </TabsTrigger>
               )}
+              <TabsTrigger
+                value="excepciones"
+                className="flex-1"
+                disabled={(!permissionsCompanyId && !resolveUserCompanyId(editingUser)) || !editingUser?.id}
+              >
+                Excepciones
+              </TabsTrigger>
               {canChangePasswords && (
-                <TabsTrigger value="password" disabled={!editingUser?.id}>
+                <TabsTrigger value="password" className="flex-1" disabled={!editingUser?.id}>
                   Contraseña
                 </TabsTrigger>
               )}
@@ -592,7 +591,7 @@ export const UserManagement = () => {
               )}
             </TabsContent>
 
-            {canManageNetworks && (
+            {canChangePasswords && (
               <TabsContent value="redes">
                 {editingUser?.id ? (
                   <UserAllowedNetworksPanel userId={editingUser.id} />
