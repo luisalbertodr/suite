@@ -158,6 +158,9 @@ async function wahaJson<T>(cfg: WhatsappCfg, path: string, init: RequestInit = {
   return text ? JSON.parse(text) as T : null as T;
 }
 
+/** Tras este tiempo en STARTING se considera bloqueado (protocolo 405 / engine colgado). */
+const WAHA_STARTING_STUCK_MS = 4 * 60_000;
+
 async function tryStartWahaSession(cfg: WhatsappCfg): Promise<string> {
   const session = cfg.session_name || 'default';
   try {
@@ -175,9 +178,102 @@ async function tryStartWahaSession(cfg: WhatsappCfg): Promise<string> {
   }
 }
 
+async function tryRestartWahaSession(cfg: WhatsappCfg): Promise<string> {
+  const session = cfg.session_name || 'default';
+  try {
+    await wahaJson(cfg, `/api/sessions/${encodeURIComponent(session)}/restart`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    return 'session.restart enviado';
+  } catch (e) {
+    return `session.restart falló: ${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
+type HostRecoverResult = {
+  attempted: boolean;
+  started: boolean;
+  needed: boolean;
+  message: string;
+};
+
+/** Pull+recreate en el host (mismo procedimiento que desbloqueó STARTING/405). */
+async function tryHostWahaRecover(reason: string): Promise<HostRecoverResult> {
+  const url = (Deno.env.get('WAHA_HOST_RECOVERY_URL') ?? '').trim();
+  const secret = (Deno.env.get('WAHA_HOST_RECOVERY_SECRET') ?? '').trim();
+  if (!url || !secret) {
+    return {
+      attempted: false,
+      started: false,
+      needed: true,
+      message:
+        `Host recovery necesario (${reason}) pero WAHA_HOST_RECOVERY_URL/SECRET no configurados`,
+    };
+  }
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Recover-Secret': secret,
+      },
+      body: JSON.stringify({ reason, force: false }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    const text = await resp.text();
+    let payload: { ok?: boolean; started?: boolean; error?: string; message?: string } = {};
+    try {
+      payload = text ? JSON.parse(text) : {};
+    } catch {
+      payload = {};
+    }
+    // 202 = arrancado en background; 200 legacy; 409 = ya en curso.
+    const started =
+      resp.status === 202 ||
+      resp.status === 200 ||
+      resp.status === 409 ||
+      payload.started === true ||
+      payload.ok === true;
+    return {
+      attempted: true,
+      started,
+      needed: !started,
+      message: started
+        ? `Host recover disparado (${reason}): ${payload.message ?? payload.error ?? `HTTP ${resp.status}`}`
+        : `Host recover falló (${reason}): HTTP ${resp.status} ${payload.error ?? text.slice(0, 180)}`,
+    };
+  } catch (e) {
+    return {
+      attempted: true,
+      started: false,
+      needed: true,
+      message: `Host recover error (${reason}): ${e instanceof Error ? e.message : String(e)}`,
+    };
+  }
+}
+
+async function readWahaSessionStatus(
+  cfg: WhatsappCfg,
+): Promise<{ status: string; sessionsOk: boolean; error?: string }> {
+  try {
+    const sessions = await wahaJson<Array<{ name?: string; status?: string }>>(cfg, '/api/sessions');
+    const sessionName = cfg.session_name || 'default';
+    const mine = sessions.find((s) => s.name === sessionName);
+    return { status: (mine?.status ?? 'MISSING').toUpperCase(), sessionsOk: true };
+  } catch (e) {
+    return {
+      status: 'UNKNOWN',
+      sessionsOk: false,
+      error: e instanceof Error ? e.message : 'Auth WAHA fallida',
+    };
+  }
+}
+
 async function checkWaha(
   cfg: WhatsappCfg | null,
   runRecovery: boolean,
+  prevDetails: Record<string, unknown> = {},
 ): Promise<CheckResult> {
   const t0 = Date.now();
   if (!cfg) {
@@ -185,6 +281,7 @@ async function checkWaha(
       status: 'down',
       latencyMs: Date.now() - t0,
       message: 'whatsapp_config no configurado (URL/API key)',
+      details: { host_recovery_needed: false },
     };
   }
 
@@ -200,69 +297,187 @@ async function checkWaha(
 
   if (!publicOk) {
     let recoveryAttempted = false;
-    let recoverySuccess = false;
     let recoveryMessage = '';
+    let host: HostRecoverResult = {
+      attempted: false,
+      started: false,
+      needed: true,
+      message: 'Contenedor WAHA inalcanzable',
+    };
     if (runRecovery) {
       recoveryAttempted = true;
-      recoveryMessage = 'Contenedor WAHA inalcanzable; no se puede session.start remotamente';
-      recoverySuccess = false;
+      host = await tryHostWahaRecover(`ping falló: ${publicError || 'sin respuesta'}`);
+      recoveryMessage = host.message;
     }
     return {
       status: 'down',
       latencyMs: Date.now() - t0,
       message: `WAHA inalcanzable: ${publicError || 'sin respuesta en /ping'}`,
       recoveryAttempted,
-      recoverySuccess,
+      recoverySuccess: false,
       recoveryMessage,
-      details: { public_ok: false },
+      details: {
+        public_ok: false,
+        host_recovery_needed: host.needed,
+        host_recovery_attempted: host.attempted,
+        host_recovery_started: host.started,
+        starting_since: null,
+      },
     };
   }
 
-  let sessions: Array<{ name?: string; status?: string }> = [];
-  try {
-    sessions = await wahaJson<Array<{ name?: string; status?: string }>>(cfg, '/api/sessions');
-  } catch (e) {
+  const live = await readWahaSessionStatus(cfg);
+  if (!live.sessionsOk) {
+    let host: HostRecoverResult = {
+      attempted: false,
+      started: false,
+      needed: true,
+      message: live.error ?? 'Auth WAHA fallida',
+    };
+    let recoveryAttempted = false;
+    let recoveryMessage = host.message;
+    if (runRecovery) {
+      recoveryAttempted = true;
+      host = await tryHostWahaRecover(`auth/list sessions: ${live.error ?? 'fallo'}`);
+      recoveryMessage = host.message;
+    }
     return {
       status: 'down',
       latencyMs: Date.now() - t0,
-      message: e instanceof Error ? e.message : 'Auth WAHA fallida',
-      details: { public_ok: true, auth_ok: false },
+      message: live.error ?? 'Auth WAHA fallida',
+      recoveryAttempted,
+      recoverySuccess: false,
+      recoveryMessage,
+      details: {
+        public_ok: true,
+        auth_ok: false,
+        host_recovery_needed: host.needed,
+        host_recovery_attempted: host.attempted,
+        host_recovery_started: host.started,
+        starting_since: null,
+      },
     };
   }
 
   const sessionName = cfg.session_name || 'default';
-  const mine = sessions.find((s) => s.name === sessionName);
-  const sessionStatus = (mine?.status ?? 'MISSING').toUpperCase();
+  const sessionStatus = live.status;
 
   if (sessionStatus === 'WORKING') {
     return {
       status: 'ok',
       latencyMs: Date.now() - t0,
       message: `Sesión ${sessionName} WORKING`,
-      details: { public_ok: true, auth_ok: true, session_status: sessionStatus },
+      details: {
+        public_ok: true,
+        auth_ok: true,
+        session_status: sessionStatus,
+        host_recovery_needed: false,
+        starting_since: null,
+      },
     };
   }
 
-  if (sessionStatus === 'STARTING' || sessionStatus === 'SCAN_QR') {
+  if (sessionStatus === 'SCAN_QR' || sessionStatus === 'SCAN_QR_CODE') {
     return {
       status: 'degraded',
       latencyMs: Date.now() - t0,
       message: `Sesión ${sessionName} en ${sessionStatus}`,
-      details: { session_status: sessionStatus },
+      details: {
+        session_status: sessionStatus,
+        host_recovery_needed: false,
+        starting_since: null,
+      },
+    };
+  }
+
+  if (sessionStatus === 'STARTING') {
+    const nowIso = new Date().toISOString();
+    const prevSince = typeof prevDetails.starting_since === 'string'
+      ? prevDetails.starting_since
+      : null;
+    const startingSince = prevSince ?? nowIso;
+    const stuckMs = Date.now() - Date.parse(startingSince);
+    const stuck = Number.isFinite(stuckMs) && stuckMs >= WAHA_STARTING_STUCK_MS;
+
+    if (!stuck) {
+      return {
+        status: 'degraded',
+        latencyMs: Date.now() - t0,
+        message: `Sesión ${sessionName} en STARTING`,
+        details: {
+          session_status: sessionStatus,
+          starting_since: startingSince,
+          host_recovery_needed: false,
+        },
+      };
+    }
+
+    let recoveryAttempted = false;
+    let recoverySuccess = false;
+    let recoveryMessage = `STARTING bloqueado >${Math.round(WAHA_STARTING_STUCK_MS / 60000)} min`;
+    let host: HostRecoverResult = {
+      attempted: false,
+      started: false,
+      needed: true,
+      message: recoveryMessage,
+    };
+
+    if (runRecovery) {
+      recoveryAttempted = true;
+      const restartMsg = await tryRestartWahaSession(cfg);
+      await new Promise((r) => setTimeout(r, 4000));
+      const afterRestart = await readWahaSessionStatus(cfg);
+      if (afterRestart.status === 'WORKING') {
+        return {
+          status: 'ok',
+          latencyMs: Date.now() - t0,
+          message: `Recuperado: sesión ${sessionName} WORKING`,
+          recoveryAttempted: true,
+          recoverySuccess: true,
+          recoveryMessage: restartMsg,
+          details: {
+            session_status: 'WORKING',
+            starting_since: null,
+            host_recovery_needed: false,
+          },
+        };
+      }
+
+      host = await tryHostWahaRecover(`STARTING stuck (${restartMsg} → ${afterRestart.status})`);
+      recoveryMessage = `${restartMsg}; ${host.message}`;
+      recoverySuccess = false;
+    }
+
+    return {
+      status: 'down',
+      latencyMs: Date.now() - t0,
+      message: `Sesión ${sessionName} STARTING bloqueado`,
+      recoveryAttempted,
+      recoverySuccess,
+      recoveryMessage,
+      details: {
+        session_status: sessionStatus,
+        starting_since: startingSince,
+        host_recovery_needed: host.needed,
+        host_recovery_attempted: host.attempted,
+        host_recovery_started: host.started,
+      },
     };
   }
 
   let recoveryAttempted = false;
   let recoverySuccess = false;
   let recoveryMessage = '';
+  let hostNeeded = false;
+  let hostAttempted = false;
+  let hostStarted = false;
   if (runRecovery) {
     recoveryAttempted = true;
     try {
       recoveryMessage = await tryStartWahaSession(cfg);
       await new Promise((r) => setTimeout(r, 2500));
-      const again = await wahaJson<Array<{ name?: string; status?: string }>>(cfg, '/api/sessions');
-      const againMine = again.find((s) => s.name === sessionName);
-      const againStatus = (againMine?.status ?? '').toUpperCase();
+      const again = await readWahaSessionStatus(cfg);
+      const againStatus = again.status;
       recoverySuccess = againStatus === 'WORKING';
       recoveryMessage += ` → estado ${againStatus || 'desconocido'}`;
       if (recoverySuccess) {
@@ -273,10 +488,14 @@ async function checkWaha(
           recoveryAttempted,
           recoverySuccess: true,
           recoveryMessage,
-          details: { session_status: againStatus },
+          details: {
+            session_status: againStatus,
+            starting_since: null,
+            host_recovery_needed: false,
+          },
         };
       }
-      if (againStatus === 'STARTING' || againStatus === 'SCAN_QR') {
+      if (againStatus === 'SCAN_QR' || againStatus === 'SCAN_QR_CODE') {
         return {
           status: 'degraded',
           latencyMs: Date.now() - t0,
@@ -284,13 +503,30 @@ async function checkWaha(
           recoveryAttempted,
           recoverySuccess: false,
           recoveryMessage,
-          details: { session_status: againStatus },
+          details: {
+            session_status: againStatus,
+            starting_since: null,
+            host_recovery_needed: false,
+          },
         };
       }
+      const host = await tryHostWahaRecover(`tras session.start: ${againStatus}`);
+      hostNeeded = host.needed;
+      hostAttempted = host.attempted;
+      hostStarted = host.started;
+      recoveryMessage += `; ${host.message}`;
+      recoverySuccess = false;
     } catch (e) {
       recoveryMessage = e instanceof Error ? e.message : 'session.start falló';
       recoverySuccess = false;
+      const host = await tryHostWahaRecover(`session.start exception: ${recoveryMessage}`);
+      hostNeeded = host.needed;
+      hostAttempted = host.attempted;
+      hostStarted = host.started;
+      recoveryMessage += `; ${host.message}`;
     }
+  } else {
+    hostNeeded = true;
   }
 
   return {
@@ -300,7 +536,13 @@ async function checkWaha(
     recoveryAttempted,
     recoverySuccess,
     recoveryMessage,
-    details: { session_status: sessionStatus },
+    details: {
+      session_status: sessionStatus,
+      starting_since: null,
+      host_recovery_needed: hostNeeded,
+      host_recovery_attempted: hostAttempted,
+      host_recovery_started: hostStarted,
+    },
   };
 }
 
@@ -822,7 +1064,10 @@ serve(async (req) => {
   const runRecovery = body.run_recovery !== false;
 
   const runners: Array<{ key: ServiceKey; name: string; run: () => Promise<CheckResult> }> = [
-    { key: 'waha', name: 'WAHA / WhatsApp', run: () => checkWaha(waCfg, runRecovery) },
+    { key: 'waha', name: 'WAHA / WhatsApp', run: async () => {
+      const prev = await loadPreviousStatus(admin, 'waha');
+      return checkWaha(waCfg, runRecovery, prev.details);
+    } },
     { key: 'supabase', name: 'Supabase', run: () => checkSupabase(admin) },
     { key: 'meta', name: 'Meta', run: () => checkMeta(admin, companyId) },
     { key: 'issabel', name: 'Issabel', run: () => checkIssabel() },
@@ -864,12 +1109,18 @@ serve(async (req) => {
       wahaUsable = result.status !== 'down';
 
       if (companyId) {
+        const hostAttempted = result.details?.host_recovery_attempted === true;
+        const hostDispatchOk = result.details?.host_recovery_started === true;
+        // No marcar "no recuperable" si acabamos de lanzar pull+recreate en el host.
         const unrecoverable =
           result.status === 'down' &&
-          (!result.details?.public_ok ||
+          alert.notifyDown &&
+          !(hostAttempted && hostDispatchOk) &&
+          (result.details?.host_recovery_needed === true ||
+            result.details?.public_ok === false ||
             (result.recoveryAttempted && result.recoverySuccess === false));
 
-        if (unrecoverable && alert.notifyDown) {
+        if (unrecoverable) {
           details = await notifyWahaEvent(
             admin,
             settings,
