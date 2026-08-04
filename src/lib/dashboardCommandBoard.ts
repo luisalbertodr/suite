@@ -156,12 +156,15 @@ export async function fetchDashboardCommandBoardStats(opts: {
   catalogCompanyId: string;
   fromDate: string;
   toDate: string;
+  /** Filtro Suite Medicina/Estética (líneas por billing_company_id). null = ambas. */
+  billingCompanyId?: string | null;
 }): Promise<CommandBoardStats> {
   const { data, error } = await supabase.rpc('dashboard_command_board_stats', {
     p_company_id: opts.companyId,
     p_catalog_company_id: opts.catalogCompanyId,
     p_from_date: opts.fromDate,
     p_to_date: opts.toDate,
+    p_billing_company_id: opts.billingCompanyId ?? null,
   });
   if (error) throw error;
   const parsed = parseCommandBoardStats(data);

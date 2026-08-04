@@ -115,10 +115,10 @@ async function applyHandlerRow(
   handler: EntityHandler,
   key: string,
   src: DbfRow,
-): Promise<void> {
+): Promise<"applied" | "skipped"> {
   const cola = { id: 0, tabla: handler.tabla, id_reg: key, accion: "UPD" };
   const args = await Promise.resolve(handler.buildArgs(deps.companyId, cola, src, deps));
-  if (!args) return;
+  if (!args) return "skipped";
   const { data, error } = await deps.supabase.schema("dunasoft").rpc(handler.rpc, args);
   if (error) throw new Error(error.message ?? JSON.stringify(error));
   const result = data as Record<string, unknown> | null;
@@ -130,6 +130,7 @@ async function applyHandlerRow(
       await handler.afterApply(deps, cola, src);
     }
   }
+  return "applied";
 }
 
 const lastMtime = new Map<string, number>();
@@ -174,7 +175,10 @@ export async function pollDbfEntityChanges(
     const seeded = enabled.get(tabla) ?? false;
     const prevMtime = lastMtime.get(tabla) ?? 0;
     if (seeded && mtime === prevMtime) continue;
-    lastMtime.set(tabla, mtime);
+    // Solo marcamos mtime como “visto” cuando el lote queda drenado; si hay
+    // pendientes, el siguiente tick debe reescanear aunque el archivo no cambie.
+    const markMtimeSeen = () => lastMtime.set(tabla, mtime);
+    const keepPendingForNextTick = () => lastMtime.delete(tabla);
 
     const fields = FINGERPRINT_FIELDS[tabla] ?? [handler.source.keyField];
     const index = await loadDbfIndexed(deps.styleRoot, handler.source.table, handler.source.keyField);
@@ -205,30 +209,43 @@ export async function pollDbfEntityChanges(
         for (const item of changed.slice(0, batch)) {
           const rawKey = handlerApplyKey(handler, item.row, item.key);
           try {
-            await applyHandlerRow(deps, handler, rawKey, item.row);
+            const outcome = await applyHandlerRow(deps, handler, rawKey, item.row);
             await upsertFingerprints(deps, tabla, [{ style_key: item.key, fingerprint: item.fp }]);
+            if (outcome === "skipped") {
+              deps.log(`dbf-poll ${tabla} key=${item.key} skip (fila inválida)`);
+            }
           } catch (err) {
             deps.log(
               `dbf-poll ${tabla} key=${item.key} error: ${err instanceof Error ? err.message : String(err)}`,
             );
           }
         }
-        if (changed.length > batch) continue;
+        if (changed.length > batch) {
+          keepPendingForNextTick();
+          continue;
+        }
       }
       await upsertFingerprints(deps, tabla, allEntries);
       await markBaselineSeeded(deps, tabla);
+      markMtimeSeen();
       deps.log(`dbf-poll ${tabla}: baseline completo (${allEntries.length} huellas)`);
       continue;
     }
 
-    if (changed.length === 0) continue;
+    if (changed.length === 0) {
+      markMtimeSeen();
+      continue;
+    }
 
     deps.log(`dbf-poll ${tabla}: ${changed.length} cambio(s) detectado(s)`);
     for (const item of changed.slice(0, batch)) {
       const rawKey = handlerApplyKey(handler, item.row, item.key);
       try {
-        await applyHandlerRow(deps, handler, rawKey, item.row);
+        const outcome = await applyHandlerRow(deps, handler, rawKey, item.row);
         await upsertFingerprints(deps, tabla, [{ style_key: item.key, fingerprint: item.fp }]);
+        if (outcome === "skipped") {
+          deps.log(`dbf-poll ${tabla} key=${item.key} skip (fila inválida)`);
+        }
       } catch (err) {
         deps.log(
           `dbf-poll ${tabla} key=${item.key} error: ${err instanceof Error ? err.message : String(err)}`,
@@ -237,6 +254,9 @@ export async function pollDbfEntityChanges(
     }
     if (changed.length > batch) {
       deps.log(`dbf-poll ${tabla}: quedan ${changed.length - batch} pendientes (siguiente tick)`);
+      keepPendingForNextTick();
+    } else {
+      markMtimeSeen();
     }
   }
 }

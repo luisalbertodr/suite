@@ -1,4 +1,5 @@
 import type { CommandBoardStats } from '@/lib/dashboardCommandBoard';
+import type { BillingEntityView } from '@/lib/salesRevenue';
 
 function eur(value: number): string {
   return `€${value.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -71,11 +72,25 @@ function SideBlock({
 
 type Props = {
   data: CommandBoardStats;
+  billingView?: BillingEntityView;
 };
 
-export function DashboardCommandBoard({ data }: Props) {
+export function DashboardCommandBoard({ data, billingView = 'both' }: Props) {
   const { sales, clients, reservations, cash, purchases, profit } = data;
   const employeeSales = sales.employeeSales ?? [];
+  const entityLabel =
+    billingView === 'medicina'
+      ? 'Medicina'
+      : billingView === 'estetica'
+        ? 'Estética'
+        : null;
+  const profitTitle = entityLabel ? `Beneficios (${entityLabel})` : 'Beneficios';
+  const profitLabel = entityLabel
+    ? `Beneficio Neto ${entityLabel} (Ventas − Compras)`
+    : 'Beneficio Neto (Ventas − Compras)';
+  const salesHint = entityLabel
+    ? `Importes por líneas Suite → ${entityLabel} (familias/artículos).`
+    : 'Ambas empresas (split Suite por línea en filtro Medicina/Estética).';
 
   const salesRows: TripleRow[] = [
     {
@@ -230,10 +245,13 @@ export function DashboardCommandBoard({ data }: Props) {
             ]}
           />
           <SideBlock
-            title="Beneficios"
-            rows={[{ label: 'Beneficio Neto (Ventas − Compras)', value: eur(profit.net) }]}
+            title={profitTitle}
+            rows={[{ label: profitLabel, value: eur(profit.net) }]}
           />
         </div>
+        {entityLabel ? (
+          <p className="text-xs text-muted-foreground">{salesHint}</p>
+        ) : null}
       </div>
 
       <div className="rounded-xl border bg-card p-5 shadow-sm">

@@ -98,5 +98,37 @@ export const useWhatsappChatLink = () => {
     },
   });
 
-  return { search, setLink, ensureChat };
+  const createMarketingLead = useMutation({
+    mutationFn: async (input: {
+      chat_id: string;
+      chat_display_name?: string | null;
+      customer_id?: string | null;
+      campaign?: string | null;
+      form_name?: string | null;
+      source?: string | null;
+    }) => {
+      return invokeWhatsappProxy<{
+        ok: boolean;
+        created: boolean;
+        marketing_lead_id: string;
+        source?: string | null;
+        campaign?: string | null;
+        form_name?: string | null;
+      }>({
+        action: 'chat.create_marketing_lead',
+        ...input,
+      });
+    },
+    onSuccess: (data, input) => {
+      if (!companyId || !data.marketing_lead_id) return;
+      patchChatInCache(queryClient, companyId, input.chat_id, {
+        marketing_lead_id: data.marketing_lead_id,
+      });
+      queryClient.invalidateQueries({ queryKey: ['whatsapp-chats', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['whatsapp-link-leads'] });
+      queryClient.invalidateQueries({ queryKey: ['marketing-leads'] });
+    },
+  });
+
+  return { search, setLink, ensureChat, createMarketingLead };
 };

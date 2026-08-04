@@ -16,6 +16,10 @@ import { enqueueMarketingLeadForInitialWhatsapp } from '../_shared/marketingWhat
 import { loadAutomationSettings } from '../_shared/whatsappAutomationDispatch.ts';
 import { isWithinAutomationHours } from '../_shared/whatsappAutomationHours.ts';
 import { emitLeadConversionFromRow } from '../_shared/metaConversionEmit.ts';
+import {
+  findMarketingAppointmentStageId,
+  findMarketingIntakeStageId,
+} from '../_shared/marketingStageRoles.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -890,28 +894,16 @@ serve(async (req) => {
 
     const { data: stages, error: stagesErr } = await admin
       .from('marketing_lead_stages')
-      .select('id, name, is_default_intake, position')
+      .select('id, name, is_default_intake, is_appointment_intake, position')
       .eq('company_id', companyId)
       .order('position', { ascending: true });
     if (stagesErr) throw stagesErr;
 
-    const stageByName = new Map<string, string>();
-    for (const s of stages ?? []) {
-      if (s.name) stageByName.set(s.name.toLowerCase(), s.id);
-    }
-    // Para los leads nuevos priorizamos siempre la etapa llamada "Nuevo lead".
-    // Así evitamos que una configuración antigua con `is_default_intake` mal marcada
-    // nos mande los leads a otra columna (p. ej. "¡Llamar por la tarde!").
-    const intakeStageId =
-      stageByName.get('nuevo lead') ??
-      stageByName.get('nuevo formulario') ??
-      (stages ?? []).find((s) => s.is_default_intake)?.id ??
-      (stages ?? [])[0]?.id ??
-      null;
+    const stageRows = stages ?? [];
+    // Flag primero; nombres canónicos solo como fallback legacy.
+    const intakeStageId = findMarketingIntakeStageId(stageRows);
     const appointmentStageId =
-      stageByName.get('formulario+agenda ficticia') ??
-      stageByName.get('formulario + agenda ficticia') ??
-      intakeStageId;
+      findMarketingAppointmentStageId(stageRows) ?? intakeStageId;
 
     const results: SyncFormResult[] = [];
     let totalInserted = 0;

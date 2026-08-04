@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { RefreshCw, MoreVertical, UserCheck, UserPlus, Link as LinkIcon, Megaphone, ArrowLeft } from 'lucide-react';
+import { RefreshCw, MoreVertical, UserCheck, UserPlus, Link as LinkIcon, Megaphone, ArrowLeft, Loader2 } from 'lucide-react';
 import { WhatsappAvatar } from './WhatsappAvatar';
 import { WhatsappMessageBubble } from './WhatsappMessageBubble';
 import { WhatsappMessageInput } from './WhatsappMessageInput';
@@ -29,6 +29,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
 import { useWhatsappAutomationSettings } from '@/hooks/useWhatsappAutomationSettings';
+import { useWhatsappChatLink } from '@/hooks/useWhatsappChatLink';
 import {
   firstUnreadMessageId,
   groupMessagesByDay,
@@ -93,6 +94,7 @@ export const WhatsappChatView: React.FC<Props> = ({
   const { toast } = useToast();
   const { companyId, loading: companyLoading } = useWhatsappCompanyId();
   const { data: waAutomationSettings } = useWhatsappAutomationSettings();
+  const { createMarketingLead } = useWhatsappChatLink();
   const relatedChatIds = useMemo(() => {
     const ids = new Set<string>();
     for (const c of chats) {
@@ -384,17 +386,64 @@ export const WhatsappChatView: React.FC<Props> = ({
                 <span className="inline-flex items-center gap-0.5 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-medium text-sky-700 dark:bg-sky-950 dark:text-sky-300">
                   <UserPlus className="h-3 w-3" /> {leadName}
                 </span>
-              ) : !isGroup && !isCustomer && onCreateCustomer ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-6 px-2 text-[10px] text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300"
-                  onClick={onCreateCustomer}
-                >
-                  <UserPlus className="mr-1 h-3 w-3" />
-                  Crear cliente
-                </Button>
+              ) : !isGroup && !isCustomer ? (
+                <span className="inline-flex flex-wrap items-center gap-1">
+                  {onCreateCustomer ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-6 px-2 text-[10px] text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300"
+                      onClick={onCreateCustomer}
+                    >
+                      <UserPlus className="mr-1 h-3 w-3" />
+                      Crear cliente
+                    </Button>
+                  ) : null}
+                  {!isSystemChatJid(chat.chat_id) ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-6 px-2 text-[10px] text-sky-700 hover:bg-sky-50 dark:text-sky-300"
+                      disabled={createMarketingLead.isPending}
+                      onClick={() => {
+                        void createMarketingLead
+                          .mutateAsync({
+                            chat_id: chat.chat_id,
+                            chat_display_name: chat.name,
+                            customer_id: chat.customer_id,
+                          })
+                          .then((res) => {
+                            toast({
+                              title: res.created
+                                ? 'Lead creado en Marketing'
+                                : 'Lead vinculado',
+                              description: res.campaign
+                                ? `Campaña: ${res.campaign}`
+                                : undefined,
+                            });
+                          })
+                          .catch((e) => {
+                            const msg =
+                              e instanceof Error ? e.message : 'No se pudo crear el lead';
+                            toast({
+                              title: 'Error',
+                              description: msg,
+                              variant: 'destructive',
+                            });
+                          });
+                      }}
+                    >
+                      {createMarketingLead.isPending ? (
+                        <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                      ) : (
+                        <Megaphone className="mr-1 h-3 w-3" />
+                      )}
+                      Crear lead
+                    </Button>
+                  ) : null}
+                </span>
               ) : null}
             </div>
           </div>

@@ -11,6 +11,7 @@ import {
 } from './whatsappAutomationDispatch.ts';
 import { providerSendText } from './whatsappProviderClient.ts';
 import { resolveWhatsappCredentials, type WhatsappProviderConfig } from './whatsappProviderTypes.ts';
+import { loadMarketingIntakeStageId } from './marketingIntakeStage.ts';
 
 export type StripeConfigRow = {
   company_id: string;
@@ -98,23 +99,7 @@ async function getIntakeStageId(
   admin: SupabaseClient,
   companyId: string,
 ): Promise<string | null> {
-  const { data: nuevoLead } = await admin
-    .from('marketing_lead_stages')
-    .select('id')
-    .eq('company_id', companyId)
-    .ilike('name', 'nuevo lead')
-    .maybeSingle();
-  if (nuevoLead?.id) return nuevoLead.id as string;
-
-  const { data: intake } = await admin
-    .from('marketing_lead_stages')
-    .select('id')
-    .eq('company_id', companyId)
-    .eq('is_default_intake', true)
-    .order('position', { ascending: true })
-    .limit(1)
-    .maybeSingle();
-  return (intake?.id as string | undefined) ?? null;
+  return loadMarketingIntakeStageId(admin, companyId);
 }
 
 type LeadDepositRow = WhatsappTemplateContext & {
@@ -122,6 +107,32 @@ type LeadDepositRow = WhatsappTemplateContext & {
   meta_form_id: string | null;
   stripe_deposit_paid_at: string | null;
   field_data?: unknown;
+};
+
+export type ResolveWhatsappMarketingLeadOptions = {
+  /** Origen del lead al crearlo. Por defecto `whatsapp`. */
+  source?: string | null;
+  campaign?: string | null;
+  form_name?: string | null;
+  meta_form_id?: string | null;
+  ctwa_campaign_id?: string | null;
+  tags?: string[] | null;
+  field_data?: unknown;
+  external_id?: string | null;
+  external_created_at?: string | null;
+  /**
+   * Si true y ya hay cliente vinculado/por teléfono, no crea lead nuevo
+   * (devuelve created=false sin lead). Útil para auto-promoción CTWA.
+   */
+  skipIfCustomer?: boolean;
+  /** Si true, no lanza cuando no hay lead y skipIfCustomer aplica. */
+  allowMissing?: boolean;
+};
+
+export type ResolveWhatsappMarketingLeadResult = {
+  lead: LeadDepositRow | null;
+  created: boolean;
+  skippedReason?: 'customer' | 'no_phone' | 'test_chat' | 'group';
 };
 
 /** Busca o crea lead de marketing para un chat WhatsApp 1:1. */
@@ -132,12 +143,36 @@ export async function resolveMarketingLeadForWhatsappChat(
   linkedLeadId?: string | null,
   chatDisplayName?: string | null,
   customerId?: string | null,
-): Promise<{ lead: LeadDepositRow; created: boolean }> {
+  options?: ResolveWhatsappMarketingLeadOptions & { allowMissing?: false; skipIfCustomer?: false },
+): Promise<{ lead: LeadDepositRow; created: boolean }>;
+export async function resolveMarketingLeadForWhatsappChat(
+  admin: SupabaseClient,
+  companyId: string,
+  chatId: string,
+  linkedLeadId?: string | null,
+  chatDisplayName?: string | null,
+  customerId?: string | null,
+  options?: ResolveWhatsappMarketingLeadOptions,
+): Promise<ResolveWhatsappMarketingLeadResult>;
+export async function resolveMarketingLeadForWhatsappChat(
+  admin: SupabaseClient,
+  companyId: string,
+  chatId: string,
+  linkedLeadId?: string | null,
+  chatDisplayName?: string | null,
+  customerId?: string | null,
+  options?: ResolveWhatsappMarketingLeadOptions,
+): Promise<ResolveWhatsappMarketingLeadResult> {
   const leadSelect =
     'id, phone, first_name, last_name, email, campaign, form_name, appointment_at, appointment_label, source, field_data, meta_form_id, stripe_deposit_paid_at, customer_id';
 
   const settings = await loadAutomationSettings(admin, companyId);
   const isTestChat = isWhatsappTestChatId(chatId, settings);
+
+  if (/@g\.us$/i.test(chatId)) {
+    if (options?.allowMissing) return { lead: null, created: false, skippedReason: 'group' };
+    throw new Error('No se puede crear un lead desde un grupo de WhatsApp');
+  }
 
   const phone = phoneFromWhatsappChatId(chatId);
   const phoneN9 = phone ? phoneDigitsLast9(phone) : null;
@@ -169,6 +204,9 @@ export async function resolveMarketingLeadForWhatsappChat(
   }
 
   if (isTestChat) {
+    if (options?.allowMissing) {
+      return { lead: null, created: false, skippedReason: 'test_chat' };
+    }
     throw new Error(
       'Este chat es el número de prueba de WhatsApp. Abre el lead en Marketing o usa el chat con el teléfono real del cliente.',
     );
@@ -197,10 +235,27 @@ export async function resolveMarketingLeadForWhatsappChat(
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
-    if (leadByPhone) return { lead: leadByPhone as LeadDepositRow, created: false };
+    if (leadByPhone) {
+      await admin
+        .from('whatsapp_chats')
+        .update({
+          marketing_lead_id: leadByPhone.id,
+          ...(effectiveCustomerId ? { customer_id: effectiveCustomerId } : {}),
+        })
+        .eq('company_id', companyId)
+        .eq('chat_id', chatId);
+      return { lead: leadByPhone as LeadDepositRow, created: false };
+    }
+  }
+
+  if (options?.skipIfCustomer && effectiveCustomerId) {
+    return { lead: null, created: false, skippedReason: 'customer' };
   }
 
   if (!phone) {
+    if (options?.allowMissing) {
+      return { lead: null, created: false, skippedReason: 'no_phone' };
+    }
     throw new Error('Este chat no tiene un número de teléfono válido');
   }
 
@@ -230,21 +285,83 @@ export async function resolveMarketingLeadForWhatsappChat(
   }
 
   const stageId = await getIntakeStageId(admin, companyId);
+  const source = (options?.source?.trim() || 'whatsapp').toLowerCase();
+  const tags = Array.isArray(options?.tags)
+    ? options!.tags!.map((t) => String(t).trim()).filter(Boolean)
+    : source === 'ctwa'
+      ? ['CTWA']
+      : ['WhatsApp'];
+
+  const insertRow: Record<string, unknown> = {
+    company_id: companyId,
+    phone,
+    first_name: firstName,
+    last_name: lastName,
+    source,
+    stage_id: stageId,
+    customer_id: effectiveCustomerId,
+    tags,
+  };
+  if (options?.campaign?.trim()) insertRow.campaign = options.campaign.trim();
+  else if (source === 'ctwa') insertRow.campaign = 'WhatsApp Meta (CTWA)';
+  else if (source === 'whatsapp') insertRow.campaign = 'WhatsApp entrante';
+
+  if (options?.form_name?.trim()) insertRow.form_name = options.form_name.trim();
+  else if (source === 'ctwa') insertRow.form_name = 'Click to WhatsApp';
+
+  if (options?.meta_form_id?.trim()) insertRow.meta_form_id = options.meta_form_id.trim();
+  if (options?.ctwa_campaign_id?.trim()) insertRow.ctwa_campaign_id = options.ctwa_campaign_id.trim();
+  if (options?.external_id?.trim()) insertRow.external_id = options.external_id.trim();
+  if (options?.external_created_at) insertRow.external_created_at = options.external_created_at;
+  if (options?.field_data != null) insertRow.field_data = options.field_data;
 
   const { data: inserted, error } = await admin
     .from('marketing_leads')
-    .insert({
-      company_id: companyId,
-      phone,
-      first_name: firstName,
-      last_name: lastName,
-      source: 'whatsapp',
-      stage_id: stageId,
-      customer_id: effectiveCustomerId,
-    })
+    .insert(insertRow)
     .select(leadSelect)
     .single();
-  if (error) throw error;
+  if (error) {
+    // Colisión por teléfono o external_id: reutilizar el lead existente.
+    if (phoneN9) {
+      const { data: existing } = await admin
+        .from('marketing_leads')
+        .select(leadSelect)
+        .eq('company_id', companyId)
+        .eq('phone_norm', phoneN9)
+        .is('archived_at', null)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (existing) {
+        await admin
+          .from('whatsapp_chats')
+          .update({
+            marketing_lead_id: existing.id,
+            ...(effectiveCustomerId ? { customer_id: effectiveCustomerId } : {}),
+          })
+          .eq('company_id', companyId)
+          .eq('chat_id', chatId);
+        return { lead: existing as LeadDepositRow, created: false };
+      }
+    }
+    if (options?.external_id?.trim()) {
+      const { data: byExt } = await admin
+        .from('marketing_leads')
+        .select(leadSelect)
+        .eq('company_id', companyId)
+        .eq('external_id', options.external_id.trim())
+        .maybeSingle();
+      if (byExt) {
+        await admin
+          .from('whatsapp_chats')
+          .update({ marketing_lead_id: byExt.id })
+          .eq('company_id', companyId)
+          .eq('chat_id', chatId);
+        return { lead: byExt as LeadDepositRow, created: false };
+      }
+    }
+    throw error;
+  }
 
   const chatUpdate: { marketing_lead_id: string; customer_id?: string } = {
     marketing_lead_id: inserted.id,

@@ -210,7 +210,7 @@ export function isLeadEligibleForWhatsappQueue(
   return true;
 }
 
-const QUEUE_CANCEL_NOT_INTAKE = 'Lead fuera de la etapa «Nuevo lead»';
+const QUEUE_CANCEL_NOT_INTAKE = 'Lead fuera de la etapa de entrada';
 
 async function pruneQueueNotInIntakeStage(
   admin: SupabaseClient,
@@ -688,7 +688,7 @@ export async function sendQueueLeadNow(
   const s = normalizeQueueSettings(settings);
   const intakeStageId = await loadMarketingIntakeStageId(admin, companyId);
   if (!intakeStageId) {
-    return { ok: false, send_error: 'Etapa «Nuevo lead» no configurada' };
+    return { ok: false, send_error: 'Etapa de entrada no configurada' };
   }
 
   const { data: queueRow, error: qErr } = await admin

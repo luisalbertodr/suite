@@ -267,12 +267,27 @@ export const Marketing: React.FC = () => {
   }, [metaConfig, metaForms, syncNow, toastMetaSyncResult, toast]);
 
   const matchLeadToCustomer = useCallback(
-    (lead: Pick<MarketingLead, 'id' | 'phone' | 'email' | 'customer_id'>) => {
-      if (lead.customer_id) {
-        const linked = customerIndex.customers.find((c) => c.id === lead.customer_id);
+    (criteria: {
+      phone?: string | null;
+      email?: string | null;
+      name?: string | null;
+      customer_id?: string | null;
+      first_name?: string | null;
+      last_name?: string | null;
+    }) => {
+      if (criteria.customer_id) {
+        const linked = customerIndex.customers.find((c) => c.id === criteria.customer_id);
         if (linked) return linked;
       }
-      return customerIndex.match({ phone: lead.phone, email: lead.email });
+      const name =
+        criteria.name?.trim() ||
+        [criteria.first_name, criteria.last_name].filter(Boolean).join(' ').trim() ||
+        null;
+      return customerIndex.match({
+        phone: criteria.phone,
+        email: criteria.email,
+        name,
+      });
     },
     [customerIndex],
   );

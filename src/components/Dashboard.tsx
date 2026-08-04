@@ -50,7 +50,22 @@ import {
   yearBillingDataKey,
   yearBillingLegend,
 } from '@/lib/salesRevenue';
+import {
+  ESTETICA_COMPANY_ID,
+  MEDICINA_COMPANY_ID,
+} from '@/lib/workCenterBilling';
+import {
+  assignedCompanyIds,
+  defaultBillingViewForAssigned,
+  resolveAllowedBillingViews,
+} from '@/lib/billingEntityAccess';
+import { usePermissions } from '@/hooks/usePermissions';
 
+function billingCompanyIdForView(view: BillingEntityView): string | null {
+  if (view === 'medicina') return MEDICINA_COMPANY_ID;
+  if (view === 'estetica') return ESTETICA_COMPANY_ID;
+  return null;
+}
 const YEAR_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#ef4444'];
 
 function yearColorForIndex(idx: number): string {
@@ -279,9 +294,6 @@ export const Dashboard: React.FC = () => {
     return years;
   }, [nowYear]);
   const [selectedYears, setSelectedYears] = useState<number[]>([nowYear, nowYear - 1]);
-  const [billingView, setBillingView] = useState<BillingEntityView>('both');
-  const [comparisonPreset, setComparisonPreset] = useState<ComparisonPeriodPreset>('days15');
-  const [comparisonMonth, setComparisonMonth] = useState(new Date().getMonth() + 1);
   const [selectedFamilies, setSelectedFamilies] = useState<string[] | null>(null);
   const [activityTypeFilter, setActivityTypeFilter] = useState<DashboardRecentActivityFilter>('all');
   const defaultRange = useMemo(() => currentMonthRange(), []);
@@ -289,18 +301,61 @@ export const Dashboard: React.FC = () => {
   const [boardToDate, setBoardToDate] = useState(defaultRange.to);
   const boardRangeValid = Boolean(boardFromDate && boardToDate && boardFromDate <= boardToDate);
 
-  const { companyId, loading: companyLoading } = useCompanyFilter();
+  const { companyId, accessibleCompanies, loading: companyLoading } = useCompanyFilter();
   const { operationalCompanyId, catalogHostCompanyId, loading: wcLoading } = useWorkCenter();
+  const { hasPermission, loading: permissionsLoading } = usePermissions();
+  const canSeeReports = hasPermission('reports', 'read');
+  const canSeeStatistics = hasPermission('statistics', 'read');
+  const canSeeRecentActivity = hasPermission('recent_activity', 'read');
+  const canSeeResumen = canSeeStatistics || canSeeRecentActivity;
+  const dashboardTabs = useMemo(() => {
+    const tabs: Array<'resumen' | 'reportes'> = [];
+    if (canSeeResumen) tabs.push('resumen');
+    if (canSeeReports) tabs.push('reportes');
+    return tabs;
+  }, [canSeeResumen, canSeeReports]);
+  const [activeDashboardTab, setActiveDashboardTab] = useState<'resumen' | 'reportes'>('resumen');
+
+  useEffect(() => {
+    if (permissionsLoading || dashboardTabs.length === 0) return;
+    setActiveDashboardTab((prev) => (dashboardTabs.includes(prev) ? prev : dashboardTabs[0]!));
+  }, [dashboardTabs, permissionsLoading]);
+
   const opCompanyId = operationalCompanyId ?? companyId;
   const catalogCompanyId = catalogHostCompanyId ?? companyId;
-  const commandBoardReady = Boolean(opCompanyId && catalogCompanyId && !companyLoading && !wcLoading);
+  const commandBoardReady = Boolean(
+    opCompanyId && catalogCompanyId && !companyLoading && !wcLoading && canSeeStatistics,
+  );
 
+  const assignedIds = useMemo(
+    () => assignedCompanyIds(accessibleCompanies),
+    [accessibleCompanies],
+  );
+  const allowedBillingViews = useMemo(
+    () => resolveAllowedBillingViews(assignedIds),
+    [assignedIds],
+  );
+  const [billingView, setBillingView] = useState<BillingEntityView>('both');
+  const [comparisonPreset, setComparisonPreset] = useState<ComparisonPeriodPreset>('days15');
+  const [comparisonMonth, setComparisonMonth] = useState(new Date().getMonth() + 1);
+
+  useEffect(() => {
+    if (companyLoading || assignedIds.length === 0) return;
+    setBillingView((prev) => {
+      const allowed = resolveAllowedBillingViews(assignedIds);
+      if (allowed.length === 1) return allowed[0];
+      return allowed.includes(prev) ? prev : defaultBillingViewForAssigned(assignedIds);
+    });
+  }, [assignedIds, companyLoading]);
+
+  const commandBoardBillingCompanyId = billingCompanyIdForView(billingView);
   const commandBoardQueryKey = [
     'dashboard-command-board',
     opCompanyId,
     catalogCompanyId,
     boardFromDate,
     boardToDate,
+    commandBoardBillingCompanyId ?? 'both',
   ] as const;
 
   const commandBoardCacheOptions = useMemo(() => {
@@ -329,8 +384,9 @@ export const Dashboard: React.FC = () => {
         catalogCompanyId: catalogCompanyId!,
         fromDate: boardFromDate,
         toDate: boardToDate,
+        billingCompanyId: commandBoardBillingCompanyId,
       }),
-    enabled: commandBoardReady && boardRangeValid,
+    enabled: commandBoardReady && boardRangeValid && canSeeStatistics,
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
     refetchOnMount: 'always',
@@ -420,10 +476,11 @@ export const Dashboard: React.FC = () => {
     </div>
   );
 
-  const entitySelector = isMultiEntity ? (
+  const entitySelector =
+    isMultiEntity && allowedBillingViews.length > 1 ? (
     <div className="flex flex-wrap items-center gap-1.5">
       <span className="text-xs text-muted-foreground mr-1">Empresa:</span>
-      {BILLING_VIEW_OPTIONS.map(({ id, label }) => (
+      {BILLING_VIEW_OPTIONS.filter((o) => allowedBillingViews.includes(o.id)).map(({ id, label }) => (
         <button
           key={id}
           type="button"
@@ -541,26 +598,38 @@ export const Dashboard: React.FC = () => {
           Actualizando…
         </div>
       ) : null}
-      <Tabs defaultValue="resumen" className="space-y-4">
+      <Tabs
+        value={activeDashboardTab}
+        onValueChange={(value) => setActiveDashboardTab(value as 'resumen' | 'reportes')}
+        className="space-y-4"
+      >
         <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
           <div className="flex flex-wrap items-center gap-2">
-            <TabsList className="h-9">
-              <TabsTrigger value="resumen" className="text-sm px-3">
-                <TrendingUp className="w-4 h-4 mr-1.5" />
-                Resumen
-              </TabsTrigger>
-              <TabsTrigger value="reportes" className="text-sm px-3">
-                <BarChart3 className="w-4 h-4 mr-1.5" />
-                Reportes
-              </TabsTrigger>
-            </TabsList>
+            {dashboardTabs.length > 1 ? (
+              <TabsList className="h-9">
+                {canSeeResumen ? (
+                  <TabsTrigger value="resumen" className="text-sm px-3">
+                    <TrendingUp className="w-4 h-4 mr-1.5" />
+                    Resumen
+                  </TabsTrigger>
+                ) : null}
+                {canSeeReports ? (
+                  <TabsTrigger value="reportes" className="text-sm px-3">
+                    <BarChart3 className="w-4 h-4 mr-1.5" />
+                    Reportes
+                  </TabsTrigger>
+                ) : null}
+              </TabsList>
+            ) : null}
             <span className="text-xs text-muted-foreground hidden sm:block tabular-nums">
               {new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
             </span>
           </div>
         </div>
 
+        {canSeeResumen ? (
         <TabsContent value="resumen" className="space-y-6 mt-0">
+          {canSeeStatistics ? (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             {statsCards.map((stat, i) => {
               const Icon = stat.icon;
@@ -582,7 +651,9 @@ export const Dashboard: React.FC = () => {
               );
             })}
           </div>
+          ) : null}
 
+          {canSeeStatistics ? (
           <div className="rounded-xl border bg-card p-5 shadow-lg">
             <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
               <div>
@@ -642,12 +713,18 @@ export const Dashboard: React.FC = () => {
                 </Button>
               </div>
             ) : commandBoard ? (
-              <DashboardCommandBoard data={commandBoard} />
+              <DashboardCommandBoard
+                data={commandBoard}
+                billingView={billingView}
+              />
             ) : (
               <p className="text-sm text-muted-foreground">No hay datos para el periodo seleccionado.</p>
             )}
           </div>
+          ) : null}
 
+          {canSeeStatistics ? (
+          <>
           <div className="flex flex-wrap items-center justify-end gap-3">
             {chartControls}
           </div>
@@ -792,7 +869,10 @@ export const Dashboard: React.FC = () => {
               </p>
             </div>
           </div>
+          </>
+          ) : null}
 
+          {canSeeRecentActivity ? (
           <div className="bg-card rounded-xl shadow-lg p-6 border">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div className="min-w-0">
@@ -854,11 +934,21 @@ export const Dashboard: React.FC = () => {
               )}
             </div>
           </div>
+          ) : null}
         </TabsContent>
+        ) : null}
 
+        {canSeeReports ? (
         <TabsContent value="reportes" className="mt-0">
           <Reportes embedded />
         </TabsContent>
+        ) : null}
+
+        {!permissionsLoading && dashboardTabs.length === 0 ? (
+          <div className="rounded-xl border bg-card p-8 text-center text-sm text-muted-foreground">
+            No tienes permisos para ver reportes, estadísticas ni actividad reciente.
+          </div>
+        ) : null}
       </Tabs>
     </div>
   );

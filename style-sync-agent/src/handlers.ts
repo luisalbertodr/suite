@@ -319,7 +319,11 @@ const facturasHandler: EntityHandler = {
   async buildArgs(companyId, cola, src, deps) {
     if (!src) return null;
     const numfac = dbfStr(src, "numfac");
-    if (!numfac) return null;
+    const ejefac = dbfStr(src, "ejefac");
+    if (!numfac || !ejefac) return null;
+    // Filas fantasma del DBF (ejefac/fecfac vacíos) no deben bloquear el poll ni ir a Postgres.
+    const fecha = dbfDateIso(src, "fecfac");
+    if (!fecha && !isDelete(cola.accion)) return null;
     const accion = isDelete(cola.accion) ? "DELETE" : "UPSERT";
     const serie = dbfStr(src, "serie") || dbfStr(src, "serfac");
     return {
@@ -328,13 +332,13 @@ const facturasHandler: EntityHandler = {
       p_numfac: numfac,
       p_serie: serie,
       p_codcli: dbfStr(src, "codcli"),
-      p_fecha: dbfDateIso(src, "fecfac"),
+      p_fecha: fecha,
       p_baseimp: dbfNum(src, "totimpbas") || dbfNum(src, "baseimp"),
       p_iva: dbfNum(src, "totimpiva") || dbfNum(src, "iva"),
       p_total: dbfNum(src, "totfac") || dbfNum(src, "total"),
       p_lineas: await faclinJson(deps, src),
       p_sync_version: syncVersionFrom(cola, src),
-      p_ejefac: dbfStr(src, "ejefac"),
+      p_ejefac: ejefac,
     };
   },
   toInboundJson(row) {

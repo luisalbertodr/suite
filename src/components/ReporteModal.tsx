@@ -78,17 +78,17 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
     return {};
   });
   const { companyId, loading: companyLoading } = useCompanyFilter();
-  const { isMultiEntity, billingCompanies, companyLabels, operationalCompanyId } = useWorkCenter();
+  const { isMultiEntity, assignedBillingCompanies, companyLabels, operationalCompanyId } = useWorkCenter();
   const catalogCompanyId = operationalCompanyId ?? companyId;
 
   const billingCompanyIds = useMemo(
     () => resolveBillingScope(
       companyId,
-      billingCompanies,
+      assignedBillingCompanies,
       isMultiEntity,
       filters.empresaEmisora as string | undefined,
     ),
-    [companyId, billingCompanies, isMultiEntity, filters.empresaEmisora],
+    [companyId, assignedBillingCompanies, isMultiEntity, filters.empresaEmisora],
   );
 
   useEffect(() => {
@@ -309,7 +309,7 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
         );
 
       case "empresa-emisora":
-        if (!isMultiEntity || billingCompanies.length <= 1) return null;
+        if (!isMultiEntity || assignedBillingCompanies.length <= 1) return null;
         return (
           <div className="space-y-2">
             <Label>Empresa emisora</Label>
@@ -328,8 +328,8 @@ export const ReporteModal: React.FC<ReporteModalProps> = ({ report, onClose }) =
                 <SelectValue placeholder="Todas las empresas" />
               </SelectTrigger>
               <SelectContent className={REPORT_SELECT_CONTENT_CLASS}>
-                <SelectItem value="all">Todas (centro laboral)</SelectItem>
-                {billingCompanies.map((c) => (
+                <SelectItem value="all">Todas (asignadas)</SelectItem>
+                {assignedBillingCompanies.map((c) => (
                   <SelectItem key={c.id} value={c.id}>
                     {companyLabels.get(c.id) ?? c.name}
                   </SelectItem>

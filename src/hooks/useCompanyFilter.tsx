@@ -86,14 +86,15 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
 
   const resolveActiveCompany = useCallback(
     (companies: AccessibleCompany[], preferredId?: string | null): string | null => {
-      if (preferredId && companies.some((c) => c.id === preferredId)) {
+      const assignedOnly = companies.filter((c) => c.is_assigned);
+      const pool = assignedOnly.length > 0 ? assignedOnly : companies;
+
+      if (preferredId && pool.some((c) => c.id === preferredId)) {
         return preferredId;
       }
-      const active = companies.find((c) => c.is_active);
+      const active = pool.find((c) => c.is_active);
       if (active) return active.id;
-      const assigned = companies.find((c) => c.is_assigned);
-      if (assigned) return assigned.id;
-      return companies[0]?.id ?? null;
+      return pool[0]?.id ?? null;
     },
     [],
   );
@@ -226,6 +227,12 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     async (nextCompanyId: string): Promise<boolean> => {
       if (!user || nextCompanyId === companyId) return true;
 
+      const target = accessibleCompanies.find((c) => c.id === nextCompanyId);
+      if (target && !target.is_assigned) {
+        console.error('switchCompany blocked: company not assigned', nextCompanyId);
+        return false;
+      }
+
       setSwitching(true);
       try {
         const { error } = await supabase.rpc('set_active_company_id', {
@@ -254,7 +261,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
         setSwitching(false);
       }
     },
-    [user, companyId, persistActiveCompany, loadAccessibleCompanies, queryClient],
+    [user, companyId, accessibleCompanies, persistActiveCompany, loadAccessibleCompanies, queryClient],
   );
 
   return (
