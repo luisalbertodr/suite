@@ -122,12 +122,16 @@ const MARKETING_NOISE_PATTERNS = [
   /medicina\s*est[eé]tica/i,
 ];
 
+const CHANNEL_ORIGIN_LABELS = new Set(['whatsapp', 'ctwa', 'meta', 'facebook', 'instagram']);
+
 export const isMarketingNoiseText = (
   value: unknown,
   lead?: Pick<MarketingLead, 'form_name' | 'campaign' | 'source' | 'appointment_label' | 'tags'>,
 ): boolean => {
   const v = normalizeNoise(String(value ?? ''));
   if (!v) return false;
+  // Etiquetas de canal (WhatsApp / CTWA / Meta) no son ruido: se muestran en tarjeta.
+  if (CHANNEL_ORIGIN_LABELS.has(v)) return false;
   if (MARKETING_NOISE_PATTERNS.some((re) => re.test(v))) return true;
   if (lead) {
     for (const candidate of [
@@ -138,11 +142,13 @@ export const isMarketingNoiseText = (
     ]) {
       const c = normalizeNoise(String(candidate ?? ''));
       if (!c) continue;
+      if (CHANNEL_ORIGIN_LABELS.has(c) && v === c) continue;
       if (v === c || v.includes(c) || c.includes(v)) return true;
     }
     if (Array.isArray(lead.tags)) {
       for (const tag of lead.tags) {
         const t = normalizeNoise(String(tag ?? ''));
+        if (!t || CHANNEL_ORIGIN_LABELS.has(t)) continue;
         if (t && (v === t || v.includes(t) || t.includes(v))) return true;
       }
     }
