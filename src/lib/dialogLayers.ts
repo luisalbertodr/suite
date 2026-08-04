@@ -16,15 +16,21 @@ export const DOCK_BAR_Z = 'z-[300]';
 /** Franja inferior libre (dock fijo bottom-4 + altura ~4.5rem). */
 export const DOCK_CLEARANCE_BOTTOM = 'bottom-[6.5rem]';
 
+/**
+ * Contenedor full-viewport que deja libre el dock y centra el popup.
+ * Usar en Dialog/AlertDialog y en modales custom `fixed inset-0`.
+ */
+export const DOCK_SAFE_MODAL_SHELL =
+  'fixed inset-x-0 top-0 bottom-[6.5rem] flex items-center justify-center p-3 sm:p-4';
+
 /** z-index de diálogos estándar (por debajo del dock). */
 export const ABOVE_DOCK_DIALOG_Z = 'z-[125]';
 
 /**
- * Ancla el diálogo entre el margen superior y el dock (bottom-4 + ~4.5rem).
- * Evita que el pie del modal quede bajo la barra aunque use translate-y centrado.
+ * Antes anclaba con top/bottom fijos; Dialog/AlertDialog ya usan DOCK_SAFE_MODAL_SHELL.
+ * Se mantiene como max-height para callers legacy que lo pasan en className.
  */
-export const ABOVE_DOCK_DIALOG_POSITION =
-  '!top-4 !bottom-[6.5rem] !translate-y-0';
+export const ABOVE_DOCK_DIALOG_POSITION = 'max-h-full';
 
 /** Altura máxima para diálogos que siguen centrados con translate-y. */
 export const ABOVE_DOCK_DIALOG_MAX_H = 'suite-max-h-dialog-xl';

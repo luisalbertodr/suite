@@ -147,7 +147,7 @@ export const ConsentimientoPlantillasManager: React.FC<Props> = ({ onClose }) =>
   const showEditor = isCreating || selectedId;
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-x-0 top-0 bottom-[6.5rem] z-50 bg-black/50 flex items-center justify-center p-4">
       <div className="bg-white dark:bg-background rounded-xl shadow-xl w-full max-w-5xl h-[85vh] overflow-hidden flex flex-col">
         <div className="p-4 border-b flex items-center justify-between shrink-0">
           <h3 className="text-lg font-semibold">Plantillas de consentimiento informado</h3>
