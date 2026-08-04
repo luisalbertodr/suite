@@ -115,10 +115,10 @@ async function applyHandlerRow(
   handler: EntityHandler,
   key: string,
   src: DbfRow,
-): Promise<void> {
+): Promise<"applied" | "skipped"> {
   const cola = { id: 0, tabla: handler.tabla, id_reg: key, accion: "UPD" };
   const args = await Promise.resolve(handler.buildArgs(deps.companyId, cola, src, deps));
-  if (!args) return;
+  if (!args) return "skipped";
   const { data, error } = await deps.supabase.schema("dunasoft").rpc(handler.rpc, args);
   if (error) throw new Error(error.message ?? JSON.stringify(error));
   const result = data as Record<string, unknown> | null;
@@ -130,6 +130,7 @@ async function applyHandlerRow(
       await handler.afterApply(deps, cola, src);
     }
   }
+  return "applied";
 }
 
 const lastMtime = new Map<string, number>();
@@ -205,8 +206,11 @@ export async function pollDbfEntityChanges(
         for (const item of changed.slice(0, batch)) {
           const rawKey = handlerApplyKey(handler, item.row, item.key);
           try {
-            await applyHandlerRow(deps, handler, rawKey, item.row);
+            const outcome = await applyHandlerRow(deps, handler, rawKey, item.row);
             await upsertFingerprints(deps, tabla, [{ style_key: item.key, fingerprint: item.fp }]);
+            if (outcome === "skipped") {
+              deps.log(`dbf-poll ${tabla} key=${item.key} skip (fila inválida)`);
+            }
           } catch (err) {
             deps.log(
               `dbf-poll ${tabla} key=${item.key} error: ${err instanceof Error ? err.message : String(err)}`,
@@ -227,8 +231,11 @@ export async function pollDbfEntityChanges(
     for (const item of changed.slice(0, batch)) {
       const rawKey = handlerApplyKey(handler, item.row, item.key);
       try {
-        await applyHandlerRow(deps, handler, rawKey, item.row);
+        const outcome = await applyHandlerRow(deps, handler, rawKey, item.row);
         await upsertFingerprints(deps, tabla, [{ style_key: item.key, fingerprint: item.fp }]);
+        if (outcome === "skipped") {
+          deps.log(`dbf-poll ${tabla} key=${item.key} skip (fila inválida)`);
+        }
       } catch (err) {
         deps.log(
           `dbf-poll ${tabla} key=${item.key} error: ${err instanceof Error ? err.message : String(err)}`,

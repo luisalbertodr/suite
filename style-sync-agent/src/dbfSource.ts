@@ -57,11 +57,19 @@ export function parseDbfLayout(buf: Buffer): DbfLayout {
   return { headerLen, recordLen, nRecords, fields };
 }
 
+/** Años plausibles para fechas Style/VFP (evita 0-01-01 de registros vacíos). */
+export function isPlausibleIsoDate(iso: string | null | undefined): iso is string {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return false;
+  const y = Number(iso.slice(0, 4));
+  return y >= 1990 && y <= 2100;
+}
+
 /** VFP plan2009: campo D como cadena ASCII YYYYMMDD (8 bytes). dbf-reader Date lleva +1 mes. */
 export function ymdFromVfpDbfDateRaw(raw: string): string | null {
   const s = raw.trim().slice(0, 8);
   if (!/^\d{8}$/.test(s)) return null;
-  return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
+  const iso = `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
+  return isPlausibleIsoDate(iso) ? iso : null;
 }
 
 /** True si el buffer parece UTF-8 occidental (C2/C3…) y no CP1252 puro (p. ej. F1=ñ). */
@@ -334,8 +342,10 @@ export function dbfBool(row: DbfRow | null | undefined, field: string): boolean 
 }
 
 /** Fecha calendario del campo D de VFP → yyyy-mm-dd (hora local, sin UTC). */
-export function dbfDateFromJsDate(v: Date): string {
+export function dbfDateFromJsDate(v: Date): string | null {
+  if (Number.isNaN(v.getTime())) return null;
   const y = v.getFullYear();
+  if (y < 1990 || y > 2100) return null;
   const m = String(v.getMonth() + 1).padStart(2, "0");
   const d = String(v.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
@@ -347,15 +357,17 @@ export function dbfDateIso(row: DbfRow | null | undefined, field: string): strin
   const f = field.toLowerCase();
   const isoKey = f === "fecha" ? "fecha_iso" : f === "fecnac" ? "fecnac_iso" : `${f}_iso`;
   const patched = row[isoKey];
-  if (typeof patched === "string" && /^\d{4}-\d{2}-\d{2}$/.test(patched)) return patched;
+  if (typeof patched === "string" && isPlausibleIsoDate(patched)) return patched;
 
   const v = row[f];
   if (v instanceof Date) {
-    if (Number.isNaN(v.getTime())) return null;
     return dbfDateFromJsDate(v);
   }
   const s = String(v ?? "").trim();
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    const iso = s.slice(0, 10);
+    return isPlausibleIsoDate(iso) ? iso : null;
+  }
   if (/^\d{8}$/.test(s)) return ymdFromVfpDbfDateRaw(s);
   return null;
 }
