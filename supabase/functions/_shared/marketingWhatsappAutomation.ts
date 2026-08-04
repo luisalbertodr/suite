@@ -1058,8 +1058,14 @@ export async function processAutomationReply(
 
   try {
     await linkChatToLead(admin, companyId, chatId, lead.id, leadDisplayName(lead));
-    const { renderWhatsappTemplateWithPaymentLinks, loadStripeConfig, resolveDepositAmountCents } =
+    const { renderWhatsappTemplateWithPaymentLinks, loadStripeConfig } =
       await import('./stripeDeposit.ts');
+    const {
+      loadRedsysConfig,
+      isRedsysOnlineReady,
+      isStripeOnlineReady,
+      resolveUnifiedDepositAmountCents,
+    } = await import('./redsysDeposit.ts');
     const replyText = await renderWhatsappTemplateWithPaymentLinks(
       admin,
       companyId,
@@ -1082,9 +1088,13 @@ export async function processAutomationReply(
       },
     );
 
-    const stripeCfg = await loadStripeConfig(admin, companyId);
-    const depositAmount = stripeCfg ? resolveDepositAmountCents(stripeCfg, form) : null;
-    const waitsPayment = choice === '1' && !!depositAmount && !!stripeCfg?.enabled;
+    const [stripeCfg, redsysCfg] = await Promise.all([
+      loadStripeConfig(admin, companyId),
+      loadRedsysConfig(admin, companyId),
+    ]);
+    const depositAmount = resolveUnifiedDepositAmountCents(stripeCfg, redsysCfg, form);
+    const onlineReady = isStripeOnlineReady(stripeCfg) || isRedsysOnlineReady(redsysCfg);
+    const waitsPayment = choice === '1' && !!depositAmount && onlineReady;
 
     const { data: locked } = await admin
       .from('marketing_leads')

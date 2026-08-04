@@ -393,16 +393,21 @@ export async function buildDepositRequestWhatsappMessage(
   leadCreated = false,
 ): Promise<DepositRequestMessageResult> {
   const cfg = await loadStripeConfig(admin, companyId);
-  if (!cfg) throw new Error('Configuración de pagos no encontrada');
+  const { loadRedsysConfig, isRedsysOnlineReady, isStripeOnlineReady, resolveUnifiedDepositAmountCents, resolvePublicAppUrl } =
+    await import('./redsysDeposit.ts');
+  const redsysCfg = await loadRedsysConfig(admin, companyId);
+
+  if (!cfg && !redsysCfg) throw new Error('Configuración de pagos no encontrada');
 
   const template =
-    cfg.deposit_request_whatsapp_message?.trim() || DEFAULT_DEPOSIT_REQUEST_WHATSAPP_MESSAGE;
+    cfg?.deposit_request_whatsapp_message?.trim() || DEFAULT_DEPOSIT_REQUEST_WHATSAPP_MESSAGE;
   const needsLink = /\{link_pago\}/i.test(template);
   const needsAmount = /\{importe_senal\}/i.test(template);
 
-  if (needsLink && (!cfg.enabled || !cfg.secret_key)) {
+  const onlineReady = isStripeOnlineReady(cfg) || isRedsysOnlineReady(redsysCfg);
+  if (needsLink && !onlineReady) {
     throw new Error(
-      'El mensaje usa {link_pago} pero Stripe no está activo. Edita el mensaje en Configuración → Pagos o activa Stripe.',
+      'El mensaje usa {link_pago} pero no hay pasarela activa. Activa Stripe o Redsys en Configuración → Pagos.',
     );
   }
 
@@ -437,10 +442,12 @@ export async function buildDepositRequestWhatsappMessage(
     form = (f as MetaFormDeposit | null) ?? null;
   }
 
-  const amountCents = resolveDisplayDepositAmountCents(cfg, form);
+  const amountCents = resolveUnifiedDepositAmountCents(cfg, redsysCfg, form);
   if ((needsLink || needsAmount) && !amountCents) {
     throw new Error('Importe de señal no configurado en Configuración → Pagos');
   }
+
+  const publicAppUrl = resolvePublicAppUrl(cfg, redsysCfg, cfg?.public_app_url ?? redsysCfg?.public_app_url);
 
   const text = await renderWhatsappTemplateWithPaymentLinks(
     admin,
@@ -449,11 +456,11 @@ export async function buildDepositRequestWhatsappMessage(
     template,
     lead,
     form,
-    cfg.public_app_url,
+    publicAppUrl,
   );
 
   let paymentUrl: string | null = null;
-  if (needsLink && amountCents && cfg.enabled && cfg.secret_key) {
+  if (needsLink && amountCents && onlineReady) {
     const { data: session } = await admin
       .from('stripe_deposit_sessions')
       .select('public_token')
@@ -464,7 +471,20 @@ export async function buildDepositRequestWhatsappMessage(
       .limit(1)
       .maybeSingle();
     if (session?.public_token) {
-      paymentUrl = buildPublicPaymentUrl(cfg, session.public_token as string, cfg.public_app_url);
+      const urlCfg = cfg ?? {
+        company_id: companyId,
+        publishable_key: null,
+        secret_key: null,
+        webhook_secret: null,
+        enabled: false,
+        currency: redsysCfg?.currency ?? 'eur',
+        default_deposit_amount_cents: amountCents,
+        public_app_url: publicAppUrl || null,
+        confirmed_stage_id: null,
+        payment_success_whatsapp_message: null,
+        deposit_request_whatsapp_message: null,
+      };
+      paymentUrl = buildPublicPaymentUrl(urlCfg, session.public_token as string, publicAppUrl);
     }
   }
 
@@ -911,7 +931,9 @@ export async function confirmManualDepositForLead(
   }
 
   const stripeCfg = await loadStripeConfig(admin, companyId);
-  if (!stripeCfg) throw new Error('Configuración de pagos no encontrada');
+  const { loadRedsysConfig, resolveUnifiedDepositAmountCents } = await import('./redsysDeposit.ts');
+  const redsysCfg = await loadRedsysConfig(admin, companyId);
+  if (!stripeCfg && !redsysCfg) throw new Error('Configuración de pagos no encontrada');
 
   let form: MetaFormDeposit | null = null;
   if (lead.meta_form_id) {
@@ -923,22 +945,26 @@ export async function confirmManualDepositForLead(
     form = (f as MetaFormDeposit | null) ?? null;
   }
 
-  const amountCents = resolveDisplayDepositAmountCents(stripeCfg, form);
+  const amountCents = resolveUnifiedDepositAmountCents(stripeCfg, redsysCfg, form);
   if (!amountCents) throw new Error('Importe de señal no configurado');
+
+  const currency = redsysCfg?.currency ?? stripeCfg?.currency ?? 'eur';
+  const publicUrl = stripeCfg?.public_app_url ?? redsysCfg?.public_app_url ?? null;
 
   const session = await ensureDepositSessionForLead(
     admin,
     companyId,
     leadId,
     amountCents,
-    stripeCfg.currency ?? 'eur',
-    stripeCfg.public_app_url,
+    currency,
+    publicUrl,
   );
   if (!session) throw new Error('No se pudo registrar la señal');
 
   await admin
     .from('stripe_deposit_sessions')
     .update({
+      payment_provider: 'manual',
       metadata: {
         source: 'manual',
         payment_method: paymentMethod,
@@ -956,14 +982,14 @@ export async function confirmManualDepositForLead(
     companyId,
     leadId,
     amountCents,
-    stripeCfg.currency ?? 'eur',
+    currency,
   );
 
   return {
     already_paid: false,
     deposit_session_id: session.id,
     amount_cents: amountCents,
-    currency: stripeCfg.currency ?? 'eur',
+    currency,
     whatsapp_sent: wa.sent,
     whatsapp_skipped_reason: wa.skipped_reason,
   };
@@ -985,26 +1011,40 @@ export async function renderWhatsappTemplateWithPaymentLinks(
   let importeSenal = '';
 
   const stripeCfg = await loadStripeConfig(admin, companyId);
-  const amountCents = stripeCfg ? resolveDisplayDepositAmountCents(stripeCfg, form ?? null) : null;
+  const { loadRedsysConfig, isRedsysOnlineReady, isStripeOnlineReady, resolveUnifiedDepositAmountCents, resolvePublicAppUrl } =
+    await import('./redsysDeposit.ts');
+  const redsysCfg = await loadRedsysConfig(admin, companyId);
+  const amountCents = resolveUnifiedDepositAmountCents(stripeCfg, redsysCfg, form ?? null);
+  const onlineReady = isStripeOnlineReady(stripeCfg) || isRedsysOnlineReady(redsysCfg);
+  const currency = redsysCfg?.currency || stripeCfg?.currency || 'eur';
+  const publicBase = resolvePublicAppUrl(stripeCfg, redsysCfg, fallbackOrigin);
 
-  if (amountCents && stripeCfg) {
-    importeSenal = formatEurosFromCents(amountCents, stripeCfg.currency ?? 'eur');
-    if (
-      needsLink &&
-      stripeCfg.enabled &&
-      stripeCfg.secret_key &&
-      leadId
-    ) {
+  if (amountCents) {
+    importeSenal = formatEurosFromCents(amountCents, currency);
+    if (needsLink && onlineReady && leadId) {
       const deposit = await ensureDepositSessionForLead(
         admin,
         companyId,
         leadId,
         amountCents,
-        stripeCfg.currency ?? 'eur',
-        fallbackOrigin,
+        currency,
+        publicBase || fallbackOrigin,
       );
       if (deposit) {
-        linkPago = buildPublicPaymentUrl(stripeCfg, deposit.public_token, fallbackOrigin);
+        const urlCfg = stripeCfg ?? {
+          company_id: companyId,
+          publishable_key: null,
+          secret_key: null,
+          webhook_secret: null,
+          enabled: false,
+          currency,
+          default_deposit_amount_cents: amountCents,
+          public_app_url: publicBase || null,
+          confirmed_stage_id: null,
+          payment_success_whatsapp_message: null,
+          deposit_request_whatsapp_message: null,
+        };
+        linkPago = buildPublicPaymentUrl(urlCfg, deposit.public_token, publicBase || fallbackOrigin);
       }
     }
   }

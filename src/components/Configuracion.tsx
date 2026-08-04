@@ -31,6 +31,7 @@ import { LegacyImportPanel } from './LegacyImportPanel';
 import { InbodyCsvImportPanel } from './InbodyCsvImportPanel';
 import { TpvSettingsConfig } from './TpvSettingsConfig';
 import { StripeConfigPanel } from './StripeConfig';
+import { RedsysConfigPanel } from './RedsysConfig';
 import { ServidoresMonitorPanel } from './ServidoresMonitorPanel';
 import { SmartPssEventsPanel } from './SmartPssEventsPanel';
 import { ConsentimientoPlantillasConfig } from './consentimiento/ConsentimientoPlantillasConfig';
@@ -63,6 +64,7 @@ const TAB_ALIASES: Record<string, { tab: ConfigTab; subtab: string }> = {
   email: { tab: 'marketing', subtab: 'email' },
   whatsapp: { tab: 'marketing', subtab: 'whatsapp-conexion' },
   stripe: { tab: 'pagos', subtab: 'stripe' },
+  redsys: { tab: 'pagos', subtab: 'redsys' },
   tpv: { tab: 'pagos', subtab: 'tpv' },
   empleados: { tab: 'usuarios', subtab: 'empleados' },
   'usuarios-permisos': { tab: 'usuarios', subtab: 'permisos' },
@@ -294,10 +296,14 @@ export const Configuracion: React.FC = () => {
           >
             <TabsList>
               <TabsTrigger value="stripe">Stripe</TabsTrigger>
+              <TabsTrigger value="redsys">Redsys</TabsTrigger>
               <TabsTrigger value="tpv">TPV</TabsTrigger>
             </TabsList>
             <TabsContent value="stripe" className="mt-4 space-y-4">
               <StripeConfigPanel />
+            </TabsContent>
+            <TabsContent value="redsys" className="mt-4 space-y-4">
+              <RedsysConfigPanel />
             </TabsContent>
             <TabsContent value="tpv" className="mt-4 space-y-4">
               <TpvSettingsConfig />
