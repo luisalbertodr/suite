@@ -204,13 +204,45 @@ function ScaleWeighNowControls({
     void queryClient.invalidateQueries({
       queryKey: ['scale_weigh_request', companyId, customerId],
     });
-    toast({
-      title: 'Medición recibida',
-      description:
-        active.matched_weight_kg != null
-          ? `Peso ${formatInbodyNumber(active.matched_weight_kg, 1, ' kg')} vinculado a este cliente.`
-          : 'La medición MorphoScan se ha vinculado a este cliente.',
-    });
+
+    const weightLabel =
+      active.matched_weight_kg != null
+        ? `Peso ${formatInbodyNumber(active.matched_weight_kg, 1, ' kg')}`
+        : 'Medición MorphoScan';
+
+    void (async () => {
+      const { data: m } = await supabase
+        .from('inbody_measurements')
+        .select('pbf_pct, smm_kg, data_quality, raw_payload')
+        .eq('id', key)
+        .maybeSingle();
+      const dq = (m?.data_quality ?? null) as {
+        needs_repeat?: boolean;
+        status?: string;
+      } | null;
+      const raw = (m?.raw_payload ?? null) as Record<string, unknown> | null;
+      const weightOnly =
+        raw?.weight_only === true ||
+        raw?.fat_source === 'none' ||
+        (m?.pbf_pct == null && dq?.needs_repeat);
+
+      if (weightOnly || dq?.needs_repeat) {
+        toast({
+          title: 'Repite la medición',
+          description: `${weightLabel} guardado, pero la composición no es fiable. Baja, espera 5 s y vuelve a subirte a la MorphoScan (pies descalzos, quieta hasta el bip).`,
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      toast({
+        title: 'Medición recibida',
+        description:
+          m?.pbf_pct != null
+            ? `${weightLabel} · grasa ${formatInbodyNumber(m.pbf_pct, 1, ' %')} vinculada a este cliente.`
+            : `${weightLabel} vinculada a este cliente.`,
+      });
+    })();
   }, [active?.status, active?.measurement_id, active?.matched_weight_kg, companyId, customerId, taxId, queryClient, toast]);
 
   const beginWeigh = (snapshot: {

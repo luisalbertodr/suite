@@ -856,7 +856,59 @@ function buildRow(
     impedance,
     edema: body.edema && typeof body.edema === 'object' ? body.edema : {},
     raw_payload: rawPayload,
+    data_quality: assessMorphoScanDataQuality({
+      device: ctx.device,
+      weightKg,
+      pbfPct,
+      bodyFatKg,
+      smmKg: pickMetric(body, ['smm_kg', 'smmKg']),
+      rawPayload,
+    }),
     updated_at: new Date().toISOString(),
+  };
+}
+
+/** Calidad MorphoScan: composición solo si frame fiable; si no → needs_repeat. */
+function assessMorphoScanDataQuality(input: {
+  device: DeviceKind;
+  weightKg: number | null;
+  pbfPct: number | null;
+  bodyFatKg: number | null;
+  smmKg: number | null;
+  rawPayload: Record<string, unknown>;
+}): Record<string, unknown> | null {
+  if (input.device !== 'morphoscan') return null;
+
+  const fatSource = String(input.rawPayload.fat_source ?? '');
+  const weightOnly =
+    input.rawPayload.weight_only === true ||
+    fatSource === 'none' ||
+    fatSource === 'from_ffm' ||
+    (input.pbfPct == null && input.bodyFatKg == null);
+
+  const issues: string[] = [];
+  if (weightOnly) issues.push('missing_core_fields');
+  if (input.pbfPct != null && input.pbfPct < 10 && (input.weightKg ?? 0) >= 40) {
+    issues.push('pbf_too_low');
+  }
+  if (input.smmKg != null && input.smmKg >= 25.4 && input.smmKg <= 25.7) {
+    issues.push('composition_sum_mismatch');
+  }
+
+  const needsRepeat = issues.length > 0;
+  return {
+    status: needsRepeat ? 'suspicious' : 'ok',
+    needs_repeat: needsRepeat,
+    issues,
+    hint: needsRepeat
+      ? {
+          source: 'morphoscan_frame',
+          message: weightOnly
+            ? 'Composición no fiable (frame incompleto). Repite la medición en la báscula.'
+            : 'Valores de composición sospechosos. Repite la medición.',
+        }
+      : null,
+    checked_at: new Date().toISOString(),
   };
 }
 
