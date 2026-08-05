@@ -28,6 +28,20 @@
 
   <body>
     <div id="root"></div>
+    <!-- Fallback visible si el boot SystemJS/legacy falla en navegadores antiguos. -->
+    <script>
+      window.addEventListener("error", function (ev) {
+        var root = document.getElementById("root");
+        if (!root || root.childNodes.length) return;
+        root.innerHTML =
+          '<div style="font-family:system-ui,sans-serif;padding:24px;max-width:40rem;margin:10vh auto;line-height:1.45">' +
+          "<h1 style=\"font-size:1.25rem;margin:0 0 8px\">No se pudo cargar Suite</h1>" +
+          "<p style=\"margin:0;color:#444\">Actualice Chrome/Edge/Safari o contacte con informática.</p>" +
+          '<pre style="margin-top:12px;padding:12px;background:#f4f4f5;overflow:auto;font-size:12px">' +
+          String((ev && ev.message) || "Error de carga") +
+          "</pre></div>";
+      });
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

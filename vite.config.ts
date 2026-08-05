@@ -2,11 +2,13 @@ import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import legacy from "@vitejs/plugin-legacy";
 import path from "path";
+import fs from "fs";
 
 /**
- * Targets más amplios que el default de Vite 8 (`baseline-widely-available` =
- * Chrome 111 / Safari 16.4). Clínicas siguen usando Chrome/Edge/Safari algo
- * anteriores; sin esto el bundle moderno deja la UI en blanco.
+ * Clínicas usan Chrome/Safari anteriores a Chrome 105 / Safari 16.4.
+ * El dual-build de Vite 8 deja la UI en blanco ahí (detector import.meta.resolve
+ * + bundle moderno). Generamos ambos artefactos (el paso moderno emite el CSS)
+ * y reescribimos el HTML final para que TODOS carguen solo SystemJS/legacy.
  */
 const BROWSER_TARGETS = [
   "Chrome >= 87",
@@ -16,26 +18,77 @@ const BROWSER_TARGETS = [
   "iOS >= 14",
 ];
 
-/**
- * Safari ≤15 (y algunos WebKit) no detienen el módulo padre cuando un
- * `import 'data:...'` lanza — bug Vite #22008. El chequeo de
- * `import.meta.resolve` queda en un data-URL y el flag modern se pone a true
- * igual, así que nunca cargan los chunks legacy y la UI queda en blanco.
- * Forzar el throw en el hilo del módulo inline sí aborta la ejecución.
- */
-function fixSafariLegacyDetect(): Plugin {
-  const nestedResolveCheck =
-    /import'data:text\/javascript,(?:[^']*?;)?if\(!import\.meta\.resolve\)throw Error\("import\.meta\.resolve not supported"\)';/g;
-  const inlineResolveCheck =
-    'if(typeof import.meta.resolve!="function")throw Error("import.meta.resolve not supported");';
+function rewriteIndexHtmlToSystemJsOnly(html: string): string {
+  const polyfillSrc = html.match(
+    /id="vite-legacy-polyfill"[^>]*\ssrc="([^"]+)"|src="([^"]+)"[^>]*\sid="vite-legacy-polyfill"/
+  );
+  const entrySrc = html.match(
+    /id="vite-legacy-entry"[^>]*\sdata-src="([^"]+)"|data-src="([^"]+)"[^>]*\sid="vite-legacy-entry"/
+  );
+  const poly = polyfillSrc?.[1] || polyfillSrc?.[2];
+  const entry = entrySrc?.[1] || entrySrc?.[2];
+  if (!poly || !entry) {
+    throw new Error(
+      "[force-systemjs-for-all-browsers] No se encontraron chunks legacy en index.html"
+    );
+  }
 
+  const cssLinks = Array.from(
+    html.matchAll(/<link\b[^>]*\brel=["']stylesheet["'][^>]*>/gi)
+  ).map((m) => m[0]);
+
+  let out = html
+    .replace(/<script\b[^>]*\btype=["']module["'][^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<script\b[^>]*\btype=["']module["'][^>]*\/>/gi, "")
+    .replace(/<link\b[^>]*\brel=["']modulepreload["'][^>]*>/gi, "")
+    .replace(/<script\b[^>]*\bnomodule\b[^>]*>[\s\S]*?<\/script>/gi, "");
+
+  if (cssLinks.length && !/<link\b[^>]*\brel=["']stylesheet["']/i.test(out)) {
+    out = out.replace(/<\/head>/i, `    ${cssLinks.join("\n    ")}\n  </head>`);
+  }
+
+  // Evitar duplicar si ya reescribimos.
+  out = out
+    .replace(/<script\b[^>]*\sid="vite-legacy-polyfill"[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<script\b[^>]*\sid="vite-legacy-entry"[^>]*>[\s\S]*?<\/script>/gi, "");
+
+  const boot = [
+    `    <script crossorigin id="vite-legacy-polyfill" src="${poly}"><\/script>`,
+    `    <script crossorigin id="vite-legacy-entry" data-src="${entry}">System.import(document.getElementById('vite-legacy-entry').getAttribute('data-src'))<\/script>`,
+  ].join("\n");
+
+  if (!/<\/body>/i.test(out)) {
+    throw new Error("[force-systemjs-for-all-browsers] index.html sin </body>");
+  }
+  return out.replace(/<\/body>/i, `${boot}\n  </body>`);
+}
+
+function forceSystemJsForAllBrowsers(): Plugin {
+  let outDir = "dist";
   return {
-    name: "fix-safari-legacy-detect",
-    enforce: "post",
-    transformIndexHtml(html) {
-      if (!nestedResolveCheck.test(html)) return html;
-      nestedResolveCheck.lastIndex = 0;
-      return html.replace(nestedResolveCheck, inlineResolveCheck);
+    name: "force-systemjs-for-all-browsers",
+    apply: "build",
+    configResolved(config) {
+      outDir = path.resolve(config.root, config.build.outDir);
+    },
+    // plugin-legacy hace dos pases; solo reescribimos cuando ya hay tags legacy.
+    writeBundle() {
+      const indexPath = path.join(outDir, "index.html");
+      if (!fs.existsSync(indexPath)) return;
+      const html = fs.readFileSync(indexPath, "utf8");
+      if (!html.includes("vite-legacy-polyfill") || !html.includes("vite-legacy-entry")) {
+        return;
+      }
+      // Ya reescrito (sin type=module de app).
+      if (
+        !html.includes('type="module"') &&
+        html.includes('id="vite-legacy-polyfill"') &&
+        !html.includes("nomodule")
+      ) {
+        return;
+      }
+      const next = rewriteIndexHtmlToSystemJsOnly(html);
+      fs.writeFileSync(indexPath, next, "utf8");
     },
   };
 }
@@ -45,7 +98,6 @@ export default defineConfig(() => ({
   server: {
     host: "::",
     port: 8080,
-    // Evita “Blocked request. This host is not allowed” al abrir el dev server por lipoout.com (proxy/túnel).
     allowedHosts: ["lipoout.com", "www.lipoout.com", ".lipoout.com"],
   },
   preview: {
@@ -56,16 +108,14 @@ export default defineConfig(() => ({
   plugins: [
     react(),
     legacy({
-      // Babel/SystemJS para navegadores sin ES modules / sin import.meta.resolve.
       targets: BROWSER_TARGETS,
-      // Sin esto, plugin-legacy fija build.target a Chrome 105 / Safari 16.4
-      // y los “modernos a medias” (p. ej. Safari 15 marcado mal) reciben
-      // sintaxis que no entienden → pantalla en blanco.
-      modernTargets: BROWSER_TARGETS,
       modernPolyfills: true,
       renderLegacyChunks: true,
+      renderModernChunks: true,
+      polyfills: true,
+      additionalLegacyPolyfills: ["regenerator-runtime/runtime"],
     }),
-    fixSafariLegacyDetect(),
+    forceSystemJsForAllBrowsers(),
   ],
   resolve: {
     alias: {
