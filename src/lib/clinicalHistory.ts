@@ -231,6 +231,29 @@ function normalizeApPhrase(value: string): string {
   return value.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
+/**
+ * Parte tras puntuación + espacios sin lookbehind (`(?<=…)`, Safari <16.4 lanza
+ * "Invalid regular expression: invalid group specifier name").
+ */
+function splitLineIntoPhrases(line: string): string[] {
+  const parts: string[] = [];
+  let start = 0;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (!/[.!?…;]/.test(ch)) continue;
+    let j = i + 1;
+    if (j >= line.length || !/\s/.test(line[j])) continue;
+    while (j < line.length && /\s/.test(line[j])) j++;
+    const phrase = line.slice(start, i + 1).trim();
+    if (phrase) parts.push(phrase);
+    start = j;
+    i = j - 1;
+  }
+  const tail = line.slice(start).trim();
+  if (tail) parts.push(tail);
+  return parts;
+}
+
 /** Parte el AP en frases/líneas para comparar igualdad exacta (tras normalizar espacios). */
 export function splitAntecedentesPhrases(text: string): string[] {
   const lines = text
@@ -239,10 +262,7 @@ export function splitAntecedentesPhrases(text: string): string[] {
     .filter(Boolean);
   const phrases: string[] = [];
   for (const line of lines) {
-    const parts = line
-      .split(/(?<=[.!?…;])\s+/)
-      .map((part) => part.trim())
-      .filter(Boolean);
+    const parts = splitLineIntoPhrases(line);
     if (parts.length > 1) phrases.push(...parts);
     else phrases.push(line);
   }
