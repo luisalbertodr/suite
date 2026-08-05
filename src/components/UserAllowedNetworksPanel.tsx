@@ -69,7 +69,7 @@ export const UserAllowedNetworksPanel: React.FC<UserAllowedNetworksPanelProps> =
         <p>
           Si no hay redes, el usuario puede entrar desde cualquier IP. Si añades redes, solo
           podrá acceder cuando la IP vista por <strong>supabase.lipoout.com</strong> esté en
-          alguna de ellas.
+          alguna de ellas. La restricción aplica también a superusers.
         </p>
         <p>
           En la clínica suele verse <code className="text-[10px]">192.168.99.x</code> si el

@@ -20,6 +20,13 @@ export async function checkNetworkAccess(): Promise<NetworkAccessCheckResult> {
       body: {},
     });
 
+    const body = (data ?? null) as NetworkAccessCheckResult | null;
+
+    // Cuerpo explícito de denegación (también si invoke marca error HTTP).
+    if (body && body.allowed === false) {
+      return body;
+    }
+
     if (error) {
       const status = (error as { context?: { status?: number } }).context?.status;
       const msg = error.message || '';
@@ -27,15 +34,14 @@ export async function checkNetworkAccess(): Promise<NetworkAccessCheckResult> {
       if (status === 404 || /not found|Failed to send/i.test(msg)) {
         return { allowed: true, error: msg };
       }
-      // Respuesta denegada con body
-      const body = data as NetworkAccessCheckResult | null;
-      if (body && body.allowed === false) {
-        return body;
+      // 401/403 → denegar
+      if (status === 401 || status === 403) {
+        return { allowed: false, error: msg, reason: 'unauthorized' };
       }
+      // Otros errores de transporte: no bloquear (evita lockout por outage breve)
       return { allowed: true, error: msg };
     }
 
-    const body = data as NetworkAccessCheckResult | null;
     if (!body) {
       return { allowed: true };
     }

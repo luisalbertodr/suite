@@ -18,6 +18,7 @@ const json = (body: unknown, status = 200) =>
 function extractClientIp(req: Request): string | null {
   const forwarded = req.headers.get('x-forwarded-for');
   if (forwarded) {
+    // Primer hop = cliente original (el resto suelen ser proxies internos).
     const first = forwarded.split(',')[0]?.trim();
     if (first) return first;
   }
@@ -65,20 +66,10 @@ serve(async (req) => {
     }
 
     const admin = createClient(supabaseUrl, serviceKey);
+    const clientIp = extractClientIp(req);
 
-    // Superusers de Suite no se restringen por red (usa auth.uid() del JWT).
-    const { data: isSuperAsUser } = await userClient.rpc('current_user_is_superuser');
-    if (isSuperAsUser === true) {
-      const clientIp = extractClientIp(req);
-      return json({
-        allowed: true,
-        restricted: false,
-        bypass: 'superuser',
-        clientIp,
-        userId: user.id,
-      });
-    }
-
+    // Las restricciones de red aplican también a superusers si tienen CIDRs
+    // configurados. Sin filas = sin restricción (cualquier IP).
     const { count, error: countError } = await admin
       .from('user_allowed_networks')
       .select('id', { count: 'exact', head: true })
@@ -86,11 +77,10 @@ serve(async (req) => {
 
     if (countError) {
       console.error('network-access-check count error', countError);
-      return json({ error: countError.message, allowed: false }, 500);
+      return json({ error: countError.message, allowed: false, clientIp }, 500);
     }
 
     const restricted = (count ?? 0) > 0;
-    const clientIp = extractClientIp(req);
 
     if (!restricted) {
       return json({
@@ -108,7 +98,17 @@ serve(async (req) => {
 
     if (rpcError) {
       console.error('network-access-check rpc error', rpcError);
-      return json({ error: rpcError.message, allowed: false, restricted: true, clientIp }, 500);
+      // Con restricción configurada, fallar cerrado ante error de comprobación.
+      return json(
+        {
+          error: rpcError.message,
+          allowed: false,
+          restricted: true,
+          clientIp,
+          reason: 'check_error',
+        },
+        200,
+      );
     }
 
     return json({
