@@ -830,20 +830,33 @@ function entityDeps(): EntityEngineDeps | null {
 }
 
 /** Style → Suite para maestros y transacciones (clientes, artículos, ...). */
+let entityTickRunning = false;
+
 async function entityTick(): Promise<void> {
-  const deps = entityDeps();
-  if (!deps || ENTITY_HANDLERS.length === 0) return;
-  const v2 = await isSyncV2Active(STYLE_ROOT);
-  if (!v2) return;
-  // Cola ligera (solo filas nuevas en cola_sincro) — no lee DBF entero.
-  await processEntitiesFromStyle(deps, ENTITY_HANDLERS, ENTITY_BATCH);
-  if (shouldDeferEntityDbfPoll(STYLE_ROOT)) {
-    logDeferEntityDbfPoll(log, STYLE_ROOT);
+  if (entityTickRunning) {
+    log("entity tick omitido (anterior aún en curso)");
     return;
   }
-  if (!DBF_ENTITY_POLL_ENABLED) return;
-  log("dbf-poll tick: barrido maestros (Style cerrado)");
-  await pollDbfEntityChanges(deps, ENTITY_HANDLERS, ENTITY_BATCH);
+  entityTickRunning = true;
+  try {
+    const deps = entityDeps();
+    if (!deps || ENTITY_HANDLERS.length === 0) return;
+    const v2 = await isSyncV2Active(STYLE_ROOT);
+    if (!v2) return;
+    // Cola ligera (solo filas nuevas en cola_sincro) — no lee DBF entero.
+    await processEntitiesFromStyle(deps, ENTITY_HANDLERS, ENTITY_BATCH);
+    if (shouldDeferEntityDbfPoll(STYLE_ROOT)) {
+      logDeferEntityDbfPoll(log, STYLE_ROOT);
+      return;
+    }
+    if (!DBF_ENTITY_POLL_ENABLED) return;
+    // Con Style cerrado drenar más rápido el backlog de huellas/DBF.
+    const batch = Math.max(ENTITY_BATCH, Number(process.env.ENTITY_BATCH_HARD ?? "80"));
+    log(`dbf-poll tick: barrido maestros (Style cerrado, batch=${batch})`);
+    await pollDbfEntityChanges(deps, ENTITY_HANDLERS, batch);
+  } finally {
+    entityTickRunning = false;
+  }
 }
 
 /** Suite → Style genérico: outbox → JSON inbound + drenaje de ACKs `e<id>.ok`. */
