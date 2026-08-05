@@ -5,17 +5,17 @@ import path from "path";
 import fs from "fs";
 
 /**
- * Clínicas usan Chrome/Safari anteriores a Chrome 105 / Safari 16.4.
- * El dual-build de Vite 8 deja la UI en blanco ahí (detector import.meta.resolve
- * + bundle moderno). Generamos ambos artefactos (el paso moderno emite el CSS)
- * y reescribimos el HTML final para que TODOS carguen solo SystemJS/legacy.
+ * Clínicas usan Chrome/Safari muy anteriores (sin `?.` / `??`: Chrome <80,
+ * Safari <13.1). El dual-build de Vite 8 deja UI en blanco; forzamos SystemJS
+ * y targets Babel bajos para que el chunk legacy transpile optional chaining
+ * y nullish (si no, SyntaxError: Unexpected token '.').
  */
 const BROWSER_TARGETS = [
-  "Chrome >= 87",
-  "Edge >= 88",
-  "Firefox >= 78",
-  "Safari >= 14",
-  "iOS >= 14",
+  "Chrome >= 63",
+  "Edge >= 79",
+  "Firefox >= 67",
+  "Safari >= 11",
+  "iOS >= 11",
 ];
 
 function rewriteIndexHtmlToSystemJsOnly(html: string): string {
