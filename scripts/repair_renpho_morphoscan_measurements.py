@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Repara TODAS las mediciones MorphoScan/Renpho con la lógica corregida del gateway.
 
-Reglas (igual que renpho-msc04.ts tras el parche):
+Reglas (igual que renpho-msc04.ts tras el parche BIA):
 - Bytes [0:4] tipo xx 11 00 00 = header, NO masa muscular.
 - SMM 0x0a00 (25.6 kg) = constante falsa; se ignora.
 - Si % grasa del frame >= 10 → usar frame.
-- Si frame < 10 → solo peso (nunca inventar grasa/MME desde FFM+header).
-- Recalcula pbf, grasa kg, MLG, MME, ACT, limpia slm/proteína falsos.
-- Re-deriva segmentales desde impedancia del raw_payload con totales corregidos.
+- Si frame < 10 y hay z1 + perfil → BIA (z1×1.08, coeficientes ble-scale-sync).
+- Calibrado 2026-08-05 vs InBody Marta (62.5 kg / 21.4 %).
+- Nunca inventar grasa desde FFM+header.
 """
 from __future__ import annotations
 
@@ -48,6 +48,9 @@ IDEAL_FAT = {
     "left_leg": 0.17,
 }
 
+# MorphoScan DF-BIA: z1 reads ~8% low vs InBody-calibrated BIA (Marta 2026-08-05).
+MSC04_Z1_BIA_SCALE = 1.08
+
 
 def load_dotenv(path: Path) -> None:
     if not path.exists():
@@ -58,6 +61,30 @@ def load_dotenv(path: Path) -> None:
             continue
         key, value = line.split("=", 1)
         os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+def compute_bia_fat(weight: float, impedance: float, sex: str | None, age: float | None, height: float | None, athlete: bool = False) -> float | None:
+    if not impedance or impedance < 100 or impedance > 1500:
+        return None
+    if not weight or weight < 0.5 or weight > 300:
+        return None
+    if not age or not height or height < 100:
+        return None
+    s = (sex or "").upper()
+    male = s.startswith("H") or s in ("MALE", "HOMBRE", "MAN", "V") or s == "M"
+    female = (not male) and (s.startswith("F") or s in ("MUJER", "WOMAN", "FEMALE") or s == "F")
+    if not female and not male:
+        female = True  # MorphoScan clinic default when sex missing
+    if female:
+        c1, c2, c3, c4 = (0.55, 0.18, -0.15, 8.5) if athlete else (0.49, 0.15, -0.13, 11.5)
+    else:
+        c1, c2, c3, c4 = (0.637, 0.205, -0.18, 12.5) if athlete else (0.503, 0.165, -0.158, 17.8)
+    z = impedance * MSC04_Z1_BIA_SCALE
+    lbm = c1 * (height**2 / z) + c2 * weight + c3 * age + c4
+    if lbm > weight:
+        lbm = weight * 0.96
+    pbf = max(3.0, min((weight - lbm) / weight * 100, 60.0))
+    return round(pbf * 10) / 10
 
 
 def parse_frame(hexv: str) -> dict[str, Any] | None:
@@ -93,6 +120,15 @@ def parse_frame(hexv: str) -> dict[str, Any] | None:
             if 10 <= smm_val <= 60:
                 smm = smm_val
 
+    # z1 = LE/10 at payload[8:10] (after weight + 0a00 on 0x25; shifted on 0x26)
+    z1 = None
+    wi = plen - 32
+    z_off = wi + 4
+    if z_off + 2 <= len(payload):
+        z_raw = int.from_bytes(payload[z_off : z_off + 2], "little") / 10
+        if 100 <= z_raw <= 1500:
+            z1 = z_raw
+
     return {
         "cmd": cmd,
         "weight": weight,
@@ -101,6 +137,7 @@ def parse_frame(hexv: str) -> dict[str, Any] | None:
         "muscle": mus if mus and 15 <= mus <= 90 else None,
         "bone": bone,
         "smm_trusted": smm,
+        "z1": z1,
     }
 
 
@@ -108,6 +145,8 @@ def recompute(
     frame: dict[str, Any],
     sex: str | None,
     bone_fallback: float | None = None,
+    age: float | None = None,
+    height: float | None = None,
 ) -> dict[str, Any]:
     w = float(frame["weight"])
     frame_fat = float(frame["frame_fat"])
@@ -116,11 +155,21 @@ def recompute(
         bone = float(bone_fallback)
     muscle = frame.get("muscle")
     header = bool(frame.get("header_muscle"))
+    z1 = frame.get("z1")
 
-    pbf: float | None = frame_fat
-    fat_source = "frame"
-    # Solo confiar en % grasa del frame >= 10. Nunca inventar desde FFM/header.
-    if frame_fat < 10:
+    # Frame fat >= 10 trusted; else BIA from z1×1.08 + profile.
+    pbf: float | None = None
+    fat_source = "weight_only"
+    if 10 <= frame_fat <= 55:
+        pbf = round(frame_fat, 1)
+        fat_source = "frame"
+    else:
+        bia = compute_bia_fat(w, float(z1) if z1 else 0, sex, age, height)
+        if bia is not None and 5 <= bia <= 55:
+            pbf = bia
+            fat_source = "from_bia"
+
+    if pbf is None:
         return {
             "pbf_pct": None,
             "body_fat_kg": None,
@@ -136,17 +185,19 @@ def recompute(
             "header_muscle": header,
         }
 
-    pbf = round(float(pbf), 1)
     fat_kg = round(w * pbf / 100, 2)
     ffm = round(w - fat_kg, 2)
-    smm = frame.get("smm_trusted")
+    smm = frame.get("smm_trusted") if fat_source == "frame" else None
     if smm is None:
         smm = round(ffm * 0.54, 2)
     else:
         smm = round(float(smm), 2)
     tbw = round(ffm * 0.73, 2)
     body_water_pct = round((tbw / w) * 100, 1) if w else None
-    slm = None if header else (round(float(muscle), 2) if muscle else None)
+    if fat_source == "from_bia":
+        slm = round(ffm - float(bone), 2) if bone is not None else round(ffm, 2)
+    else:
+        slm = None if header else (round(float(muscle), 2) if muscle else None)
     protein = round(ffm * 0.20, 2)
     protein_pct = round((protein / w) * 100, 1) if w else None
 
@@ -300,7 +351,7 @@ def main() -> int:
         """
         SELECT id, measured_at, weight_kg, smm_kg, body_fat_kg, pbf_pct, ffm_kg, tbw_kg,
                slm_kg, bone_mass_kg, protein_mass_kg, protein_pct, body_water_pct,
-               sex, height_cm, segmental_lean, segmental_fat, raw_payload,
+               sex, height_cm, age_years, segmental_lean, segmental_fat, raw_payload,
                raw_payload->>'body_comp_hex' AS hex,
                raw_payload->>'fat_source' AS fat_source
         FROM public.inbody_measurements
@@ -350,6 +401,8 @@ def main() -> int:
                 frame,
                 row.get("sex"),
                 bone_fallback=float(row["bone_mass_kg"]) if row.get("bone_mass_kg") is not None else None,
+                age=float(row["age_years"]) if row.get("age_years") is not None else None,
+                height=float(row["height_cm"]) if row.get("height_cm") is not None else None,
             )
 
         would = needs_update(row, vals)
@@ -396,6 +449,8 @@ def main() -> int:
         if apply:
             if vals["fat_source"] == "frame":
                 fat_tag = "frame_repaired"
+            elif vals["fat_source"] == "from_bia":
+                fat_tag = "from_bia"
             elif vals["fat_source"] == "from_ffm":
                 fat_tag = "from_ffm_repaired"
             elif vals["fat_source"] == "weight_only":
@@ -404,8 +459,9 @@ def main() -> int:
                 fat_tag = vals["fat_source"]
             patch = {
                 "fat_source": fat_tag,
-                "repair_note": "Reparación completa MorphoScan: header músculo/SMM rechazados; composición recalculada",
-                "repair_version": 2,
+                "repair_note": "Reparación MorphoScan BIA: fat desde z1×1.08+perfil si frame<10; sin FFM/header",
+                "bia_z_scale": MSC04_Z1_BIA_SCALE if vals["fat_source"] == "from_bia" else None,
+                "repair_version": 3,
             }
 
             # Segmentales: si weight_only, vaciar los derivados del músculo falso.

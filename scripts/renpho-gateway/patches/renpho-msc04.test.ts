@@ -307,9 +307,9 @@ describe('RenphoMsc04Adapter', () => {
       expect(adapter.isComplete(r!)).toBe(true);
     }, 25_000);
 
-    it('recovers Renpho composition from real 0x25 hex via FFM (muscle+bone)', () => {
+    it('estimates fat via BIA when end-anchored frame fat is guest garbage (<10%)', () => {
       const adapter = makeAdapter();
-      // Gemma 2026-07-22: Renpho 53.00 kg / 12.3% / muscle 43.41 / smm 25.81 / bone 3.10
+      // Real MorphoScan 0x25: plen-8 fat=3.0 (untrusted); z1≈406.5 Ω; bone≈3.02
       const hex =
         '55aa2500240311000014b40a00e10f260ea60bb20bc800b80dd20d4d0ab10ab101001e0098021f0001c8';
       const frame = Buffer.from(hex, 'hex');
@@ -323,11 +323,32 @@ describe('RenphoMsc04Adapter', () => {
         height: 170,
         isAthlete: false,
       });
-      expect(m.bodyFatPercent).toBeCloseTo(12.3, 0);
-      expect(m.muscleMass).toBeCloseTo(43.5, 0);
+      // Must NOT invent ~12% from header muscle 43.5 + bone FFM / fake SMM 25.6
+      expect(m.bodyFatPercent).toBeCloseTo(14.2, 0);
       expect(m.boneMass).toBeCloseTo(3.02, 1);
-      expect((m as { smmKg?: number }).smmKg).toBeCloseTo(25.6, 0);
-      expect(m.waterPercent).toBeCloseTo(64.0, 0);
+      expect(m.muscleMass).toBeLessThan(43);
+      expect((m as { smmKg?: number }).smmKg).not.toBeCloseTo(25.6, 0);
+      expect((m.raw as { fat_source?: string }).fat_source).toBe('from_bia');
+    });
+
+    it('matches Marta InBody (~21.4%) from today MorphoScan frame via BIA', () => {
+      const adapter = makeAdapter();
+      const hex =
+        '55aa2500240111000018740a00d90ead0eda0a3b09e700ac0d180d3b0963090d01002f00b3021c00013e';
+      const r = adapter.parseCharNotification(uuid16(0x2a12), Buffer.from(hex, 'hex'));
+      expect(r).not.toBeNull();
+      expect(r!.weight).toBeCloseTo(62.6, 2);
+      const m = adapter.computeMetrics(r!, {
+        ...defaultProfile(),
+        gender: 'female',
+        age: 37,
+        height: 167,
+        isAthlete: false,
+      });
+      // InBody same day: 62.5 kg / 21.4 % / FFM 49.1
+      expect(m.bodyFatPercent).toBeCloseTo(21.1, 0);
+      expect((m as { ffmKg?: number }).ffmKg).toBeCloseTo(49.4, 0);
+      expect((m.raw as { fat_source?: string }).fat_source).toBe('from_bia');
     });
   });
 

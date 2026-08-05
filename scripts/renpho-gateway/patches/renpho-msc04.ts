@@ -11,7 +11,12 @@ import type {
   UserProfile,
   BodyComposition,
 } from '../interfaces/scale-adapter.js';
-import { uuid16, buildPayload, type ScaleBodyComp } from './body-comp-helpers.js';
+import {
+  uuid16,
+  buildPayload,
+  computeBiaFat,
+  type ScaleBodyComp,
+} from './body-comp-helpers.js';
 import { matchesDescriptor, type MatchDescriptor } from './match-descriptor.js';
 import { bleLog } from '../ble/types.js';
 
@@ -50,6 +55,12 @@ const MATCH_WEIGHT_KG = 0.8;
 const PENDING_CACHE_MS = 45_000;
 /** Max wait for pending profile before handshake (ms). Cache/config used if slower. */
 const PENDING_HANDSHAKE_WAIT_MS = 350;
+/**
+ * MorphoScan DF-BIA `z1` (LE/10 after weight + 0x0a00) vs InBody calibration.
+ * 2026-08-05 Marta Loureiro: InBody 62.5 kg / 21.4 % / FFM 49.1; frame z1≈380 Ω.
+ * End-anchored plen-8 fat is guest garbage (0–8 %); trunk BE/10@weight+3 is Z20, not %.
+ */
+const MSC04_Z1_BIA_SCALE = 1.08;
 
 type CachedComp = ScaleBodyComp & {
   bodyFat?: number;
@@ -67,12 +78,19 @@ type CachedComp = ScaleBodyComp & {
     '100khz': Record<string, number>;
   };
   /** How body-fat % was obtained for this frame. */
-  fatSource?: 'frame' | 'from_ffm' | 'from_water' | 'none';
+  fatSource?: 'frame' | 'from_bia' | 'from_ffm' | 'from_water' | 'none';
   /** Renpho "masa muscular" (kg), not skeletal %. */
   muscleMassKg?: number;
   /** Skeletal muscle mass (kg). */
   smmKg?: number;
 };
+
+/** Body fat % from DF-BIA z1 + user profile (InBody-calibrated scale factor). */
+function msc04BiaFat(weight: number, z1Ohm: number, profile: UserProfile): number {
+  const z = z1Ohm * MSC04_Z1_BIA_SCALE;
+  if (!(z >= 100 && z <= 1500) || !(weight >= 0.5 && weight <= 300)) return Number.NaN;
+  return Math.round(computeBiaFat(weight, z, profile) * 10) / 10;
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -805,8 +823,10 @@ export class RenphoMsc04Adapter
 
   /**
    * Decode reassembled 0x25 / 0x26.
-   * Weight/fat end-anchored (joelr). Muscle mass / SMM / bone from parseMsc04BodyFields.
-   * Prefer FFM-derived fat (muscleMass+bone) — matches Renpho; joelr fat often ~3%.
+   * Weight end-anchored (joelr). Bone + DF-BIA Z from parseMsc04BodyFields.
+   * End-anchored fat (plen-8) is only trusted when >= 10 %; MorphoScan DF-BIA
+   * frames usually carry 0–8 % garbage there. When untrusted, estimate fat from
+   * z1×1.08 + profile (calibrated vs InBody). Never invent fat from header+bone FFM.
    */
   private decodeBodyCompFrame(data: Buffer): ScaleReading | null {
     if (data.length < 8 || data[0] !== HDR0 || data[1] !== HDR1) return null;
@@ -820,7 +840,7 @@ export class RenphoMsc04Adapter
       this.stashOrphans([data]);
       bleLog.info(
         `Renpho R-MSC04: buffer body-comp 0x${cmd.toString(16)} before handshake ` +
-          `(will replay after b3→b8; guest fat % ignored via FFM)`,
+          `(will replay after b3→b8; guest fat % ignored — BIA after profile)`,
       );
       return null;
     }
@@ -840,19 +860,41 @@ export class RenphoMsc04Adapter
     let bodyFat = frameFat;
     let fatSource: CachedComp['fatSource'] = 'frame';
     let waterPct: number | undefined;
+    let muscleMassKg: number | undefined;
+    let smmKg: number | undefined;
 
-    // Frame fat % >= 10 is the only trusted composition signal.
-    // Never invent % from header muscle (~43.5) + bone FFM — that path made
-    // fake ~10% / SMM~25.6 on Gemma-sized weights and ~40% on heavier bodies.
+    // Frame fat % >= 10 is trusted (joelr path). Below that MorphoScan DF-BIA
+    // frames need BIA from z1 + profile — never header muscle (~43.5) + bone FFM.
     const frameFatTrusted = frameFat >= 10 && frameFat <= 55;
-    const weightOnlyComp = !frameFatTrusted;
-    if (weightOnlyComp) {
-      bodyFat = 0;
-      fatSource = 'none';
-      waterPct = undefined;
-    } else {
+    let weightOnlyComp = false;
+    if (frameFatTrusted) {
       bodyFat = Math.round(frameFat * 10) / 10;
       fatSource = 'frame';
+      muscleMassKg = parsed.muscleMassKg;
+      smmKg = parsed.smmKg;
+    } else if (parsed.z1 != null && this.lastProfile) {
+      const bia = msc04BiaFat(weight, parsed.z1, this.lastProfile);
+      if (Number.isFinite(bia) && bia >= 5 && bia <= 55) {
+        bodyFat = bia;
+        fatSource = 'from_bia';
+        const lbm = weight * (1 - bodyFat / 100);
+        muscleMassKg =
+          parsed.boneKg != null
+            ? Math.round((lbm - parsed.boneKg) * 100) / 100
+            : Math.round(lbm * 100) / 100;
+        smmKg = Math.round(lbm * (this.lastProfile.isAthlete ? 0.6 : 0.54) * 100) / 100;
+      } else {
+        weightOnlyComp = true;
+        bodyFat = 0;
+        fatSource = 'none';
+      }
+    } else {
+      weightOnlyComp = true;
+      bodyFat = 0;
+      fatSource = 'none';
+    }
+
+    if (!weightOnlyComp) {
       const lbm = weight * (1 - bodyFat / 100);
       const leanHydration = this.lastProfile?.isAthlete ? 0.74 : 0.73;
       waterPct = Math.round(((lbm * leanHydration) / weight) * 1000) / 10;
@@ -873,25 +915,24 @@ export class RenphoMsc04Adapter
     bleLog.info(
       `Renpho R-MSC04: body-comp 0x${cmd.toString(16)} age=${ageS}s ` +
         `${weight.toFixed(2)} kg / ${weightOnlyComp ? '—' : `${bodyFat.toFixed(1)}%`}` +
-        `${parsed.muscleMassKg != null ? ` mus ${parsed.muscleMassKg.toFixed(2)}kg` : ''}` +
-        `${parsed.smmKg != null ? ` smm ${parsed.smmKg.toFixed(2)}kg` : ''}` +
+        `${muscleMassKg != null ? ` mus ${muscleMassKg.toFixed(2)}kg` : ''}` +
+        `${smmKg != null ? ` smm ${smmKg.toFixed(2)}kg` : ''}` +
         `${parsed.boneKg != null ? ` bone ${parsed.boneKg.toFixed(2)}kg` : ''}` +
+        `${parsed.z1 != null ? ` z1 ${parsed.z1.toFixed(1)}Ω` : ''}` +
         ` — ${fresh ? 'FRESH' : 'stored (ignored)'} [${fatSource}${weightOnlyComp ? '/weight-only' : ''}]`,
     );
     bleLog.info(`Renpho R-MSC04: body-comp hex ${data.subarray(0, frameLen).toString('hex')}`);
 
     const musclePct =
-      !weightOnlyComp && parsed.muscleMassKg != null
-        ? (parsed.muscleMassKg / weight) * 100
-        : undefined;
+      !weightOnlyComp && muscleMassKg != null ? (muscleMassKg / weight) * 100 : undefined;
 
     const snapshot: CachedComp = {
       fat: weightOnlyComp ? undefined : bodyFat,
       water: waterPct,
       muscle: musclePct,
       bone: parsed.boneKg,
-      muscleMassKg: weightOnlyComp ? undefined : parsed.muscleMassKg,
-      smmKg: weightOnlyComp ? undefined : parsed.smmKg,
+      muscleMassKg: weightOnlyComp ? undefined : muscleMassKg,
+      smmKg: weightOnlyComp ? undefined : smmKg,
       weightOnly: weightOnlyComp || undefined,
       frameHex: data.subarray(0, frameLen).toString('hex'),
       cmd,
@@ -970,8 +1011,34 @@ export class RenphoMsc04Adapter
     const scaleId = this.lastDeviceMac ? `scale-${this.lastDeviceMac}` : undefined;
     const impedance = c.impedanceOhm ?? reading.impedance ?? 0;
 
+    // Late BIA: frame fat was untrusted but we still have z1 + profile at export time.
+    let fatPct = c.fat;
+    let fatSource = c.fatSource;
+    let muscleMassKg = c.muscleMassKg;
+    let smmKg = c.smmKg;
+    let waterPct = c.water;
+    if (
+      (fatPct == null || fatSource === 'none' || c.weightOnly) &&
+      impedance >= 100 &&
+      effective?.height
+    ) {
+      const bia = msc04BiaFat(reading.weight, impedance, effective);
+      if (Number.isFinite(bia) && bia >= 5 && bia <= 55) {
+        fatPct = bia;
+        fatSource = 'from_bia';
+        const lbm = reading.weight * (1 - fatPct / 100);
+        muscleMassKg =
+          c.bone != null
+            ? Math.round((lbm - c.bone) * 100) / 100
+            : Math.round(lbm * 100) / 100;
+        smmKg = Math.round(lbm * (effective.isAthlete ? 0.6 : 0.54) * 100) / 100;
+        const leanHydration = effective.isAthlete ? 0.74 : 0.73;
+        waterPct = Math.round(((lbm * leanHydration) / reading.weight) * 1000) / 10;
+      }
+    }
+
     // Weight-only: do NOT call buildPayload — it invents Deurenberg fat %.
-    if (c.weightOnly || c.fatSource === 'none' || c.fat == null) {
+    if (fatPct == null || fatSource === 'none') {
       const heightM = effective.height / 100;
       const bmi =
         heightM > 0 ? Math.round((reading.weight / (heightM * heightM)) * 100) / 100 : undefined;
@@ -995,15 +1062,16 @@ export class RenphoMsc04Adapter
           impedance: c.impedanceMap ?? null,
           derived: [],
           note:
-            'weight-only: frame fat % < 10 (untrusted); no FFM/header invention',
+            'weight-only: frame fat % < 10 and BIA unavailable (missing z1/profile)',
         },
       } as BodyComposition;
     }
 
     const comp: ScaleBodyComp = {};
-    if (c.fat != null) comp.fat = c.fat;
-    if (c.water != null) comp.water = c.water;
-    if (c.muscle != null) comp.muscle = c.muscle;
+    comp.fat = fatPct;
+    if (waterPct != null) comp.water = waterPct;
+    if (muscleMassKg != null) comp.muscle = (muscleMassKg / reading.weight) * 100;
+    else if (c.muscle != null) comp.muscle = c.muscle;
     if (c.bone != null) comp.bone = c.bone;
     const base = buildPayload(reading.weight, impedance, comp, effective);
 
@@ -1012,26 +1080,27 @@ export class RenphoMsc04Adapter
     // Renpho: protein ≈ muscleMass − waterMass
     const waterMass = (base.waterPercent / 100) * base.weight;
     const proteinMass =
-      c.muscleMassKg != null
-        ? Math.round((c.muscleMassKg - waterMass) * 100) / 100
+      muscleMassKg != null
+        ? Math.round((muscleMassKg - waterMass) * 100) / 100
         : Math.round(lbm * 0.2 * 100) / 100;
     const proteinPercent = Math.round((proteinMass / base.weight) * 1000) / 10;
     const subcutaneous = Math.round(fat * 0.71 * 10) / 10;
     const smm =
-      c.smmKg != null
-        ? Math.round(c.smmKg * 100) / 100
+      smmKg != null
+        ? Math.round(smmKg * 100) / 100
         : Math.round(lbm * (effective.isAthlete ? 0.6 : 0.54) * 100) / 100;
     const ffm = Math.round(lbm * 100) / 100;
     const derived = ['subcutaneousFatPercent'];
-    if (c.water != null) derived.push('waterPercent(from_lbm)');
-    if (c.smmKg == null) derived.push('smmKg');
+    if (fatSource === 'from_bia') derived.push('bodyFatPercent(from_bia_z1)');
+    if (waterPct != null) derived.push('waterPercent(from_lbm)');
+    if (smmKg == null) derived.push('smmKg');
     derived.push('proteinPercent');
 
     return {
       ...base,
       ...(scaleId ? { external_user_id: scaleId } : {}),
-      // Prefer frame muscle mass kg over buildPayload's percent×weight
-      ...(c.muscleMassKg != null ? { muscleMass: Math.round(c.muscleMassKg * 100) / 100 } : {}),
+      // Prefer frame/BIA muscle mass kg over buildPayload's percent×weight
+      ...(muscleMassKg != null ? { muscleMass: Math.round(muscleMassKg * 100) / 100 } : {}),
       proteinPercent,
       proteinMassKg: proteinMass,
       subcutaneousFatPercent: subcutaneous,
@@ -1045,13 +1114,16 @@ export class RenphoMsc04Adapter
         body_comp_cmd: c.cmd ?? null,
         body_comp_hex: c.frameHex ?? null,
         payload_len: c.payloadLen ?? null,
-        fat_source: c.fatSource ?? 'frame',
+        fat_source: fatSource ?? 'frame',
+        bia_z_scale: fatSource === 'from_bia' ? MSC04_Z1_BIA_SCALE : null,
         impedance_ohm: c.impedanceOhm ?? null,
         impedance_ohm_2: c.impedanceOhm2 ?? null,
         impedance: c.impedanceMap ?? null,
         derived,
         note:
-          'segmental kg still from Renpho/app when available; DF-BIA Z + bone from 0x25; prefer frame fat % >= 10 (no FFM fallback)',
+          fatSource === 'from_bia'
+            ? 'DF-BIA: fat from z1×1.08 + profile (InBody-calibrated); bone from frame; no header FFM'
+            : 'DF-BIA Z + bone from frame; frame fat % >= 10 trusted (no FFM fallback)',
       },
     } as BodyComposition;
   }
