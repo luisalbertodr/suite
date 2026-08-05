@@ -13,7 +13,9 @@ ExecStart=/usr/bin/npm start
 Restart=always
 RestartSec=5
 # node-ble acumula match rules de D-Bus; reciclar el proceso limpia la conexión.
-RuntimeMaxSec=3600
+# En clínica (~60–80 BLE) con 3600s se saturaba max_match_rules (~40 min) y el
+# proceso moría; 900s recicla antes de llegar al límite.
+RuntimeMaxSec=900
 # Bluetooth / D-Bus
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
