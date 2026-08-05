@@ -72,9 +72,11 @@ export const UserAllowedNetworksPanel: React.FC<UserAllowedNetworksPanelProps> =
           alguna de ellas. La restricción aplica también a superusers.
         </p>
         <p>
-          En la clínica suele verse <code className="text-[10px]">192.168.99.x</code> si el
-          DNS de API resuelve en LAN. Desde internet verás la IP pública (NAT): para acceso
-          remoto usa el preset «Cualquier IP» o añade la IP pública fija de la clínica.
+          En la clínica el proxy suele ver <code className="text-[10px]">10.10.10.x</code> (la
+          más habitual) o <code className="text-[10px]">192.168.99.x</code> /
+          <code className="text-[10px]">192.168.1.x</code>. Sin redes asignadas = acceso libre
+          (por eso otros usuarios de la misma ubicación sí entran). Para acceso remoto usa
+          «Cualquier IP» o la IP pública fija.
         </p>
       </div>
 

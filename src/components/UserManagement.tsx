@@ -84,7 +84,7 @@ export const UserManagement = () => {
   const handleApplyInternalNetworks = async () => {
     if (!canManageNetworks || users.length === 0) return;
     const ok = window.confirm(
-      `¿Asignar redes internas (192.168.99.0/24 y 192.168.1.0/24) a los ${users.length} usuarios listados?\n\n` +
+      `¿Asignar redes internas (10.10.10.0/24, 192.168.99.0/24 y 192.168.1.0/24) a los ${users.length} usuarios listados?\n\n` +
         'No se modificará quien ya tenga «Cualquier IP (0.0.0.0/0)».',
     );
     if (!ok) return;
@@ -407,7 +407,7 @@ export const UserManagement = () => {
               variant="outline"
               size="sm"
               disabled={applyingInternalNetworks || usersLoading || users.length === 0}
-              title="Asigna 192.168.99.0/24 y 192.168.1.0/24 a todos (omite quien ya tenga acceso externo)"
+              title="Asigna 10.10.10.0/24, 192.168.99.0/24 y 192.168.1.0/24 a todos (omite quien ya tenga acceso externo)"
             >
               <Network className="h-4 w-4 mr-2" />
               {applyingInternalNetworks ? 'Aplicando…' : 'Redes internas a todos'}
