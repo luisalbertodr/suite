@@ -3,6 +3,8 @@
  * Mantener alineada la lógica con supabase/functions/meta-sync-leads/index.ts
  */
 
+import { stripCombiningMarks } from '@/lib/unicodeText';
+
 export type MetaFieldEntry = { name: string; values: string[] };
 
 const EXCLUDE_SUBSTRINGS = [
@@ -127,12 +129,7 @@ const ES_MONTH_TOKEN: Record<string, number> = {
 };
 
 export const normalizeMetaFieldKey = (name: string): string =>
-  String(name ?? '')
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/\p{M}/gu, '')
-    .replace(/\s+/g, '_');
+  stripCombiningMarks(String(name ?? '').trim().toLowerCase()).replace(/\s+/g, '_');
 
 const YES_NO_ANSWER_RE =
   /^(si|sí|yes|no|true|false|1|0|ok|vale|confirmo|acepto|de_acuerdo)$/i;
@@ -140,11 +137,7 @@ const YES_NO_ANSWER_RE =
 /** Respuestas sí/no de preguntas tipo «¿quieres agendar?» — no son fecha de cita. */
 export function isYesNoOnlyAnswer(value: string | null | undefined): boolean {
   if (value == null) return true;
-  const s = String(value)
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/\p{M}/gu, '');
+  const s = stripCombiningMarks(String(value).trim().toLowerCase());
   if (!s) return true;
   if (YES_NO_ANSWER_RE.test(s)) return true;
   return s.length <= 2;
@@ -325,7 +318,7 @@ function parseDayMonthNameYear(raw: string): string | null {
   const m = cleaned.match(re);
   if (!m) return null;
   const day = Number(m[1]);
-  const monToken = m[2].toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+  const monToken = stripCombiningMarks(m[2].toLowerCase());
   const month = ES_MONTH_TOKEN[monToken];
   if (month == null) return null;
   const year = Number(m[3]);

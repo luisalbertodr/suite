@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { stripCombiningMarks } from '@/lib/unicodeText';
 
 export type CustomerLookupRow = {
   id: string;
@@ -27,12 +28,7 @@ const emailKey = (raw: string | null | undefined): string =>
   (raw ?? '').trim().toLowerCase();
 
 export const normalizePersonName = (name: string | null | undefined): string =>
-  (name ?? '')
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/\p{M}/gu, '')
-    .replace(/\s+/g, ' ');
+  stripCombiningMarks((name ?? '').trim().toLowerCase()).replace(/\s+/g, ' ');
 
 export type CustomerLookupIndex = {
   byPhone: Map<string, CustomerLookupRow>;

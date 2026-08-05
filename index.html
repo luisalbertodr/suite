@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="es">
   <head>
@@ -28,19 +27,31 @@
 
   <body>
     <div id="root"></div>
-    <!-- Fallback visible si el boot SystemJS/legacy falla en navegadores antiguos. -->
+    <!-- Overlay fuera de #root: next-themes mete un <script> en #root y ocultaba el aviso. -->
+    <div id="suite-boot-error" hidden style="display:none;font-family:system-ui,sans-serif;padding:24px;max-width:40rem;margin:10vh auto;line-height:1.45"></div>
     <script>
-      window.addEventListener("error", function (ev) {
-        var root = document.getElementById("root");
-        if (!root || root.childNodes.length) return;
-        root.innerHTML =
-          '<div style="font-family:system-ui,sans-serif;padding:24px;max-width:40rem;margin:10vh auto;line-height:1.45">' +
-          "<h1 style=\"font-size:1.25rem;margin:0 0 8px\">No se pudo cargar Suite</h1>" +
-          "<p style=\"margin:0;color:#444\">Actualice Chrome/Edge/Safari o contacte con informática.</p>" +
-          '<pre style="margin-top:12px;padding:12px;background:#f4f4f5;overflow:auto;font-size:12px">' +
-          String((ev && ev.message) || "Error de carga") +
-          "</pre></div>";
-      });
+      (function () {
+        function showBootError(msg) {
+          var box = document.getElementById("suite-boot-error");
+          if (!box || box.getAttribute("data-shown") === "1") return;
+          box.setAttribute("data-shown", "1");
+          box.hidden = false;
+          box.style.display = "block";
+          box.innerHTML =
+            "<h1 style=\"font-size:1.25rem;margin:0 0 8px\">No se pudo cargar Suite</h1>" +
+            "<p style=\"margin:0;color:#444\">Actualice Chrome/Edge/Safari o contacte con informática.</p>" +
+            '<pre style="margin-top:12px;padding:12px;background:#f4f4f5;overflow:auto;font-size:12px;white-space:pre-wrap">' +
+            String(msg || "Error de carga") +
+            "</pre>";
+        }
+        window.addEventListener("error", function (ev) {
+          showBootError((ev && ev.message) || "Error de carga");
+        });
+        window.addEventListener("unhandledrejection", function (ev) {
+          var r = ev && ev.reason;
+          showBootError((r && (r.message || r)) || "Error de carga (promise)");
+        });
+      })();
     </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>

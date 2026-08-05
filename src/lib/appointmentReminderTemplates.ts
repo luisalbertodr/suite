@@ -4,6 +4,8 @@
  * laser_fotodepilacion > micropigmentacion > medicina > otros
  */
 
+import { stripCombiningMarks } from '@/lib/unicodeText';
+
 export type AppointmentReminderCategory =
   | 'laser_fotodepilacion'
   | 'micropigmentacion'
@@ -71,10 +73,7 @@ export const DEFAULT_TREATMENT_REMINDER_TEMPLATES: Record<
 };
 
 function normalizeMatchText(s: string): string {
-  return s
-    .normalize('NFD')
-    .replace(/\p{M}/gu, '')
-    .toLowerCase();
+  return stripCombiningMarks(s).toLowerCase();
 }
 
 const LASER_RE =

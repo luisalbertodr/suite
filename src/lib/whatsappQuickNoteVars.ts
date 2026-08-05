@@ -4,6 +4,7 @@ import {
   appointmentYmd,
   normalizeHm,
 } from '@/lib/agendaAppointmentDisplay';
+import { stripCombiningMarks } from '@/lib/unicodeText';
 
 /** Variables disponibles en Notas rápidas de WhatsApp. */
 export const WHATSAPP_QUICK_NOTE_VARS = [
@@ -112,7 +113,7 @@ export function applyWhatsappQuickNoteVars(
     profesional: ctx.profesional ?? '',
   };
   return body.replace(/\{([a-zA-ZáéíóúÁÉÍÓÚñÑ0-9_]+)\}/g, (match, key: string) => {
-    const k = key.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+    const k = stripCombiningMarks(key).toLowerCase();
     return Object.prototype.hasOwnProperty.call(vars, k) ? vars[k] : match;
   });
 }
