@@ -16,6 +16,7 @@ import {
   formatEurosFromCents,
   loadStripeConfig,
   markDepositPaid,
+  resolvePaymentGatewayCompanyId,
   type StripeConfigRow,
 } from './stripeDeposit.ts';
 
@@ -38,7 +39,7 @@ export type RedsysConfigRow = {
 
 export type RedsysPayMethod = 'card' | 'bizum';
 
-export async function loadRedsysConfig(
+async function loadRedsysConfigExact(
   admin: SupabaseClient,
   companyId: string,
 ): Promise<RedsysConfigRow | null> {
@@ -49,6 +50,49 @@ export async function loadRedsysConfig(
     .maybeSingle();
   if (error) throw error;
   return (data as RedsysConfigRow | null) ?? null;
+}
+
+/** Carga Redsys de la empresa; si no hay fila, prueba hub / hermanas del centro laboral. */
+export async function loadRedsysConfig(
+  admin: SupabaseClient,
+  companyId: string,
+): Promise<RedsysConfigRow | null> {
+  const direct = await loadRedsysConfigExact(admin, companyId);
+  if (direct) return direct;
+
+  const gatewayId = await resolvePaymentGatewayCompanyId(admin, companyId);
+  if (gatewayId !== companyId) {
+    const hubCfg = await loadRedsysConfigExact(admin, gatewayId);
+    if (hubCfg) return hubCfg;
+  }
+
+  const { data: company } = await admin
+    .from('companies')
+    .select('work_center_id')
+    .eq('id', companyId)
+    .maybeSingle();
+  if (!company?.work_center_id) return null;
+
+  const { data: sisters } = await admin
+    .from('companies')
+    .select('id')
+    .eq('work_center_id', company.work_center_id);
+  const ids = (sisters ?? [])
+    .map((s) => String(s.id))
+    .filter((id) => id !== companyId && id !== gatewayId);
+  if (ids.length === 0) return null;
+
+  const { data: rows, error } = await admin
+    .from('redsys_config')
+    .select('*')
+    .in('company_id', ids);
+  if (error) throw error;
+  const list = (rows as RedsysConfigRow[] | null) ?? [];
+  return (
+    list.find((r) => r.enabled && !!r.signature_key?.trim()) ??
+    list[0] ??
+    null
+  );
 }
 
 export function isRedsysOnlineReady(cfg: RedsysConfigRow | null | undefined): boolean {
@@ -305,7 +349,7 @@ export async function processRedsysNotification(
   await admin
     .from('redsys_config')
     .update({ last_notification_at: new Date().toISOString() })
-    .eq('company_id', companyId);
+    .eq('company_id', redsysCfg.company_id);
 
   const { data: session } = await admin
     .from('stripe_deposit_sessions')

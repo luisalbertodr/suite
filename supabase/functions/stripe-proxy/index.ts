@@ -2,6 +2,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import {
   loadStripeConfig,
+  resolvePaymentGatewayCompanyId,
   startCheckoutForDepositToken,
   testStripeConnection,
 } from '../_shared/stripeDeposit.ts';
@@ -205,7 +206,8 @@ serve(async (req) => {
   }
   const auth = await resolveAuthCompanyId(req, admin, body.company_id);
   if (auth instanceof Response) return auth;
-  const companyId = auth.companyId;
+  // Pagos online (Stripe/Redsys) y leads WA viven en el hub del centro laboral.
+  const companyId = await resolvePaymentGatewayCompanyId(admin, auth.companyId);
 
   if (body.action === 'config.save') {
     const { data: existing } = await admin
@@ -371,7 +373,8 @@ serve(async (req) => {
     if (!body.chat_id?.trim()) return err('Falta chat_id');
     const authCtx = await resolveAuthContext(req, admin, body.company_id);
     if (authCtx instanceof Response) return authCtx;
-    const { companyId, userId } = authCtx;
+    const userId = authCtx.userId;
+    const companyId = await resolvePaymentGatewayCompanyId(admin, authCtx.companyId);
 
     const { data: canWrite } = await admin.rpc('user_has_effective_permission', {
       p_user_id: userId,

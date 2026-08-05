@@ -6,6 +6,7 @@ import {
   startRedsysCheckoutForDepositToken,
   type RedsysPayMethod,
 } from '../_shared/redsysDeposit.ts';
+import { resolvePaymentGatewayCompanyId } from '../_shared/stripeDeposit.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -142,7 +143,8 @@ serve(async (req) => {
 
   const auth = await resolveAuthCompanyId(req, admin, body.company_id);
   if (auth instanceof Response) return auth;
-  const companyId = auth.companyId;
+  // Config y cobros online viven en el hub del centro (Estética), no en Medicina.
+  const companyId = await resolvePaymentGatewayCompanyId(admin, auth.companyId);
 
   if (body.action === 'config.save') {
     const { data: existing } = await admin

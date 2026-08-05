@@ -2,6 +2,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { getSupabaseAccessToken } from '@/lib/supabaseSession';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useWorkCenter } from '@/hooks/useWorkCenter';
+import { resolvePaymentGatewayCompanyIdClient } from '@/lib/paymentGatewayCompany';
 import type { Database } from '@/integrations/supabase/types';
 
 export type RedsysConfigSafe = Database['public']['Views']['redsys_config_safe']['Row'] & {
@@ -92,7 +94,6 @@ export async function invokeRedsysProxy<T = unknown>(payload: RedsysProxyAction)
     const errMsg = (data as { error?: unknown }).error;
     if (errMsg) throw new Error(String(errMsg));
   }
-  // config.test puede devolver ok:false con mensaje sin HTTP de error
   if (
     data &&
     typeof data === 'object' &&
@@ -113,12 +114,25 @@ export async function invokeRedsysProxy<T = unknown>(payload: RedsysProxyAction)
 export const useRedsysConfig = () => {
   const queryClient = useQueryClient();
   const { companyId, loading: companyLoading } = useCompanyFilter();
+  const { billingCompanies, loading: wcLoading } = useWorkCenter();
+
+  const gatewayQuery = useQuery({
+    queryKey: ['payment-gateway-company', companyId, billingCompanies.map((c) => c.id).join(',')],
+    enabled: !!companyId && !companyLoading && !wcLoading,
+    staleTime: 60_000,
+    queryFn: async () => {
+      if (!companyId) return null;
+      return resolvePaymentGatewayCompanyIdClient(companyId, billingCompanies);
+    },
+  });
+
+  const gatewayCompanyId = gatewayQuery.data ?? companyId;
 
   const configQuery = useQuery({
-    queryKey: ['redsys-config', companyId],
-    enabled: !!companyId && !companyLoading,
+    queryKey: ['redsys-config', gatewayCompanyId],
+    enabled: !!gatewayCompanyId && !companyLoading && !gatewayQuery.isLoading,
     queryFn: async (): Promise<RedsysConfigSafe | null> => {
-      if (!companyId) return null;
+      if (!gatewayCompanyId) return null;
       const { data, error } = await supabase
         .from('redsys_config_safe')
         .select('*')
@@ -130,19 +144,19 @@ export const useRedsysConfig = () => {
 
   const upsertConfig = useMutation({
     mutationFn: async (values: RedsysConfigSavePayload) => {
-      if (!companyId) throw new Error('Sin empresa');
+      if (!gatewayCompanyId) throw new Error('Sin empresa');
       const res = await invokeRedsysProxy<{
         ok: boolean;
         config: RedsysConfigSafe;
       }>({
         action: 'config.save',
-        company_id: companyId,
+        company_id: gatewayCompanyId,
         ...values,
       });
       return res.config;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['redsys-config', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['redsys-config', gatewayCompanyId] });
     },
   });
 
@@ -155,13 +169,14 @@ export const useRedsysConfig = () => {
         environment?: string;
       }>({
         action: 'config.test',
-        company_id: companyId ?? undefined,
+        company_id: gatewayCompanyId ?? undefined,
       }),
   });
 
   return {
     config: configQuery.data ?? null,
-    isLoading: configQuery.isLoading,
+    gatewayCompanyId: gatewayCompanyId ?? null,
+    isLoading: configQuery.isLoading || gatewayQuery.isLoading,
     upsertConfig,
     testConnection,
   };

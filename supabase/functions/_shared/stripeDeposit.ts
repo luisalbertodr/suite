@@ -502,7 +502,40 @@ export async function buildDepositRequestWhatsappMessage(
   };
 }
 
-export async function loadStripeConfig(
+/**
+ * Empresa anfitriona de Stripe/Redsys: hub Style si la empresa comparte
+ * centro laboral con él; si no, la propia empresa.
+ */
+export async function resolvePaymentGatewayCompanyId(
+  admin: SupabaseClient,
+  companyId: string,
+): Promise<string> {
+  const { data: rpcId, error: rpcErr } = await admin.rpc('payment_gateway_company_id', {
+    p_company_id: companyId,
+  });
+  if (!rpcErr && rpcId) return String(rpcId);
+
+  // Fallback sin RPC (migración aún no aplicada): hermanas del work_center → hub Style.
+  const { data: company } = await admin
+    .from('companies')
+    .select('id, work_center_id')
+    .eq('id', companyId)
+    .maybeSingle();
+  if (!company?.work_center_id) return companyId;
+
+  const HUB = '5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4';
+  const { data: hub } = await admin
+    .from('companies')
+    .select('id, work_center_id')
+    .eq('id', HUB)
+    .maybeSingle();
+  if (hub?.work_center_id && hub.work_center_id === company.work_center_id) {
+    return HUB;
+  }
+  return companyId;
+}
+
+async function loadStripeConfigExact(
   admin: SupabaseClient,
   companyId: string,
 ): Promise<StripeConfigRow | null> {
@@ -513,6 +546,48 @@ export async function loadStripeConfig(
     .maybeSingle();
   if (error) throw error;
   return (data as StripeConfigRow | null) ?? null;
+}
+
+export async function loadStripeConfig(
+  admin: SupabaseClient,
+  companyId: string,
+): Promise<StripeConfigRow | null> {
+  const direct = await loadStripeConfigExact(admin, companyId);
+  if (direct) return direct;
+
+  const gatewayId = await resolvePaymentGatewayCompanyId(admin, companyId);
+  if (gatewayId !== companyId) {
+    const hubCfg = await loadStripeConfigExact(admin, gatewayId);
+    if (hubCfg) return hubCfg;
+  }
+
+  const { data: company } = await admin
+    .from('companies')
+    .select('work_center_id')
+    .eq('id', companyId)
+    .maybeSingle();
+  if (!company?.work_center_id) return null;
+
+  const { data: sisters } = await admin
+    .from('companies')
+    .select('id')
+    .eq('work_center_id', company.work_center_id);
+  const ids = (sisters ?? [])
+    .map((s) => String(s.id))
+    .filter((id) => id !== companyId && id !== gatewayId);
+  if (ids.length === 0) return null;
+
+  const { data: rows, error } = await admin
+    .from('stripe_config')
+    .select('*')
+    .in('company_id', ids);
+  if (error) throw error;
+  const list = (rows as StripeConfigRow[] | null) ?? [];
+  return (
+    list.find((r) => r.enabled && !!r.secret_key?.trim()) ??
+    list[0] ??
+    null
+  );
 }
 
 /** Devuelve el stage_id solo si sigue existiendo (tras renombres el id se mantiene; si se borró, null). */

@@ -34,8 +34,8 @@ const NONE_STAGE = '__none__';
 
 export const StripeConfigPanel: React.FC = () => {
   const { toast } = useToast();
-  const { config, isLoading, upsertConfig, testConnection } = useStripeConfig();
-  const { stages } = useMarketingStages();
+  const { config, gatewayCompanyId, isLoading, upsertConfig, testConnection } = useStripeConfig();
+  const { stages } = useMarketingStages(gatewayCompanyId);
 
   const [publishableKey, setPublishableKey] = useState('');
   const [secretKey, setSecretKey] = useState('');
@@ -145,9 +145,9 @@ export const StripeConfigPanel: React.FC = () => {
             <div>
               <CardTitle>Pagos Stripe · Señal de reserva</CardTitle>
               <CardDescription>
-                Cobro online de la señal para confirmar la cita. Enlaza con WhatsApp
-                automático usando {'{link_pago}'} y {'{importe_senal}'}. Convive con Redsys
-                (Configuración → Pagos → Redsys): la página /pago ofrece los métodos activos.
+                Cobro online de la señal para confirmar la cita. En el centro M/E se guarda
+                en Estética (hub). Enlaza con WhatsApp usando {'{link_pago}'} y{' '}
+                {'{importe_senal}'}. Convive con Redsys (Configuración → Pagos → Redsys).
               </CardDescription>
             </div>
           </div>

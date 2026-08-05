@@ -22,7 +22,6 @@ import { Eye, EyeOff, Landmark, Copy, CheckCircle2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { centsToEurosInput, eurosToCents } from '@/hooks/useStripeConfig';
 import { useRedsysConfig } from '@/hooks/useRedsysConfig';
-import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { useMarketingStages } from '@/hooks/useMarketingStages';
 import { WHATSAPP_MESSAGE_TEMPLATE_VARS } from '@/lib/whatsappMessageTemplates';
 
@@ -31,9 +30,8 @@ const NONE_STAGE = '__none__';
 
 export const RedsysConfigPanel: React.FC = () => {
   const { toast } = useToast();
-  const { companyId } = useCompanyFilter();
-  const { config, isLoading, upsertConfig, testConnection } = useRedsysConfig();
-  const { stages } = useMarketingStages();
+  const { config, gatewayCompanyId, isLoading, upsertConfig, testConnection } = useRedsysConfig();
+  const { stages } = useMarketingStages(gatewayCompanyId);
 
   const [merchantCode, setMerchantCode] = useState('');
   const [terminal, setTerminal] = useState('1');
@@ -163,7 +161,8 @@ export const RedsysConfigPanel: React.FC = () => {
             <div>
               <CardTitle>Pagos Redsys · Señal de reserva</CardTitle>
               <CardDescription>
-                TPV Virtual (tarjeta y Bizum). Convive con Stripe: el enlace{' '}
+                TPV Virtual (tarjeta y Bizum). En el centro M/E la config se guarda en
+                Estética (hub), compartida con Medicina. Convive con Stripe: el enlace{' '}
                 {'{link_pago}'} ofrece los métodos activos en la página pública.
               </CardDescription>
             </div>
