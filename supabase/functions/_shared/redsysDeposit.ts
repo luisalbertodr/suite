@@ -330,12 +330,20 @@ export async function processRedsysNotification(
 
     await markDepositPaid(admin, session.id, authCode ? `redsys:${authCode}` : 'redsys');
 
-    // markDepositPaid usa la etapa de Stripe; si Redsys tiene la suya, prevalece
+    // markDepositPaid usa la etapa de Stripe; si Redsys tiene la suya (y sigue existiendo), prevalece
     if (redsysCfg.confirmed_stage_id && session.marketing_lead_id) {
-      await admin
-        .from('marketing_leads')
-        .update({ stage_id: redsysCfg.confirmed_stage_id })
-        .eq('id', session.marketing_lead_id);
+      const { resolveExistingStageId } = await import('./stripeDeposit.ts');
+      const stageId = await resolveExistingStageId(
+        admin,
+        companyId,
+        redsysCfg.confirmed_stage_id,
+      );
+      if (stageId) {
+        await admin
+          .from('marketing_leads')
+          .update({ stage_id: stageId })
+          .eq('id', session.marketing_lead_id);
+      }
     }
 
     const successMsg =

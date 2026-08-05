@@ -48,6 +48,7 @@ export const StripeConfigPanel: React.FC = () => {
   const [depositEuros, setDepositEuros] = useState('');
   const [publicAppUrl, setPublicAppUrl] = useState('');
   const [confirmedStageId, setConfirmedStageId] = useState<string>(NONE_STAGE);
+  const [orphanedStageWarning, setOrphanedStageWarning] = useState<string | null>(null);
   const [successWhatsapp, setSuccessWhatsapp] = useState('');
   const [depositRequestWhatsapp, setDepositRequestWhatsapp] = useState('');
   const [copied, setCopied] = useState(false);
@@ -60,12 +61,21 @@ export const StripeConfigPanel: React.FC = () => {
     setEnabled(config.enabled ?? false);
     setDepositEuros(centsToEurosInput(config.default_deposit_amount_cents));
     setPublicAppUrl(config.public_app_url ?? window.location.origin);
-    setConfirmedStageId(config.confirmed_stage_id ?? NONE_STAGE);
     setSuccessWhatsapp(config.payment_success_whatsapp_message ?? '');
     setDepositRequestWhatsapp(
       config.deposit_request_whatsapp_message ?? DEFAULT_DEPOSIT_REQUEST_WHATSAPP_MESSAGE,
     );
-  }, [config]);
+    const stageId = config.confirmed_stage_id;
+    if (stageId && stages.length > 0 && !stages.some((s) => s.id === stageId)) {
+      setConfirmedStageId(NONE_STAGE);
+      setOrphanedStageWarning(
+        'La etapa tras pago ya no existe (eliminada o recreada). Elige la etapa actual y guarda.',
+      );
+    } else {
+      setConfirmedStageId(stageId ?? NONE_STAGE);
+      setOrphanedStageWarning(null);
+    }
+  }, [config, stages]);
 
   const webhookUrl = useMemo(() => {
     if (!SUPABASE_URL || !config?.company_id) return '';
@@ -243,7 +253,13 @@ export const StripeConfigPanel: React.FC = () => {
             </div>
             <div className="space-y-2 md:col-span-2">
               <Label>Etapa tras pago confirmado</Label>
-              <Select value={confirmedStageId} onValueChange={setConfirmedStageId}>
+              <Select
+                value={confirmedStageId}
+                onValueChange={(v) => {
+                  setConfirmedStageId(v);
+                  setOrphanedStageWarning(null);
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Auto: primera etapa ganada" />
                 </SelectTrigger>
@@ -252,10 +268,20 @@ export const StripeConfigPanel: React.FC = () => {
                   {stages.map((s) => (
                     <SelectItem key={s.id} value={s.id}>
                       {s.name}
+                      {s.is_won ? ' · ganada' : ''}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              <p className="text-[11px] text-muted-foreground">
+                Se guarda por ID: si renombras la etapa en Marketing, sigue vinculada. Si la
+                eliminas, elige otra y guarda.
+              </p>
+              {orphanedStageWarning ? (
+                <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                  {orphanedStageWarning}
+                </p>
+              ) : null}
             </div>
             <div className="space-y-2 md:col-span-2">
               <Label>WhatsApp tras pago (opcional)</Label>

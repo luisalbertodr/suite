@@ -35,23 +35,78 @@ export type RedsysProxyAction =
       pay_method?: 'card' | 'bizum';
     };
 
+async function readJsonBody(res: Response): Promise<unknown> {
+  const text = await res.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
 export async function invokeRedsysProxy<T = unknown>(payload: RedsysProxyAction): Promise<T> {
   const publicActions = new Set(['deposit.public_checkout']);
-  const headers: Record<string, string> = {};
+  const url = (import.meta.env.VITE_SUPABASE_URL as string | undefined) ?? '';
+  if (!url) throw new Error('Falta VITE_SUPABASE_URL');
+  const endpoint = `${url.replace(/\/+$/, '')}/functions/v1/redsys-proxy`;
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    apikey: (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ?? '',
+  };
   if (!publicActions.has(payload.action)) {
     headers.Authorization = `Bearer ${await getSupabaseAccessToken()}`;
+  } else {
+    headers.Authorization = `Bearer ${
+      (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ?? ''
+    }`;
   }
-  const response = await supabase.functions.invoke('redsys-proxy', {
-    headers,
-    body: payload,
-  });
-  if (response.error) {
-    throw new Error(response.error.message ?? 'Error en Redsys');
+
+  let res: Response;
+  try {
+    res = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+    });
+  } catch (e) {
+    throw new Error(
+      `No se pudo contactar con Redsys: ${e instanceof Error ? e.message : 'Error de red'}`,
+    );
   }
-  const data = response.data as T & { error?: string };
-  if (data && typeof data === 'object' && 'error' in data && data.error) {
-    throw new Error(String(data.error));
+
+  const data = await readJsonBody(res);
+
+  if (!res.ok) {
+    const msg =
+      data && typeof data === 'object' && data !== null && 'error' in data
+        ? String((data as { error: unknown }).error)
+        : typeof data === 'string' && data
+          ? data.slice(0, 280)
+          : `Error Redsys (HTTP ${res.status})`;
+    throw new Error(msg);
   }
+
+  if (data && typeof data === 'object' && data !== null && 'error' in data) {
+    const errMsg = (data as { error?: unknown }).error;
+    if (errMsg) throw new Error(String(errMsg));
+  }
+  // config.test puede devolver ok:false con mensaje sin HTTP de error
+  if (
+    data &&
+    typeof data === 'object' &&
+    data !== null &&
+    'ok' in data &&
+    (data as { ok?: unknown }).ok === false
+  ) {
+    const errMsg =
+      'error' in data && (data as { error?: unknown }).error
+        ? String((data as { error: unknown }).error)
+        : 'Configuración Redsys incompleta';
+    throw new Error(errMsg);
+  }
+
   return data as T;
 }
 

@@ -50,6 +50,7 @@ export const RedsysConfigPanel: React.FC = () => {
   const [depositEuros, setDepositEuros] = useState('');
   const [publicAppUrl, setPublicAppUrl] = useState('');
   const [confirmedStageId, setConfirmedStageId] = useState<string>(NONE_STAGE);
+  const [orphanedStageWarning, setOrphanedStageWarning] = useState<string | null>(null);
   const [successWhatsapp, setSuccessWhatsapp] = useState('');
   const [productDescription, setProductDescription] = useState('Señal reserva cita');
   const [copied, setCopied] = useState(false);
@@ -65,10 +66,20 @@ export const RedsysConfigPanel: React.FC = () => {
     setBizumEnabled(config.bizum_enabled ?? true);
     setDepositEuros(centsToEurosInput(config.default_deposit_amount_cents));
     setPublicAppUrl(config.public_app_url ?? window.location.origin);
-    setConfirmedStageId(config.confirmed_stage_id ?? NONE_STAGE);
     setSuccessWhatsapp(config.payment_success_whatsapp_message ?? '');
     setProductDescription(config.product_description ?? 'Señal reserva cita');
-  }, [config]);
+
+    const stageId = config.confirmed_stage_id;
+    if (stageId && stages.length > 0 && !stages.some((s) => s.id === stageId)) {
+      setConfirmedStageId(NONE_STAGE);
+      setOrphanedStageWarning(
+        'La etapa tras pago ya no existe (eliminada o recreada). Elige la etapa actual y guarda.',
+      );
+    } else {
+      setConfirmedStageId(stageId ?? NONE_STAGE);
+      setOrphanedStageWarning(null);
+    }
+  }, [config, stages]);
 
   const notificationUrl = useMemo(() => {
     if (!SUPABASE_URL || !config?.company_id) return '';
@@ -115,9 +126,14 @@ export const RedsysConfigPanel: React.FC = () => {
       const res = await testConnection.mutateAsync();
       toast({
         title: 'Configuración Redsys OK',
-        description: res.merchant_code
-          ? `Comercio ${res.merchant_code} · Terminal ${res.terminal} · ${res.environment}`
-          : undefined,
+        description: [
+          res.merchant_code
+            ? `Comercio ${res.merchant_code} · Terminal ${res.terminal} · ${res.environment}`
+            : null,
+          (res as { stage_warning?: string }).stage_warning,
+        ]
+          .filter(Boolean)
+          .join(' — ') || undefined,
       });
     } catch (e) {
       toast({
@@ -300,7 +316,13 @@ export const RedsysConfigPanel: React.FC = () => {
             </div>
             <div className="space-y-2 md:col-span-2">
               <Label>Etapa tras pago confirmado</Label>
-              <Select value={confirmedStageId} onValueChange={setConfirmedStageId}>
+              <Select
+                value={confirmedStageId}
+                onValueChange={(v) => {
+                  setConfirmedStageId(v);
+                  setOrphanedStageWarning(null);
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Auto: primera etapa ganada" />
                 </SelectTrigger>
@@ -309,10 +331,20 @@ export const RedsysConfigPanel: React.FC = () => {
                   {stages.map((s) => (
                     <SelectItem key={s.id} value={s.id}>
                       {s.name}
+                      {s.is_won ? ' · ganada' : ''}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              <p className="text-[11px] text-muted-foreground">
+                Se guarda por ID: si renombras la etapa en Marketing, sigue vinculada. Si la
+                eliminas, elige otra y guarda.
+              </p>
+              {orphanedStageWarning ? (
+                <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                  {orphanedStageWarning}
+                </p>
+              ) : null}
             </div>
             <div className="space-y-2 md:col-span-2">
               <Label>WhatsApp tras pago (opcional)</Label>

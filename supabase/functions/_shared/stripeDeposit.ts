@@ -391,7 +391,8 @@ export async function buildDepositRequestWhatsappMessage(
   companyId: string,
   leadId: string,
   leadCreated = false,
-): Promise<DepositRequestMessageResult> {
+  options?: { allowIfPaid?: boolean },
+): Promise<DepositRequestMessageResult & { paid_at?: string | null }> {
   const cfg = await loadStripeConfig(admin, companyId);
   const { loadRedsysConfig, isRedsysOnlineReady, isStripeOnlineReady, resolveUnifiedDepositAmountCents, resolvePublicAppUrl } =
     await import('./redsysDeposit.ts');
@@ -421,7 +422,8 @@ export async function buildDepositRequestWhatsappMessage(
     .maybeSingle();
   if (!lead) throw new Error('Lead no encontrado');
 
-  if (lead.stripe_deposit_paid_at) {
+  const paidAt = (lead.stripe_deposit_paid_at as string | null) ?? null;
+  if (paidAt && !options?.allowIfPaid) {
     return {
       text: '',
       already_paid: true,
@@ -429,6 +431,7 @@ export async function buildDepositRequestWhatsappMessage(
       payment_url: null,
       lead_id: leadId,
       lead_created: leadCreated,
+      paid_at: paidAt,
     };
   }
 
@@ -490,11 +493,12 @@ export async function buildDepositRequestWhatsappMessage(
 
   return {
     text,
-    already_paid: false,
+    already_paid: !!paidAt,
     amount_cents: amountCents,
     payment_url: paymentUrl,
     lead_id: leadId,
     lead_created: leadCreated,
+    paid_at: paidAt,
   };
 }
 
@@ -509,6 +513,22 @@ export async function loadStripeConfig(
     .maybeSingle();
   if (error) throw error;
   return (data as StripeConfigRow | null) ?? null;
+}
+
+/** Devuelve el stage_id solo si sigue existiendo (tras renombres el id se mantiene; si se borró, null). */
+export async function resolveExistingStageId(
+  admin: SupabaseClient,
+  companyId: string,
+  stageId: string | null | undefined,
+): Promise<string | null> {
+  if (!stageId) return null;
+  const { data } = await admin
+    .from('marketing_lead_stages')
+    .select('id')
+    .eq('company_id', companyId)
+    .eq('id', stageId)
+    .maybeSingle();
+  return data?.id ? String(data.id) : null;
 }
 
 function publicAppBaseUrl(stripeCfg: StripeConfigRow, fallbackOrigin?: string | null): string {
@@ -765,7 +785,11 @@ export async function markDepositPaid(
     .eq('id', session.marketing_lead_id);
 
   const stripeCfg = await loadStripeConfig(admin, session.company_id);
-  let stageId = stripeCfg?.confirmed_stage_id ?? null;
+  let stageId = await resolveExistingStageId(
+    admin,
+    session.company_id,
+    stripeCfg?.confirmed_stage_id ?? null,
+  );
   if (!stageId) {
     const { data: wonStage } = await admin
       .from('marketing_lead_stages')

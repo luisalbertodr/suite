@@ -222,8 +222,32 @@ serve(async (req) => {
 
   if (body.action === 'config.test') {
     const cfg = await loadRedsysConfig(admin, companyId);
-    if (!cfg?.signature_key || !cfg.merchant_code) {
-      return err('Faltan comercio y/o clave de firma');
+    if (!cfg) {
+      return json({
+        ok: false,
+        error:
+          'No hay configuración Redsys guardada. Rellena comercio, terminal y clave, y pulsa Guardar.',
+      });
+    }
+    if (!cfg.signature_key || !cfg.merchant_code) {
+      return json({
+        ok: false,
+        error: 'Faltan comercio y/o clave de firma. Guarda la configuración completa.',
+      });
+    }
+    // Si la etapa configurada ya no existe (borrada), avisar sin fallar el test de TPV
+    let stageWarning: string | undefined;
+    if (cfg.confirmed_stage_id) {
+      const { data: stage } = await admin
+        .from('marketing_lead_stages')
+        .select('id, name')
+        .eq('company_id', companyId)
+        .eq('id', cfg.confirmed_stage_id)
+        .maybeSingle();
+      if (!stage) {
+        stageWarning =
+          'La etapa tras pago ya no existe (¿eliminada?). Elige otra en el desplegable y guarda.';
+      }
     }
     return json({
       ok: true,
@@ -232,6 +256,7 @@ serve(async (req) => {
       environment: cfg.environment,
       signature_version: cfg.signature_version,
       bizum_enabled: cfg.bizum_enabled,
+      ...(stageWarning ? { stage_warning: stageWarning } : {}),
     });
   }
 

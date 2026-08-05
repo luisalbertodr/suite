@@ -47,6 +47,7 @@ type Body =
       chat_display_name?: string | null;
       customer_id?: string | null;
       marketing_lead_id?: string | null;
+      allow_if_paid?: boolean;
     }
   | {
       action: 'deposit.confirm_manual_for_chat';
@@ -358,6 +359,7 @@ serve(async (req) => {
         companyId,
         lead.id,
         created,
+        { allowIfPaid: !!body.allow_if_paid },
       );
       return json({ ok: true, ...result });
     } catch (e) {

@@ -30,6 +30,7 @@ export type StripeProxyAction =
       chat_display_name?: string | null;
       customer_id?: string | null;
       marketing_lead_id?: string | null;
+      allow_if_paid?: boolean;
     }
   | {
       action: 'deposit.confirm_manual_for_chat';
