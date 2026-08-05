@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { stripCombiningMarks } from '@/lib/unicodeText';
 
 export type ExistingCustomerMatch = {
   id: string;
@@ -22,11 +23,7 @@ function normTaxId(raw: string): string {
 
 /** Nombre comparable: minúsculas, sin tildes, solo [a-z0-9] y espacios. */
 export function normalizeCustomerNameKey(raw: string): string {
-  return raw
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/\p{M}/gu, '')
+  return stripCombiningMarks(raw.trim().toLowerCase())
     .replace(/[^a-z0-9]+/g, ' ')
     .trim()
     .replace(/\s+/g, ' ');

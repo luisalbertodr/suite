@@ -5,6 +5,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { repairStyleText } from '@/lib/styleTextEncoding';
+import { countLetters } from '@/lib/unicodeText';
 export type CustomerSearchRow = {
   id: string;
   name: string;
@@ -182,7 +183,7 @@ export const CUSTOMER_SEARCH_MIN_CHARS = 3;
 export function isCustomerSearchQueryReady(raw: string): boolean {
   const q = raw.trim();
   if (!q) return false;
-  const letters = (q.match(/[\p{L}]/gu) || []).length;
+  const letters = countLetters(q);
   const digits = (q.match(/\d/g) || []).length;
   return letters >= CUSTOMER_SEARCH_MIN_CHARS || digits >= CUSTOMER_SEARCH_MIN_CHARS;
 }
