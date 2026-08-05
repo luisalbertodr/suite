@@ -121,6 +121,53 @@ function normalizeIncomingBody(
   if (!asString(body.device)) body.device = 'morphoscan';
   if (!asString(body.source)) body.source = 'ble-scale-sync';
 
+  // MorphoScan: si el gateway marca weight-only / fat_source none|from_ffm, no persistir
+  // composición inventada (Deurenberg / FFM header).
+  const rawFatSource =
+    raw && typeof raw === 'object' && !Array.isArray(raw)
+      ? String((raw as Record<string, unknown>).fat_source ?? '')
+      : '';
+  const rawWeightOnly =
+    raw && typeof raw === 'object' && !Array.isArray(raw)
+      ? Boolean((raw as Record<string, unknown>).weight_only)
+      : false;
+  if (rawWeightOnly || rawFatSource === 'none' || rawFatSource === 'from_ffm') {
+    delete body.body_fat_pct;
+    delete body.bodyFatPercent;
+    delete body.bodyfat;
+    delete body.pbf_pct;
+    delete body.body_fat_kg;
+    delete body.bodyFatKg;
+    delete body.smm_kg;
+    delete body.smmKg;
+    delete body.ffm_kg;
+    delete body.ffmKg;
+    delete body.slm_kg;
+    delete body.muscle_mass_kg;
+    delete body.muscleMass;
+    delete body.water_pct;
+    delete body.waterPercent;
+    delete body.tbw_kg;
+    delete body.protein_pct;
+    delete body.proteinPercent;
+    delete body.protein_mass_kg;
+    delete body.proteinMassKg;
+    delete body.subcutaneous_fat_pct;
+    delete body.subcutaneousFatPercent;
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      const r = raw as Record<string, unknown>;
+      delete r.bodyFatPercent;
+      delete r.smmKg;
+      delete r.ffmKg;
+      delete r.bodyFatKg;
+      delete r.muscleMass;
+      delete r.waterPercent;
+      delete r.proteinPercent;
+      delete r.proteinMassKg;
+      delete r.subcutaneousFatPercent;
+    }
+  }
+
   // Campos camelCase del webhook nativo
   if (asNumber(body.weight_kg) == null && asNumber(raw.weight) != null) {
     body.weight_kg = asNumber(raw.weight);
