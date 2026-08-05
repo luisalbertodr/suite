@@ -48,11 +48,13 @@ function fixSafariLegacyDetect(): Plugin {
         nestedResolveCheck.lastIndex = 0;
         html = html.replace(nestedResolveCheck, inlineResolveCheck);
       }
-      // Quitar crossorigin de scripts legacy: en Safari antiguo + nginx sin ACAO
-      // puede bloquear el boot clásico.
+      // Quitar crossorigin de scripts legacy (Safari antiguo + sin ACAO).
       html = html.replace(
-        /(<script\b[^>]*\bid="vite-legacy-(?:polyfill|entry)"[^>]*)\scrossorigin(?:="[^"]*")?/gi,
-        "$1"
+        /<script([^>]*\bid="vite-legacy-(?:polyfill|entry)"[^>]*)>/gi,
+        (_full, attrs: string) => {
+          const cleaned = attrs.replace(/\scrossorigin(?:="[^"]*")?/gi, "");
+          return `<script${cleaned}>`;
+        }
       );
       fs.writeFileSync(indexPath, html, "utf8");
     },
@@ -78,11 +80,7 @@ export default defineConfig(() => ({
       renderLegacyChunks: true,
       renderModernChunks: true,
       polyfills: true,
-      additionalLegacyPolyfills: [
-        "regenerator-runtime/runtime",
-        "core-js/modules/es.array.at.js",
-        "core-js/modules/es.string.at.js",
-      ],
+      additionalLegacyPolyfills: ["regenerator-runtime/runtime"],
     }),
     fixSafariLegacyDetect(),
   ],
