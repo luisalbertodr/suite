@@ -8,6 +8,7 @@ import {
   resolveEffectiveR50Ohm,
 } from '../src/lib/inbodyLikeBia.ts';
 import { buildMorphoScanReport } from '../src/lib/morphoscanReport.ts';
+import { adaptMorphoToInbodyView } from '../src/lib/morphoInbodyView.ts';
 import type { InbodyMeasurement } from '../src/lib/inbodyMeasurements.ts';
 
 function assertClose(name: string, got: number, exp: number, tol: number) {
@@ -55,6 +56,8 @@ console.log('OK Marta metabolicAge', marta.metabolicAge, 'type', marta.bodyType,
 
 console.log('\n=== Report: ignore numeric physiqueRating ===');
 const fake = {
+  device: 'morphoscan',
+  source: 'ble-scale-sync',
   weight_kg: 80.4,
   height_cm: 180,
   age_years: 50,
@@ -63,6 +66,10 @@ const fake = {
   pbf_pct: 14.4,
   body_fat_kg: 11.6,
   raw_payload: { impedance_ohm: 301.6 },
+  segmental_lean: {},
+  segmental_fat: {},
+  impedance: {},
+  edema: {},
 } as InbodyMeasurement;
 const report = buildMorphoScanReport(fake);
 if (!report.compositionFromSuiteBia) throw new Error('expected Suite BIA');
@@ -72,5 +79,19 @@ if (report.body_type === '9' || report.body_type === 'Obeso') {
 const wMax = report.compositionRows[0]?.rangeMax;
 if (wMax == null || wMax > 90) throw new Error(`weight range still too wide: ${wMax}`);
 console.log('OK report body_type', report.body_type, 'pbf', report.pbf_pct, 'age', report.metabolic_age);
+
+console.log('\n=== Adapter Morpho → UI InBody ===');
+const adapted = adaptMorphoToInbodyView(fake);
+if (adapted.pbf_pct == null || Math.abs(adapted.pbf_pct - 18.7) > 0.2) {
+  throw new Error(`adapted pbf ${adapted.pbf_pct}`);
+}
+if (adapted.weight_max_kg == null || adapted.weight_max_kg > 90) {
+  throw new Error(`adapted weight max ${adapted.weight_max_kg}`);
+}
+if (adapted.smm_min_kg == null || adapted.tbw_min_kg == null) {
+  throw new Error('adapted missing ranges');
+}
+if (adapted.raw_payload?.suite_bia !== true) throw new Error('suite_bia flag missing');
+console.log('OK adapted pbf', adapted.pbf_pct, 'smm', adapted.smm_kg, 'controls', adapted.fat_control_kg);
 
 console.log('\nALL PASSED');

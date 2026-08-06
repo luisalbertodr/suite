@@ -42,6 +42,10 @@ import {
   type InbodyMeasurement,
 } from '@/lib/inbodyMeasurements';
 import {
+  adaptMorphoMeasurementsForInbodyUi,
+  morphoUsesSuiteBia,
+} from '@/lib/morphoInbodyView';
+import {
   ageYearsFromBirthDate,
   buildScaleProfileSnapshot,
   mergeClinicalSex,
@@ -57,8 +61,7 @@ import { InbodyHistoryChart } from './inbody/InbodyHistoryChart';
 import { InbodyCompositionEvolutionChart } from './inbody/InbodyCompositionEvolutionChart';
 import { InbodySegmentalSilhouette } from './inbody/InbodySegmentalSilhouette';
 import { InbodyReportExport } from './inbody/InbodyReportExport';
-import { MorphoScanMeasurementReport } from './inbody/MorphoScanMeasurementReport';
-import { MorphoScanReportExport } from './inbody/MorphoScanReportExport';
+import { MorphoClinicalExtrasPanel } from './inbody/MorphoClinicalExtrasPanel';
 import { InbodyNutritionPanel } from './inbody/InbodyNutritionPanel';
 import { InbodyMetricHelp, InbodySectionHelp } from './inbody/InbodyMetricHelp';
 import { InbodyCsvImportPanel } from '@/components/InbodyCsvImportPanel';
@@ -627,15 +630,34 @@ function MeasurementReport({
   onSelectReference?: (id: string) => void;
   compact?: boolean;
 }) {
+  const isMorpho = isMorphoScanMeasurement(measurement);
+  const suiteBia = morphoUsesSuiteBia(measurement);
+
   return (
     <div className="space-y-4">
       <Card className="border-sky-100/50 dark:border-sky-900/20">
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm">
+          <CardTitle className="text-sm flex items-center gap-2 flex-wrap">
             <InbodySectionHelp metricId="weight_kg" title="Composición corporal" />
+            {isMorpho ? (
+              <Badge variant="secondary" className="text-[10px] font-normal">
+                MorphoScan
+              </Badge>
+            ) : null}
+            {suiteBia ? (
+              <Badge
+                variant="outline"
+                className="text-[10px] font-normal border-teal-400/60 text-teal-800 dark:text-teal-200"
+                title="Composición recalculada en Suite (TBW→FFM→%BF) alineada a LookInBody"
+              >
+                Suite BIA
+              </Badge>
+            ) : null}
           </CardTitle>
           <p className="text-[10px] text-muted-foreground mt-1">
-            Banda verde = rango normal InBody. Línea azul = valor medido; la curva une peso, MME y masa grasa.
+            {isMorpho
+              ? 'Misma lectura clínica que InBody: banda verde = rango normal; línea azul = valor (Suite BIA si hay impedancia).'
+              : 'Banda verde = rango normal InBody. Línea azul = valor medido; la curva une peso, MME y masa grasa.'}
           </p>
         </CardHeader>
         <CardContent className="space-y-2">
@@ -718,8 +740,14 @@ export const ClienteInbodyTab: React.FC<Props> = ({
   clinicalProfile,
   compact,
 }) => {
-  const { data: measurements, isLoading, error } = useInbodyMeasurements(customerId, taxId, companyId);
+  const { data: rawMeasurements, isLoading, error } = useInbodyMeasurements(customerId, taxId, companyId);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  /** Morpho proyectado a columnas/rangos InBody (Suite BIA) para UI y gráficos coherentes. */
+  const measurements = useMemo(
+    () => (rawMeasurements?.length ? adaptMorphoMeasurementsForInbodyUi(rawMeasurements) : rawMeasurements),
+    [rawMeasurements],
+  );
 
   useEffect(() => {
     setSelectedId(null);
@@ -839,36 +867,28 @@ export const ClienteInbodyTab: React.FC<Props> = ({
         />
       )}
 
-      {selected &&
-        (isMorphoScanMeasurement(selected) ? (
-          <MorphoScanMeasurementReport measurement={selected} compact={compact} />
-        ) : (
-          <MeasurementReport
-            measurement={selected}
-            siblings={measurements}
-            onSelectReference={setSelectedId}
-            compact={compact}
-          />
-        ))}
+      {selected && (
+        <MeasurementReport
+          measurement={selected}
+          siblings={measurements ?? []}
+          onSelectReference={setSelectedId}
+          compact={compact}
+        />
+      )}
 
-      {selected &&
-        (isMorphoScanMeasurement(selected) ? (
-          <MorphoScanReportExport
-            key={`morphoscan-report-${customerId}-${selected.id}`}
-            customerId={customerId}
-            measurement={selected}
-            customerName={customerName ?? undefined}
-            compact={compact}
-          />
-        ) : (
-          <InbodyReportExport
-            key={`inbody-report-${customerId}-${selected.id}`}
-            customerId={customerId}
-            measurement={selected}
-            customerName={customerName ?? undefined}
-            compact={compact}
-          />
-        ))}
+      {selected && isMorphoScanMeasurement(selected) ? (
+        <MorphoClinicalExtrasPanel measurement={selected} />
+      ) : null}
+
+      {selected && (
+        <InbodyReportExport
+          key={`inbody-report-${customerId}-${selected.id}`}
+          customerId={customerId}
+          measurement={selected}
+          customerName={customerName ?? undefined}
+          compact={compact}
+        />
+      )}
 
       <InbodyCsvImportPanel
         embedded
