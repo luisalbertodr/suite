@@ -97,6 +97,48 @@ if (-not (Test-Path $indexPath)) {
   throw "dist/index.html no encontrado. El build parece incompleto."
 }
 
+# Evita redesplegar un dist compilado sin los fixes de Safari/Chrome antiguos
+# (p. ej. desde una feature branch que no tiene vite.config legacy al día).
+function Test-LegacyBrowserBuild {
+  param([string]$DistRoot)
+  $index = Join-Path $DistRoot "index.html"
+  $html = Get-Content $index -Raw -Encoding UTF8
+
+  if ($html -notmatch 'suite-boot-error') {
+    throw "dist/index.html sin overlay suite-boot-error. ¿Build desde main con index.html actualizado?"
+  }
+  if ($html -match "import'data:text/javascript,[^']*if\(!import\.meta\.resolve\)") {
+    throw "dist/index.html tiene el detector Safari roto (import data: + import.meta.resolve). Falta fix-safari-legacy-detect en vite.config.ts."
+  }
+  if ($html -notmatch 'typeof import\.meta\.resolve!="function"') {
+    throw "dist/index.html sin chequeo inline de import.meta.resolve. Rebuild con vite.config legacy."
+  }
+
+  $legacy = Get-ChildItem (Join-Path $DistRoot "assets") -Filter "index-legacy-*.js" -ErrorAction SilentlyContinue |
+    Sort-Object Length -Descending |
+    Select-Object -First 1
+  if (-not $legacy) {
+    throw "No hay assets/index-legacy-*.js. plugin-legacy no generó chunks."
+  }
+
+  # Muestreo: demasiados ?. reales indica targets Babel altos (Chrome 87+/Safari 14+).
+  $sample = Get-Content $legacy.FullName -Raw -Encoding UTF8
+  $optionalish = ([regex]::Matches($sample, '\w\?\.\w')).Count
+  if ($optionalish -gt 50) {
+    throw ("Bundle legacy {0} tiene {1} '?.' sin transpilar. Targets Babel deben ser Chrome >= 63 / Safari >= 11." -f $legacy.Name, $optionalish)
+  }
+  if ($sample -match '\(\?<[=!]') {
+    throw ("Bundle legacy {0} contiene lookbehind (?<=)/(?<!). Incompatible con Safari <16.4." -f $legacy.Name)
+  }
+  if ($sample -match '\\p\{') {
+    throw ("Bundle legacy {0} contiene \\p{{...}} unicode properties. Usa src/lib/unicodeText.ts." -f $legacy.Name)
+  }
+
+  Write-Host ("OK compat navegadores antiguos: {0} (?.~{1})" -f $legacy.Name, $optionalish) -ForegroundColor Green
+}
+
+Test-LegacyBrowserBuild -DistRoot $distDir
+
 if ($DryRun) {
   Write-Host "DryRun: build OK, dist listo en $distDir" -ForegroundColor Green
   exit 0
