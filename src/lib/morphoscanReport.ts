@@ -3,6 +3,19 @@ import type {
   InbodyRangeStatus,
 } from '@/lib/inbodyMeasurements';
 import { formatInbodyNumber } from '@/lib/inbodyMeasurements';
+import {
+  buildInbodyLikeRanges,
+  computeInbodyLikeComposition,
+  computeMetabolicAge,
+  deriveInbodyLikeBodyScore,
+  deriveInbodyLikeBodyType,
+  idealWeightKg,
+  INBODY_LIKE_FORMULA_VERSION,
+  normalizeInbodyLikeSex,
+  pickMorphoImpedanceInputs,
+  resolveEffectiveR50Ohm,
+  type InbodyLikeRanges,
+} from '@/lib/inbodyLikeBia';
 import { estimateMorphoScanWhr } from '@/lib/morphoscanSegmentals';
 
 export type MorphoEval = 'low' | 'standard' | 'high' | 'unknown';
@@ -27,7 +40,7 @@ export interface MorphoScanDerivedReport {
   protein_pct: number | null;
   tbw_kg: number | null;
   body_water_pct: number | null;
-  /** Renpho soft lean / masa muscular */
+  /** Soft lean / masa muscular */
   slm_kg: number | null;
   smm_kg: number | null;
   ffm_kg: number | null;
@@ -44,6 +57,9 @@ export interface MorphoScanDerivedReport {
   weight_control_kg: number | null;
   fat_control_kg: number | null;
   muscle_control_kg: number | null;
+  /** true si TBW/FFM/%BF se recalcularon con motor InBody-like */
+  compositionFromSuiteBia?: boolean;
+  formulaVersion?: string;
   compositionRows: MorphoMetricRow[];
   obesityRows: MorphoMetricRow[];
   otherRows: MorphoMetricRow[];
@@ -62,7 +78,6 @@ function round2(v: number): number {
   return Math.round(v * 100) / 100;
 }
 
-/** Eval Renpho-like: Bajo / Estándar / Alto. */
 export function morphoEval(
   value: number | null | undefined,
   min: number | null | undefined,
@@ -94,13 +109,20 @@ export function morphoEvalToInbodyStatus(e: MorphoEval): InbodyRangeStatus {
   return 'unknown';
 }
 
+/** Si no hay altura, estima H a partir de peso≈IMC 24 (solo fallback UI). */
+function estimateHeightFromWeightBand(weightKg: number, sex: 'male' | 'female'): number {
+  const bmi = sex === 'male' ? 24 : 23;
+  return Math.sqrt(weightKg / bmi) * 100;
+}
+
 /**
- * Rangos aproximados estilo Renpho (mujer/hombre adultos).
- * No son clínicos oficiales; sirven para UI cuando la medición no trae min/max.
+ * Rangos LookInBody-like (por altura / ideales).
+ * `weightKg` se conserva por compatibilidad; se usa solo si falta altura.
  */
 export function morphoCompositionRanges(
   sex: string | null | undefined,
   weightKg: number,
+  heightCm?: number | null,
 ): {
   fatKg: { min: number; max: number };
   boneKg: { min: number; max: number };
@@ -110,29 +132,21 @@ export function morphoCompositionRanges(
   smmKg: { min: number; max: number };
   weightKg: { min: number; max: number };
 } {
-  const female = (sex || '').toUpperCase().startsWith('F') || (sex || '').toLowerCase() === 'female';
-  // Peso óptimo ~ IMC 18.5–25 (altura se aplica fuera); aquí banda relativa al peso medido.
-  const wMin = round1(weightKg * 0.95);
-  const wMax = round1(weightKg * 1.35);
-  if (female) {
-    return {
-      weightKg: { min: wMin, max: wMax },
-      fatKg: { min: round1(weightKg * 0.22), max: round1(weightKg * 0.35) },
-      boneKg: { min: 2.0, max: 3.5 },
-      proteinKg: { min: round1(weightKg * 0.14), max: round1(weightKg * 0.19) },
-      waterKg: { min: round1(weightKg * 0.45), max: round1(weightKg * 0.6) },
-      muscleKg: { min: round1(weightKg * 0.65), max: round1(weightKg * 0.85) },
-      smmKg: { min: round1(weightKg * 0.35), max: round1(weightKg * 0.5) },
-    };
-  }
+  const s = normalizeInbodyLikeSex(sex);
+  const h =
+    heightCm != null && heightCm >= 100
+      ? heightCm
+      : estimateHeightFromWeightBand(weightKg, s);
+  const ideal = idealWeightKg(h, s);
+  const ranges = buildInbodyLikeRanges(h, s, ideal);
   return {
-    weightKg: { min: wMin, max: wMax },
-    fatKg: { min: round1(weightKg * 0.1), max: round1(weightKg * 0.22) },
-    boneKg: { min: 2.5, max: 4.0 },
-    proteinKg: { min: round1(weightKg * 0.15), max: round1(weightKg * 0.2) },
-    waterKg: { min: round1(weightKg * 0.5), max: round1(weightKg * 0.65) },
-    muscleKg: { min: round1(weightKg * 0.7), max: round1(weightKg * 0.9) },
-    smmKg: { min: round1(weightKg * 0.4), max: round1(weightKg * 0.55) },
+    weightKg: ranges.weightKg,
+    fatKg: ranges.fatKg,
+    boneKg: ranges.boneKg,
+    proteinKg: ranges.proteinKg,
+    waterKg: ranges.waterKg,
+    muscleKg: ranges.muscleKg,
+    smmKg: ranges.smmKg,
   };
 }
 
@@ -140,56 +154,27 @@ export function morphoObesityRanges(sex: string | null | undefined): {
   bmi: { min: number; max: number };
   pbf: { min: number; max: number };
 } {
-  const female = (sex || '').toUpperCase().startsWith('F') || (sex || '').toLowerCase() === 'female';
-  return {
-    bmi: { min: 18.5, max: 24.9 },
-    pbf: female ? { min: 21, max: 35 } : { min: 10, max: 20 },
-  };
+  const s = normalizeInbodyLikeSex(sex);
+  const ranges = buildInbodyLikeRanges(170, s, idealWeightKg(170, s));
+  return { bmi: ranges.bmi, pbf: ranges.pbf };
 }
 
-/** Matriz Renpho-like IMC × % grasa → tipo corporal. */
-export function deriveMorphoBodyType(bmi: number | null, pbf: number | null): string | null {
+export function deriveMorphoBodyType(
+  bmi: number | null,
+  pbf: number | null,
+  sex?: string | null,
+): string | null {
   if (bmi == null || pbf == null) return null;
-  const lowBmi = bmi < 18.5;
-  const highBmi = bmi >= 25;
-  const lowFat = pbf < 18;
-  const highFat = pbf >= 28;
-  if (lowBmi && lowFat) return 'Delgado';
-  if (lowBmi && !highFat) return 'Delgado muscular';
-  if (!lowBmi && !highBmi && lowFat) return 'Atlético';
-  if (!lowBmi && !highBmi && !highFat) return 'Estándar';
-  if (!lowBmi && !highBmi && highFat) return 'Sobrepeso';
-  if (highBmi && highFat) return 'Obeso';
-  if (highBmi && !highFat) return 'Musculoso';
-  return 'Estándar';
+  return deriveInbodyLikeBodyType(bmi, pbf, normalizeInbodyLikeSex(sex));
 }
 
-/**
- * Puntuación corporal aproximada (0–100) a partir de IMC y % grasa
- * (penaliza desviación respecto a bandas estándar).
- */
 export function deriveMorphoBodyScore(
   bmi: number | null,
   pbf: number | null,
   sex: string | null | undefined,
 ): number | null {
   if (bmi == null || pbf == null) return null;
-  const { bmi: bR, pbf: pR } = morphoObesityRanges(sex);
-  let score = 100;
-  if (bmi < bR.min) score -= Math.min(30, (bR.min - bmi) * 8);
-  else if (bmi > bR.max) score -= Math.min(30, (bmi - bR.max) * 6);
-  if (pbf < pR.min) score -= Math.min(25, (pR.min - pbf) * 2);
-  else if (pbf > pR.max) score -= Math.min(25, (pbf - pR.max) * 2);
-  return Math.max(40, Math.min(100, Math.round(score)));
-}
-
-function optimalWeightKg(heightCm: number | null, sex: string | null | undefined): number | null {
-  if (heightCm == null || heightCm < 100) return null;
-  const h = heightCm / 100;
-  const female = (sex || '').toUpperCase().startsWith('F') || (sex || '').toLowerCase() === 'female';
-  // IMC objetivo ~21.5 (mujer) / 22 (hombre)
-  const targetBmi = female ? 21.5 : 22;
-  return round1(targetBmi * h * h);
+  return deriveInbodyLikeBodyScore(bmi, pbf, normalizeInbodyLikeSex(sex));
 }
 
 function row(
@@ -212,17 +197,38 @@ function row(
   };
 }
 
+function trySuiteBia(m: InbodyMeasurement) {
+  const weight = n(m.weight_kg);
+  const height = n(m.height_cm);
+  const age = n(m.age_years);
+  if (weight == null || height == null || age == null) return null;
+  const sex = normalizeInbodyLikeSex(m.sex);
+  const { z1Ohm, z20, z100 } = pickMorphoImpedanceInputs(m);
+  const rEff = resolveEffectiveR50Ohm({ sex, z1Ohm, z20, z100 });
+  if (rEff == null) return null;
+  return computeInbodyLikeComposition(weight, { heightCm: height, ageYears: age, sex }, rEff);
+}
+
+function isNumericPhysiqueRating(v: string): boolean {
+  return /^[1-9]$/.test(v.trim());
+}
+
 /**
- * Enriquece una medición MorphoScan con campos derivados (SMI, objetivos, tipo, score)
- * sin recalcular BIA: usa peso/grasa/músculo/hueso ya persistidos.
+ * Informe MorphoScan con interpretación LookInBody-like.
+ * Si hay Z (z1 o segmentaria), recalcula composición; si no, reinterpreta
+ * peso/%BF persistidos con ideales/controles/rangos InBody.
  */
 export function buildMorphoScanReport(m: InbodyMeasurement): MorphoScanDerivedReport {
   const weight = n(m.weight_kg);
   const height = n(m.height_cm);
   const sex = m.sex;
+  const sexNorm = normalizeInbodyLikeSex(sex);
+  const age = n(m.age_years);
 
-  let bodyFatKg = n(m.body_fat_kg);
-  let pbf = n(m.pbf_pct);
+  const suite = trySuiteBia(m);
+
+  let bodyFatKg = suite?.bodyFatKg ?? n(m.body_fat_kg);
+  let pbf = suite?.pbfPct ?? n(m.pbf_pct);
   if (bodyFatKg == null && pbf != null && weight != null) {
     bodyFatKg = round2((weight * pbf) / 100);
   }
@@ -230,22 +236,19 @@ export function buildMorphoScanReport(m: InbodyMeasurement): MorphoScanDerivedRe
     pbf = round1((bodyFatKg / weight) * 100);
   }
 
-  let bone = n(m.bone_mass_kg);
-  let slm = n(m.slm_kg);
-  let smm = n(m.smm_kg);
-  let ffm = n(m.ffm_kg);
+  let bone = suite?.boneMassKg ?? n(m.bone_mass_kg);
+  let slm = suite?.muscleMassKg ?? n(m.slm_kg);
+  let smm = suite?.smmKg ?? n(m.smm_kg);
+  let ffm = suite?.ffmKg ?? n(m.ffm_kg);
   if (ffm == null && weight != null && bodyFatKg != null) {
     ffm = round2(weight - bodyFatKg);
   }
   if (slm == null && ffm != null && bone != null) {
     slm = round2(ffm - bone);
   }
-  if (ffm == null && slm != null && bone != null) {
-    ffm = round2(slm + bone);
-  }
 
-  let waterPct = n(m.body_water_pct);
-  let tbw = n(m.tbw_kg);
+  let waterPct = suite?.bodyWaterPct ?? n(m.body_water_pct);
+  let tbw = suite?.tbwKg ?? n(m.tbw_kg);
   if (tbw == null && waterPct != null && weight != null) {
     tbw = round2((weight * waterPct) / 100);
   }
@@ -253,12 +256,11 @@ export function buildMorphoScanReport(m: InbodyMeasurement): MorphoScanDerivedRe
     waterPct = round1((tbw / weight) * 100);
   }
   if (waterPct == null && ffm != null && weight != null && weight > 0) {
-    // Hidratación magra ~73% (misma heurística del bridge)
     waterPct = round1(((ffm * 0.73) / weight) * 100);
     tbw = round2((weight * waterPct) / 100);
   }
 
-  let proteinMass = n(m.protein_mass_kg);
+  let proteinMass = suite?.proteinMassKg ?? n(m.protein_mass_kg);
   let proteinPct = n(m.protein_pct);
   if (proteinMass == null && slm != null && tbw != null) {
     proteinMass = round2(Math.max(0, slm - tbw));
@@ -267,48 +269,77 @@ export function buildMorphoScanReport(m: InbodyMeasurement): MorphoScanDerivedRe
     proteinPct = round1((proteinMass / weight) * 100);
   }
 
-  let bmi = n(m.bmi);
+  let bmi = suite?.bmi ?? n(m.bmi);
   if (bmi == null && weight != null && height != null && height > 0) {
     const hm = height / 100;
     bmi = round1(weight / (hm * hm));
   }
 
-  let smi = n(m.smi);
+  let smi = suite?.smi ?? n(m.smi);
   if (smi == null && smm != null && height != null && height > 0) {
     const hm = height / 100;
     smi = round1(smm / (hm * hm));
   }
 
-  const target =
-    n(m.target_weight_kg) ?? (height != null ? optimalWeightKg(height, sex) : null);
-  let weightControl = n(m.weight_control_kg);
-  let fatControl = n(m.fat_control_kg);
-  let muscleControl = n(m.muscle_control_kg);
-  if (weight != null && target != null && weightControl == null) {
-    weightControl = round1(target - weight);
-  }
-  if (bodyFatKg != null && weight != null && fatControl == null) {
-    const ranges = morphoCompositionRanges(sex, weight);
-    const midFat = (ranges.fatKg.min + ranges.fatKg.max) / 2;
-    fatControl = round1(midFat - bodyFatKg);
-  }
-  if (smm != null && weight != null && muscleControl == null) {
-    const ranges = morphoCompositionRanges(sex, weight);
-    const midSmm = (ranges.smmKg.min + ranges.smmKg.max) / 2;
-    muscleControl = round1(midSmm - smm);
+  const idealW =
+    suite?.idealWeightKg ?? (height != null ? idealWeightKg(height, sexNorm) : null);
+
+  let weightControl = suite?.weightControlKg ?? n(m.weight_control_kg);
+  let fatControl = suite?.fatControlKg ?? n(m.fat_control_kg);
+  let muscleControl = suite?.muscleControlKg ?? n(m.muscle_control_kg);
+
+  if (suite == null && height != null && weight != null && idealW != null) {
+    const idealBfm = (sexNorm === 'male' ? 0.15 : 0.23) * idealW;
+    const idealFfm = idealW - idealBfm;
+    if (weightControl == null) weightControl = round1(idealW - weight);
+    if (fatControl == null && bodyFatKg != null) fatControl = round1(idealBfm - bodyFatKg);
+    if (muscleControl == null && ffm != null) {
+      muscleControl = round1(Math.max(0, idealFfm - ffm));
+    }
   }
 
+  const storedType = m.body_type != null ? String(m.body_type).trim() : '';
   const bodyType =
-    (m.body_type && String(m.body_type).trim()) || deriveMorphoBodyType(bmi, pbf);
+    storedType && !isNumericPhysiqueRating(storedType)
+      ? storedType
+      : deriveMorphoBodyType(bmi, pbf, sex);
+
   const rawScore = m.raw_payload?.body_score;
   const bodyScore =
-    typeof rawScore === 'number'
-      ? rawScore
-      : deriveMorphoBodyScore(bmi, pbf, sex);
+    typeof rawScore === 'number' ? rawScore : deriveMorphoBodyScore(bmi, pbf, sex);
 
-  const ranges =
-    weight != null ? morphoCompositionRanges(sex, weight) : null;
-  const obesity = morphoObesityRanges(sex);
+  let metabolicAge = suite?.metabolicAge ?? null;
+  if (
+    metabolicAge == null &&
+    age != null &&
+    bodyFatKg != null &&
+    smm != null &&
+    idealW != null
+  ) {
+    const idealBfm = (sexNorm === 'male' ? 0.15 : 0.23) * idealW;
+    const idealFfm = idealW - idealBfm;
+    metabolicAge = computeMetabolicAge({
+      ageYears: age,
+      bodyFatKg,
+      idealBfmKg: idealBfm,
+      smmKg: smm,
+      idealSmmKg: idealFfm * 0.57,
+    });
+  }
+
+  let bmr = suite?.bmrKcal ?? null;
+  if (bmr == null && ffm != null) bmr = Math.round(370 + 21.6 * ffm);
+  if (bmr == null) bmr = n(m.bmr_kcal);
+
+  const ranges: InbodyLikeRanges | null =
+    height != null
+      ? buildInbodyLikeRanges(height, sexNorm, idealWeightKg(height, sexNorm))
+      : weight != null
+        ? (() => {
+            const hEst = estimateHeightFromWeightBand(weight, sexNorm);
+            return buildInbodyLikeRanges(hEst, sexNorm, idealWeightKg(hEst, sexNorm));
+          })()
+        : null;
 
   const compositionRows: MorphoMetricRow[] = [
     row('weight_kg', 'Peso', weight, ranges?.weightKg ?? null),
@@ -321,8 +352,8 @@ export function buildMorphoScanReport(m: InbodyMeasurement): MorphoScanDerivedRe
   ];
 
   const obesityRows: MorphoMetricRow[] = [
-    row('bmi', 'IMC', bmi, obesity.bmi, '', 1),
-    row('pbf_pct', 'Porcentaje de grasa corporal', pbf, obesity.pbf, '%', 1),
+    row('bmi', 'IMC', bmi, ranges?.bmi ?? null, '', 1),
+    row('pbf_pct', 'Porcentaje de grasa corporal', pbf, ranges?.pbf ?? null, '%', 1),
   ];
 
   const otherRows: MorphoMetricRow[] = [
@@ -336,7 +367,7 @@ export function buildMorphoScanReport(m: InbodyMeasurement): MorphoScanDerivedRe
     {
       id: 'bmr_kcal',
       label: 'Tasa metabólica basal',
-      value: n(m.bmr_kcal),
+      value: bmr,
       unit: 'kcal',
       decimals: 0,
       eval: 'unknown',
@@ -352,7 +383,7 @@ export function buildMorphoScanReport(m: InbodyMeasurement): MorphoScanDerivedRe
     {
       id: 'subcutaneous_fat_pct',
       label: 'Grasa subcutánea',
-      value: n(m.subcutaneous_fat_pct),
+      value: n(m.subcutaneous_fat_pct) ?? (pbf != null ? round1(pbf * 0.71) : null),
       unit: '%',
       decimals: 1,
       eval: 'unknown',
@@ -368,7 +399,7 @@ export function buildMorphoScanReport(m: InbodyMeasurement): MorphoScanDerivedRe
     {
       id: 'metabolic_age',
       label: 'Edad metabólica',
-      value: n(m.metabolic_age),
+      value: metabolicAge,
       decimals: 0,
       eval: 'unknown',
     },
@@ -395,17 +426,20 @@ export function buildMorphoScanReport(m: InbodyMeasurement): MorphoScanDerivedRe
     ffm_kg: ffm,
     bmi,
     whr: n(m.whr) ?? estimateMorphoScanWhr(m),
-    bmr_kcal: n(m.bmr_kcal),
+    bmr_kcal: bmr,
     visceral_fat_index: n(m.visceral_fat_index),
-    subcutaneous_fat_pct: n(m.subcutaneous_fat_pct),
+    subcutaneous_fat_pct:
+      n(m.subcutaneous_fat_pct) ?? (pbf != null ? round1(pbf * 0.71) : null),
     smi,
-    metabolic_age: n(m.metabolic_age),
+    metabolic_age: metabolicAge,
     body_type: bodyType,
     body_score: bodyScore,
-    target_weight_kg: target,
+    target_weight_kg: idealW,
     weight_control_kg: weightControl,
     fat_control_kg: fatControl,
     muscle_control_kg: muscleControl,
+    compositionFromSuiteBia: suite != null,
+    formulaVersion: suite != null ? INBODY_LIKE_FORMULA_VERSION : undefined,
     compositionRows,
     obesityRows,
     otherRows,

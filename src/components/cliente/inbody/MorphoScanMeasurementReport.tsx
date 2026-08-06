@@ -188,14 +188,29 @@ export function MorphoScanMeasurementReport({ measurement, compact }: Props) {
     <div className="space-y-4">
       <Card className="border-violet-100/50 dark:border-violet-900/20">
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm flex items-center gap-2">
+          <CardTitle className="text-sm flex items-center gap-2 flex-wrap">
             Análisis de composición corporal
             <Badge variant="secondary" className="text-[10px] font-normal">
               MorphoScan
             </Badge>
+            {report.compositionFromSuiteBia ? (
+              <Badge
+                variant="outline"
+                className="text-[10px] font-normal border-teal-400/60 text-teal-800 dark:text-teal-200"
+                title={
+                  report.formulaVersion
+                    ? `Motor Suite LookInBody-like (${report.formulaVersion})`
+                    : 'Motor Suite LookInBody-like'
+                }
+              >
+                Suite BIA
+              </Badge>
+            ) : null}
           </CardTitle>
           <p className="text-[10px] text-muted-foreground mt-1">
-            Valores de la medición MorphoScan. Rangos orientativos estilo Renpho (no clínicos).
+            {report.compositionFromSuiteBia
+              ? 'Composición recalculada en Suite (TBW→FFM→%BF) a partir de peso e impedancia. Rangos e ideales estilo LookInBody / clínica.'
+              : 'Valores de la medición MorphoScan. Rangos e ideales LookInBody-like (orientativos, no diagnóstico).'}
           </p>
         </CardHeader>
         <CardContent>

@@ -1,4 +1,4 @@
-/** Glosario corto MorphoScan / Renpho (paralelo a inbodyGlossary). */
+/** Glosario corto MorphoScan / interpretación Suite LookInBody-like (paralelo a inbodyGlossary). */
 
 export type MorphoScanMetricId =
   | 'weight_kg'
@@ -35,37 +35,37 @@ export const MORPHOSCAN_GLOSSARY: Record<MorphoScanMetricId, MorphoScanGlossaryE
   body_fat_kg: {
     shortLabel: 'Grasa',
     fullName: 'Masa grasa corporal',
-    description: 'Kilogramos de grasa estimados por BIA (a menudo vía FFM).',
+    description: 'Kilogramos de grasa: peso − FFM (Suite BIA vía TBW/0,73 cuando hay Z).',
   },
   pbf_pct: {
     shortLabel: '% grasa',
     fullName: 'Porcentaje de grasa corporal',
-    description: 'Proporción de grasa respecto al peso total.',
+    description: 'Proporción de grasa respecto al peso total (misma base que BFM).',
   },
   bone_mass_kg: {
     shortLabel: 'Hueso',
     fullName: 'Masa ósea',
-    description: 'Estimación de masa mineral ósea del informe MorphoScan.',
+    description: 'Estimación ~7 % de la FFM (fracción LookInBody-like).',
   },
   protein_mass_kg: {
     shortLabel: 'Proteína',
     fullName: 'Masa proteica',
-    description: 'Componente proteico estimado de la composición corporal.',
+    description: 'Estimación ~18 % de la FFM.',
   },
   tbw_kg: {
     shortLabel: 'Agua',
     fullName: 'Agua corporal total',
-    description: 'Litros / kg de agua corporal estimada (TBW).',
+    description: 'TBW desde impedancia efectiva (~50 kHz) y perfil H/A/S; base del resto de la composición.',
   },
   slm_kg: {
     shortLabel: 'Masa muscular',
     fullName: 'Masa magra blanda (SLM)',
-    description: 'Masa muscular “soft lean” Renpho: músculo + agua, sin hueso.',
+    description: 'FFM − hueso (soft lean): músculo + agua, sin masa ósea.',
   },
   smm_kg: {
     shortLabel: 'MME',
     fullName: 'Masa muscular esquelética',
-    description: 'Músculo esquelético (SMM / MME) usado también para SMI.',
+    description: 'SMM / MME (Janssen-like sobre FFM); base del SMI.',
   },
   bmi: {
     shortLabel: 'IMC',
@@ -80,7 +80,7 @@ export const MORPHOSCAN_GLOSSARY: Record<MorphoScanMetricId, MorphoScanGlossaryE
   visceral_fat_index: {
     shortLabel: 'Visceral',
     fullName: 'Nivel de grasa visceral',
-    description: 'Índice estimado de grasa alrededor de órganos (no kg absolutos).',
+    description: 'Índice estimado de grasa alrededor de órganos (heurística Morpho; no calibrado InBody).',
   },
   subcutaneous_fat_pct: {
     shortLabel: 'Subcutánea',
@@ -90,17 +90,18 @@ export const MORPHOSCAN_GLOSSARY: Record<MorphoScanMetricId, MorphoScanGlossaryE
   bmr_kcal: {
     shortLabel: 'BMR',
     fullName: 'Metabolismo basal',
-    description: 'Calorías en reposo estimadas a partir de la composición.',
+    description: 'Cunningham: 370 + 21,6 × FFM (kcal/día).',
   },
   ffm_kg: {
     shortLabel: 'FFM',
     fullName: 'Masa libre de grasa',
-    description: 'Peso menos grasa (músculo, hueso, agua, etc.).',
+    description: 'TBW / 0,73 cuando hay BIA Suite; si no, peso − grasa.',
   },
   metabolic_age: {
     shortLabel: 'Edad met.',
     fullName: 'Edad metabólica',
-    description: 'Edad estimada según metabolismo / composición frente a la cronológica.',
+    description:
+      'Edad estimada vs cronológica según exceso de grasa y déficit de músculo (criterio LookInBody-like), no solo por edad.',
   },
   whr: {
     shortLabel: 'WHR',
@@ -110,12 +111,12 @@ export const MORPHOSCAN_GLOSSARY: Record<MorphoScanMetricId, MorphoScanGlossaryE
   body_type: {
     shortLabel: 'Tipo',
     fullName: 'Tipo corporal',
-    description: 'Clasificación orientativa según IMC y % grasa (matriz Renpho-like).',
+    description: 'Clasificación orientativa según IMC (OMS) y % grasa respecto a objetivos InBody-like.',
   },
   body_score: {
     shortLabel: 'Score',
     fullName: 'Puntuación corporal',
-    description: 'Puntuación 0–100 del informe; si no viene en payload, se deriva de forma estable.',
+    description: 'Puntuación 0–100 por desviación de IMC y % grasa respecto a bandas clínicas Suite.',
   },
 };
 
