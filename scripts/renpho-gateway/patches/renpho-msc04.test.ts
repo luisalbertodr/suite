@@ -350,6 +350,29 @@ describe('RenphoMsc04Adapter', () => {
       expect((m as { ffmKg?: number }).ffmKg).toBeCloseTo(49.4, 0);
       expect((m.raw as { fat_source?: string }).fat_source).toBe('from_bia');
     });
+
+    it('matches Luis Renpho PDF (20.7%) — ignores false plen-8 frame fat 14.4%', () => {
+      const adapter = makeAdapter();
+      // 2026-08-06 MorphoScan E2; plen-8=14.4 but Renpho report P26080602 = 20.7%
+      const hex =
+        '55aa250024041100001f680a00c80b9c0b230a970af000960a5f09d3097509c901009000e601ea0003b6';
+      const r = adapter.parseCharNotification(uuid16(0x2a12), Buffer.from(hex, 'hex'));
+      expect(r).not.toBeNull();
+      expect(r!.weight).toBeCloseTo(80.4, 2);
+      const m = adapter.computeMetrics(r!, {
+        ...defaultProfile(),
+        gender: 'male',
+        age: 50,
+        height: 180,
+        isAthlete: false,
+      });
+      // Renpho PDF 80.90 kg / 20.7 % / SMM 36.65 / muscle 59.87 (same morning)
+      expect(m.bodyFatPercent).toBeCloseTo(20.7, 0);
+      expect(m.bodyFatPercent).not.toBeCloseTo(14.4, 0);
+      expect((m as { smmKg?: number }).smmKg).toBeCloseTo(36.5, 0);
+      expect((m.raw as { fat_source?: string }).fat_source).toBe('from_bia');
+      expect((m.raw as { bia_z_scale?: number }).bia_z_scale).toBeCloseTo(1.33, 2);
+    });
   });
 
   describe('computeMetrics()', () => {
