@@ -46,6 +46,8 @@ interface MarketingStageColumnProps {
 const currencyFormatter = new Intl.NumberFormat('es-ES', {
   style: 'currency',
   currency: 'EUR',
+  // Safari/Firefox antiguos: EUR implica min=2; max=0 sin min explícito → RangeError.
+  minimumFractionDigits: 0,
   maximumFractionDigits: 0,
 });
 
