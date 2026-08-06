@@ -16,7 +16,7 @@ import {
 } from '@/lib/inbodyNutrition';
 
 /** Versión de plantilla: cambiar al subir PNG nueva para invalidar caché del navegador. */
-export const INBODY_REPORT_TEMPLATE_VERSION = '20260624';
+export const INBODY_REPORT_TEMPLATE_VERSION = '20260807';
 export const INBODY_REPORT_TEMPLATE_URL = `/inbody/inbody-report-template-980x1200.png?v=${INBODY_REPORT_TEMPLATE_VERSION}`;
 
 /** Plantilla y coordenadas en píxeles reales 980×1200 (origen arriba-izquierda). */
