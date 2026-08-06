@@ -1,0 +1,39 @@
+---
+description: Flujo Git y restricciones de despliegue obligatorias para todos los agentes
+alwaysApply: true
+---
+
+# Git y despliegue (obligatorio para agentes)
+
+## Ramas
+
+1. **NUNCA** hagas push directo a `main`.
+2. Trabaja siempre en una rama de características:
+   - Preferido: `feature/<nombre-de-tarea>`
+   - En Cursor Cloud, si el entorno exige `cursor/<nombre>-<sufijo>`, úsala; sigue siendo una feature branch (no es `main`).
+3. **NUNCA** hagas commit ni push en `main` local “por comodidad”. Crea o cambia a la feature branch antes de editar.
+
+## Antes de dar por finalizada una tarea o pedir integración
+
+1. `git fetch origin main`
+2. Integra `main` en tu rama: `git merge origin/main`
+3. Resuelve conflictos localmente.
+4. Valida que compila: `npm run build` (u otro script de verificación del cambio).
+5. Push solo de la feature branch; abre/actualiza el PR hacia `main`.
+
+## Despliegue
+
+1. **NUNCA** ejecutes comandos de despliegue manuales desde ramas de feature  
+   (`deploy-frontend.ps1`, `deploy-migration.ps1`, `deploy-edge-functions.ps1`, reinicios remotos, etc.).
+2. El despliegue a producción ocurre **después** de integrar en `main` (o cuando el usuario lo pida explícitamente ya en el flujo post-merge), no desde la rama de trabajo.
+3. Si `production-deploy.mdc` u otra regla habla de desplegar tras cambios de UI: esa obligación **no aplica** mientras estés en una feature branch. Prioriza esta regla.
+
+## Resumen rápido
+
+| Acción | ¿Permitido? |
+|--------|-------------|
+| Push a `main` | No |
+| Trabajar en `feature/…` o `cursor/…` | Sí |
+| Merge `origin/main` → feature antes de cerrar | Obligatorio |
+| `npm run build` antes de pedir integración | Obligatorio |
+| Deploy desde feature | No |
