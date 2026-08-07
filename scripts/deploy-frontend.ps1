@@ -107,11 +107,21 @@ function Test-LegacyBrowserBuild {
   if ($html -notmatch 'suite-boot-error') {
     throw "dist/index.html sin overlay suite-boot-error. ¿Build desde main con index.html actualizado?"
   }
-  if ($html -match "import'data:text/javascript,[^']*if\(!import\.meta\.resolve\)") {
-    throw "dist/index.html tiene el detector Safari roto (import data: + import.meta.resolve). Falta fix-safari-legacy-detect en vite.config.ts."
+  if ($html -notmatch 'id="vite-legacy-polyfill"') {
+    throw "dist/index.html sin vite-legacy-polyfill. Falta force-systemjs-for-all-browsers en vite.config.ts."
   }
-  if ($html -notmatch 'typeof import\.meta\.resolve!="function"') {
-    throw "dist/index.html sin chequeo inline de import.meta.resolve. Rebuild con vite.config legacy."
+  if ($html -notmatch 'id="vite-legacy-entry"') {
+    throw "dist/index.html sin vite-legacy-entry. Rebuild con vite.config legacy."
+  }
+  # SystemJS-only: no deben quedar módulos de app (causan Script error. en Safari/Chrome viejos).
+  if ($html -match 'type=["'']module["'']') {
+    throw "dist/index.html aún tiene type=module. El rewrite SystemJS-only no se aplicó."
+  }
+  if ($html -match '\bnomodule\b') {
+    throw "dist/index.html aún tiene nomodule. El rewrite SystemJS-only no se aplicó."
+  }
+  if ($html -match '<script[^>]*\scrossorigin') {
+    throw "dist/index.html tiene crossorigin en <script> (enmascara errores como 'Script error.')."
   }
 
   $legacy = Get-ChildItem (Join-Path $DistRoot "assets") -Filter "index-legacy-*.js" -ErrorAction SilentlyContinue |

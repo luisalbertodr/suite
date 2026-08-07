@@ -39,17 +39,30 @@
           box.style.display = "block";
           box.innerHTML =
             "<h1 style=\"font-size:1.25rem;margin:0 0 8px\">No se pudo cargar Suite</h1>" +
-            "<p style=\"margin:0;color:#444\">Actualice Chrome/Edge/Safari o contacte con informática.</p>" +
+            "<p style=\"margin:0;color:#444\">Pruebe Ctrl+F5. Si sigue fallando, actualice Chrome/Edge/Safari o contacte con informática.</p>" +
             '<pre style="margin-top:12px;padding:12px;background:#f4f4f5;overflow:auto;font-size:12px;white-space:pre-wrap">' +
             String(msg || "Error de carga") +
             "</pre>";
         }
         window.addEventListener("error", function (ev) {
-          showBootError((ev && ev.message) || "Error de carga");
-        });
+          var parts = [];
+          var msg = (ev && ev.message) || "";
+          if (msg) parts.push(msg);
+          if (ev && ev.filename) parts.push(ev.filename);
+          if (ev && (ev.lineno || ev.colno)) {
+            parts.push("linea " + (ev.lineno || 0) + ":" + (ev.colno || 0));
+          }
+          if (!parts.length && ev && ev.target && ev.target.src) {
+            parts.push("fallo al cargar " + ev.target.src);
+          }
+          if (msg === "Script error." || msg === "Script error") {
+            parts.push("(detalle oculto por CORS; recargue sin caché)");
+          }
+          showBootError(parts.join("\n") || "Error de carga");
+        }, true);
         window.addEventListener("unhandledrejection", function (ev) {
           var r = ev && ev.reason;
-          showBootError((r && (r.message || r)) || "Error de carga (promise)");
+          showBootError((r && (r.message || String(r))) || "Error de carga (promise)");
         });
       })();
     </script>

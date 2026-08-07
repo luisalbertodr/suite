@@ -23,9 +23,12 @@ import { InbodySectionHelp } from './InbodyMetricHelp';
 
 function formatEs(value: number | null | undefined, decimals = 1, suffix = ''): string {
   if (value == null || Number.isNaN(value)) return '—';
+  const digits = Number.isFinite(decimals)
+    ? Math.min(20, Math.max(0, Math.trunc(decimals)))
+    : 1;
   const n = value.toLocaleString('es-ES', {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
   });
   return suffix ? `${n}${suffix}` : n;
 }

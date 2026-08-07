@@ -5,9 +5,13 @@ import path from "path";
 import fs from "fs";
 
 /**
- * Legacy Babel targets: por debajo de Chrome 80 / Safari 13.1 para forzar
- * transpile de `?.` / `??`. El dual-build sirve módulos ES a navegadores
- * modernos y SystemJS a los antiguos.
+ * Targets Babel bajos para forzar transpile de `?.` / `??` en el bundle
+ * SystemJS. Generamos también chunks modernos (emiten el CSS) y reescribimos
+ * index.html para que TODOS los navegadores carguen solo SystemJS/legacy.
+ *
+ * Motivo: el dual-build deja que Safari/Chrome "a medias" (soportan
+ * type=module pero no sintaxis actual) parseen el chunk moderno, fallen, y
+ * con `crossorigin` + nginx sin ACAO el overlay solo muestre "Script error.".
  */
 const LEGACY_BROWSER_TARGETS = [
   "Chrome >= 63",
@@ -17,46 +21,85 @@ const LEGACY_BROWSER_TARGETS = [
   "iOS >= 11",
 ];
 
-/**
- * Safari ≤15 no aborta el módulo padre cuando falla un `import 'data:...'`
- * (vite#22008). Mover el chequeo de import.meta.resolve al hilo inline.
- */
-function fixSafariLegacyDetect(): Plugin {
-  const nestedResolveCheck =
-    /import'data:text\/javascript,(?:[^']*?;)?if\(!import\.meta\.resolve\)throw Error\("import\.meta\.resolve not supported"\)';/g;
-  const inlineResolveCheck =
-    'if(typeof import.meta.resolve!="function")throw Error("import.meta.resolve not supported");';
+function stripCrossorigin(tag: string): string {
+  return tag.replace(/\s+crossorigin(?:="[^"]*")?/gi, "");
+}
 
+function rewriteIndexHtmlToSystemJsOnly(html: string): string {
+  const polyfillSrc = html.match(
+    /id="vite-legacy-polyfill"[^>]*\ssrc="([^"]+)"|src="([^"]+)"[^>]*\sid="vite-legacy-polyfill"/
+  );
+  const entrySrc = html.match(
+    /id="vite-legacy-entry"[^>]*\sdata-src="([^"]+)"|data-src="([^"]+)"[^>]*\sid="vite-legacy-entry"/
+  );
+  const poly = polyfillSrc?.[1] || polyfillSrc?.[2];
+  const entry = entrySrc?.[1] || entrySrc?.[2];
+  if (!poly || !entry) {
+    throw new Error(
+      "[force-systemjs-for-all-browsers] No se encontraron chunks legacy en index.html"
+    );
+  }
+
+  const cssLinks = Array.from(
+    html.matchAll(/<link\b[^>]*\brel=["']stylesheet["'][^>]*>/gi)
+  ).map((m) => stripCrossorigin(m[0]));
+
+  let out = html
+    .replace(/<script\b[^>]*\btype=["']module["'][^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<script\b[^>]*\btype=["']module["'][^>]*\/>/gi, "")
+    .replace(/<link\b[^>]*\brel=["']modulepreload["'][^>]*>/gi, "")
+    .replace(/<script\b[^>]*\bnomodule\b[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<link\b[^>]*\brel=["']stylesheet["'][^>]*>/gi, "");
+
+  if (cssLinks.length) {
+    out = out.replace(/<\/head>/i, `    ${cssLinks.join("\n    ")}\n  </head>`);
+  }
+
+  out = out
+    .replace(/<script\b[^>]*\sid="vite-legacy-polyfill"[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<script\b[^>]*\sid="vite-legacy-entry"[^>]*>[\s\S]*?<\/script>/gi, "");
+
+  // Sin crossorigin: mismo origen + nginx sin ACAO → evita "Script error." enmascarado.
+  const boot = [
+    `    <script id="vite-legacy-polyfill" src="${poly}"><\/script>`,
+    `    <script id="vite-legacy-entry" data-src="${entry}">System.import(document.getElementById('vite-legacy-entry').getAttribute('data-src'))<\/script>`,
+  ].join("\n");
+
+  if (!/<\/body>/i.test(out)) {
+    throw new Error("[force-systemjs-for-all-browsers] index.html sin </body>");
+  }
+  return out.replace(/<\/body>/i, `${boot}\n  </body>`);
+}
+
+function forceSystemJsForAllBrowsers(): Plugin {
+  let outDir = "dist";
   return {
-    name: "fix-safari-legacy-detect",
+    name: "force-systemjs-for-all-browsers",
     apply: "build",
-    enforce: "post",
-    transformIndexHtml(html) {
-      if (!nestedResolveCheck.test(html)) return html;
-      nestedResolveCheck.lastIndex = 0;
-      return html.replace(nestedResolveCheck, inlineResolveCheck);
+    configResolved(config) {
+      outDir = path.resolve(config.root, config.build.outDir);
     },
-    writeBundle(_opts, _bundle) {
-      // transformIndexHtml a veces no ve el HTML final con tags inyectados;
-      // reescribe dist/index.html tras el write.
-      const outDir = path.resolve(process.cwd(), "dist");
+    // plugin-legacy hace dos pases; reescribimos cuando ya hay tags legacy.
+    writeBundle() {
       const indexPath = path.join(outDir, "index.html");
       if (!fs.existsSync(indexPath)) return;
-      let html = fs.readFileSync(indexPath, "utf8");
-      nestedResolveCheck.lastIndex = 0;
-      if (nestedResolveCheck.test(html)) {
-        nestedResolveCheck.lastIndex = 0;
-        html = html.replace(nestedResolveCheck, inlineResolveCheck);
+      const html = fs.readFileSync(indexPath, "utf8");
+      if (!html.includes("vite-legacy-polyfill") || !html.includes("vite-legacy-entry")) {
+        return;
       }
-      // Quitar crossorigin de scripts legacy (Safari antiguo + sin ACAO).
-      html = html.replace(
-        /<script([^>]*\bid="vite-legacy-(?:polyfill|entry)"[^>]*)>/gi,
-        (_full, attrs: string) => {
-          const cleaned = attrs.replace(/\scrossorigin(?:="[^"]*")?/gi, "");
-          return `<script${cleaned}>`;
-        }
-      );
-      fs.writeFileSync(indexPath, html, "utf8");
+      if (
+        !html.includes('type="module"') &&
+        html.includes('id="vite-legacy-polyfill"') &&
+        !html.includes("nomodule")
+      ) {
+        // Ya reescrito: solo asegurar sin crossorigin.
+        const cleaned = html
+          .replace(/(<script\b[^>]*)\s+crossorigin(?:="[^"]*")?/gi, "$1")
+          .replace(/(<link\b[^>]*)\s+crossorigin(?:="[^"]*")?/gi, "$1");
+        if (cleaned !== html) fs.writeFileSync(indexPath, cleaned, "utf8");
+        return;
+      }
+      fs.writeFileSync(indexPath, rewriteIndexHtmlToSystemJsOnly(html), "utf8");
     },
   };
 }
@@ -82,7 +125,7 @@ export default defineConfig(() => ({
       polyfills: true,
       additionalLegacyPolyfills: ["regenerator-runtime/runtime"],
     }),
-    fixSafariLegacyDetect(),
+    forceSystemJsForAllBrowsers(),
   ],
   resolve: {
     alias: {
