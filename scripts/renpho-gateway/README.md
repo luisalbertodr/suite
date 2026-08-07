@@ -26,6 +26,7 @@
 # Varias MorphoScan (mismo centro):
 #   - No fijar ble.scale_mac → auto-discovery
 #   - .env SCALE_MACS=MAC1,MAC2  (allowlist)
-#   - Actual: 60:30:F2:74:26:E2 + 60:30:F2:74:22:B6
+#   - Actual: 60:30:F2:74:26:E2 (Morpho) + 60:30:F2:74:22:B6 (Morpho+3, ~+0,3 kg)
 #   - Una sola cola «Pesar ahora» por company_id: la primera báscula que mida vincula
 #   - El JSON lleva external_user_id=scale-<MAC> para distinguir unidades
+#   - Suite etiqueta el selector: Morpho vs Morpho+3 según MAC
