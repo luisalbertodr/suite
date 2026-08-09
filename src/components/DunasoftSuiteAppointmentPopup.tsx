@@ -102,12 +102,55 @@ export async function fetchSuiteAppointmentByLegacyIdPlan(
   return (data as AgendaAppointmentDayRow | null) ?? null;
 }
 
+export async function fetchSuiteAppointmentById(
+  companyId: string,
+  appointmentId: string,
+): Promise<AgendaAppointmentDayRow | null> {
+  const key = String(appointmentId).trim();
+  if (!key) return null;
+  const { data, error } = await (supabase.from('agenda_appointments') as any)
+    .select(AGENDA_APPOINTMENT_DAY_SELECT)
+    .eq('company_id', companyId)
+    .eq('id', key)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as AgendaAppointmentDayRow | null) ?? null;
+}
+
+/** Cita Style mínima a partir del gemelo Suite (cuando no está en la grid del día). */
+export function styleAppointmentFromSuiteRow(
+  row: AgendaAppointmentDayRow,
+  fallbackDateYmd: string,
+): Appointment {
+  const idplan = row.legacy_idplan != null ? String(row.legacy_idplan).trim() : '';
+  return {
+    id: idplan || row.id,
+    employeeId: row.employee_id || '',
+    clientName: repairStyleText(row.client_name || row.title || ''),
+    customerId: row.customer_id ?? null,
+    description: repairStyleText(row.description || ''),
+    startTime: normalizeAgendaTime(row.start_time) || '09:00',
+    endTime: normalizeAgendaTime(row.end_time) || '09:30',
+    date: normalizeAgendaDate(row.start_time, row.appointment_date, fallbackDateYmd),
+    color: row.color || '#3B82F6',
+    status: (['confirmed', 'pending', 'cancelled'].includes(row.status)
+      ? row.status
+      : 'pending') as Appointment['status'],
+    legacyIdPlan: idplan || null,
+    legacyClientCode: row.legacy_codcli || null,
+    legacyEmployeeCode: row.legacy_codemp || null,
+    clientPhone: null,
+  };
+}
+
 type Props = {
   styleAppointment: Appointment;
   suiteRow: AgendaAppointmentDayRow;
   fallbackDateYmd: string;
   onClose: () => void;
   onDeleted?: () => void;
+  returnCustomerId?: string | null;
+  onReturnToCustomerHistory?: () => void;
 };
 
 /**
@@ -120,6 +163,8 @@ export const DunasoftSuiteAppointmentPopup: React.FC<Props> = ({
   fallbackDateYmd,
   onClose,
   onDeleted,
+  returnCustomerId,
+  onReturnToCustomerHistory,
 }) => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -402,6 +447,8 @@ export const DunasoftSuiteAppointmentPopup: React.FC<Props> = ({
       onDelete={handleDelete}
       onCancelAndRefund={handleCancelAndRefund}
       onCancel={onClose}
+      returnCustomerId={returnCustomerId}
+      onReturnToCustomerHistory={onReturnToCustomerHistory}
     />
   );
 };

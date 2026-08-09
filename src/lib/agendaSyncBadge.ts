@@ -48,20 +48,31 @@ export function buildAgendaSyncBadge(
   const outboundAge = ageMs(styleSync?.last_outbound_ok_at, nowMs);
   const tickAge = ageMs(styleSync?.agent_last_tick_at, nowMs);
   const lagMs = styleSync?.last_outbound_lag_ms;
-  const outboundStale =
-    outboundAge == null ||
-    outboundAge > OUTBOUND_STALE_MS ||
-    (lagMs != null && lagMs > LAG_STALE_MS);
   const agentStale = tickAge != null && tickAge > AGENT_TICK_STALE_MS;
+  // Sin pendientes: Style puede estar cerrado y el outbound calla; el tick del agente basta.
+  // Con pendientes: sí marcar atrasado si no hay outbound reciente o hay lag.
+  const outboundStale =
+    pending > 0 &&
+    (outboundAge == null ||
+      outboundAge > OUTBOUND_STALE_MS ||
+      (lagMs != null && lagMs > LAG_STALE_MS));
+  const idleStyleClosed =
+    pending === 0 &&
+    !agentStale &&
+    !outboundStale &&
+    outboundAge != null &&
+    outboundAge > OUTBOUND_STALE_MS;
 
   const label =
     pending > 0
       ? cursor > 0
         ? `${pending}/${cursor} Sync`
         : `${pending} Sync`
-      : outboundStale || agentStale
+      : agentStale || outboundStale
         ? 'Sync atrasado'
-        : 'Sync OK';
+        : idleStyleClosed
+          ? 'Sync idle'
+          : 'Sync OK';
 
   const parts: string[] = [];
   if (pendingDbf > 0) parts.push(`${pendingDbf} pendiente(s) DBF/cola`);
@@ -70,7 +81,10 @@ export function buildAgendaSyncBadge(
   if (styleSync?.inbound_worker_status) {
     parts.push(`worker ${styleSync.inbound_worker_status}`);
   }
-  if (cursor > 0) parts.push(`cursor cola ${cursor}`);
+  if (cursor > 0) parts.push(`último id cola Style ${cursor}`);
+  if (idleStyleClosed) {
+    parts.push('Style sin actividad reciente (normal si está cerrado)');
+  }
   if (outboundAge != null) {
     parts.push(`último outbound hace ${formatAge(outboundAge)}`);
   } else if (styleSync) {

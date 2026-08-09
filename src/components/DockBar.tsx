@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Home, Calendar, ShoppingBag, Receipt, Users, Package, Settings, MapPin, Megaphone, MessageCircle, Phone } from 'lucide-react';
+import { Home, Calendar, ShoppingBag, Receipt, Users, Package, Megaphone, MessageCircle, Phone } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useWhatsappUnread } from '@/hooks/useWhatsappUnread';
 import { useMarketingUnread } from '@/hooks/useMarketingUnread';
@@ -39,8 +39,6 @@ const dockItems: DockItem[] = [
   },
   { label: 'Marketing', path: '/marketing', icon: Megaphone, color: 'text-rose-500', permission: { resource: 'marketing', action: 'read' } },
   { label: 'WhatsApp', path: '/whatsapp', icon: MessageCircle, color: 'text-emerald-600', permission: { resource: 'whatsapp', action: 'read' } },
-  { label: 'Fichaje', path: '/asistencia', icon: MapPin, color: 'text-emerald-500', permission: { resource: 'attendance', action: 'read' } },
-  { label: 'Configuración', path: '/configuracion', icon: Settings, color: 'text-gray-500', permission: { resource: 'settings', action: 'read' } },
 ];
 
 const FACTURACION_PATHS = [

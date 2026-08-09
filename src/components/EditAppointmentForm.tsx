@@ -389,7 +389,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                 onClick={onReturnToCustomerHistory}
               >
                 <ArrowLeft className="w-3.5 h-3.5" />
-                Historial
+                Volver
               </Button>
             )}
             <div className="min-w-0 flex-1 space-y-2">

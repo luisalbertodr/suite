@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { format, addDays, subDays, parse, isValid } from 'date-fns';
@@ -22,9 +22,13 @@ import {
 } from '@/components/DunasoftAppointmentForm';
 import {
   DunasoftSuiteAppointmentPopup,
+  fetchSuiteAppointmentById,
   fetchSuiteAppointmentByLegacyIdPlan,
+  styleAppointmentFromSuiteRow,
 } from '@/components/DunasoftSuiteAppointmentPopup';
 import type { AgendaAppointmentDayRow } from '@/lib/agendaAppointmentsQuery';
+import { buildCustomerHistoryUrl } from '@/lib/agendaCustomerNavigation';
+import { isUuid } from '@/lib/appointmentSales';
 import {
   useDunasoftAgendaDay,
   usePrefetchAdjacentDunasoftAgendaDays,
@@ -114,6 +118,10 @@ export const DunasoftAgenda: React.FC = () => {
 
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [goToTodayRequestId, setGoToTodayRequestId] = useState(0);
+  const [scrollToTimeRequest, setScrollToTimeRequest] = useState<{
+    requestId: number;
+    time: string;
+  } | null>(null);
   const [detailAppointment, setDetailAppointment] = useState<Appointment | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [suiteEdit, setSuiteEdit] = useState<{
@@ -131,8 +139,35 @@ export const DunasoftAgenda: React.FC = () => {
     trackingFamily: TrackingFamily;
     plantillaCodigo?: string | null;
   } | null>(null);
+  const pendingOpenAppointmentIdRef = useRef<string | null>(null);
+  const openingDeepLinkRef = useRef(false);
 
   const selectedDateYmd = useMemo(() => format(selectedDate, 'yyyy-MM-dd'), [selectedDate]);
+
+  const returnCustomerId = useMemo(() => {
+    const id = new URLSearchParams(location.search).get('returnCustomer');
+    return id?.trim() || null;
+  }, [location.search]);
+
+  const clearReturnCustomerParam = useCallback(() => {
+    const params = new URLSearchParams(location.search);
+    if (!params.has('returnCustomer')) return;
+    params.delete('returnCustomer');
+    navigate(
+      { pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : '' },
+      { replace: true },
+    );
+  }, [location.pathname, location.search, navigate]);
+
+  const handleReturnToCustomerHistory = useCallback(() => {
+    if (!returnCustomerId) return;
+    setSuiteEdit(null);
+    setDetailOpen(false);
+    setFormMode(null);
+    setEditTarget(null);
+    clearReturnCustomerParam();
+    navigate(buildCustomerHistoryUrl(returnCustomerId));
+  }, [returnCustomerId, clearReturnCustomerParam, navigate]);
 
   const selectAgendaDate = useCallback(
     (date: Date) => {
@@ -248,19 +283,138 @@ export const DunasoftAgenda: React.FC = () => {
     [companyId, openStyleEditForm, requirePermissionOrToast],
   );
 
+  // Deep-link desde ficha/cliente (Dock keep-alive: re-leer search en cada navegación).
   useEffect(() => {
     const params = new URLSearchParams(location.search);
-    const aptId = params.get('appointment');
-    if (!aptId || !appointments.length) return;
-    const apt = appointments.find((a) => a.id === aptId);
-    if (!apt) return;
-    void openAppointmentPopup(apt);
-    params.delete('appointment');
-    navigate(
-      { pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : '' },
-      { replace: true },
-    );
-  }, [appointments, location.pathname, location.search, navigate, openAppointmentPopup]);
+    const appointmentParam = params.get('appointment')?.trim() || null;
+    if (appointmentParam) {
+      pendingOpenAppointmentIdRef.current = appointmentParam;
+    }
+    const dateParam = params.get('date');
+    if (dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
+      const parsed = parse(dateParam, 'yyyy-MM-dd', new Date());
+      if (isValid(parsed)) {
+        setSelectedDate((prev) =>
+          format(prev, 'yyyy-MM-dd') === dateParam ? prev : parsed,
+        );
+      }
+    }
+  }, [location.search]);
+
+  useEffect(() => {
+    const targetId = pendingOpenAppointmentIdRef.current;
+    if (!targetId || !companyId || openingDeepLinkRef.current) return;
+    // idplan Style: esperar a la grid del día. UUID Suite: se puede abrir vía BD.
+    if (!isUuid(targetId) && isDayLoading && !appointments.length) return;
+
+    let cancelled = false;
+    openingDeepLinkRef.current = true;
+
+    const stripAppointmentParam = () => {
+      const params = new URLSearchParams(location.search);
+      if (!params.has('appointment')) return;
+      params.delete('appointment');
+      navigate(
+        { pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : '' },
+        { replace: true },
+      );
+    };
+
+    void (async () => {
+      try {
+        let suiteRow: AgendaAppointmentDayRow | null = null;
+        let styleApt: Appointment | undefined;
+
+        if (isUuid(targetId)) {
+          suiteRow = await fetchSuiteAppointmentById(companyId, targetId);
+          if (cancelled) return;
+          if (!suiteRow) {
+            pendingOpenAppointmentIdRef.current = null;
+            stripAppointmentParam();
+            toast({
+              title: 'Cita no encontrada',
+              description: 'No se pudo abrir la cita desde la ficha.',
+              variant: 'destructive',
+            });
+            return;
+          }
+          const rowYmd =
+            (suiteRow.start_time && String(suiteRow.start_time).includes('T')
+              ? String(suiteRow.start_time).split('T')[0]
+              : null) ||
+            suiteRow.appointment_date ||
+            selectedDateYmd;
+          if (rowYmd && rowYmd !== selectedDateYmd) {
+            const parsed = parse(rowYmd, 'yyyy-MM-dd', new Date());
+            if (isValid(parsed)) {
+              // Mantener pending hasta que cargue el día correcto.
+              openingDeepLinkRef.current = false;
+              selectAgendaDate(parsed);
+              return;
+            }
+          }
+          const idplan = suiteRow.legacy_idplan != null ? String(suiteRow.legacy_idplan).trim() : '';
+          styleApt =
+            (idplan ? appointments.find((a) => a.id === idplan) : undefined) ??
+            styleAppointmentFromSuiteRow(suiteRow, selectedDateYmd);
+        } else {
+          styleApt = appointments.find((a) => a.id === targetId);
+          if (!styleApt) {
+            if (!isDayLoading) {
+              pendingOpenAppointmentIdRef.current = null;
+              stripAppointmentParam();
+              toast({
+                title: 'Cita no encontrada',
+                description: 'No hay esa cita en la agenda del día.',
+                variant: 'destructive',
+              });
+            }
+            return;
+          }
+          try {
+            suiteRow = await fetchSuiteAppointmentByLegacyIdPlan(companyId, styleApt.id);
+          } catch {
+            suiteRow = null;
+          }
+          if (cancelled) return;
+        }
+
+        pendingOpenAppointmentIdRef.current = null;
+        stripAppointmentParam();
+        setScrollToTimeRequest({
+          requestId: Date.now(),
+          time: styleApt.startTime || '09:00',
+        });
+
+        if (suiteRow) {
+          setDetailOpen(false);
+          setFormMode(null);
+          setEditTarget(null);
+          setSuiteEdit({ styleApt, suiteRow });
+        } else {
+          await openAppointmentPopup(styleApt);
+        }
+      } finally {
+        if (!cancelled) openingDeepLinkRef.current = false;
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      openingDeepLinkRef.current = false;
+    };
+  }, [
+    appointments,
+    companyId,
+    isDayLoading,
+    location.pathname,
+    location.search,
+    navigate,
+    openAppointmentPopup,
+    selectAgendaDate,
+    selectedDateYmd,
+    toast,
+  ]);
 
   const topBarActions = useMemo(
     () => (
@@ -540,6 +694,7 @@ export const DunasoftAgenda: React.FC = () => {
             persistUserId={user?.id}
             viewDateYmd={selectedDateYmd}
             goToTodayRequestId={goToTodayRequestId}
+            scrollToTimeRequest={scrollToTimeRequest}
             centerHours={DEFAULT_AGENDA_CENTER_HOURS}
             employeeAgendaById={employeeAgendaById}
             slotMinutes={15}
@@ -654,6 +809,10 @@ export const DunasoftAgenda: React.FC = () => {
           suiteRow={suiteEdit.suiteRow}
           fallbackDateYmd={selectedDateYmd}
           onClose={() => setSuiteEdit(null)}
+          returnCustomerId={returnCustomerId}
+          onReturnToCustomerHistory={
+            returnCustomerId ? handleReturnToCustomerHistory : undefined
+          }
         />
       ) : null}
 
