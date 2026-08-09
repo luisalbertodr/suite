@@ -21,6 +21,11 @@ import {
   type DunasoftAppointmentFormValues,
 } from '@/components/DunasoftAppointmentForm';
 import {
+  DunasoftSuiteAppointmentPopup,
+  fetchSuiteAppointmentByLegacyIdPlan,
+} from '@/components/DunasoftSuiteAppointmentPopup';
+import type { AgendaAppointmentDayRow } from '@/lib/agendaAppointmentsQuery';
+import {
   useDunasoftAgendaDay,
   usePrefetchAdjacentDunasoftAgendaDays,
 } from '@/hooks/useDunasoftAgendaDay';
@@ -111,6 +116,11 @@ export const DunasoftAgenda: React.FC = () => {
   const [goToTodayRequestId, setGoToTodayRequestId] = useState(0);
   const [detailAppointment, setDetailAppointment] = useState<Appointment | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [suiteEdit, setSuiteEdit] = useState<{
+    styleApt: Appointment;
+    suiteRow: AgendaAppointmentDayRow;
+  } | null>(null);
+  const [openingAppointment, setOpeningAppointment] = useState(false);
   const [formMode, setFormMode] = useState<'create' | 'edit' | null>(null);
   const [formSlot, setFormSlot] = useState<{ employeeId: string; time: string } | null>(null);
   const [editTarget, setEditTarget] = useState<Appointment | null>(null);
@@ -191,20 +201,66 @@ export const DunasoftAgenda: React.FC = () => {
     }
   }, [companyId, queryClient, refetch, toast]);
 
+  const openStyleEditForm = useCallback((apt: Appointment) => {
+    setFormMode('edit');
+    setEditTarget(apt);
+    setFormSlot({ employeeId: apt.employeeId, time: apt.startTime });
+  }, []);
+
+  const openAppointmentPopup = useCallback(
+    async (apt: Appointment) => {
+      setDetailOpen(false);
+      setSuiteEdit(null);
+      setFormMode(null);
+      setEditTarget(null);
+
+      const paid =
+        apt.paymentStatus === 'paid' || apt.paymentStatus === 'invoiced';
+
+      if (companyId) {
+        setOpeningAppointment(true);
+        try {
+          const suiteRow = await fetchSuiteAppointmentByLegacyIdPlan(companyId, apt.id);
+          if (suiteRow) {
+            setSuiteEdit({ styleApt: apt, suiteRow });
+            return;
+          }
+        } catch (e) {
+          console.warn('No se pudo resolver gemelo Suite de la cita Style:', e);
+        } finally {
+          setOpeningAppointment(false);
+        }
+      }
+
+      // Sin gemelo Suite: formulario Style completo; cobrada → detalle (docs / solo lectura).
+      if (paid) {
+        setDetailAppointment(apt);
+        setDetailOpen(true);
+        return;
+      }
+      if (!requirePermissionOrToast('agenda', 'update')) {
+        setDetailAppointment(apt);
+        setDetailOpen(true);
+        return;
+      }
+      openStyleEditForm(apt);
+    },
+    [companyId, openStyleEditForm, requirePermissionOrToast],
+  );
+
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const aptId = params.get('appointment');
     if (!aptId || !appointments.length) return;
     const apt = appointments.find((a) => a.id === aptId);
     if (!apt) return;
-    setDetailAppointment(apt);
-    setDetailOpen(true);
+    void openAppointmentPopup(apt);
     params.delete('appointment');
     navigate(
       { pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : '' },
       { replace: true },
     );
-  }, [appointments, location.pathname, location.search, navigate]);
+  }, [appointments, location.pathname, location.search, navigate, openAppointmentPopup]);
 
   const topBarActions = useMemo(
     () => (
@@ -355,10 +411,12 @@ export const DunasoftAgenda: React.FC = () => {
     [requirePermissionOrToast],
   );
 
-  const handleAppointmentClick = useCallback((apt: Appointment) => {
-    setDetailAppointment(apt);
-    setDetailOpen(true);
-  }, []);
+  const handleAppointmentClick = useCallback(
+    (apt: Appointment) => {
+      void openAppointmentPopup(apt);
+    },
+    [openAppointmentPopup],
+  );
 
   const handleAppointmentMove = useCallback(
     (appointmentId: string, newEmployeeId: string, newTime: string) => {
@@ -420,6 +478,7 @@ export const DunasoftAgenda: React.FC = () => {
     setFormMode(null);
     setFormSlot(null);
     setEditTarget(null);
+    setSuiteEdit(null);
   };
 
   const handleCreateSave = (values: DunasoftAppointmentFormValues) => {
@@ -506,9 +565,7 @@ export const DunasoftAgenda: React.FC = () => {
         onEdit={(apt) => {
           if (!requirePermissionOrToast('agenda', 'update')) return;
           setDetailOpen(false);
-          setFormMode('edit');
-          setEditTarget(apt);
-          setFormSlot({ employeeId: apt.employeeId, time: apt.startTime });
+          openStyleEditForm(apt);
         }}
         onDelete={(apt) => {
           if (!requirePermissionOrToast('agenda', 'delete')) return;
@@ -591,6 +648,15 @@ export const DunasoftAgenda: React.FC = () => {
         />
       ) : null}
 
+      {suiteEdit ? (
+        <DunasoftSuiteAppointmentPopup
+          styleAppointment={suiteEdit.styleApt}
+          suiteRow={suiteEdit.suiteRow}
+          fallbackDateYmd={selectedDateYmd}
+          onClose={() => setSuiteEdit(null)}
+        />
+      ) : null}
+
       {formMode === 'create' && formSlot ? (
         <DunasoftAppointmentForm
           mode="create"
@@ -613,7 +679,7 @@ export const DunasoftAgenda: React.FC = () => {
           startTime={editTarget.startTime}
           idplan={editTarget.id}
           initial={appointmentToFormValues(editTarget)}
-          saving={updateMutation.isPending}
+          saving={updateMutation.isPending || openingAppointment}
           onSave={handleEditSave}
           onCancel={closeForm}
         />
