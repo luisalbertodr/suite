@@ -2,7 +2,6 @@ import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import {
   completeSpanishDni,
-  inbodyBarScale,
   inbodyRangeStatus,
   inbodyStatusLabel,
   normalizeInbodyMeasurement,
@@ -17,7 +16,7 @@ import {
 } from '@/lib/inbodyNutrition';
 
 /** Versión de plantilla: cambiar al subir PNG nueva para invalidar caché del navegador. */
-export const INBODY_REPORT_TEMPLATE_VERSION = '20260624';
+export const INBODY_REPORT_TEMPLATE_VERSION = '20260807';
 export const INBODY_REPORT_TEMPLATE_URL = `/inbody/inbody-report-template-980x1200.png?v=${INBODY_REPORT_TEMPLATE_VERSION}`;
 
 /** Plantilla y coordenadas en píxeles reales 980×1200 (origen arriba-izquierda). */
@@ -49,15 +48,21 @@ const REGIONS = {
 } as const satisfies Record<string, RefRect>;
 
 /**
- * Composición corporal — calibrado contra inbody-report-example.png escalado a 980×1200.
- * Marcador en zonas Bajo/Normal/Alto; valor kg en UNIDAD:%; rango+estado en Valor normal.
+ * Composición corporal — calibrado contra plantilla 980×1200.
+ * Zonas horizontales FIJAS del cuadro (Bajo / Normal / Alto):
+ *   Bajo 165–260 · Normal 260–328 · Alto 328–412
+ * El marcador se proyecta por tramos al rango min–max del paciente (no escala lineal
+ * con padding), para que valores «Normal» caigan siempre entre 260 y 328.
  */
 const COMPOSITION_GRAPH_DX = 33;
 const COMPOSITION_GRAPH_DY = -17;
-const COMPOSITION_BAR = {
-  x1: 142 + COMPOSITION_GRAPH_DX,
-  x2: 340 + COMPOSITION_GRAPH_DX,
-};
+/** Límites X de las tres bandas impresas en la plantilla. */
+const COMPOSITION_ZONE = {
+  lowStart: 165,
+  normalStart: 260,
+  normalEnd: 328,
+  highEnd: 412,
+} as const;
 const COMPOSITION_UNIT = {
   x1: 358 + COMPOSITION_GRAPH_DX,
   x2: 448 + COMPOSITION_GRAPH_DX,
@@ -66,6 +71,33 @@ const COMPOSITION_NORM = {
   x1: 468 + COMPOSITION_GRAPH_DX,
   x2: 542 + COMPOSITION_GRAPH_DX,
 };
+
+function clamp01(t: number): number {
+  return Math.min(1, Math.max(0, t));
+}
+
+/**
+ * X de referencia (980×1200) del marcador de composición corporal.
+ * Dentro de [min, max] → banda Normal; fuera → Bajo/Alto con un span de referencia.
+ */
+export function inbodyCompositionMarkerXRef(
+  value: number,
+  min: number,
+  max: number,
+): number {
+  const span = Math.max(max - min, 0.001);
+  const { lowStart, normalStart, normalEnd, highEnd } = COMPOSITION_ZONE;
+  if (value < min) {
+    const t = (value - (min - span)) / span;
+    return lowStart + clamp01(t) * (normalStart - lowStart);
+  }
+  if (value > max) {
+    const t = (value - max) / span;
+    return normalEnd + clamp01(t) * (highEnd - normalEnd);
+  }
+  const t = (value - min) / span;
+  return normalStart + t * (normalEnd - normalStart);
+}
 
 /** Centros Y de fila (Peso, MME, Masa grasa). */
 const COMPOSITION_ROW_Y = [150, 197, 244] as const;
@@ -275,18 +307,15 @@ function drawCompositionMarker(
   max: number | null | undefined,
 ) {
   if (value == null || min == null || max == null) return;
-  const scale = inbodyBarScale(value, min, max);
-  const barLeft = px(w, h, COMPOSITION_BAR.x1, yRef);
-  const barRight = px(w, h, COMPOSITION_BAR.x2, yRef);
-  const barWidth = barRight.x - barLeft.x;
+  const markerX = px(w, h, inbodyCompositionMarkerXRef(value, min, max), yRef).x;
   const barH = px(w, h, 0, 18).y;
-  const markerX = barLeft.x + (scale.markerPct / 100) * barWidth;
+  const markerY = px(w, h, 0, yRef).y;
   ctx.save();
   ctx.strokeStyle = '#1d4ed8';
   ctx.lineWidth = Math.max(2, px(w, h, 0, 2.5).y);
   ctx.beginPath();
-  ctx.moveTo(markerX, barLeft.y - barH / 2);
-  ctx.lineTo(markerX, barLeft.y + barH / 2);
+  ctx.moveTo(markerX, markerY - barH / 2);
+  ctx.lineTo(markerX, markerY + barH / 2);
   ctx.stroke();
   ctx.restore();
 }
@@ -305,12 +334,10 @@ function drawCompositionMarkerCurve(
   const points: Array<{ x: number; y: number }> = [];
   for (const item of rows) {
     if (item.value == null || item.min == null || item.max == null) continue;
-    const scale = inbodyBarScale(item.value, item.min, item.max);
     const yGraph = compositionGraphY(item.yRef);
-    const barLeft = px(w, h, COMPOSITION_BAR.x1, yGraph);
-    const barRight = px(w, h, COMPOSITION_BAR.x2, yGraph);
-    const markerX = barLeft.x + (scale.markerPct / 100) * (barRight.x - barLeft.x);
-    points.push({ x: markerX, y: barLeft.y });
+    const markerX = px(w, h, inbodyCompositionMarkerXRef(item.value, item.min, item.max), yGraph).x;
+    const markerY = px(w, h, 0, yGraph).y;
+    points.push({ x: markerX, y: markerY });
   }
   if (points.length < 2) return;
 

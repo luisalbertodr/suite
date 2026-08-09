@@ -485,6 +485,7 @@ export const WhatsappChatView: React.FC<Props> = ({
                 marketingLeadId={effectiveMarketingLeadId}
                 customerId={effectiveCustomerId}
                 depositPaid={!!leadMeta?.stripeDepositPaidAt}
+                depositPaidAt={leadMeta?.stripeDepositPaidAt ?? null}
                 onSendText={async (text) => {
                   await onSend({ text });
                 }}

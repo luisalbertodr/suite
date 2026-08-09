@@ -5011,6 +5011,10 @@ export type Database = {
         Returns: string
       }
       get_user_company_id: { Args: never; Returns: string }
+      payment_gateway_company_id: {
+        Args: { p_company_id?: string | null }
+        Returns: string
+      }
       get_user_permissions: { Args: { p_user_id: string }; Returns: string[] }
       current_user_has_marketing_permission: {
         Args: { p_action?: string; p_user_id?: string | null }

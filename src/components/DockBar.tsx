@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Home, Calendar, ShoppingBag, Receipt, Users, Package, Settings, MapPin, Megaphone, MessageCircle, Phone } from 'lucide-react';
@@ -67,6 +67,7 @@ export const DockBar: React.FC = () => {
   const { total: marketingUnread } = useMarketingUnread();
   const { missedUnread } = usePhoneMissedCalls();
   const prefetchDockPanel = usePrefetchDockPanel();
+  const scrollRef = useRef<HTMLDivElement>(null);
   useNotificationSoundOnIncrease(whatsappUnread, 'whatsapp', { enabled: canSeeWhatsapp });
 
   const visibleItems = dockItems.filter((item) => {
@@ -86,78 +87,104 @@ export const DockBar: React.FC = () => {
     return 0;
   };
 
+  // Mantener el ítem activo visible al cambiar de ruta o al cargar en pantallas estrechas.
+  useEffect(() => {
+    const root = scrollRef.current;
+    if (!root) return;
+    const active = root.querySelector<HTMLElement>('[aria-current="page"]');
+    active?.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
+  }, [location.pathname, visibleItems.length]);
+
   if (typeof document === 'undefined') return null;
 
   return createPortal(
-    <div className={`fixed bottom-4 left-1/2 -translate-x-1/2 ${DOCK_Z_CLASS} pointer-events-auto`} data-suite-dock-bar>
-      <div className="flex items-end gap-1 px-3 py-2 bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl border border-white/20 dark:border-gray-700/50 rounded-2xl shadow-2xl shadow-black/10">
-        {visibleItems.map((item) => {
-          const isActive = isDockItemActive(location.pathname, item.path);
+    <div
+      className={`fixed bottom-4 left-0 right-0 flex justify-center px-2 ${DOCK_Z_CLASS} pointer-events-none`}
+      data-suite-dock-bar
+    >
+      <div
+        ref={scrollRef}
+        className="
+          pointer-events-auto max-w-[calc(100vw-1rem)]
+          overflow-x-auto overflow-y-visible overscroll-x-contain touch-pan-x
+          [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden
+        "
+      >
+        <div className="flex w-max items-end gap-1 px-3 py-2 bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl border border-white/20 dark:border-gray-700/50 rounded-2xl shadow-2xl shadow-black/10">
+          {visibleItems.map((item) => {
+            const isActive = isDockItemActive(location.pathname, item.path);
 
-          const dockKey = matchDockRoute(item.path);
+            const dockKey = matchDockRoute(item.path);
 
-          const goTo = () => {
-            if (document.activeElement instanceof HTMLElement) {
-              document.activeElement.blur();
-            }
-            if (!isActive) navigate(item.path);
-          };
+            const goTo = () => {
+              if (document.activeElement instanceof HTMLElement) {
+                document.activeElement.blur();
+              }
+              if (!isActive) navigate(item.path);
+            };
 
-          return (
-            <button
-              key={item.path}
-              type="button"
-              title={item.label}
-              aria-label={item.label}
-              aria-current={isActive ? 'page' : undefined}
-              onPointerEnter={() => {
-                if (dockKey) prefetchDockPanel(dockKey);
-              }}
-              onPointerDown={(e) => {
-                // Navegar en pointerdown evita perder el clic si un input (TPV, WhatsApp…) tiene el foco.
-                e.preventDefault();
-                goTo();
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
+            return (
+              <button
+                key={item.path}
+                type="button"
+                title={item.label}
+                aria-label={item.label}
+                aria-current={isActive ? 'page' : undefined}
+                onPointerEnter={() => {
+                  if (dockKey) prefetchDockPanel(dockKey);
+                }}
+                onPointerDown={(e) => {
+                  // En touch no capturar pointerdown: permite scroll horizontal del dock.
+                  // En ratón sí: evita perder el clic si un input (TPV, WhatsApp…) tiene el foco.
+                  if (e.pointerType === 'touch') return;
                   e.preventDefault();
                   goTo();
-                }
-              }}
-              className={`
-                group relative flex cursor-pointer flex-col items-center justify-center
-                w-14 h-14 rounded-xl border-0 bg-transparent p-0
-                transition-all duration-300 ease-out
-                hover:scale-125 hover:-translate-y-2
-                active:scale-95
-                ${isActive ? 'scale-110 -translate-y-1' : ''}
-              `}
-            >
-              <div className={`
-                relative flex items-center justify-center w-12 h-12 rounded-xl
-                transition-all duration-300
-                ${isActive
-                  ? 'bg-white dark:bg-gray-800 shadow-lg shadow-black/10'
-                  : 'hover:bg-white/60 dark:hover:bg-gray-800/60'
-                }
-              `}>
-                <item.icon className={`h-6 w-6 transition-all duration-300 ${item.color} ${isActive ? 'scale-110' : 'group-hover:scale-110'}`} />
-                {(() => {
-                  const badge = badgeForItem(item.path);
-                  if (badge <= 0) return null;
-                  return (
-                    <span className="absolute -top-1 -right-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold leading-none text-white shadow ring-2 ring-white dark:ring-gray-900">
-                      {badge > 99 ? '99+' : badge}
-                    </span>
-                  );
-                })()}
-              </div>
-              {isActive && (
-                <div className="absolute -bottom-1 w-1.5 h-1.5 rounded-full bg-gray-400 dark:bg-gray-500" />
-              )}
-            </button>
-          );
-        })}
+                }}
+                onClick={() => {
+                  // Tap táctil (y fallback) tras soltar sin haber hecho scroll cancelatorio.
+                  goTo();
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    goTo();
+                  }
+                }}
+                className={`
+                  group relative flex shrink-0 cursor-pointer flex-col items-center justify-center
+                  w-14 h-14 rounded-xl border-0 bg-transparent p-0
+                  transition-all duration-300 ease-out
+                  hover:scale-125 hover:-translate-y-2
+                  active:scale-95
+                  ${isActive ? 'scale-110 -translate-y-1' : ''}
+                `}
+              >
+                <div className={`
+                  relative flex items-center justify-center w-12 h-12 rounded-xl
+                  transition-all duration-300
+                  ${isActive
+                    ? 'bg-white dark:bg-gray-800 shadow-lg shadow-black/10'
+                    : 'hover:bg-white/60 dark:hover:bg-gray-800/60'
+                  }
+                `}>
+                  <item.icon className={`h-6 w-6 transition-all duration-300 ${item.color} ${isActive ? 'scale-110' : 'group-hover:scale-110'}`} />
+                  {(() => {
+                    const badge = badgeForItem(item.path);
+                    if (badge <= 0) return null;
+                    return (
+                      <span className="absolute -top-1 -right-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold leading-none text-white shadow ring-2 ring-white dark:ring-gray-900">
+                        {badge > 99 ? '99+' : badge}
+                      </span>
+                    );
+                  })()}
+                </div>
+                {isActive && (
+                  <div className="absolute -bottom-1 w-1.5 h-1.5 rounded-full bg-gray-400 dark:bg-gray-500" />
+                )}
+              </button>
+            );
+          })}
+        </div>
       </div>
     </div>,
     document.body,

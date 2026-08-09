@@ -40,20 +40,23 @@ Variables opcionales:
 
 ## Comportamiento del agente tras cambios
 
-Cuando el usuario pida desplegar o hayas modificado código que afecte producción, **ejecuta los scripts** (no solo documentes comandos) si hay acceso SSH.
+**Prioridad:** la regla `git-and-deploy-workflow.mdc` manda. **No despliegues desde ramas de feature.** Solo despliega tras integración en `main`, o si el usuario lo pide explícitamente en ese contexto post-merge.
 
-### Frontend: subir siempre
+Cuando el usuario pida desplegar (ya en `main` / post-merge) o hayas modificado código que afecte producción **y** no estés en una feature branch, **ejecuta los scripts** (no solo documentes comandos) si hay acceso SSH.
 
-Tras cualquier cambio que afecte la UI (`src/`, assets públicos, `VITE_*`, build), **despliega el frontend en la misma sesión** con `.\scripts\deploy-frontend.ps1` (o `-SkipBuild` si `dist/` ya está al día). No dejes la subida pendiente ni te limites a indicar el comando: súbelo. Si falta SSH a `suite-web`, configura acceso (`.\scripts\setup-ssh-deploy.ps1 -IncludeWeb`) y reintenta el deploy antes de cerrar.
+### Frontend: subir (solo post-merge / bajo petición explícita)
 
-### Orden recomendado (si aplica todo)
+Tras cambios de UI ya integrados en `main` (o con petición explícita de deploy), despliega con `.\scripts\deploy-frontend.ps1` (o `-SkipBuild` si `dist/` ya está al día). Si falta SSH a `suite-web`, configura acceso (`.\scripts\setup-ssh-deploy.ps1 -IncludeWeb`) y reintenta.
+
+### Orden recomendado (si aplica todo, post-merge)
 
 1. **Migración SQL** (`supabase/migrations/`)
 2. **Edge Functions** (`supabase/functions/`) — especialmente si dependen del esquema
-3. **Frontend** (`src/`, assets, `.env` con `VITE_*`) — **siempre subir** (ver arriba)
+3. **Frontend** (`src/`, assets, `.env` con `VITE_*`)
 
 ### Cuándo NO desplegar
 
+- Estás en una **feature branch** (ver `git-and-deploy-workflow.mdc`).
 - Solo lectura o preguntas sin cambios.
 - SSH no disponible tras intentar configurarlo: informar con comandos exactos y qué falta (p. ej. contraseña root del 112 una vez).
 - Migración ya en `supabase_migrations.schema_migrations`: no re-ejecutar.
