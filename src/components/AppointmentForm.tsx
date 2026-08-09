@@ -14,7 +14,7 @@ import { APPOINTMENT_CUSTOMER_SUMMARY_FIELDS } from '@/lib/appointmentCustomerSu
 import type { Appointment, AppointmentItemDraft } from '@/types/agenda';
 import { calcEndFromStart, effectiveDurationMinutes } from '@/lib/agendaAppointmentItems';
 import { AGENDA_APPOINTMENT_MODAL_Z } from '@/lib/agendaResourceColors';
-import { DOCK_CLEARANCE_BOTTOM } from '@/lib/dialogLayers';
+import { AGENDA_MODAL_SHELL } from '@/lib/dialogLayers';
 import { toRecursoCatalogEntries } from '@/lib/agendaRecursoMatch';
 import { appointmentItemLineTotal } from '@/lib/agendaAppointmentPricing';
 import { appointmentChargeableTotal, canChargeAppointment } from '@/lib/appointmentSales';
@@ -284,41 +284,36 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
   };
 
   return (
-    <div className={`fixed inset-x-0 top-0 ${DOCK_CLEARANCE_BOTTOM} bg-black/50 flex items-start sm:items-center justify-center ${AGENDA_APPOINTMENT_MODAL_Z} px-3 pt-2 pb-4 sm:p-4`}>
-      <Card className="suite-max-h-dialog w-full max-w-md overflow-y-auto">
-        <CardHeader className="pb-2 pt-3 px-4">
+    <div className={`${AGENDA_MODAL_SHELL} bg-black/50 ${AGENDA_APPOINTMENT_MODAL_Z}`}>
+      <Card className="flex max-h-full w-full max-w-3xl flex-col overflow-hidden">
+        <CardHeader className="shrink-0 space-y-2 px-4 pb-2 pt-3">
           <div className="flex items-start gap-2">
-            <CardTitle className="text-base flex items-center gap-2 shrink-0 pt-1">
+            <CardTitle className="text-base flex items-center gap-2 shrink-0 pt-0.5">
               <User className="w-4 h-4" /> Nueva Cita
             </CardTitle>
-            <div className="flex-1 min-w-0">
+            <div className="min-w-0 flex-1">
               <AppointmentClientePicker lazySearch value={clientPick} onChange={setClientPick} />
             </div>
-            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0 mt-0.5" onClick={onCancel} disabled={saving}>
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0" onClick={onCancel} disabled={saving}>
               <X className="w-4 h-4" />
             </Button>
           </div>
-        </CardHeader>
-        <CardContent className="px-4 pb-3 pt-0">
-          <form onSubmit={handleSubmit} className="space-y-2">
-            <div className="text-[11px] text-muted-foreground rounded-md border border-border/60 bg-muted/30 px-2 py-1.5">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+            <span>
               Profesional: <strong className="text-foreground">{selectedEmployeeName}</strong>
-              <span className="ml-1.5">· Se sincronizará con Style (cola DBF)</span>
-            </div>
-
+              <span className="ml-1">· Style (cola DBF)</span>
+            </span>
             {(stylePhone || styleCodcli) && (
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <div className="rounded-md border border-border/50 bg-muted/20 px-2 py-1.5 min-w-0">
-                  <div className="text-[10px] text-muted-foreground">Teléfono</div>
-                  <div className="truncate tabular-nums font-medium">{stylePhone || '—'}</div>
-                </div>
-                <div className="rounded-md border border-border/50 bg-muted/20 px-2 py-1.5 min-w-0">
-                  <div className="text-[10px] text-muted-foreground">Cód. cliente Style</div>
-                  <div className="truncate tabular-nums font-medium">{styleCodcli || '—'}</div>
-                </div>
-              </div>
+              <span className="tabular-nums truncate">
+                {[stylePhone ? `tel ${stylePhone}` : null, styleCodcli ? `cli ${styleCodcli}` : null]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </span>
             )}
-
+          </div>
+        </CardHeader>
+        <CardContent className="min-h-0 flex-1 overflow-y-auto px-4 pb-3 pt-0">
+          <form onSubmit={handleSubmit} className="space-y-2.5">
             {selectedCustomerId && selectedCustomer && (
               <AppointmentCustomerSummaryBar
                 customer={selectedCustomer}
@@ -334,34 +329,36 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
                 onCharge={chargeCheck.allowed ? openTpvWithCurrentItems : undefined}
               />
             )}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-              <div>
-                <Label className="text-xs">Fecha</Label>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <div className="min-w-0">
+                <Label className="text-[10px] text-muted-foreground">Fecha</Label>
                 <Input
                   type="date"
                   value={formData.date}
                   onChange={(e) => setFormData({ ...formData, date: e.target.value })}
                   disabled={saving}
+                  className="h-8 text-xs"
                 />
               </div>
-              <div>
-                <Label className="text-xs">Hora inicio</Label>
+              <div className="min-w-0">
+                <Label className="text-[10px] text-muted-foreground">Inicio</Label>
                 <Input
                   type="time"
                   value={formData.startTime}
                   onChange={(e) => setFormData({ ...formData, startTime: e.target.value })}
                   disabled={saving}
+                  className="h-8 text-xs tabular-nums"
                 />
               </div>
-              <div>
-                <Label className="text-xs">Fin (calc.)</Label>
-                <Input type="time" value={computedEndTime} readOnly tabIndex={-1} className="bg-muted/40" />
+              <div className="min-w-0">
+                <Label className="text-[10px] text-muted-foreground">Fin (calc.)</Label>
+                <Input type="time" value={computedEndTime} readOnly tabIndex={-1} className="h-8 text-xs tabular-nums bg-muted/40" />
               </div>
-              <div>
-                <Label className="text-xs">Empleada</Label>
+              <div className="min-w-0">
+                <Label className="text-[10px] text-muted-foreground">Empleada</Label>
                 {hasMixedBillingServices && (
-                  <p className="text-[10px] text-amber-600 mb-1">
-                    Cita con servicios de distintas empresas: asigna empleada del tenant o divide la cita.
+                  <p className="text-[10px] text-amber-600 mb-0.5">
+                    Servicios de distintas empresas: asigna empleada del tenant o divide la cita.
                   </p>
                 )}
                 <Select
@@ -369,7 +366,7 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
                   onValueChange={(v) => setFormData({ ...formData, employeeId: v })}
                   disabled={saving}
                 >
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                   <AppointmentSelectContent>
                     {eligibleEmployees.map((e) => (
                       <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>
