@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Search } from 'lucide-react';
 import {
@@ -64,6 +64,8 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   itemKind: ArticlePickerKind;
   selectedId?: string | null;
+  /** Familia del artículo ya elegido: al abrir, entra en ese nivel. */
+  selectedFamilia?: string | null;
   onSelect: (article: AppointmentArticleOption) => void;
 };
 
@@ -72,6 +74,7 @@ export const ArticleGridPickerDialog: React.FC<Props> = ({
   onOpenChange,
   itemKind,
   selectedId,
+  selectedFamilia,
   onSelect,
 }) => {
   const [selectedFamily, setSelectedFamily] = useState<string | null>(null);
@@ -80,6 +83,38 @@ export const ArticleGridPickerDialog: React.FC<Props> = ({
   const { catalogHostCompanyId } = useWorkCenter();
   const catalogCompanyId = catalogHostCompanyId ?? companyId;
   const { families, loading: familiesLoading } = useFamilies();
+
+  const { data: selectedArticleMeta } = useQuery({
+    queryKey: ['article-family-for-picker', catalogCompanyId, selectedId],
+    enabled: Boolean(open && catalogCompanyId && selectedId && !selectedFamilia),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('articles')
+        .select('id,familia')
+        .eq('company_id', catalogCompanyId!)
+        .eq('id', selectedId!)
+        .maybeSingle();
+      if (error) throw error;
+      return data as { id: string; familia: string | null } | null;
+    },
+    staleTime: 60_000,
+  });
+
+  useEffect(() => {
+    if (!open) return;
+    setSearchQuery('');
+    if (selectedFamilia !== undefined) {
+      setSelectedFamily(familyKeyFromArticle(selectedFamilia));
+      return;
+    }
+    if (selectedArticleMeta) {
+      setSelectedFamily(familyKeyFromArticle(selectedArticleMeta.familia));
+      return;
+    }
+    if (!selectedId) {
+      setSelectedFamily(null);
+    }
+  }, [open, selectedFamilia, selectedArticleMeta, selectedId]);
 
   const trimmedSearch = searchQuery.trim();
   const isSearching = isArticleSearchQueryReady(trimmedSearch);
@@ -235,9 +270,10 @@ export const ArticleGridPickerDialog: React.FC<Props> = ({
               size="sm"
               className="h-9 shrink-0 px-2"
               onClick={() => setSelectedFamily(null)}
+              title="Subir un nivel (familias)"
             >
               <ArrowLeft className="mr-1 h-4 w-4" />
-              Familias
+              Subir a familias
             </Button>
           ) : null}
           <div className="relative min-w-0 flex-1">

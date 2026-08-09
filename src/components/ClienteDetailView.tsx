@@ -21,6 +21,7 @@ import { primaryCustomerPhone } from '@/lib/legacyCustomerPhones';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { buildAgendaAppointmentUrl } from '@/lib/agendaCustomerNavigation';
+import { usePermissions } from '@/hooks/usePermissions';
 
 interface Props {
   customerId: string;
@@ -46,7 +47,15 @@ export const ClienteDetailView: React.FC<Props> = ({
 }) => {
   const navigate = useNavigate();
   const compact = variant === 'compact';
-  const activeTab = initialTab ?? (compact ? 'ficha' : 'timeline');
+  const { hasPermission, loading: permissionsLoading } = usePermissions();
+  const canSeeClinicalHistory = hasPermission('clinical_history', 'read');
+  const requestedTab = initialTab ?? (compact ? 'ficha' : 'timeline');
+  const activeTab: ClienteDetailTab =
+    requestedTab === 'historial' && !canSeeClinicalHistory && !permissionsLoading
+      ? compact
+        ? 'ficha'
+        : 'timeline'
+      : requestedTab;
   const [tab, setTab] = useState(activeTab);
   const { customer } = useCustomerDetail(customerId);
   const { toast } = useToast();
@@ -88,6 +97,21 @@ export const ClienteDetailView: React.FC<Props> = ({
   useEffect(() => {
     setTab(activeTab);
   }, [activeTab, customerId]);
+
+  useEffect(() => {
+    if (permissionsLoading) return;
+    if (tab === 'historial' && !canSeeClinicalHistory) {
+      setTab(compact ? 'ficha' : 'timeline');
+    }
+  }, [permissionsLoading, tab, canSeeClinicalHistory, compact]);
+
+  const handleTabChange = useCallback(
+    (next: string) => {
+      if (next === 'historial' && !canSeeClinicalHistory) return;
+      setTab(next as ClienteDetailTab);
+    },
+    [canSeeClinicalHistory],
+  );
 
   const handleAppointmentClick = useCallback(
     (appointmentId: string, dateYmd: string) => {
@@ -151,7 +175,7 @@ export const ClienteDetailView: React.FC<Props> = ({
         </>
       )}
 
-      <Tabs value={tab} onValueChange={setTab} className="w-full">
+      <Tabs value={tab} onValueChange={handleTabChange} className="w-full">
         <TabsList
           className={cn(
             'w-full bg-sky-50/50 dark:bg-sky-950/20 border border-sky-100/50 dark:border-sky-900/20 rounded-lg p-0.5',
@@ -194,6 +218,7 @@ export const ClienteDetailView: React.FC<Props> = ({
           >
             Báscula
           </TabsTrigger>
+          {canSeeClinicalHistory ? (
           <TabsTrigger
             value="historial"
             className={cn(
@@ -203,6 +228,7 @@ export const ClienteDetailView: React.FC<Props> = ({
           >
             Historial
           </TabsTrigger>
+          ) : null}
           <TabsTrigger
             value="adjuntos"
             className={cn(
@@ -266,6 +292,7 @@ export const ClienteDetailView: React.FC<Props> = ({
             ) : null}
           </TabsContent>
 
+          {canSeeClinicalHistory ? (
           <TabsContent value="historial" className="mt-0">
             {tab === 'historial' ? (
               <ClienteHistorialClinicoTab
@@ -276,6 +303,7 @@ export const ClienteDetailView: React.FC<Props> = ({
               />
             ) : null}
           </TabsContent>
+          ) : null}
 
           <TabsContent value="adjuntos" className="mt-0">
             {tab === 'adjuntos' ? (

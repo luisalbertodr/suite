@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { AGENDA_APPOINTMENT_SELECT_Z } from '@/lib/agendaResourceColors';
 import { cn } from '@/lib/utils';
-import { ChevronDown, ChevronRight, ChevronsUpDown, LayoutGrid, Search } from 'lucide-react';
+import { ArrowLeft, ChevronDown, ChevronRight, ChevronsUpDown, LayoutGrid, Search } from 'lucide-react';
 import { ArticleGridPickerDialog } from '@/components/forms/ArticleGridPickerDialog';
 import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
@@ -42,6 +42,8 @@ type Props = {
   selectedLabel?: string;
   /** Precio del artículo ya elegido (se muestra en el botón junto al nombre). */
   selectedUnitPrice?: number | null;
+  /** Familia del artículo elegido: la rejilla/lista abre en ese nivel. */
+  selectedFamilia?: string | null;
   placeholder?: string;
   /** Al pulsar el campo principal se abre la rejilla gráfica (recomendado en agenda táctil). */
   primaryOpensGrid?: boolean;
@@ -82,6 +84,7 @@ export const AppointmentArticleFamilyPicker: React.FC<Props> = ({
   triggerClassName,
   selectedLabel,
   selectedUnitPrice,
+  selectedFamilia,
   placeholder,
   primaryOpensGrid = false,
 }) => {
@@ -94,6 +97,28 @@ export const AppointmentArticleFamilyPicker: React.FC<Props> = ({
   const catalogCompanyId = catalogHostCompanyId ?? companyId;
 
   const { families, loading: familiesLoading } = useFamilies();
+
+  const { data: selectedArticleMeta } = useQuery({
+    queryKey: ['article-family-for-list-picker', catalogCompanyId, value],
+    enabled: Boolean(catalogCompanyId && value && selectedFamilia === undefined),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('articles')
+        .select('id,familia')
+        .eq('company_id', catalogCompanyId!)
+        .eq('id', value!)
+        .maybeSingle();
+      if (error) throw error;
+      return data as { id: string; familia: string | null } | null;
+    },
+    staleTime: 60_000,
+  });
+
+  const resolvedFamilyKey = (() => {
+    if (selectedFamilia !== undefined) return familyKeyFromArticle(selectedFamilia);
+    if (selectedArticleMeta) return familyKeyFromArticle(selectedArticleMeta.familia);
+    return null;
+  })();
   const trimmedSearch = searchQuery.trim();
   const isSearching = isArticleSearchQueryReady(trimmedSearch);
   const searchTooShort = trimmedSearch.length > 0 && !isSearching;
@@ -216,7 +241,16 @@ export const AppointmentArticleFamilyPicker: React.FC<Props> = ({
     if (!next) {
       setExpandedFamily(null);
       setSearchQuery('');
+      return;
     }
+    if (resolvedFamilyKey) {
+      setExpandedFamily(resolvedFamilyKey);
+    }
+  };
+
+  const openGridAtSelection = () => {
+    if (resolvedFamilyKey) setExpandedFamily(resolvedFamilyKey);
+    setGridOpen(true);
   };
 
   const renderArticleButton = (a: AppointmentArticleOption, showLong = false) => {
@@ -285,7 +319,20 @@ export const AppointmentArticleFamilyPicker: React.FC<Props> = ({
         align="start"
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
-        <div className="border-b border-border/60 p-1.5">
+        <div className="border-b border-border/60 p-1.5 space-y-1">
+          {expandedFamily && !isSearching ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 w-full justify-start gap-1 px-2 text-[11px]"
+              onClick={() => setExpandedFamily(null)}
+              title="Subir un nivel (familias)"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              Subir a familias
+            </Button>
+          ) : null}
           <div className="relative">
             <Search className="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -387,7 +434,7 @@ export const AppointmentArticleFamilyPicker: React.FC<Props> = ({
           )}
           title="Selector gráfico de artículos"
           aria-label="Abrir selector gráfico de artículos"
-          onClick={() => setGridOpen(true)}
+          onClick={openGridAtSelection}
         >
           <LayoutGrid className="h-3.5 w-3.5 shrink-0 opacity-70" />
           <span className="truncate text-left">{triggerText}</span>
@@ -404,7 +451,7 @@ export const AppointmentArticleFamilyPicker: React.FC<Props> = ({
           className={cn('h-7 w-7 shrink-0', triggerClassName?.includes('h-10') && 'h-10 w-10')}
           title="Selector gráfico"
           aria-label="Abrir selector gráfico de artículos"
-          onClick={() => setGridOpen(true)}
+          onClick={openGridAtSelection}
         >
           <LayoutGrid className="h-3.5 w-3.5" />
         </Button>
@@ -415,6 +462,13 @@ export const AppointmentArticleFamilyPicker: React.FC<Props> = ({
       onOpenChange={setGridOpen}
       itemKind={itemKind}
       selectedId={value}
+      selectedFamilia={
+        selectedFamilia !== undefined
+          ? selectedFamilia
+          : selectedArticleMeta
+            ? selectedArticleMeta.familia
+            : undefined
+      }
       onSelect={onSelect}
     />
     </>
