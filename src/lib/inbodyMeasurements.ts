@@ -186,6 +186,13 @@ export function extractInbodyDni(userId: string | null | undefined): string {
   return (paren ? paren[1] : raw).trim();
 }
 
+/** Código legacy Style embebido en USERID LookInBody, p. ej. "(008278)". */
+export function extractInbodyLegacyCodcli(userId: string | null | undefined): string | null {
+  const raw = String(userId ?? '').trim();
+  const paren = raw.match(/\((\d+)\)\s*$/);
+  return paren ? paren[1] : null;
+}
+
 /** Fichas auto-creadas por importación InBody sin cliente real vinculado. */
 export function isInbodyPlaceholderCustomerName(name: string | null | undefined): boolean {
   return /^paciente\s+in\s*body\b/i.test(String(name ?? '').trim());
