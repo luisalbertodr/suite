@@ -37,8 +37,7 @@ import {
   formatInbodyNumber,
   inbodySexLabel,
   isMorphoScanMeasurement,
-  scaleDeviceFromMeasurement,
-  scaleDeviceLabel,
+  measurementSessionDeviceLabel,
   type InbodyMeasurement,
 } from '@/lib/inbodyMeasurements';
 import {
@@ -135,7 +134,7 @@ function ImpedanceTable({ measurement }: { measurement: InbodyMeasurement }) {
 }
 
 function sessionLabel(m: InbodyMeasurement, index: number, total: number): string {
-  const device = scaleDeviceLabel(scaleDeviceFromMeasurement(m));
+  const device = measurementSessionDeviceLabel(m);
   const date = format(new Date(m.measured_at), 'dd/MM/yyyy HH:mm', { locale: es });
   const weight = m.weight_kg != null ? formatInbodyNumber(m.weight_kg, 1, ' kg') : 'sin peso';
   const pbf = m.pbf_pct != null ? ` · PGC ${formatInbodyNumber(m.pbf_pct, 1, '%')}` : '';
@@ -552,7 +551,7 @@ function MeasurementSessionBar({
   compact?: boolean;
 }) {
   const measuredLabel = format(new Date(selected.measured_at), 'yyyy-MM-dd HH:mm:ss', { locale: es });
-  const deviceLabel = scaleDeviceLabel(scaleDeviceFromMeasurement(selected));
+  const deviceLabel = measurementSessionDeviceLabel(selected);
 
   return (
     <div className="space-y-2">
