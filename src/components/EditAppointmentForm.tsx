@@ -289,8 +289,6 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
   });
 
   const recursosCatalog = useMemo(() => toRecursoCatalogEntries(recursos), [recursos]);
-  const legacyCodcli = appointment.legacyClientCode?.trim() || null;
-
   const {
     effectiveCustomerId,
     summaryCustomer,
