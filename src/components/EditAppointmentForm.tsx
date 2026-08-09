@@ -41,7 +41,7 @@ import { useAppointmentEffectiveCustomer } from '@/hooks/useAppointmentEffective
 import { normalizeLegacyAppointmentDescription } from '@/lib/legacyAppointmentItems';
 import { isAppointmentFinanciallyClosed } from '@/lib/appointmentLifecycle';
 import { AppointmentResourceConflictDialog } from '@/components/AppointmentResourceConflictDialog';
-import { AppointmentClinicalHistoryPanel } from '@/components/AppointmentClinicalHistoryPanel';
+import { usePermissions } from '@/hooks/usePermissions';
 import { AppointmentDocumentationDialog } from '@/components/clinical/AppointmentDocumentationDialog';
 import { ConsentimientoSignDialog } from '@/components/consentimiento/ConsentimientoSignDialog';
 import { TreatmentSessionDialog } from '@/components/clinical/TreatmentSessionDialog';
@@ -170,10 +170,15 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
   );
 
   const { requireOrToast: requirePermissionOrToast } = usePermissionGuard();
+  const { hasPermission } = usePermissions();
+  const canSeeClinicalHistory = hasPermission('clinical_history', 'read');
+  const openClinicalHistoryTab = () => {
+    setCustomerHistoryTab('historial');
+    setShowCustomerHistory(true);
+  };
   const { toast } = useToast();
   const [showCustomerHistory, setShowCustomerHistory] = useState(false);
   const [customerHistoryTab, setCustomerHistoryTab] = useState<ClienteDetailTab>('ficha');
-  const [showClinicalHistory, setShowClinicalHistory] = useState(false);
   const [docPickerOpen, setDocPickerOpen] = useState(false);
   const [consentSignContext, setConsentSignContext] = useState<ConsentimientoSignContext | null>(null);
   const [sessionContext, setSessionContext] = useState<{
@@ -513,7 +518,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                 chargeBlockedReason={!chargeCheck.allowed ? chargeCheck.reason : null}
                 onOpenVouchers={() => { setCustomerHistoryTab('vouchers'); setShowCustomerHistory(true); }}
                 onOpenFacturacion={() => { setCustomerHistoryTab('timeline'); setShowCustomerHistory(true); }}
-                onOpenClinicalHistory={() => setShowClinicalHistory(true)}
+                onOpenClinicalHistory={canSeeClinicalHistory ? openClinicalHistoryTab : undefined}
                 lockStatusSelect={paidLocked}
                 onViewInvoice={linkedInvoice
                   ? () => navigate(`/facturacion?invoice=${linkedInvoice.id}`)
@@ -593,16 +598,18 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                     <FolderOpen className="w-3.5 h-3.5" />
                     Docs
                   </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-8 text-xs gap-1.5"
-                    onClick={() => setShowClinicalHistory(true)}
-                  >
-                    <Stethoscope className="w-3.5 h-3.5" />
-                    Clínico
-                  </Button>
+                  {canSeeClinicalHistory ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-xs gap-1.5"
+                      onClick={openClinicalHistoryTab}
+                    >
+                      <Stethoscope className="w-3.5 h-3.5" />
+                      Historial
+                    </Button>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -751,25 +758,6 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
           onHistoryAppointmentClick?.(appointmentId, dateYmd);
         }}
       />
-      {effectiveCustomerId && companyId && (
-        <AppointmentClinicalHistoryPanel
-          open={showClinicalHistory}
-          onClose={() => setShowClinicalHistory(false)}
-          appointmentId={appointment.id}
-          appointmentDate={formData.date}
-          customerId={effectiveCustomerId}
-          companyId={companyId}
-          customerName={summaryCustomer?.name?.trim() || appointment.clientName || 'Cliente'}
-          employeeId={formData.employeeId}
-          notifyRecipients={notifyRecipients}
-          onNotify={
-            onNotify
-              ? (recipientUserId, message) =>
-                  onNotify(appointment, recipientUserId, message)
-              : undefined
-          }
-        />
-      )}
       {effectiveCustomerId && companyId && (
         <AppointmentDocumentationDialog
           open={docPickerOpen}

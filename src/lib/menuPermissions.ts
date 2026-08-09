@@ -9,6 +9,12 @@ export interface MenuPermission {
 export const MENU_PERMISSIONS: MenuPermission[] = [
   { resource: 'dashboard', action: 'read', label: 'Dashboard', description: 'Ver el panel principal' },
   { resource: 'customers', action: 'read', label: 'Clientes', description: 'Ver y gestionar clientes' },
+  {
+    resource: 'clinical_history',
+    action: 'read',
+    label: 'Historial clínico',
+    description: 'Ver la pestaña Historial clínico en la ficha del cliente (por defecto Medicina)',
+  },
   { resource: 'articles', action: 'read', label: 'Artículos', description: 'Ver y gestionar productos' },
   { resource: 'planillas', action: 'read', label: 'Planillas', description: 'Ver y gestionar planillas' },
   { resource: 'quotes', action: 'read', label: 'Presupuestos', description: 'Ver y gestionar presupuestos' },

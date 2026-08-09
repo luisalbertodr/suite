@@ -294,6 +294,11 @@ export const DunasoftAppointmentForm: React.FC<Props> = ({
                         itemKind="service"
                         selectedLabel={selectedLabel}
                         selectedUnitPrice={cached?.precio}
+                        selectedFamilia={
+                          row.articleId && cached
+                            ? cached.familia ?? null
+                            : undefined
+                        }
                         placeholder="Elegir servicio…"
                         triggerClassName="h-9 text-xs"
                         primaryOpensGrid

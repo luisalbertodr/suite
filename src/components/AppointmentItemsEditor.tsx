@@ -397,6 +397,11 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
           itemKind="service"
           selectedLabel={item.label?.trim() || undefined}
           selectedUnitPrice={item.unit_price}
+          selectedFamilia={
+            item.article_id && articleById.has(item.article_id)
+              ? articleById.get(item.article_id)!.familia ?? null
+              : undefined
+          }
           primaryOpensGrid
           onSelect={(a) => applyArticleAt(index, a.id, a)}
           onClear={() => updateAt(index, { article_id: null, label: '' })}
@@ -414,6 +419,11 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
           itemKind={item.kind}
           selectedLabel={item.label?.trim() || undefined}
           selectedUnitPrice={item.unit_price}
+          selectedFamilia={
+            item.article_id && articleById.has(item.article_id)
+              ? articleById.get(item.article_id)!.familia ?? null
+              : undefined
+          }
           primaryOpensGrid
           onSelect={(a) => applyArticleAt(index, a.id, a)}
           onClear={() => updateAt(index, { article_id: null, label: '' })}
