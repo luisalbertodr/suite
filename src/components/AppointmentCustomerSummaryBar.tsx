@@ -25,6 +25,8 @@ type Props = {
   onViewInvoice?: () => void;
   onCharge?: () => void;
   onOpenClinicalHistory?: () => void;
+  onOpenQuestionnaire?: () => void;
+  onOpenDocs?: () => void;
   showCrearBono?: boolean;
   /** Cita cobrada/facturada: el estado solo cambia con «Cancelar y devolver». */
   lockStatusSelect?: boolean;
@@ -47,6 +49,8 @@ export const AppointmentCustomerSummaryBar: React.FC<Props> = ({
   onViewInvoice,
   onCharge,
   onOpenClinicalHistory,
+  onOpenQuestionnaire,
+  onOpenDocs,
   showCrearBono = true,
   lockStatusSelect = false,
 }) => {
@@ -95,6 +99,28 @@ export const AppointmentCustomerSummaryBar: React.FC<Props> = ({
               onClick={onOpenClinicalHistory}
             >
               Hist. clínico
+            </Button>
+          )}
+          {onOpenQuestionnaire && (
+            <Button
+              type="button"
+              variant="default"
+              size="sm"
+              className="h-6 text-[11px] px-2"
+              onClick={onOpenQuestionnaire}
+            >
+              Cuestionario
+            </Button>
+          )}
+          {onOpenDocs && (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="h-6 text-[11px] px-2"
+              onClick={onOpenDocs}
+            >
+              Docs
             </Button>
           )}
         </div>

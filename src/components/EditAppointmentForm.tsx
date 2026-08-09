@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
-import { X, Save, Trash2, ArrowLeft, Stethoscope, FolderOpen, ClipboardList } from 'lucide-react';
+import { X, Save, Trash2, ArrowLeft } from 'lucide-react';
 import { AppointmentItemsEditor } from '@/components/AppointmentItemsEditor';
 import { AppointmentAttachmentsPanel } from '@/components/AppointmentAttachmentsPanel';
 import { AppointmentCustomerSummaryBar } from '@/components/AppointmentCustomerSummaryBar';
@@ -519,6 +519,16 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                 onOpenVouchers={() => { setCustomerHistoryTab('vouchers'); setShowCustomerHistory(true); }}
                 onOpenFacturacion={() => { setCustomerHistoryTab('timeline'); setShowCustomerHistory(true); }}
                 onOpenClinicalHistory={canSeeClinicalHistory ? openClinicalHistoryTab : undefined}
+                onOpenQuestionnaire={
+                  effectiveCustomerId && companyId
+                    ? () => { void handleOpenQuestionnaire(); }
+                    : undefined
+                }
+                onOpenDocs={
+                  effectiveCustomerId && companyId
+                    ? () => setDocPickerOpen(true)
+                    : undefined
+                }
                 lockStatusSelect={paidLocked}
                 onViewInvoice={linkedInvoice
                   ? () => navigate(`/facturacion?invoice=${linkedInvoice.id}`)
@@ -567,51 +577,15 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
               </div>
             )}
 
-            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-              <div className="min-w-0">
-                <Label className="text-xs">Observaciones</Label>
-                <Input
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  placeholder="Notas rápidas de la cita"
-                />
-              </div>
-              {effectiveCustomerId && companyId ? (
-                <div className="flex flex-wrap gap-1.5 sm:justify-end">
-                  <Button
-                    type="button"
-                    variant="default"
-                    size="sm"
-                    className="h-8 text-xs gap-1.5"
-                    onClick={() => void handleOpenQuestionnaire()}
-                  >
-                    <ClipboardList className="w-3.5 h-3.5" />
-                    Cuestionario
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="h-8 text-xs gap-1.5"
-                    onClick={() => setDocPickerOpen(true)}
-                  >
-                    <FolderOpen className="w-3.5 h-3.5" />
-                    Docs
-                  </Button>
-                  {canSeeClinicalHistory ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-8 text-xs gap-1.5"
-                      onClick={openClinicalHistoryTab}
-                    >
-                      <Stethoscope className="w-3.5 h-3.5" />
-                      Historial
-                    </Button>
-                  ) : null}
-                </div>
-              ) : null}
+            <div className="min-w-0">
+              <Label className="text-xs">Observaciones</Label>
+              <Textarea
+                value={formData.description}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                placeholder="Notas rápidas de la cita"
+                rows={3}
+                className="min-h-[4.5rem] resize-y text-sm"
+              />
             </div>
 
             {effectiveCustomerId && companyId && (

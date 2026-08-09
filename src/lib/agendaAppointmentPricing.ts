@@ -5,9 +5,12 @@ function n(v: unknown, fallback = 0): number {
   return Number.isFinite(x) ? x : fallback;
 }
 
+/** Sesión cubierta por bono/voucher: no suma al importe de la cita. */
 export function isBonoSessionItem(item: AppointmentItemDraft): boolean {
   if (item.bono_id) return true;
-  return !!item.customer_voucher_id && item.bonus_payment_mode === 'none' && item.occupies_time;
+  if (!item.customer_voucher_id) return false;
+  // Cobertura de sesiones del voucher (no fracciones 60/40/full de venta de bono).
+  return (item.bonus_payment_mode ?? 'none') === 'none';
 }
 
 export function appointmentItemLineTotal(item: AppointmentItemDraft): number {

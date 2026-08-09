@@ -13,6 +13,7 @@ type ItemRow = {
   label: string | null;
   notes: string | null;
   article_id: string | null;
+  customer_voucher_id?: string | null;
   articles?: { precio?: number | null } | null;
 };
 
@@ -57,6 +58,9 @@ function inferItemPriceFromLabel(
 
 function lineTotal(row: ItemRow, byCode: Map<string, number>, byDescription: Map<string, number>): number {
   const fallback = parsePricingFromNotes(row.notes ?? null);
+  const mode = String(fallback.bonus_payment_mode ?? 'none');
+  // Sesión cubierta por voucher: no suma (alineado con isBonoSessionItem).
+  if (row.customer_voucher_id && mode === 'none') return 0;
   const qty = Math.max(0, Number(fallback.quantity ?? 1));
   const baseUnit = Math.max(0, Number(fallback.unit_price ?? 0));
   const articlePrice = Math.max(0, Number(row.articles?.precio ?? 0));
@@ -65,7 +69,6 @@ function lineTotal(row: ItemRow, byCode: Map<string, number>, byDescription: Map
       ? inferItemPriceFromLabel(row.label, byCode, byDescription)
       : 0;
   const unit = baseUnit > 0 ? baseUnit : (row.article_id ? articlePrice : inferredLabelPrice);
-  const mode = String(fallback.bonus_payment_mode ?? 'none');
   let line = qty * unit;
   if (row.kind === 'bonus') {
     if (mode === '60') line = unit * 0.6;
@@ -259,6 +262,7 @@ export async function buildAppointmentChargedTotals(
               label: (row.label as string | null) ?? null,
               notes: (row.notes as string | null) ?? null,
               article_id: (row.article_id as string | null) ?? null,
+              customer_voucher_id: (row.customer_voucher_id as string | null) ?? null,
               articles: null,
             },
             byCode,

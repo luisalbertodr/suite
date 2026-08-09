@@ -329,11 +329,16 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
       const nextKind: AppointmentItemKind =
         a.article_kind === 'service' ? 'service' : a.article_kind === 'product' ? 'product' : 'other';
       const nextLabel = `${a.codigo ? `${a.codigo} - ` : ''}${a.descripcion}`.trim();
+      const current = items[index];
       const isBonusKind = nextKind === 'bonus';
       const isProductKind = nextKind === 'product';
+      const coveredByVoucher =
+        !isBonusKind &&
+        (!!current?.customer_voucher_id || !!current?.bono_id) &&
+        (current?.bonus_payment_mode ?? 'none') === 'none';
       const hint: ArticleResourceHint = { familia: a.familia ?? null, recurso_id: a.recurso_id ?? null };
       const draftBase = {
-        ...items[index],
+        ...current,
         label: nextLabel,
         article_id: a.id,
         kind: nextKind,
@@ -348,15 +353,16 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
         article_id: a.id,
         label: nextLabel,
         kind: nextKind,
-        unit_price: Math.max(0, Number(a.precio || 0)),
+        // Sesión de bono: no cargar precio de catálogo al cambiar el artículo.
+        unit_price: coveredByVoucher ? 0 : Math.max(0, Number(a.precio || 0)),
         occupies_time: isBonusKind || isProductKind ? false : true,
         duration_minutes: isBonusKind || isProductKind
           ? 0
           : (Math.max(0, Number(a.duration_minutes || 0))
-            || items[index]?.duration_minutes
+            || current?.duration_minutes
             || DEFAULT_APPOINTMENT_SERVICE_MINUTES),
         recurso_id: resolvedRecursoId,
-        cabina_id: items[index]?.cabina_id || autoCabina || null,
+        cabina_id: current?.cabina_id || autoCabina || null,
       });
     },
     [articleById, items, updateAt, recursosCatalog, useFamilyPicker]

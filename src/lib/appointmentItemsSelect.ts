@@ -8,6 +8,7 @@ const DEFAULT_ITEM_COLUMNS = [
   'quantity',
   'unit_price',
   'bonus_payment_mode',
+  'customer_voucher_id',
   'notes',
   'sort_order',
   'article_id',

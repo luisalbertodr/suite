@@ -11,7 +11,7 @@ export type InvoiceDebtRow = {
   issue_date?: string | null;
 };
 
-/** Evita doble conteo: tickets automáticos si ya existe rebuild FACCAB el mismo día. */
+/** Evita doble conteo: automática / sin cita si ya existe rebuild FACCAB el mismo día. */
 export function filterInvoicesForDebtCalculation<T extends InvoiceDebtRow>(
   rows: T[],
 ): T[] {
@@ -23,7 +23,9 @@ export function filterInvoicesForDebtCalculation<T extends InvoiceDebtRow>(
   );
   return rows.filter((r) => {
     const notes = r.notes || '';
-    if (!notes.includes('Factura legacy automática')) return true;
+    const isDupCandidate =
+      notes.includes('Factura legacy automática') || notes.includes('Factura legacy sin cita');
+    if (!isDupCandidate) return true;
     if (!r.issue_date || rebuildDates.size === 0) return true;
     return !rebuildDates.has(r.issue_date);
   });
