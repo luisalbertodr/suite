@@ -74,15 +74,21 @@ export function normalizePlanKey(key: string): string {
 }
 
 async function loadFingerprintMap(deps: PollDeps): Promise<Map<string, string>> {
-  const { data, error } = await deps.supabase
-    .schema("dunasoft")
-    .from("style_sync_dbf_fingerprint")
-    .select("style_key,fingerprint")
-    .eq("company_id", deps.companyId)
-    .eq("tabla", TABLA);
-  if (error) throw error;
   const out = new Map<string, string>();
-  for (const row of data ?? []) out.set(String(row.style_key), String(row.fingerprint));
+  const pageSize = 1000;
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await deps.supabase
+      .schema("dunasoft")
+      .from("style_sync_dbf_fingerprint")
+      .select("style_key,fingerprint")
+      .eq("company_id", deps.companyId)
+      .eq("tabla", TABLA)
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    const rows = data ?? [];
+    for (const row of rows) out.set(String(row.style_key), String(row.fingerprint));
+    if (rows.length < pageSize) break;
+  }
   return out;
 }
 

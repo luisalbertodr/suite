@@ -35,22 +35,28 @@ async function loadEntityMapKeys(
   deps: EntityEngineDeps,
   entityType: string,
 ): Promise<Set<string>> {
-  const { data, error } = await deps.supabase
-    .schema("dunasoft")
-    .from("style_sync_entity_map")
-    .select("style_key")
-    .eq("company_id", deps.companyId)
-    .eq("entity_type", entityType);
-  if (error) throw error;
   const out = new Set<string>();
-  for (const row of data ?? []) {
-    const key = String(row.style_key);
-    if (entityType === "invoice") {
-      const id = invoiceIdentityFromMapKey(key);
-      if (id) out.add(id);
-      continue;
+  const pageSize = 1000;
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await deps.supabase
+      .schema("dunasoft")
+      .from("style_sync_entity_map")
+      .select("style_key")
+      .eq("company_id", deps.companyId)
+      .eq("entity_type", entityType)
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    const rows = data ?? [];
+    for (const row of rows) {
+      const key = String(row.style_key);
+      if (entityType === "invoice") {
+        const id = invoiceIdentityFromMapKey(key);
+        if (id) out.add(id);
+        continue;
+      }
+      out.add(normalizeStyleKey(key));
     }
-    out.add(normalizeStyleKey(key));
+    if (rows.length < pageSize) break;
   }
   return out;
 }
@@ -59,16 +65,22 @@ async function loadFingerprintMap(
   deps: EntityEngineDeps,
   tabla: string,
 ): Promise<Map<string, string>> {
-  const { data, error } = await deps.supabase
-    .schema("dunasoft")
-    .from("style_sync_dbf_fingerprint")
-    .select("style_key,fingerprint")
-    .eq("company_id", deps.companyId)
-    .eq("tabla", tabla);
-  if (error) throw error;
   const out = new Map<string, string>();
-  for (const row of data ?? []) {
-    out.set(String(row.style_key), String(row.fingerprint));
+  const pageSize = 1000;
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await deps.supabase
+      .schema("dunasoft")
+      .from("style_sync_dbf_fingerprint")
+      .select("style_key,fingerprint")
+      .eq("company_id", deps.companyId)
+      .eq("tabla", tabla)
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    const rows = data ?? [];
+    for (const row of rows) {
+      out.set(String(row.style_key), String(row.fingerprint));
+    }
+    if (rows.length < pageSize) break;
   }
   return out;
 }
@@ -134,6 +146,8 @@ async function applyHandlerRow(
 }
 
 const lastMtime = new Map<string, number>();
+/** Tablas con backlog de huellas aún no drenado (fuerza reescaneo aunque mtime no cambie). */
+const pendingRescan = new Set<string>();
 
 /**
  * Detecta cambios leyendo el DBF maestro cuando Style no encola en cola_sincro.
@@ -174,11 +188,20 @@ export async function pollDbfEntityChanges(
 
     const seeded = enabled.get(tabla) ?? false;
     const prevMtime = lastMtime.get(tabla) ?? 0;
-    if (seeded && mtime === prevMtime) continue;
+    if (seeded && mtime === prevMtime && !pendingRescan.has(tabla)) {
+      // Sin cambios de archivo y sin pendientes marcados en este proceso.
+      continue;
+    }
     // Solo marcamos mtime como “visto” cuando el lote queda drenado; si hay
     // pendientes, el siguiente tick debe reescanear aunque el archivo no cambie.
-    const markMtimeSeen = () => lastMtime.set(tabla, mtime);
-    const keepPendingForNextTick = () => lastMtime.delete(tabla);
+    const markMtimeSeen = () => {
+      pendingRescan.delete(tabla);
+      lastMtime.set(tabla, mtime);
+    };
+    const keepPendingForNextTick = () => {
+      pendingRescan.add(tabla);
+      lastMtime.delete(tabla);
+    };
 
     const fields = FINGERPRINT_FIELDS[tabla] ?? [handler.source.keyField];
     const index = await loadDbfIndexed(deps.styleRoot, handler.source.table, handler.source.keyField);

@@ -106,6 +106,8 @@ OUTBOUND_MAX_RETRIES=5
 INBOUND_ACK_MAX_RETRIES=5
 ENTITY_POLL_MS=120000
 ENTITY_BATCH=15
+# Con Style cerrado, dbf-poll usa al menos este batch para drenar backlog de huellas.
+ENTITY_BATCH_HARD=80
 # Red de seguridad: detectar cambios en plan2009.dbf aunque Style no encole en cola_sincro.
 PLAN2009_POLL_ENABLED=1
 PLAN2009_POLL_MS=2500
