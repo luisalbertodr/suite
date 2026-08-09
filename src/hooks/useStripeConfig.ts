@@ -2,6 +2,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { getSupabaseAccessToken } from '@/lib/supabaseSession';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useWorkCenter } from '@/hooks/useWorkCenter';
+import { resolvePaymentGatewayCompanyIdClient } from '@/lib/paymentGatewayCompany';
 import type { Database } from '@/integrations/supabase/types';
 
 export type StripeConfigSafe = Database['public']['Views']['stripe_config_safe']['Row'];
@@ -30,6 +32,7 @@ export type StripeProxyAction =
       chat_display_name?: string | null;
       customer_id?: string | null;
       marketing_lead_id?: string | null;
+      allow_if_paid?: boolean;
     }
   | {
       action: 'deposit.confirm_manual_for_chat';
@@ -66,12 +69,25 @@ export async function invokeStripeProxy<T = unknown>(payload: StripeProxyAction)
 export const useStripeConfig = () => {
   const queryClient = useQueryClient();
   const { companyId, loading: companyLoading } = useCompanyFilter();
+  const { billingCompanies, loading: wcLoading } = useWorkCenter();
+
+  const gatewayQuery = useQuery({
+    queryKey: ['payment-gateway-company', companyId, billingCompanies.map((c) => c.id).join(',')],
+    enabled: !!companyId && !companyLoading && !wcLoading,
+    staleTime: 60_000,
+    queryFn: async () => {
+      if (!companyId) return null;
+      return resolvePaymentGatewayCompanyIdClient(companyId, billingCompanies);
+    },
+  });
+
+  const gatewayCompanyId = gatewayQuery.data ?? companyId;
 
   const configQuery = useQuery({
-    queryKey: ['stripe-config', companyId],
-    enabled: !!companyId && !companyLoading,
+    queryKey: ['stripe-config', gatewayCompanyId],
+    enabled: !!gatewayCompanyId && !companyLoading && !gatewayQuery.isLoading,
     queryFn: async (): Promise<StripeConfigSafe | null> => {
-      if (!companyId) return null;
+      if (!gatewayCompanyId) return null;
       const { data, error } = await supabase
         .from('stripe_config_safe')
         .select('*')
@@ -83,19 +99,19 @@ export const useStripeConfig = () => {
 
   const upsertConfig = useMutation({
     mutationFn: async (values: StripeConfigSavePayload) => {
-      if (!companyId) throw new Error('Sin empresa');
+      if (!gatewayCompanyId) throw new Error('Sin empresa');
       const res = await invokeStripeProxy<{
         ok: boolean;
         config: StripeConfigSafe;
       }>({
         action: 'config.save',
-        company_id: companyId,
+        company_id: gatewayCompanyId,
         ...values,
       });
       return res.config;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['stripe-config', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['stripe-config', gatewayCompanyId] });
     },
   });
 
@@ -103,13 +119,14 @@ export const useStripeConfig = () => {
     mutationFn: () =>
       invokeStripeProxy<{ ok: boolean; account_id?: string }>({
         action: 'config.test',
-        company_id: companyId ?? undefined,
+        company_id: gatewayCompanyId ?? undefined,
       }),
   });
 
   return {
     config: configQuery.data ?? null,
-    isLoading: configQuery.isLoading,
+    gatewayCompanyId: gatewayCompanyId ?? null,
+    isLoading: configQuery.isLoading || gatewayQuery.isLoading,
     upsertConfig,
     testConnection,
   };
