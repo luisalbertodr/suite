@@ -13,6 +13,11 @@ export type UserAllowedNetwork = {
 
 export const NETWORK_PRESETS: Array<{ cidr: string; label: string; description: string }> = [
   {
+    cidr: '10.10.10.0/24',
+    label: 'Clínica (proxy)',
+    description: 'IP vista por el proxy Nginx (la más habitual en clínica)',
+  },
+  {
     cidr: '192.168.99.0/24',
     label: 'Clínica (LAN)',
     description: 'Red interna 192.168.99.x',
@@ -28,6 +33,9 @@ export const NETWORK_PRESETS: Array<{ cidr: string; label: string; description: 
     description: 'Permite acceso desde internet',
   },
 ];
+
+/** Redes internas por defecto (excluye 0.0.0.0/0). */
+export const INTERNAL_NETWORK_PRESETS = NETWORK_PRESETS.filter((p) => p.cidr !== '0.0.0.0/0');
 
 const CIDR_RE =
   /^(?:\d{1,3}\.){3}\d{1,3}\/(?:[0-9]|[12][0-9]|3[0-2])$|^(?:[0-9a-fA-F:]+)\/(?:[0-9]|[1-9][0-9]|1[01][0-9]|12[0-8])$/;
@@ -164,7 +172,7 @@ export function useUserAllowedNetworks(userId: string | null | undefined) {
 
 /** Aplica redes internas por defecto a una lista de usuarios (omite quien ya tenga 0.0.0.0/0). */
 export async function applyInternalNetworksToUsers(userIds: string[]): Promise<number> {
-  const defaults = NETWORK_PRESETS.filter((p) => p.cidr !== '0.0.0.0/0');
+  const defaults = INTERNAL_NETWORK_PRESETS;
   const {
     data: { user },
   } = await supabase.auth.getUser();
