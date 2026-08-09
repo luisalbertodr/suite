@@ -16,12 +16,22 @@ export const DOCK_BAR_Z = 'z-[300]';
 /** Franja inferior libre (dock fijo bottom-4 + altura ~4.5rem). */
 export const DOCK_CLEARANCE_BOTTOM = 'bottom-[6.5rem]';
 
+/** TopBar fija (`h-12`): deja el popup por debajo para que no quede tapado. */
+export const TOP_BAR_CLEARANCE = 'top-12';
+
 /**
  * Contenedor full-viewport que deja libre el dock y centra el popup.
  * Usar en Dialog/AlertDialog y en modales custom `fixed inset-0`.
  */
 export const DOCK_SAFE_MODAL_SHELL =
   'fixed inset-x-0 top-0 bottom-[6.5rem] flex items-center justify-center p-3 sm:p-4';
+
+/**
+ * Shell para modales de agenda (nueva/editar cita): libre de TopBar + dock,
+ * anclado arriba para que el encabezado nunca quede fuera de pantalla.
+ */
+export const AGENDA_MODAL_SHELL =
+  'fixed inset-x-0 top-12 bottom-[6.5rem] flex items-start justify-center overflow-y-auto p-3 sm:p-4';
 
 /** z-index de diálogos estándar (por debajo del dock). */
 export const ABOVE_DOCK_DIALOG_Z = 'z-[125]';

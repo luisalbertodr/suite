@@ -10,7 +10,7 @@ import type { DunasoftPlanArtInput } from '@/lib/dunasoftDualWrite';
 import type { Employee } from '@/types/agenda';
 import { calcEndFromStart } from '@/lib/agendaAppointmentItems';
 import { AGENDA_APPOINTMENT_MODAL_Z } from '@/lib/agendaResourceColors';
-import { DOCK_CLEARANCE_BOTTOM } from '@/lib/dialogLayers';
+import { AGENDA_MODAL_SHELL } from '@/lib/dialogLayers';
 import {
   AppointmentClientePicker,
   type AppointmentClientPick,
@@ -207,11 +207,9 @@ export const DunasoftAppointmentForm: React.FC<Props> = ({
   };
 
   return (
-    <div
-      className={`fixed inset-x-0 top-0 ${DOCK_CLEARANCE_BOTTOM} flex items-center justify-center bg-black/40 p-4 ${AGENDA_APPOINTMENT_MODAL_Z}`}
-    >
-      <Card className="w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-xl">
-        <CardHeader className="flex flex-row items-center justify-between py-3">
+    <div className={`${AGENDA_MODAL_SHELL} bg-black/40 ${AGENDA_APPOINTMENT_MODAL_Z}`}>
+      <Card className="flex max-h-full w-full max-w-3xl flex-col overflow-hidden shadow-xl">
+        <CardHeader className="flex shrink-0 flex-row items-center justify-between space-y-0 px-4 py-3">
           <CardTitle className="text-base">
             {mode === 'create' ? 'Nueva cita Style' : `Editar cita ${idplan ?? ''}`}
           </CardTitle>
@@ -219,24 +217,23 @@ export const DunasoftAppointmentForm: React.FC<Props> = ({
             <X className="w-4 h-4" />
           </Button>
         </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-3">
+        <CardContent className="min-h-0 flex-1 overflow-y-auto px-4 pb-3">
+          <form onSubmit={handleSubmit} className="space-y-2.5">
             <div className="text-xs text-muted-foreground rounded-md border border-border/60 bg-muted/30 px-2 py-1.5">
               Profesional: <strong>{employee?.name ?? employeeId}</strong>
               <span className="ml-2">· Suite + Dunasoft + cola DBF</span>
             </div>
 
-            <div className="space-y-1">
-              <Label>Cliente</Label>
-              <AppointmentClientePicker
-                lazySearch
-                value={clientPick}
-                onChange={setClientPick}
-                disabled={saving}
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="space-y-1 min-w-0 sm:col-span-2">
+                <Label>Cliente</Label>
+                <AppointmentClientePicker
+                  lazySearch
+                  value={clientPick}
+                  onChange={setClientPick}
+                  disabled={saving}
+                />
+              </div>
               <div>
                 <Label htmlFor="ds-nomcli">Nombre</Label>
                 <Input id="ds-nomcli" value={nomcli} onChange={(e) => setNomcli(e.target.value)} required />
@@ -245,24 +242,24 @@ export const DunasoftAppointmentForm: React.FC<Props> = ({
                 <Label htmlFor="ds-codcli">Cód. cliente</Label>
                 <Input id="ds-codcli" value={codcli} onChange={(e) => setCodcli(e.target.value)} />
               </div>
-            </div>
-            <div>
-              <Label htmlFor="ds-tel">Teléfono</Label>
-              <Input id="ds-tel" value={tel1cli} onChange={(e) => setTel1cli(e.target.value)} />
+              <div className="sm:col-span-2">
+                <Label htmlFor="ds-tel">Teléfono</Label>
+                <Input id="ds-tel" value={tel1cli} onChange={(e) => setTel1cli(e.target.value)} />
+              </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-2">
-              <div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <div className="min-w-0 sm:col-span-2">
                 <Label htmlFor="ds-fecha">Fecha</Label>
-                <Input id="ds-fecha" type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} required />
+                <Input id="ds-fecha" type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} required className="h-8 text-xs" />
               </div>
-              <div>
+              <div className="min-w-0">
                 <Label htmlFor="ds-ini">Inicio</Label>
-                <Input id="ds-ini" value={horini} onChange={(e) => setHorini(e.target.value)} required />
+                <Input id="ds-ini" value={horini} onChange={(e) => setHorini(e.target.value)} required className="h-8 text-xs tabular-nums" />
               </div>
-              <div>
+              <div className="min-w-0">
                 <Label htmlFor="ds-fin">Fin</Label>
-                <Input id="ds-fin" value={horfin} onChange={(e) => setHorfin(e.target.value)} required />
+                <Input id="ds-fin" value={horfin} onChange={(e) => setHorfin(e.target.value)} required className="h-8 text-xs tabular-nums" />
               </div>
             </div>
 

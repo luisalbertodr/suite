@@ -58,29 +58,15 @@ export const AppointmentCustomerSummaryBar: React.FC<Props> = ({
   const pendingCharge = Math.max(0, chargeableTotal - chargedTotal);
 
   return (
-    <div className="rounded-md border bg-muted/30 p-2 text-xs">
-      <div className="flex items-start justify-between gap-2">
+    <div className="rounded-md border bg-muted/30 px-2.5 py-1.5 text-xs">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <div className="min-w-0 flex-1 leading-snug">
           {displayName && (
             <div className="font-medium text-foreground truncate">{displayName}</div>
           )}
-          <div className="text-muted-foreground">{displayContact}</div>
+          <div className="text-muted-foreground truncate">{displayContact}</div>
         </div>
-        <div className="flex flex-col gap-1 shrink-0">
-          <Button type="button" variant="outline" size="sm" className="h-6 text-[11px] px-2" onClick={onOpenFicha}>
-            Ficha
-          </Button>
-          {onOpenClinicalHistory && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-6 text-[11px] px-2"
-              onClick={onOpenClinicalHistory}
-            >
-              Hist. clínico
-            </Button>
-          )}
+        <div className="flex flex-wrap items-center gap-1 shrink-0">
           {lockStatusSelect ? (
             <span className="h-6 inline-flex items-center px-2 rounded-md border bg-background text-[11px] font-medium">
               {isCancelled ? 'Cancelada' : status === 'pending' ? 'Pendiente' : 'Confirmada'}
@@ -96,6 +82,20 @@ export const AppointmentCustomerSummaryBar: React.FC<Props> = ({
                 <SelectItem value="cancelled">Cancelada</SelectItem>
               </AppointmentSelectContent>
             </Select>
+          )}
+          <Button type="button" variant="outline" size="sm" className="h-6 text-[11px] px-2" onClick={onOpenFicha}>
+            Ficha
+          </Button>
+          {onOpenClinicalHistory && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-6 text-[11px] px-2"
+              onClick={onOpenClinicalHistory}
+            >
+              Hist. clínico
+            </Button>
           )}
         </div>
       </div>

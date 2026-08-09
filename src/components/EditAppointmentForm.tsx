@@ -18,7 +18,7 @@ import type { AppointmentItemDraft } from '@/types/agenda';
 import type { Appointment as AgendaAppointment } from '@/types/agenda';
 import { calcEndFromStart, effectiveDurationMinutes, minutesBetweenHHmm } from '@/lib/agendaAppointmentItems';
 import { AGENDA_APPOINTMENT_MODAL_Z } from '@/lib/agendaResourceColors';
-import { DOCK_CLEARANCE_BOTTOM } from '@/lib/dialogLayers';
+import { AGENDA_MODAL_SHELL } from '@/lib/dialogLayers';
 import { toRecursoCatalogEntries } from '@/lib/agendaRecursoMatch';
 import { appointmentItemsTotal } from '@/lib/agendaAppointmentPricing';
 import { appointmentChargeableTotal, canChargeAppointment, summarizeAppointmentChargeState } from '@/lib/appointmentSales';
@@ -371,10 +371,10 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
   };
 
   return (
-    <div className={`fixed inset-x-0 top-0 ${DOCK_CLEARANCE_BOTTOM} bg-black/50 flex items-start sm:items-center justify-center ${AGENDA_APPOINTMENT_MODAL_Z} px-4 pt-3 pb-28 sm:pb-24 sm:p-4`}>
-      <Card className="suite-max-h-dialog w-full max-w-lg overflow-y-auto">
-        <CardHeader className="pb-3">
-          <div className="flex items-center gap-2">
+    <div className={`${AGENDA_MODAL_SHELL} bg-black/50 ${AGENDA_APPOINTMENT_MODAL_Z}`}>
+      <Card className="flex max-h-full w-full max-w-3xl flex-col overflow-hidden">
+        <CardHeader className="shrink-0 space-y-2 px-4 pb-2 pt-3">
+          <div className="flex items-start gap-2">
             {returnCustomerId && onReturnToCustomerHistory && (
               <Button
                 type="button"
@@ -387,101 +387,117 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                 Historial
               </Button>
             )}
-            <CardTitle className="text-base shrink-0 truncate max-w-[9rem]" title={appointment.legacyIdPlan ? `IDPLAN ${appointment.legacyIdPlan}` : undefined}>
-              {appointment.legacyIdPlan ? `Cita · ${appointment.legacyIdPlan}` : 'Cita'}
-            </CardTitle>
-            <div className="flex flex-1 min-w-0 items-center gap-1.5">
-              <Input
-                type="date"
-                aria-label="Fecha"
-                value={formData.date}
-                onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                disabled={paidLocked || saving}
-                className="h-8 min-w-0 flex-1 text-xs px-2"
-              />
-              <Input
-                type="time"
-                aria-label="Hora inicio"
-                className="h-8 w-[5.25rem] shrink-0 text-xs px-1.5 tabular-nums"
-                value={formData.startTime}
-                onChange={(e) => setFormData({ ...formData, startTime: e.target.value })}
-                disabled={paidLocked || saving}
-              />
-              <Input
-                type="time"
-                aria-label="Hora fin calculada"
-                title="Fin calculado según servicios"
-                className="h-8 w-[5.25rem] shrink-0 text-xs px-1.5 tabular-nums bg-muted/40"
-                value={computedEndTime}
-                readOnly
-                tabIndex={-1}
-              />
-              <Select
-                value={formData.employeeId}
-                onValueChange={(v) => setFormData({ ...formData, employeeId: v })}
-                disabled={paidLocked || saving}
-              >
-                <SelectTrigger
-                  className="h-8 min-w-0 flex-1 text-xs"
-                  title={hasMixedBillingServices ? 'Servicios de distintas empresas en la misma cita' : 'Empleada'}
+            <div className="min-w-0 flex-1 space-y-2">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <CardTitle
+                  className="text-base shrink-0"
+                  title={appointment.legacyIdPlan ? `IDPLAN ${appointment.legacyIdPlan}` : undefined}
                 >
-                  <SelectValue placeholder="Empleada" />
-                </SelectTrigger>
-                <AppointmentSelectContent>
-                  {eligibleEmployees.map((e) => (
-                    <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>
-                  ))}
-                </AppointmentSelectContent>
-              </Select>
+                  {appointment.legacyIdPlan ? `Cita · ${appointment.legacyIdPlan}` : 'Cita'}
+                </CardTitle>
+                <span className="inline-flex h-5 items-center rounded border border-border/70 bg-muted/40 px-1.5 text-[10px] font-medium text-muted-foreground">
+                  Style · dual sync
+                </span>
+                {styleFacturado ? (
+                  <span className="inline-flex h-5 items-center rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 text-[10px] font-medium text-emerald-800 dark:text-emerald-300">
+                    Facturado Style/TPV
+                  </span>
+                ) : null}
+                {(appointment.legacyClientCode ||
+                  appointment.legacyEmployeeCode ||
+                  stylePhone) && (
+                  <p
+                    className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground tabular-nums"
+                    title="Códigos Style / dual-sync"
+                  >
+                    {[
+                      appointment.legacyClientCode ? `cli ${appointment.legacyClientCode}` : null,
+                      appointment.legacyEmployeeCode ? `emp ${appointment.legacyEmployeeCode}` : null,
+                      stylePhone ? `tel ${stylePhone}` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </p>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <div className="min-w-0">
+                  <Label className="text-[10px] text-muted-foreground">Fecha</Label>
+                  <Input
+                    type="date"
+                    aria-label="Fecha"
+                    value={formData.date}
+                    onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                    disabled={paidLocked || saving}
+                    className="h-8 text-xs px-2"
+                  />
+                </div>
+                <div className="min-w-0">
+                  <Label className="text-[10px] text-muted-foreground">Inicio</Label>
+                  <Input
+                    type="time"
+                    aria-label="Hora inicio"
+                    className="h-8 text-xs px-1.5 tabular-nums"
+                    value={formData.startTime}
+                    onChange={(e) => setFormData({ ...formData, startTime: e.target.value })}
+                    disabled={paidLocked || saving}
+                  />
+                </div>
+                <div className="min-w-0">
+                  <Label className="text-[10px] text-muted-foreground">Fin (calc.)</Label>
+                  <Input
+                    type="time"
+                    aria-label="Hora fin calculada"
+                    title="Fin calculado según servicios"
+                    className="h-8 text-xs px-1.5 tabular-nums bg-muted/40"
+                    value={computedEndTime}
+                    readOnly
+                    tabIndex={-1}
+                  />
+                </div>
+                <div className="min-w-0">
+                  <Label className="text-[10px] text-muted-foreground">Empleada</Label>
+                  <Select
+                    value={formData.employeeId}
+                    onValueChange={(v) => setFormData({ ...formData, employeeId: v })}
+                    disabled={paidLocked || saving}
+                  >
+                    <SelectTrigger
+                      className="h-8 text-xs"
+                      title={hasMixedBillingServices ? 'Servicios de distintas empresas en la misma cita' : 'Empleada'}
+                    >
+                      <SelectValue placeholder="Empleada" />
+                    </SelectTrigger>
+                    <AppointmentSelectContent>
+                      {eligibleEmployees.map((e) => (
+                        <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>
+                      ))}
+                    </AppointmentSelectContent>
+                  </Select>
+                </div>
+              </div>
             </div>
             <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0" onClick={onCancel} disabled={saving} title="Cerrar y volver a la agenda">
               <X className="w-4 h-4" />
             </Button>
           </div>
-          <div className="mt-1.5 space-y-1.5">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="inline-flex h-5 items-center rounded border border-border/70 bg-muted/40 px-1.5 text-[10px] font-medium text-muted-foreground">
-                Style · dual sync
-              </span>
-              {styleFacturado ? (
-                <span className="inline-flex h-5 items-center rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 text-[10px] font-medium text-emerald-800 dark:text-emerald-300">
-                  Facturado Style/TPV
-                </span>
-              ) : null}
-            </div>
-            {(appointment.legacyIdPlan ||
-              appointment.legacyClientCode ||
-              appointment.legacyEmployeeCode ||
-              stylePhone) && (
-              <p className="text-[11px] text-muted-foreground tabular-nums truncate" title="Códigos Style / dual-sync">
-                {[
-                  appointment.legacyIdPlan ? `IDPLAN ${appointment.legacyIdPlan}` : null,
-                  appointment.legacyClientCode ? `cli ${appointment.legacyClientCode}` : null,
-                  appointment.legacyEmployeeCode ? `emp ${appointment.legacyEmployeeCode}` : null,
-                  stylePhone ? `tel ${stylePhone}` : null,
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}
-              </p>
-            )}
-            {showUnlinkedStyleHint ? (
-              <p className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
-                Cliente Style sin ficha en Suite (cód. {appointment.legacyClientCode}). Vincule el
-                cliente en Clientes con el mismo código legacy para usar cuestionarios y documentación.
-              </p>
-            ) : null}
-            {appointment.customerId &&
-            effectiveCustomerId &&
-            appointment.customerId !== effectiveCustomerId ? (
-              <p className="rounded-md border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-[11px] text-sky-900 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200">
-                Enlace de ficha corregido: se mostraba un Paciente InBody por error. Cliente de la cita:{' '}
-                <strong>{appointment.clientName}</strong>.
-              </p>
-            ) : null}
-          </div>
+          {showUnlinkedStyleHint ? (
+            <p className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+              Cliente Style sin ficha en Suite (cód. {appointment.legacyClientCode}). Vincule el
+              cliente en Clientes con el mismo código legacy para usar cuestionarios y documentación.
+            </p>
+          ) : null}
+          {appointment.customerId &&
+          effectiveCustomerId &&
+          appointment.customerId !== effectiveCustomerId ? (
+            <p className="rounded-md border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-[11px] text-sky-900 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200">
+              Enlace de ficha corregido: se mostraba un Paciente InBody por error. Cliente de la cita:{' '}
+              <strong>{appointment.clientName}</strong>.
+            </p>
+          ) : null}
         </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-3">
+        <CardContent className="min-h-0 flex-1 overflow-y-auto px-4 pb-3 pt-0">
+          <form onSubmit={handleSubmit} className="space-y-2.5">
             {summaryCustomer && (
               <AppointmentCustomerSummaryBar
                 customer={summaryCustomer}
@@ -546,18 +562,17 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
               </div>
             )}
 
-            <div>
-              <Label className="text-xs">Observaciones</Label>
-              <Input
-                value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                placeholder="Notas rápidas de la cita"
-              />
-            </div>
-
-            {effectiveCustomerId && companyId && (
-              <>
-                <div className="flex flex-wrap justify-end gap-2">
+            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+              <div className="min-w-0">
+                <Label className="text-xs">Observaciones</Label>
+                <Input
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  placeholder="Notas rápidas de la cita"
+                />
+              </div>
+              {effectiveCustomerId && companyId ? (
+                <div className="flex flex-wrap gap-1.5 sm:justify-end">
                   <Button
                     type="button"
                     variant="default"
@@ -566,7 +581,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                     onClick={() => void handleOpenQuestionnaire()}
                   >
                     <ClipboardList className="w-3.5 h-3.5" />
-                    Cuestionario tablet
+                    Cuestionario
                   </Button>
                   <Button
                     type="button"
@@ -576,7 +591,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                     onClick={() => setDocPickerOpen(true)}
                   >
                     <FolderOpen className="w-3.5 h-3.5" />
-                    Documentación
+                    Docs
                   </Button>
                   <Button
                     type="button"
@@ -586,20 +601,23 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                     onClick={() => setShowClinicalHistory(true)}
                   >
                     <Stethoscope className="w-3.5 h-3.5" />
-                    Historial clínico
+                    Clínico
                   </Button>
                 </div>
-                <AppointmentAttachmentsPanel
-                  appointmentId={appointment.id}
-                  customerId={effectiveCustomerId}
-                  companyId={companyId}
-                  logDate={formData.date}
-                  customerLabel={summaryCustomer?.name?.trim() || appointment.clientName || 'Cliente'}
-                />
-              </>
+              ) : null}
+            </div>
+
+            {effectiveCustomerId && companyId && (
+              <AppointmentAttachmentsPanel
+                appointmentId={appointment.id}
+                customerId={effectiveCustomerId}
+                companyId={companyId}
+                logDate={formData.date}
+                customerLabel={summaryCustomer?.name?.trim() || appointment.clientName || 'Cliente'}
+              />
             )}
 
-            <div className="flex justify-between pt-2">
+            <div className="flex justify-between pt-1">
               {paidLocked && onCancelAndRefund ? (
                 <PermissionButton
                   resource="agenda"
