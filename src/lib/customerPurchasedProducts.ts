@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { parseAgendaSaleNotes } from '@/lib/appointmentSales';
 
 export type CustomerPurchasedProduct = {
   id: string;
@@ -29,6 +30,72 @@ export function isProductArticleKind(kind: string | null | undefined): boolean {
   );
 }
 
+function ymdFromUnknown(raw: unknown): string | null {
+  const ymd = raw ? String(raw).slice(0, 10) : '';
+  return /^\d{4}-\d{2}-\d{2}$/.test(ymd) ? ymd : null;
+}
+
+/** Resuelve cita de venta: sale.appointment_id → notas → misma fecha + artículo en agenda. */
+async function resolveMissingAppointmentLinks(
+  customerId: string,
+  companyId: string,
+  rows: CustomerPurchasedProduct[],
+): Promise<void> {
+  const missing = rows.filter((r) => !r.appointmentId && r.articleId);
+  if (!missing.length) return;
+
+  const dates = [...new Set(missing.map((r) => r.purchasedAt.slice(0, 10)).filter(Boolean))];
+  if (!dates.length) return;
+
+  const { data: appts, error } = await supabase
+    .from('agenda_appointments')
+    .select('id, appointment_date, start_time')
+    .eq('customer_id', customerId)
+    .eq('company_id', companyId)
+    .in('appointment_date', dates);
+
+  if (error || !appts?.length) return;
+
+  const apptIds = appts.map((a) => String((a as { id: string }).id));
+  const dateByAppt = new Map<string, string>();
+  for (const a of appts) {
+    const id = String((a as { id: string }).id);
+    const ymd =
+      ymdFromUnknown((a as { appointment_date?: string }).appointment_date) ||
+      ymdFromUnknown((a as { start_time?: string }).start_time);
+    if (ymd) dateByAppt.set(id, ymd);
+  }
+
+  const { data: items, error: itemsErr } = await supabase
+    .from('appointment_items')
+    .select('appointment_id, article_id')
+    .in('appointment_id', apptIds)
+    .not('article_id', 'is', null);
+
+  if (itemsErr || !items?.length) return;
+
+  const articleToAppts = new Map<string, string[]>();
+  for (const it of items) {
+    const articleId = (it as { article_id?: string | null }).article_id;
+    const appointmentId = (it as { appointment_id?: string | null }).appointment_id;
+    if (!articleId || !appointmentId) continue;
+    const list = articleToAppts.get(String(articleId)) ?? [];
+    list.push(String(appointmentId));
+    articleToAppts.set(String(articleId), list);
+  }
+
+  for (const row of missing) {
+    if (!row.articleId) continue;
+    const saleYmd = row.purchasedAt.slice(0, 10);
+    const candidates = articleToAppts.get(row.articleId) ?? [];
+    const match = candidates.find((apptId) => dateByAppt.get(apptId) === saleYmd);
+    if (match) {
+      row.appointmentId = match;
+      row.appointmentDateYmd = saleYmd;
+    }
+  }
+}
+
 export async function fetchCustomerPurchasedProducts(
   customerId: string,
   companyId: string,
@@ -37,7 +104,7 @@ export async function fetchCustomerPurchasedProducts(
     .from('sales')
     .select(
       `
-      id, created_at, ticket_number, appointment_id,
+      id, created_at, ticket_number, appointment_id, notes,
       sale_items (
         id, description, quantity, unit_price, total_price, article_id,
         articles:article_id (codigo, descripcion, article_kind)
@@ -53,7 +120,7 @@ export async function fetchCustomerPurchasedProducts(
       .from('sales')
       .select(
         `
-        id, created_at, ticket_number,
+        id, created_at, ticket_number, notes,
         sale_items (
           id, description, quantity, unit_price, total_price, article_id,
           articles:article_id (codigo, descripcion, article_kind)
@@ -73,9 +140,13 @@ export async function fetchCustomerPurchasedProducts(
     const purchasedAt = String(sale.created_at || '');
     const saleId = String(sale.id);
     const ticketNumber = sale.ticket_number ? String(sale.ticket_number) : null;
-    const appointmentId = (sale as { appointment_id?: string | null }).appointment_id
+    const notes = (sale as { notes?: string | null }).notes;
+    let appointmentId = (sale as { appointment_id?: string | null }).appointment_id
       ? String((sale as { appointment_id?: string | null }).appointment_id)
       : null;
+    if (!appointmentId) {
+      appointmentId = parseAgendaSaleNotes(notes)?.appointment_id ?? null;
+    }
 
     for (const raw of (sale as { sale_items?: unknown[] }).sale_items ?? []) {
       const item = raw as {
@@ -93,15 +164,17 @@ export async function fetchCustomerPurchasedProducts(
       };
 
       const article = item.articles;
-      if (article && !isProductArticleKind(article.article_kind)) continue;
+      // Incluir productos y servicios vendidos (excluir solo bonos de catálogo).
+      const kind = String(article?.article_kind || '').toLowerCase();
+      if (kind === 'bono' || kind.includes('bono')) continue;
 
       const label =
         article?.descripcion?.trim() ||
         String(item.description || '').trim() ||
-        'Producto';
+        'Artículo';
       if (!article && !item.article_id) {
         const desc = label.toLowerCase();
-        if (desc.includes('sesión') || desc.includes('sesion') || desc.includes('servicio')) continue;
+        if (desc.includes('sesión') || desc.includes('sesion')) continue;
       }
 
       rows.push({
@@ -132,11 +205,10 @@ export async function fetchCustomerPurchasedProducts(
     if (!apptErr) {
       for (const a of appts ?? []) {
         const id = String((a as { id: string }).id);
-        const raw =
-          (a as { appointment_date?: string | null }).appointment_date ??
-          (a as { start_time?: string | null }).start_time;
-        const ymd = raw ? String(raw).slice(0, 10) : '';
-        if (/^\d{4}-\d{2}-\d{2}$/.test(ymd)) appointmentDateById.set(id, ymd);
+        const ymd =
+          ymdFromUnknown((a as { appointment_date?: string | null }).appointment_date) ||
+          ymdFromUnknown((a as { start_time?: string | null }).start_time);
+        if (ymd) appointmentDateById.set(id, ymd);
       }
     }
   }
@@ -146,6 +218,8 @@ export async function fetchCustomerPurchasedProducts(
       row.appointmentDateYmd = appointmentDateById.get(row.appointmentId) ?? row.purchasedAt.slice(0, 10);
     }
   }
+
+  await resolveMissingAppointmentLinks(customerId, companyId, rows);
 
   rows.sort((a, b) => b.purchasedAt.localeCompare(a.purchasedAt));
   return rows;

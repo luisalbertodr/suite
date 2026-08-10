@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Home, Calendar, ShoppingBag, Receipt, Users, Package, Megaphone, MessageCircle, Phone } from 'lucide-react';
+import { Calendar, ShoppingBag, Receipt, Users, Package, Megaphone, MessageCircle, Phone } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useWhatsappUnread } from '@/hooks/useWhatsappUnread';
 import { useMarketingUnread } from '@/hooks/useMarketingUnread';
@@ -24,7 +24,6 @@ type DockItem = {
 };
 
 const dockItems: DockItem[] = [
-  { label: 'Inicio', path: '/inicio', icon: Home, color: 'text-red-500', permission: { resource: 'dashboard', action: 'read' } },
   { label: 'Agenda', path: '/agenda', icon: Calendar, color: 'text-blue-500', permission: { resource: 'agenda', action: 'read' } },
   { label: 'TPV', path: '/tpv', icon: ShoppingBag, color: 'text-green-500', permission: { resource: 'sales', action: 'read' } },
   { label: 'Facturación', path: '/facturacion', icon: Receipt, color: 'text-amber-500', permission: { resource: 'invoices', action: 'read' } },

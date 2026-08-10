@@ -25,6 +25,7 @@ import {
   fetchLiveMonthBillingForView,
   fetchMonthBillingForView,
   fetchYearBillingSingleYear,
+  isWorkCenterStyleBilling,
   mergeYearBillingRows,
   type BillingEntityView,
   type ComparisonPeriod,
@@ -91,6 +92,8 @@ export const useDashboardData = (
   const period: ComparisonPeriod = comparisonPeriod ?? { mode: 'rolling', days: 15 };
   const periodKey = comparisonPeriodCacheKey(period);
   const familiesKey = familiesCacheKey(selectedFamilies);
+  const billingScopeKey =
+    companyId && isWorkCenterStyleBilling(companyId) ? 'hub' : companyId;
 
   const billingCompanyIds = useMemo(
     () => assignedBillingCompanies.map((company) => company.id),
@@ -98,11 +101,11 @@ export const useDashboardData = (
   );
 
   const familiesQueryKey = ['dashboard-families', catalogCompanyId, billingCompanyIds.join(',')] as const;
-  const mainQueryKey = ['dashboard-main', companyId, opCompanyId, billingView] as const;
+  const mainQueryKey = ['dashboard-main', billingScopeKey, opCompanyId, billingView] as const;
   const activityQueryKey = ['dashboard-recent-activity', companyId, opCompanyId, activityTypeFilter] as const;
   const dailyComparisonQueryKey = [
     'dashboard-daily-comparison',
-    companyId,
+    billingScopeKey,
     yearsSorted.join(','),
     periodKey,
     billingView,
@@ -110,7 +113,7 @@ export const useDashboardData = (
   ] as const;
   const yearBillingSnapshotKey = [
     'dashboard-year-billing-rows',
-    companyId,
+    billingScopeKey,
     yearsSorted.join(','),
     billingView,
     familiesKey,
@@ -188,7 +191,7 @@ export const useDashboardData = (
 
   const yearQueries = useQueries({
     queries: yearsSorted.map((year) => {
-      const yearQueryKey = ['dashboard-year-billing-year', companyId, year, billingView, familiesKey] as const;
+      const yearQueryKey = ['dashboard-year-billing-year', billingScopeKey, year, billingView, familiesKey] as const;
       return {
         queryKey: yearQueryKey,
         queryFn: async () => {

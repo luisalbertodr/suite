@@ -1072,11 +1072,11 @@ export const ClienteBonosTab: React.FC<Props> = ({ customerId, onAppointmentClic
       )}
 
       <section className="space-y-2 pt-1 border-t border-border/50">
-        <h3 className="text-base font-semibold">Productos comprados</h3>
+        <h3 className="text-base font-semibold">Artículos vendidos</h3>
         {productsLoading ? (
-          <div className="text-center py-4 text-sm text-muted-foreground">Cargando productos...</div>
+          <div className="text-center py-4 text-sm text-muted-foreground">Cargando artículos...</div>
         ) : !purchasedProducts.length ? (
-          <div className="text-center py-4 text-sm text-muted-foreground">Sin productos registrados</div>
+          <div className="text-center py-4 text-sm text-muted-foreground">Sin artículos registrados</div>
         ) : (
           <div className="space-y-0.5">{purchasedProducts.map(renderProductRow)}</div>
         )}
