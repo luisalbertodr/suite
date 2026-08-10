@@ -6,7 +6,7 @@ import { Receipt, FileText, AlertCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import {
-  computeInvoicePendingAmount,
+  computeInvoicePendingAmountForDisplay,
   fetchCustomerPendingInvoiceDebt,
   filterInvoicesForDebtCalculation,
 } from '@/lib/customerInvoiceDebt';
@@ -24,7 +24,7 @@ export const ClienteFacturacionTab: React.FC<Props> = ({ customerId }) => {
     queryFn: async () => {
       let q = supabase
         .from('invoices')
-        .select('id, number, issue_date, total_amount, amount_paid, paid_status, status, company_id')
+        .select('id, number, issue_date, total_amount, amount_paid, paid_status, status, company_id, notes')
         .eq('customer_id', customerId)
         .order('issue_date', { ascending: false });
       if (companyId) q = q.eq('company_id', companyId);
@@ -39,7 +39,7 @@ export const ClienteFacturacionTab: React.FC<Props> = ({ customerId }) => {
           if (companyId) q2 = q2.eq('company_id', companyId);
           const res = await q2;
           if (res.error) throw res.error;
-          return (res.data ?? []).map((row) => ({ ...row, amount_paid: null }));
+          return (res.data ?? []).map((row) => ({ ...row, amount_paid: null, notes: null }));
         }
         throw error;
       }
@@ -98,7 +98,10 @@ export const ClienteFacturacionTab: React.FC<Props> = ({ customerId }) => {
         ) : (
           <div className="space-y-2">
             {invoiceRowsForDisplay.map((inv) => {
-              const pending = computeInvoicePendingAmount(inv as InvoiceDebtRow);
+              const pending = computeInvoicePendingAmountForDisplay(
+                inv as InvoiceDebtRow & { number?: string | null },
+                pendingDebt,
+              );
               const paid = Number(inv.amount_paid ?? 0);
               const statusLabel =
                 inv.status === 'paid' || pending <= 0

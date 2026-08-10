@@ -235,7 +235,8 @@ export async function fetchAppointmentItems(
   const needsCatalog = rows.some((r) => {
     const fallback = parsePricingFromNotes(r.notes ?? null);
     const unit = Number(r.unit_price ?? fallback.unit_price ?? 0);
-    return (!r.article_id && unit <= 0 && !!r.label);
+    const embedPrice = Number(r.articles?.precio ?? 0);
+    return unit <= 0 && embedPrice <= 0 && (!!r.label || !!r.article_id);
   });
   const needsLegacyRepair = rows.some(
     (r) => r.kind === 'service' && /^\[\d{1,2}:\d{2}\]\s*\S+/.test(String(r.label || ''))
@@ -243,6 +244,7 @@ export async function fetchAppointmentItems(
 
   const byCode = new Map<string, number>();
   const byDescription = new Map<string, number>();
+  const byId = new Map<string, number>();
   let catalog: Array<{
     id: string;
     codigo: string | null;
@@ -267,6 +269,7 @@ export async function fetchAppointmentItems(
     }));
     for (const a of catalog) {
       if (a.precio <= 0) continue;
+      byId.set(a.id, a.precio);
       if (a.codigo) byCode.set(String(a.codigo).toLowerCase(), a.precio);
       byDescription.set(normalizeText(a.descripcion), a.precio);
     }
@@ -277,7 +280,10 @@ export async function fetchAppointmentItems(
     if (row.occupies_time == null) draft.occupies_time = draft.kind === 'service';
     if (row.duration_minutes == null) draft.duration_minutes = Math.max(0, Number(draft.duration_minutes || 0));
     if ((draft.unit_price ?? 0) > 0) return draft;
-    if (row.article_id) return draft;
+    if (row.article_id) {
+      const fromCatalog = byId.get(String(row.article_id));
+      if (fromCatalog && fromCatalog > 0) return { ...draft, unit_price: fromCatalog };
+    }
     const inferred = inferItemPriceFromLabel(row.label, byCode, byDescription);
     return inferred > 0 ? { ...draft, unit_price: inferred } : draft;
   });

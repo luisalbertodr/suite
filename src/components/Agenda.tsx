@@ -5,7 +5,6 @@ import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import {
   Calendar as CalendarIcon,
-  Clock,
   ChevronLeft,
   ChevronRight,
   AlertCircle,
@@ -281,6 +280,19 @@ export const Agenda: React.FC = () => {
       pendingOpenAppointmentIdRef.current = appointmentParam;
     }
 
+    if (params.get('now') === '1') {
+      const today = new Date();
+      setSelectedDate(today);
+      setGoToTodayRequestId((n) => n + 1);
+      params.delete('now');
+      if (!params.get('date')) params.set('date', format(today, 'yyyy-MM-dd'));
+      navigate(
+        { pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : '' },
+        { replace: true },
+      );
+      return;
+    }
+
     if (!dateParam) return;
     const parsedDate = parse(dateParam, 'yyyy-MM-dd', new Date());
     if (!isValid(parsedDate)) return;
@@ -289,7 +301,7 @@ export const Agenda: React.FC = () => {
       const nextYmd = format(parsedDate, 'yyyy-MM-dd');
       return prevYmd === nextYmd ? prev : parsedDate;
     });
-  }, [location.search]);
+  }, [location.pathname, location.search, navigate]);
 
   const returnCustomerId = useMemo(() => {
     const id = new URLSearchParams(location.search).get('returnCustomer');
@@ -919,17 +931,6 @@ export const Agenda: React.FC = () => {
         </PopoverContent>
       </Popover>
       <AgendaTopBarFitExtras>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-7 px-2 text-xs shrink-0"
-          onClick={() => {
-            selectAgendaDate(new Date());
-            setGoToTodayRequestId((n) => n + 1);
-          }}
-        >
-          <Clock className="w-3.5 h-3.5 mr-1" /> Hoy
-        </Button>
         <span
           className={`inline-flex h-7 shrink-0 items-center rounded-md border px-2 text-[11px] font-medium tabular-nums ${
             syncBadge.tone === 'error'

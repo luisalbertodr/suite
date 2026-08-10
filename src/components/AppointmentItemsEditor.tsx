@@ -167,6 +167,21 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
     return m;
   }, [articles, articleCache, pinnedArticles, useFamilyPicker]);
 
+  // Rellenar importe desde catálogo si el ítem llegó a 0 € (p. ej. sync Style).
+  useEffect(() => {
+    if (itemsLocked || articleById.size === 0) return;
+    let changed = false;
+    const next = items.map((it) => {
+      if (isBonoSessionItem(it)) return it;
+      if ((it.unit_price ?? 0) > 0 || !it.article_id) return it;
+      const precio = Math.max(0, Number(articleById.get(it.article_id)?.precio ?? 0));
+      if (precio <= 0) return it;
+      changed = true;
+      return { ...it, unit_price: precio };
+    });
+    if (changed) onChange(next);
+  }, [articleById, items, itemsLocked, onChange]);
+
   const articleMatchesItemKind = articleMatchesAppointmentItemKind;
 
   const articleHints = useMemo(() => {
@@ -558,13 +573,20 @@ export const AppointmentItemsEditor: React.FC<AppointmentItemsEditorProps> = ({
           Cita facturada: no se pueden añadir ni eliminar servicios, bonos o productos.
         </p>
       )}
-      {!compactHeader && (
+      {compactHeader ? (
+        <div className="flex items-center justify-between gap-2 px-0.5">
+          <span className="text-[10px] text-muted-foreground tabular-nums">Fin: {endPreview}</span>
+          <span className="text-[11px] font-semibold tabular-nums text-foreground">
+            Total: {totalPreview.toFixed(2)} €
+          </span>
+        </div>
+      ) : (
         <>
           <div className="flex items-center justify-between gap-2">
             <Label className="text-xs font-medium">Ítems de la cita</Label>
             <div className="flex items-center gap-3">
               <span className="text-[10px] text-muted-foreground tabular-nums">Fin: {endPreview}</span>
-              <span className="text-[10px] font-medium tabular-nums">Total: {totalPreview.toFixed(2)} EUR</span>
+              <span className="text-[10px] font-medium tabular-nums">Total: {totalPreview.toFixed(2)} €</span>
             </div>
           </div>
           <p className="text-[10px] text-muted-foreground leading-tight">

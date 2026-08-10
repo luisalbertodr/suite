@@ -1,11 +1,11 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
 
-/** Ancho aproximado de Hoy + Sync + Actualizar (con gaps). */
-const EXTRAS_MIN_PX = 210;
+/** Ancho mínimo para Sync + Actualizar (sin botón Hoy). */
+const EXTRAS_MIN_PX = 150;
 
 /**
- * Muestra los extras de la barra de agenda solo si caben en la fila de acciones.
- * Evita apilar/scroll de «Hoy», Sync y «Actualizar» en iPhone.
+ * Muestra Sync/Actualizar solo si caben en la fila de acciones.
+ * En anchos estrechos se ocultan (el título de pestaña lo gestiona TopBar).
  */
 export function AgendaTopBarFitExtras({ children }: { children: React.ReactNode }) {
   const wrapRef = useRef<HTMLDivElement>(null);

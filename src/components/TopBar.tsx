@@ -5,7 +5,6 @@ import { NotificationBell } from './NotificationBell';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from 'next-themes';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
-import { useWorkCenter } from '@/hooks/useWorkCenter';
 import { useWorkCenterBranding } from '@/hooks/useWorkCenterBranding';
 import { useBillingScopeRoute } from '@/hooks/useBillingScopeRoute';
 import { BillingScopeToggle } from '@/components/BillingScopeToggle';
@@ -17,6 +16,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { format } from 'date-fns';
 
 const ROUTE_TITLES: Record<string, string> = {
   '/inicio': 'Inicio',
@@ -37,24 +37,38 @@ const ROUTE_TITLES: Record<string, string> = {
   '/telefono': 'Teléfono',
 };
 
+/** Por debajo de esto se oculta el título de pestaña para dar sitio al centro. */
+const HIDE_TITLE_MAX_PX = 920;
+
 export const TopBar: React.FC = () => {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { user, signOut } = useAuth();
   const { theme, resolvedTheme, setTheme } = useTheme();
-  const { companyId, loading: companyLoading } = useCompanyFilter();
-  const { isMultiEntity, loading: wcLoading } = useWorkCenter();
+  const { loading: companyLoading } = useCompanyFilter();
   const { displayName, logoUrlLight, logoUrlDark, isLoading: brandingLoading } = useWorkCenterBranding();
   const { enabled: billingScopeEnabled } = useBillingScopeRoute();
   const { content } = useTopBarContent();
   const [currentDateTime, setCurrentDateTime] = useState(new Date());
+  const [hideRouteTitle, setHideRouteTitle] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentDateTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
-  const handleDateClick = () => navigate('/agenda');
+  useEffect(() => {
+    const check = () => setHideRouteTitle(window.innerWidth < HIDE_TITLE_MAX_PX);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+
+  const goToAgendaNow = () => {
+    const ymd = format(new Date(), 'yyyy-MM-dd');
+    navigate(`/agenda?date=${ymd}&now=1`);
+  };
+
   const toggleTheme = () => setTheme(theme === 'dark' ? 'light' : 'dark');
   const activeTheme = resolvedTheme ?? theme;
   const logoUrl = activeTheme === 'dark' ? (logoUrlDark || logoUrlLight) : logoUrlLight;
@@ -62,7 +76,18 @@ export const TopBar: React.FC = () => {
   const brandLabel = displayName.trim() || 'Lipoout';
   const routeTitle = content.title ?? ROUTE_TITLES[pathname] ?? '';
   const showBrandSkeleton = (companyLoading || brandingLoading) && !displayName;
-  const showBillingToggle = isMultiEntity && !wcLoading && !pathname.startsWith('/whatsapp');
+  // Solo en pestañas donde M|E filtra de verdad (no deshabilitado en agenda/etc.).
+  const showBillingToggle = billingScopeEnabled;
+
+  const timeLabel = currentDateTime.toLocaleTimeString('es-ES', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  const dateLabel = currentDateTime.toLocaleDateString('es-ES', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  });
 
   return (
     <header className="fixed top-0 left-0 right-0 z-40 h-12 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
@@ -84,7 +109,7 @@ export const TopBar: React.FC = () => {
               )}
             </>
           )}
-          {routeTitle && (
+          {routeTitle && !hideRouteTitle && (
             <>
               <span className="h-5 w-px shrink-0 bg-border" aria-hidden />
               <span className="min-w-0 truncate text-sm font-semibold text-foreground sm:text-base">
@@ -102,10 +127,8 @@ export const TopBar: React.FC = () => {
           )}
         </div>
 
-        <div className="flex items-center justify-end gap-3 min-w-0">
-          {showBillingToggle && (
-            <BillingScopeToggle disabled={!billingScopeEnabled} />
-          )}
+        <div className="flex items-center justify-end gap-2 sm:gap-3 min-w-0">
+          {showBillingToggle && <BillingScopeToggle />}
 
           <button
             type="button"
@@ -124,15 +147,15 @@ export const TopBar: React.FC = () => {
 
           <button
             type="button"
-            onClick={handleDateClick}
-            className="flex items-center gap-2 text-xs text-foreground/60 hover:text-foreground/80 transition-colors"
+            onClick={goToAgendaNow}
+            title="Ir a la agenda en la fecha y hora actuales"
+            className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-muted/40 px-2 py-1 text-xs text-foreground/80 hover:bg-muted hover:text-foreground transition-colors tabular-nums"
           >
-            <span className="font-medium tabular-nums">
-              {currentDateTime.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
+            <span className="font-semibold">{timeLabel}</span>
+            <span className="text-foreground/50" aria-hidden>
+              ·
             </span>
-            <span className="hidden xs:inline">
-              {currentDateTime.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })}
-            </span>
+            <span className="font-medium capitalize">{dateLabel}</span>
           </button>
 
           <DropdownMenu>

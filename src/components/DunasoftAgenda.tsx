@@ -7,7 +7,6 @@ import {
   Calendar as CalendarIcon,
   ChevronLeft,
   ChevronRight,
-  Clock,
   AlertCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -283,7 +282,7 @@ export const DunasoftAgenda: React.FC = () => {
     [companyId, openStyleEditForm, requirePermissionOrToast],
   );
 
-  // Deep-link desde ficha/cliente (Dock keep-alive: re-leer search en cada navegación).
+  // Deep-link desde ficha/cliente / reloj TopBar (Dock keep-alive: re-leer search).
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const appointmentParam = params.get('appointment')?.trim() || null;
@@ -299,7 +298,23 @@ export const DunasoftAgenda: React.FC = () => {
         );
       }
     }
-  }, [location.search]);
+    if (params.get('now') === '1') {
+      const today = new Date();
+      const todayYmd = format(today, 'yyyy-MM-dd');
+      setSelectedDate((prev) =>
+        format(prev, 'yyyy-MM-dd') === todayYmd ? prev : today,
+      );
+      setGoToTodayRequestId((n) => n + 1);
+      params.delete('now');
+      navigate(
+        { pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : '' },
+        { replace: true },
+      );
+      void queryClient.invalidateQueries({
+        queryKey: ['dunasoft-agenda-day', todayYmd, companyId],
+      });
+    }
+  }, [companyId, location.pathname, location.search, navigate, queryClient]);
 
   useEffect(() => {
     const targetId = pendingOpenAppointmentIdRef.current;
@@ -484,26 +499,6 @@ export const DunasoftAgenda: React.FC = () => {
           </PopoverContent>
         </Popover>
         <AgendaTopBarFitExtras>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 px-2 text-xs shrink-0"
-            onClick={() => {
-              const today = new Date();
-              const todayYmd = format(today, 'yyyy-MM-dd');
-              selectAgendaDate(today);
-              setGoToTodayRequestId((n) => n + 1);
-              // Hoy operativo: forzar datos frescos aunque ya estemos en el día.
-              if (todayYmd === selectedDateYmd) void refetchDay();
-              else {
-                void queryClient.invalidateQueries({
-                  queryKey: ['dunasoft-agenda-day', todayYmd, companyId],
-                });
-              }
-            }}
-          >
-            <Clock className="w-3.5 h-3.5 mr-1" /> Hoy
-          </Button>
           <span
             className={`inline-flex h-7 shrink-0 items-center rounded-md border px-2 text-[11px] font-medium tabular-nums ${
               syncBadge.tone === 'error'
@@ -529,15 +524,11 @@ export const DunasoftAgenda: React.FC = () => {
       </>
     ),
     [
-      companyId,
       datePickerOpen,
       handleRefresh,
       isFetching,
-      queryClient,
-      refetchDay,
       selectAgendaDate,
       selectedDate,
-      selectedDateYmd,
       syncBadge,
     ],
   );

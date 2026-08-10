@@ -11,8 +11,19 @@ export type InvoiceDebtRow = {
   issue_date?: string | null;
 };
 
+export function isLegacyImportInvoice(
+  row: Pick<InvoiceDebtRow, 'notes'> & { number?: string | null },
+): boolean {
+  const notes = row.notes || '';
+  if (notes.includes('Legacy FACCAB rebuild')) return true;
+  if (notes.includes('Factura legacy sin cita')) return true;
+  if (notes.includes('Factura legacy automática')) return true;
+  if (String(row.number || '').startsWith('LEG-')) return true;
+  return false;
+}
+
 /** Evita doble conteo: automática / sin cita si ya existe rebuild FACCAB el mismo día. */
-export function filterInvoicesForDebtCalculation<T extends InvoiceDebtRow>(
+export function filterInvoicesForDebtCalculation<T extends InvoiceDebtRow & { number?: string | null }>(
   rows: T[],
 ): T[] {
   const rebuildDates = new Set(
@@ -29,6 +40,18 @@ export function filterInvoicesForDebtCalculation<T extends InvoiceDebtRow>(
     if (!r.issue_date || rebuildDates.size === 0) return true;
     return !rebuildDates.has(r.issue_date);
   });
+}
+
+/**
+ * Pendiente a mostrar en UI. Si la deuda Style/RPC del cliente es 0, las facturas
+ * legacy importadas se consideran saldadas (Style no las lleva en clientes.deuda).
+ */
+export function computeInvoicePendingAmountForDisplay(
+  row: InvoiceDebtRow & { number?: string | null },
+  customerPendingDebt: number,
+): number {
+  if (customerPendingDebt <= 0.005 && isLegacyImportInvoice(row)) return 0;
+  return computeInvoicePendingAmount(row);
 }
 
 /** Importe pendiente de una factura (0 si está cerrada o pagada). */
