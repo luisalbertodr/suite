@@ -116,7 +116,11 @@ export async function fetchCustomerPendingInvoiceDebt(
     throw error;
   }
 
-  const rows = filterInvoicesForDebtCalculation((data ?? []) as InvoiceDebtRow[]);
+  // Fallback sin RPC: no sumar imports legacy (Style es la fuente; suelen estar
+  // desfasados en amount_paid y producen deudas fantasma ~miles de €).
+  const rows = filterInvoicesForDebtCalculation(
+    (data ?? []) as Array<InvoiceDebtRow & { number?: string | null }>,
+  ).filter((r) => !isLegacyImportInvoice(r));
   return sumCustomerInvoicePendingDebt(
     rows.filter((r) => computeInvoicePendingAmount(r) > 0),
   );

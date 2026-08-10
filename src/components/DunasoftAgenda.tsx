@@ -19,6 +19,7 @@ import {
   DunasoftAppointmentForm,
   type DunasoftAppointmentFormValues,
 } from '@/components/DunasoftAppointmentForm';
+import { AppointmentForm } from '@/components/AppointmentForm';
 import {
   DunasoftSuiteAppointmentPopup,
   fetchSuiteAppointmentById,
@@ -36,6 +37,12 @@ import { useDunasoftAppointmentMutations } from '@/hooks/useDunasoftAppointmentM
 import { useDunasoftSyncStatus } from '@/hooks/useDunasoftSyncStatus';
 import { useStyleSyncAgentStatus } from '@/hooks/useStyleSyncAgentStatus';
 import { useAgendaInboundSyncRefetch } from '@/hooks/useAgendaInboundSyncRefetch';
+import { useAgendaEmployees } from '@/hooks/useAgendaEmployees';
+import { useAgendaAppointments } from '@/hooks/useAgendaAppointments';
+import { useCabinas, useRecursos } from '@/hooks/useRecursosCabinas';
+import { appointmentItemsQueryKey, syncAppointmentItems } from '@/hooks/useAppointmentItems';
+import { applyBonoSessionDelta } from '@/lib/consumeBonoSessions';
+import { syncAgendaAppointmentToStyle } from '@/lib/dunasoftDualWriteApi';
 import { buildAgendaSyncBadge } from '@/lib/agendaSyncBadge';
 import { AgendaTopBarFitExtras } from '@/components/AgendaTopBarFitExtras';
 import { useAuth } from '@/hooks/useAuth';
@@ -50,7 +57,7 @@ import {
   saveAgendaViewPersisted,
 } from '@/lib/agendaViewPersistence';
 import { DEFAULT_AGENDA_CENTER_HOURS } from '@/lib/agendaHours';
-import type { Appointment } from '@/types/agenda';
+import type { Appointment, AppointmentItemDraft } from '@/types/agenda';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -67,6 +74,10 @@ import { TreatmentSessionDialog } from '@/components/clinical/TreatmentSessionDi
 import type { TrackingFamily } from '@/lib/treatmentTracking';
 import { createQuestionnaire, openQuestionnaireKiosk } from '@/lib/questionnaireApi';
 import { useToast } from '@/hooks/use-toast';
+
+function normalizeStyleEmployeeCode(value: unknown): string {
+  return String(value ?? '').trim().replace(/^0+/, '') || '0';
+}
 
 function appointmentToFormValues(apt: Appointment): Partial<DunasoftAppointmentFormValues> {
   const endTime =
@@ -128,6 +139,7 @@ export const DunasoftAgenda: React.FC = () => {
     suiteRow: AgendaAppointmentDayRow;
   } | null>(null);
   const [openingAppointment, setOpeningAppointment] = useState(false);
+  const [createSaving, setCreateSaving] = useState(false);
   const [formMode, setFormMode] = useState<'create' | 'edit' | null>(null);
   const [formSlot, setFormSlot] = useState<{ employeeId: string; time: string } | null>(null);
   const [editTarget, setEditTarget] = useState<Appointment | null>(null);
@@ -194,12 +206,36 @@ export const DunasoftAgenda: React.FC = () => {
   usePrefetchAdjacentDunasoftAgendaDays(selectedDateYmd, companyId, panelActive);
   useAgendaInboundSyncRefetch(companyId, refetchDay, selectedDateYmd, panelActive);
   const showInitialSkeleton = isLoading && !data;
-  const { createMutation, updateMutation, deleteMutation } = useDunasoftAppointmentMutations(
+  const { updateMutation, deleteMutation } = useDunasoftAppointmentMutations(
     selectedDateYmd,
     companyId,
   );
+  const { employees: suiteEmployees = [] } = useAgendaEmployees({ agendaOnly: true });
+  const { createAppointment } = useAgendaAppointments(selectedDateYmd);
+  const { cabinas } = useCabinas();
+  const { recursos } = useRecursos();
   const { data: syncStatus } = useDunasoftSyncStatus(20_000, panelActive);
   const { data: styleSync } = useStyleSyncAgentStatus(companyId, 25_000, panelActive);
+
+  const suiteEmployeesForForm = useMemo(
+    () =>
+      suiteEmployees.map((e) => ({
+        id: e.id,
+        name: e.name,
+        color: e.color || '#3B82F6',
+        billing_company_id: e.billing_company_id,
+      })),
+    [suiteEmployees],
+  );
+
+  const createSuiteEmployeeId = useMemo(() => {
+    if (!formSlot) return suiteEmployeesForForm[0]?.id ?? '';
+    const styleCode = normalizeStyleEmployeeCode(formSlot.employeeId);
+    const match = suiteEmployees.find(
+      (e) => normalizeStyleEmployeeCode(e.dunasoft_codemp) === styleCode,
+    );
+    return match?.id ?? suiteEmployeesForForm[0]?.id ?? '';
+  }, [formSlot, suiteEmployees, suiteEmployeesForForm]);
 
   const syncBadge = useMemo(
     () => buildAgendaSyncBadge(syncStatus, styleSync),
@@ -626,8 +662,70 @@ export const DunasoftAgenda: React.FC = () => {
     setSuiteEdit(null);
   };
 
-  const handleCreateSave = (values: DunasoftAppointmentFormValues) => {
-    createMutation.mutate(values, { onSuccess: () => closeForm() });
+  const handleSuiteCreateSave = async (data: {
+    employeeId: string;
+    clientName: string;
+    customerId?: string | null;
+    description: string;
+    date: string;
+    startTime: string;
+    endTime: string;
+    color: string;
+    status: Appointment['status'];
+    items?: AppointmentItemDraft[];
+  }) => {
+    setCreateSaving(true);
+    try {
+      const dateStr = data.date || selectedDateYmd;
+      const items = data.items ?? [];
+      const created = await createAppointment.mutateAsync({
+        employee_id: data.employeeId,
+        customer_id: data.customerId ?? null,
+        title: data.clientName,
+        description: data.description,
+        start_time: `${dateStr}T${data.startTime}:00`,
+        end_time: `${dateStr}T${data.endTime}:00`,
+        color: data.color,
+        status: data.status,
+      });
+      try {
+        await syncAppointmentItems(created.id, items);
+        try {
+          await applyBonoSessionDelta([], items, {
+            appointmentId: created.id,
+            appointmentDate: dateStr,
+            employeeId: data.employeeId,
+          });
+        } catch (bonoErr) {
+          console.error('bono session consume', bonoErr);
+          toast({
+            title: 'Cita guardada, pero no se registró el uso del bono',
+            description: (bonoErr as Error)?.message || 'Revisa el bono del cliente.',
+            variant: 'destructive',
+          });
+        }
+        await queryClient.invalidateQueries({ queryKey: appointmentItemsQueryKey(created.id) });
+        await syncAgendaAppointmentToStyle(created.id);
+      } catch (e) {
+        console.error('appointment_items / style sync', e);
+        toast({
+          title: 'Cita creada, pero faltan ítems o sync Style',
+          description: (e as Error)?.message || 'Revisa la cita y vuelve a guardar.',
+          variant: 'destructive',
+        });
+      }
+      await refetchDay();
+      closeForm();
+      toast({ title: 'Cita creada', description: 'Guardada en Suite y encolada hacia Style.' });
+    } catch (err) {
+      toast({
+        title: 'Error al crear',
+        description: (err as Error)?.message || 'No se pudo crear la cita.',
+        variant: 'destructive',
+      });
+    } finally {
+      setCreateSaving(false);
+    }
   };
 
   const handleEditSave = (values: DunasoftAppointmentFormValues) => {
@@ -807,15 +905,17 @@ export const DunasoftAgenda: React.FC = () => {
         />
       ) : null}
 
-      {formMode === 'create' && formSlot ? (
-        <DunasoftAppointmentForm
-          mode="create"
-          employeeId={formSlot.employeeId}
-          employees={employees}
+      {formMode === 'create' && formSlot && createSuiteEmployeeId ? (
+        <AppointmentForm
+          employeeId={createSuiteEmployeeId}
+          time={formSlot.time}
           defaultDate={selectedDateYmd}
-          startTime={formSlot.time}
-          saving={createMutation.isPending}
-          onSave={handleCreateSave}
+          employees={suiteEmployeesForForm}
+          cabinas={cabinas.data || []}
+          recursos={recursos.data || []}
+          dayAppointments={appointments}
+          saving={createSaving || createAppointment.isPending}
+          onSave={handleSuiteCreateSave}
           onCancel={closeForm}
         />
       ) : null}

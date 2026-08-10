@@ -392,12 +392,14 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
               onResourceConflictsChange={setResourceConflictMessages}
             />
 
-            <div>
+            <div className="min-w-0">
               <Label className="text-xs">Observaciones</Label>
-              <Input
+              <Textarea
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 placeholder="Notas rápidas de la cita"
+                rows={3}
+                className="min-h-[4.5rem] resize-y text-sm"
               />
             </div>
 
