@@ -67,6 +67,7 @@
     "react-router-dom": "^6.26.2",
     "react-window": "^2.2.7",
     "recharts": "^2.12.7",
+    "resize-observer-polyfill": "^1.5.1",
     "sonner": "^1.5.0",
     "supabase": "^2.67.0",
     "tailwind-merge": "^2.5.2",

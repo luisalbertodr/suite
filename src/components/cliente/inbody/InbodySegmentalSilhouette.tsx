@@ -111,8 +111,8 @@ function BodySilhouetteFallback({ sex }: { sex: InbodySilhouetteSex }) {
       }}
     >
       <g
-        fill="hsl(var(--muted-foreground) / 0.15)"
-        stroke="hsl(var(--foreground) / 0.2)"
+        fill="hsla(var(--muted-foreground), 0.15)"
+        stroke="hsla(var(--foreground), 0.2)"
         strokeWidth="0.6"
       >
         <ellipse cx="50" cy="17" rx={isFemale ? 12 : 13} ry="15" />

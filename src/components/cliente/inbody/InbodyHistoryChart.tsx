@@ -42,8 +42,8 @@ const chartConfig = {
   value: {
     label: 'Valor',
     theme: {
-      light: 'hsl(199 89% 42%)',
-      dark: 'hsl(199 95% 72%)',
+      light: 'hsl(199, 89%, 42%)',
+      dark: 'hsl(199, 95%, 72%)',
     },
   },
 } satisfies ChartConfig;
@@ -216,16 +216,16 @@ export const InbodyHistoryChart: React.FC<Props> = ({
                         cy={cy}
                         r={selected ? 7 : 5.5}
                         fill={selected ? 'hsl(var(--primary))' : 'var(--color-value)'}
-                        stroke="hsl(var(--foreground) / 0.45)"
+                        stroke="hsla(var(--foreground), 0.45)"
                         strokeWidth={selected ? 3 : 2.25}
-                        className="drop-shadow-sm dark:drop-shadow-[0_0_4px_hsl(199_95%_72%/0.85)]"
+                        className="drop-shadow-sm dark:drop-shadow-[0_0_4px_hsla(199,95%,72%,0.85)]"
                       />
                     );
                   }}
                   activeDot={{
                     r: 8,
                     fill: 'var(--color-value)',
-                    stroke: 'hsl(var(--foreground) / 0.6)',
+                    stroke: 'hsla(var(--foreground), 0.6)',
                     strokeWidth: 2.5,
                   }}
                   connectNulls

@@ -29,15 +29,15 @@ interface Props {
 const chartConfig = {
   weight_kg: {
     label: 'Peso',
-    theme: { light: 'hsl(199 89% 42%)', dark: 'hsl(199 95% 72%)' },
+    theme: { light: 'hsl(199, 89%, 42%)', dark: 'hsl(199, 95%, 72%)' },
   },
   smm_kg: {
     label: 'MME',
-    theme: { light: 'hsl(142 55% 40%)', dark: 'hsl(142 60% 55%)' },
+    theme: { light: 'hsl(142, 55%, 40%)', dark: 'hsl(142, 60%, 55%)' },
   },
   body_fat_kg: {
     label: 'Masa grasa',
-    theme: { light: 'hsl(32 90% 48%)', dark: 'hsl(32 95% 58%)' },
+    theme: { light: 'hsl(32, 90%, 48%)', dark: 'hsl(32, 95%, 58%)' },
   },
 } satisfies ChartConfig;
 

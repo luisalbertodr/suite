@@ -123,7 +123,10 @@ export default defineConfig(() => ({
       renderLegacyChunks: true,
       renderModernChunks: true,
       polyfills: true,
-      additionalLegacyPolyfills: ["regenerator-runtime/runtime"],
+      additionalLegacyPolyfills: [
+        "regenerator-runtime/runtime",
+        path.resolve(__dirname, "src/polyfills/resize-observer.ts"),
+      ],
     }),
     forceSystemJsForAllBrowsers(),
   ],
