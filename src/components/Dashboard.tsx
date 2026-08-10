@@ -56,10 +56,14 @@ import {
 } from '@/lib/workCenterBilling';
 import {
   assignedCompanyIds,
+  billingViewFromCompanyId,
+  clampBillingView,
   defaultBillingViewForAssigned,
   resolveAllowedBillingViews,
 } from '@/lib/billingEntityAccess';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useAuth } from '@/hooks/useAuth';
+import { supabase } from '@/lib/supabase';
 
 function billingCompanyIdForView(view: BillingEntityView): string | null {
   if (view === 'medicina') return MEDICINA_COMPANY_ID;
@@ -304,6 +308,20 @@ export const Dashboard: React.FC = () => {
   const { companyId, accessibleCompanies, loading: companyLoading } = useCompanyFilter();
   const { operationalCompanyId, catalogHostCompanyId, loading: wcLoading } = useWorkCenter();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
+  const { isSuperuser } = useAuth();
+  const { data: isAdminRpc = false } = useQuery({
+    queryKey: ['dashboard-is-admin'],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('is_admin');
+      if (error) {
+        console.warn('is_admin:', error.message);
+        return false;
+      }
+      return data === true;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+  const canSeeCombinedBilling = isSuperuser || isAdminRpc;
   const canSeeReports = hasPermission('reports', 'read');
   const canSeeStatistics = hasPermission('statistics', 'read');
   const canSeeRecentActivity = hasPermission('recent_activity', 'read');
@@ -331,22 +349,32 @@ export const Dashboard: React.FC = () => {
     () => assignedCompanyIds(accessibleCompanies),
     [accessibleCompanies],
   );
+  const billingAccessOpts = useMemo(
+    () => ({ canSeeCombined: canSeeCombinedBilling, activeCompanyId: companyId }),
+    [canSeeCombinedBilling, companyId],
+  );
   const allowedBillingViews = useMemo(
-    () => resolveAllowedBillingViews(assignedIds),
-    [assignedIds],
+    () => resolveAllowedBillingViews(assignedIds, billingAccessOpts),
+    [assignedIds, billingAccessOpts],
   );
   const [billingView, setBillingView] = useState<BillingEntityView>('both');
   const [comparisonPreset, setComparisonPreset] = useState<ComparisonPeriodPreset>('days15');
   const [comparisonMonth, setComparisonMonth] = useState(new Date().getMonth() + 1);
 
+  // Admins: pueden Ambas; el resto se ancla a la empresa activa del TopBar (M|E).
   useEffect(() => {
     if (companyLoading || assignedIds.length === 0) return;
     setBillingView((prev) => {
-      const allowed = resolveAllowedBillingViews(assignedIds);
-      if (allowed.length === 1) return allowed[0];
-      return allowed.includes(prev) ? prev : defaultBillingViewForAssigned(assignedIds);
+      const allowed = resolveAllowedBillingViews(assignedIds, billingAccessOpts);
+      if (!canSeeCombinedBilling) {
+        const fromActive = billingViewFromCompanyId(companyId);
+        if (fromActive && allowed.includes(fromActive)) return fromActive;
+        return defaultBillingViewForAssigned(assignedIds, billingAccessOpts);
+      }
+      if (allowed.length === 1) return allowed[0]!;
+      return allowed.includes(prev) ? prev : defaultBillingViewForAssigned(assignedIds, billingAccessOpts);
     });
-  }, [assignedIds, companyLoading]);
+  }, [assignedIds, companyLoading, companyId, canSeeCombinedBilling, billingAccessOpts]);
 
   const commandBoardBillingCompanyId = billingCompanyIdForView(billingView);
   const commandBoardQueryKey = [
@@ -477,14 +505,14 @@ export const Dashboard: React.FC = () => {
   );
 
   const entitySelector =
-    isMultiEntity && allowedBillingViews.length > 1 ? (
+    isMultiEntity && canSeeCombinedBilling && allowedBillingViews.length > 1 ? (
     <div className="flex flex-wrap items-center gap-1.5">
       <span className="text-xs text-muted-foreground mr-1">Empresa:</span>
       {BILLING_VIEW_OPTIONS.filter((o) => allowedBillingViews.includes(o.id)).map(({ id, label }) => (
         <button
           key={id}
           type="button"
-          onClick={() => setBillingView(id)}
+          onClick={() => setBillingView(clampBillingView(id, assignedIds, billingAccessOpts))}
           className={`h-7 rounded-md border px-2.5 text-xs font-medium transition-colors ${
             billingView === id
               ? 'border-primary bg-primary/10 text-primary'

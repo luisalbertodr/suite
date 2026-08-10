@@ -463,12 +463,14 @@ export async function fetchYearBillingSingleYear(
   const viewKey = billingView;
 
   if (useSplit) {
-    const rawCacheKey = `monthly_family_raw:v2:${companyId}:${year}`;
+    // Caché hub-estable (no por companyId activo): evita totales M/E distintos al cambiar TopBar.
+    const rawCacheKey = `monthly_family_raw:v3:hub:${year}:all`;
     const rawPayload = await withDashboardBillingCache<{ rows: RpcFamilyMonthRow[] }>(
       rawCacheKey,
       companyId,
       async () => {
-        return { rows: await fetchMonthlyFamilyRows(year, selectedFamilies) };
+        // Siempre traer todas las familias; el filtro se aplica en aggregate.
+        return { rows: await fetchMonthlyFamilyRows(year, null) };
       },
     );
     const { totals, split } = aggregateFamilyMonthRows(rawPayload.rows, selectedFamilies, billingView);
@@ -670,12 +672,12 @@ export async function fetchDailyBillingComparison(
   let splitByYear = new Map<number, { medicina: Map<string, number>; estetica: Map<string, number> }>();
 
   if (useSplit) {
-    const rawCacheKey = `daily_family_raw:v2:${companyId}:${from}:${to}`;
+    const rawCacheKey = `daily_family_raw:v3:hub:${from}:${to}:all`;
     const rawPayload = await withDashboardBillingCache<{ rows: RpcFamilyDayRow[] }>(
       rawCacheKey,
       companyId,
       async () => {
-        return { rows: await fetchDailyFamilyRows(from, to, selectedFamilies) };
+        return { rows: await fetchDailyFamilyRows(from, to, null) };
       },
     );
     const aggregated = aggregateFamilyDayRows(rawPayload.rows, selectedFamilies, billingView);

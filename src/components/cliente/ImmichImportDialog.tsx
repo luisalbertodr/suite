@@ -6,7 +6,6 @@ import { Loader2, Images, Calendar, CheckSquare, Square, Video, ChevronDown, Che
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -14,6 +13,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import {
   downloadImmichAsset,
@@ -137,7 +137,7 @@ export const ImmichImportDialog: React.FC<Props> = ({
   onOpenChange,
   customerId,
   companyId,
-  customerLabel,
+  customerLabel: _customerLabel,
   appointmentId,
   logDate,
   defaultAnchorDate,
@@ -389,6 +389,21 @@ export const ImmichImportDialog: React.FC<Props> = ({
     }
   }, [allAssets, selected.size]);
 
+  const toggleDay = useCallback((group: DayGroup) => {
+    const ids = group.assets.map((a) => a.id);
+    if (!ids.length) return;
+    setSelected((prev) => {
+      const next = new Set(prev);
+      const allSelected = ids.every((id) => next.has(id));
+      if (allSelected) {
+        for (const id of ids) next.delete(id);
+      } else {
+        for (const id of ids) next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
   const handleImport = async () => {
     if (selected.size === 0) {
       toast({ title: 'Selecciona al menos un archivo', variant: 'destructive' });
@@ -467,10 +482,6 @@ export const ImmichImportDialog: React.FC<Props> = ({
             <Images className="h-5 w-5" />
             Importar desde Immich
           </DialogTitle>
-          <DialogDescription>
-            Fotos y vídeos por día. Desplázate o usa los botones para ver días anteriores y posteriores. Se
-            adjuntan a <span className="font-medium text-foreground">{customerLabel}</span>.
-          </DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-wrap items-end gap-3">
@@ -576,11 +587,22 @@ export const ImmichImportDialog: React.FC<Props> = ({
                 ) : null}
               </div>
 
-              {sortDayGroupsDesc(dayGroups).map((group) => (
+              {sortDayGroupsDesc(dayGroups).map((group) => {
+                const dayIds = group.assets.map((a) => a.id);
+                const daySelectedCount = dayIds.filter((id) => selected.has(id)).length;
+                const dayAllSelected = dayIds.length > 0 && daySelectedCount === dayIds.length;
+                const daySomeSelected = daySelectedCount > 0 && !dayAllSelected;
+                return (
                 <section key={group.date}>
-                  <h3 className="text-xs font-semibold text-foreground capitalize sticky top-0 z-[1] bg-background/95 backdrop-blur py-1.5 mb-2 border-b border-border/40">
-                    {formatDayLabel(group.date)}
-                    <span className="ml-2 font-normal text-muted-foreground tabular-nums">
+                  <h3 className="text-xs font-semibold text-foreground capitalize sticky top-0 z-[1] bg-background/95 backdrop-blur py-1.5 mb-2 border-b border-border/40 flex items-center gap-2">
+                    <Checkbox
+                      checked={dayAllSelected ? true : daySomeSelected ? 'indeterminate' : false}
+                      onCheckedChange={() => toggleDay(group)}
+                      aria-label={`Seleccionar todo el día ${formatDayLabel(group.date)}`}
+                      className="shrink-0"
+                    />
+                    <span className="min-w-0 truncate">{formatDayLabel(group.date)}</span>
+                    <span className="ml-auto font-normal text-muted-foreground tabular-nums shrink-0">
                       ({group.assets.length})
                     </span>
                   </h3>
@@ -606,7 +628,8 @@ export const ImmichImportDialog: React.FC<Props> = ({
                     </div>
                   )}
                 </section>
-              ))}
+                );
+              })}
 
               <div ref={loadOlderSentinelRef} className="flex justify-center py-3 min-h-[1px] text-xs text-muted-foreground">
                 {loadingOlder ? (

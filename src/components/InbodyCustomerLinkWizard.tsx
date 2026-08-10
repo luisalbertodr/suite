@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Loader2, UserPlus, UserSearch } from 'lucide-react';
+import { Loader2, UserSearch } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -9,7 +9,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
@@ -66,7 +65,6 @@ export const InbodyCustomerLinkWizard: React.FC<Props> = ({
   const [customerByTax, setCustomerByTax] = useState(initialMap);
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<CustomerSearchRow | null>(null);
-  const [createName, setCreateName] = useState('');
   const [busy, setBusy] = useState(false);
   const [stats, setStats] = useState<InbodyCustomerLinkStats>({ linked: 0, created: 0, skipped: 0 });
 
@@ -84,7 +82,6 @@ export const InbodyCustomerLinkWizard: React.FC<Props> = ({
     if (!current) return;
     const hint = current.legacyName?.trim() || '';
     setSearch(hint);
-    setCreateName(hint);
     setSelected(null);
   }, [current?.inbody_user_id]);
 
@@ -133,12 +130,6 @@ export const InbodyCustomerLinkWizard: React.FC<Props> = ({
   const handleLinkExisting = async () => {
     if (!selected) return;
     await runDecision({ kind: 'existing', customerId: selected.id }, { linked: 1 });
-  };
-
-  const handleCreate = async () => {
-    const name = createName.trim();
-    if (!name) return;
-    await runDecision({ kind: 'create', name }, { created: 1 });
   };
 
   const handleSkip = async () => {
@@ -250,31 +241,16 @@ export const InbodyCustomerLinkWizard: React.FC<Props> = ({
             </Alert>
           )}
 
-          <div className="space-y-2 border-t pt-3">
-            <Label className="flex items-center gap-1.5">
-              <UserPlus className="h-3.5 w-3.5" />
-              O crear ficha nueva
-            </Label>
-            <Input
-              value={createName}
-              onChange={(e) => setCreateName(e.target.value)}
-              placeholder="Nombre y apellidos del cliente"
-            />
-          </div>
+          <p className="text-xs text-muted-foreground border-t pt-3">
+            Si no hay ficha, omite: el InBody queda guardado por DNI y se enlazará al completar el DNI
+            del cliente.
+          </p>
         </div>
 
         <DialogFooter className="flex-col sm:flex-col gap-2 sm:space-x-0">
           <div className="flex flex-wrap gap-2 w-full justify-end">
             <Button variant="outline" onClick={() => void handleSkip()} disabled={busy}>
               Omitir (solo InBody)
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => void handleCreate()}
-              disabled={busy || !createName.trim()}
-            >
-              {busy ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-              Crear ficha
             </Button>
             <Button onClick={() => void handleLinkExisting()} disabled={busy || !selected}>
               {busy ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}

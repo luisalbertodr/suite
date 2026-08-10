@@ -597,38 +597,9 @@ export async function persistInbodyCustomerLink(
   }
 
   if (decision.kind === 'create') {
-    const name = decision.name.trim();
-    if (!name) throw new Error('Indica un nombre para la ficha nueva.');
-
-    const { data, error } = await supabase
-      .from('customers')
-      .insert({
-        company_id: companyId,
-        name,
-        tax_id: taxId,
-      } as never)
-      .select('id')
-      .single();
-
-    if (error) {
-      if (error.code === '23505') {
-        const { data: existing } = await supabase
-          .from('customers')
-          .select('id')
-          .eq('company_id', companyId)
-          .ilike('tax_id', taxId)
-          .maybeSingle();
-        if (existing?.id) {
-          registerCustomerInTaxMap(customerByTax, existing.id, inbodyUserId, taxId);
-          return { customerId: existing.id, created: false, linked: true };
-        }
-      }
-      throw error;
-    }
-
-    if (!data?.id) throw new Error('No se pudo crear la ficha de cliente.');
-    registerCustomerInTaxMap(customerByTax, data.id, inbodyUserId, taxId);
-    return { customerId: data.id, created: true, linked: false };
+    throw new Error(
+      'Ya no se crean fichas «Paciente InBody». Omite el DNI o vincula una ficha existente; el InBody se enlazará al completar el DNI.',
+    );
   }
 
   const customerId = decision.customerId;

@@ -1,7 +1,8 @@
 """
-Crea fichas customers para inbody_user_id sin customer_id y re-vincula mediciones.
+Vincula mediciones InBody huérfanas a customers existentes por DNI.
 
-Usa legacy.clientes para el nombre cuando el DNI coincide.
+Ya no crea fichas "Paciente InBody": las mediciones sin ficha quedan con
+customer_id NULL y se enlazan al completar tax_id (trigger en BD).
 
 Uso:
   python scripts/promote_inbody_customers.py
@@ -14,7 +15,6 @@ import argparse
 import os
 import re
 import sys
-import uuid
 from pathlib import Path
 
 try:
@@ -99,29 +99,11 @@ def complete_spanish_dni(user_id: str) -> str:
     return norm
 
 
-def legacy_name(cur, tax_id: str) -> str | None:
-    cur.execute(
-        """
-        SELECT nullif(trim(concat_ws(' ', nullif(trim(nomcli), ''), nullif(trim(ape1cli), ''))), '')
-        FROM legacy.clientes
-        WHERE nullif(btrim(dnicli), '') IS NOT NULL
-          AND (
-            lower(regexp_replace(dnicli, '[\\s\\-.]', '', 'g'))
-              = lower(regexp_replace(%s, '[\\s\\-.]', '', 'g'))
-            OR regexp_replace(dnicli, '\\D', '', 'g') = regexp_replace(%s, '\\D', '', 'g')
-          )
-        ORDER BY length(trim(concat_ws(' ', nomcli, ape1cli))) DESC
-        LIMIT 1
-        """,
-        (tax_id, tax_id),
-    )
-    row = cur.fetchone()
-    return row[0] if row and row[0] else None
-
-
 def main() -> None:
     load_dotenv()
-    parser = argparse.ArgumentParser(description="Crear customers desde InBody sin ficha")
+    parser = argparse.ArgumentParser(
+        description="Vincular mediciones InBody huérfanas a customers por DNI (sin crear Paciente InBody)"
+    )
     parser.add_argument("--company-id", default=get_company_id())
     parser.add_argument("--source", default=None, help="Filtrar inbody_measurements.source")
     parser.add_argument("--dry-run", action="store_true")
@@ -151,8 +133,8 @@ def main() -> None:
             cur.execute(sql, params)
             user_ids = [row[0] for row in cur.fetchall()]
 
-            created = 0
             linked = 0
+            orphans = 0
             for user_id in user_ids:
                 tax_id = complete_spanish_dni(user_id)
                 existing = find_customer_id(user_id, customer_map) or find_customer_id(tax_id, customer_map)
@@ -171,61 +153,16 @@ def main() -> None:
                         )
                     continue
 
-                name = legacy_name(cur, tax_id) or f"Paciente InBody {tax_id}"
-                new_id = str(uuid.uuid4())
+                # No crear "Paciente InBody": dejar mediciones huérfanas por DNI;
+                # se vinculan al completar tax_id en la ficha real.
+                orphans += 1
                 if args.dry_run:
-                    print(f"CREATE {tax_id} -> {name}")
-                    created += 1
-                    continue
-
-                cur.execute(
-                    """
-                    INSERT INTO public.customers (id, company_id, name, tax_id)
-                    VALUES (%s::uuid, %s::uuid, %s, %s)
-                    ON CONFLICT DO NOTHING
-                    RETURNING id
-                    """,
-                    (new_id, args.company_id, name, tax_id.lower()),
-                )
-                row = cur.fetchone()
-                if row:
-                    cid = str(row[0])
-                    created += 1
-                else:
-                    cur.execute(
-                        """
-                        SELECT id FROM public.customers
-                        WHERE company_id = %s::uuid AND lower(tax_id) = lower(%s)
-                        LIMIT 1
-                        """,
-                        (args.company_id, tax_id),
-                    )
-                    found = cur.fetchone()
-                    if not found:
-                        continue
-                    cid = str(found[0])
-                    linked += 1
-
-                for key in dni_match_keys(user_id):
-                    customer_map[key] = cid
-                for key in dni_match_keys(tax_id):
-                    customer_map[key] = cid
-
-                cur.execute(
-                    """
-                    UPDATE public.inbody_measurements
-                    SET customer_id = %s::uuid, updated_at = now()
-                    WHERE company_id = %s::uuid
-                      AND customer_id IS NULL
-                      AND inbody_user_id = %s
-                    """,
-                    (cid, args.company_id, user_id),
-                )
+                    print(f"SKIP orphan {tax_id} (sin ficha Suite)")
 
             if not args.dry_run:
                 conn.commit()
             print(f"Usuarios InBody sin ficha: {len(user_ids)}")
-            print(f"Fichas creadas: {created}, vinculadas: {linked}")
+            print(f"Vinculadas: {linked}; huérfanas (sin crear Paciente InBody): {orphans}")
     finally:
         conn.close()
 

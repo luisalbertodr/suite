@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { User, LogOut, Settings, ChevronDown, Moon, Sun } from 'lucide-react';
+import { User, LogOut, Settings, ChevronDown, Moon, Sun, LayoutDashboard } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from 'next-themes';
@@ -9,6 +9,7 @@ import { useWorkCenterBranding } from '@/hooks/useWorkCenterBranding';
 import { useBillingScopeRoute } from '@/hooks/useBillingScopeRoute';
 import { BillingScopeToggle } from '@/components/BillingScopeToggle';
 import { useTopBarContent } from './TopBarContentContext';
+import { usePermissions } from '@/hooks/usePermissions';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -44,6 +45,9 @@ export const TopBar: React.FC = () => {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { user, signOut } = useAuth();
+  const { hasPermission, loading: permissionsLoading } = usePermissions();
+  const canSeeDashboard = permissionsLoading || hasPermission('dashboard', 'read');
+  const canSeeSettings = permissionsLoading || hasPermission('settings', 'read');
   const { theme, resolvedTheme, setTheme } = useTheme();
   const { loading: companyLoading } = useCompanyFilter();
   const { displayName, logoUrlLight, logoUrlDark, isLoading: brandingLoading } = useWorkCenterBranding();
@@ -169,11 +173,19 @@ export const TopBar: React.FC = () => {
               <ChevronDown className="h-3 w-3 text-foreground/40" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuItem className="text-xs" onClick={() => navigate('/configuracion')}>
-                <Settings className="h-3.5 w-3.5 mr-2" />
-                Configuración
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
+              {canSeeDashboard ? (
+                <DropdownMenuItem className="text-xs" onClick={() => navigate('/inicio')}>
+                  <LayoutDashboard className="h-3.5 w-3.5 mr-2" />
+                  Dashboard
+                </DropdownMenuItem>
+              ) : null}
+              {canSeeSettings ? (
+                <DropdownMenuItem className="text-xs" onClick={() => navigate('/configuracion')}>
+                  <Settings className="h-3.5 w-3.5 mr-2" />
+                  Configuración
+                </DropdownMenuItem>
+              ) : null}
+              {(canSeeDashboard || canSeeSettings) ? <DropdownMenuSeparator /> : null}
               <DropdownMenuItem className="text-xs text-destructive" onClick={signOut}>
                 <LogOut className="h-3.5 w-3.5 mr-2" />
                 Cerrar Sesión

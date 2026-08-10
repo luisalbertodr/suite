@@ -187,6 +187,7 @@ export const ClienteForm: React.FC<ClienteFormProps> = ({ customer, onClose }) =
       if (result?.customerId) {
         queryClient.invalidateQueries({ queryKey: ['customer_day_timeline', result.customerId] });
         queryClient.invalidateQueries({ queryKey: ['customer_detail', result.customerId] });
+        queryClient.invalidateQueries({ queryKey: ['inbody_measurements'] });
       }
       toast({ title: customer ? 'Cliente actualizado' : 'Cliente creado' });
       onClose();
