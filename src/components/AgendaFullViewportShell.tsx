@@ -8,7 +8,7 @@ export function AgendaFullViewportShell({ children }: { children: React.ReactNod
   useLockPageScroll(panelActive);
 
   return (
-    <div className="suite-h-agenda-viewport fixed inset-x-0 top-14 z-[1] flex flex-col overflow-hidden px-1.5 sm:px-4 md:px-6">
+    <div className="suite-h-agenda-viewport fixed inset-x-0 top-12 z-[1] flex flex-col overflow-hidden px-1.5 sm:px-4 md:px-6">
       {children}
     </div>
   );

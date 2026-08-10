@@ -472,6 +472,8 @@ type AgendaAppointmentItemProps = {
   onAppointmentCopy?: (appointment: Appointment) => void;
   onAppointmentCut?: (appointment: Appointment) => void;
   allowHtml5Drag: boolean;
+  /** En táctil (sin HTML5 DnD): mantener pulsado ~0.4s y soltar en otro hueco. */
+  onTouchRelocateStart?: (appointment: Appointment, clientX: number, clientY: number) => void;
   onDragStart: (e: React.DragEvent, appointment: Appointment) => void;
   onDragEnd: (e: React.DragEvent) => void;
   onDragOver: (e: React.DragEvent, employeeId: string, time: string) => void;
@@ -494,6 +496,7 @@ const AgendaAppointmentItem = React.memo(function AgendaAppointmentItem({
   onAppointmentCopy,
   onAppointmentCut,
   allowHtml5Drag,
+  onTouchRelocateStart,
   onDragStart,
   onDragEnd,
   onDragOver,
@@ -535,11 +538,34 @@ const AgendaAppointmentItem = React.memo(function AgendaAppointmentItem({
         ? segments[0]?.recursoColor ?? null
         : null;
   const outerRecursoStyle = segmentStyleFromHex(blockRecursoColor);
+  const longPressTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressOriginRef = React.useRef<{ x: number; y: number } | null>(null);
+  const suppressClickRef = React.useRef(false);
+
+  const clearLongPress = React.useCallback(() => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    longPressOriginRef.current = null;
+  }, []);
+
+  const onTouchStartRelocate = (clientX: number, clientY: number) => {
+    if (allowHtml5Drag || lockedByPayment || !onTouchRelocateStart) return;
+    clearLongPress();
+    longPressOriginRef.current = { x: clientX, y: clientY };
+    longPressTimerRef.current = setTimeout(() => {
+      longPressTimerRef.current = null;
+      suppressClickRef.current = true;
+      onTouchRelocateStart(appointment, clientX, clientY);
+    }, 420);
+  };
 
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild disabled={lockedByPayment}>
         <div
+          data-agenda-appointment={appointment.id}
           className={`absolute z-20 hover:opacity-80 ${lockedByPayment ? 'cursor-default' : 'cursor-move'}`}
           style={{
             top: `${topPosition}px`,
@@ -548,7 +574,44 @@ const AgendaAppointmentItem = React.memo(function AgendaAppointmentItem({
             height: `${height}px`,
             paddingRight: '1px',
           }}
-          onClick={() => onAppointmentClick?.(appointment)}
+          onClick={() => {
+            if (suppressClickRef.current) {
+              suppressClickRef.current = false;
+              return;
+            }
+            onAppointmentClick?.(appointment);
+          }}
+          onPointerDown={(e) => {
+            if (e.pointerType === 'touch' || e.pointerType === 'pen') {
+              onTouchStartRelocate(e.clientX, e.clientY);
+            }
+          }}
+          onPointerMove={(e) => {
+            const origin = longPressOriginRef.current;
+            if (!origin || !longPressTimerRef.current) return;
+            if (Math.abs(e.clientX - origin.x) > 10 || Math.abs(e.clientY - origin.y) > 10) {
+              clearLongPress();
+            }
+          }}
+          onPointerUp={clearLongPress}
+          onPointerCancel={clearLongPress}
+          onTouchStart={(e) => {
+            if (typeof window !== 'undefined' && 'PointerEvent' in window) return;
+            if (e.touches.length !== 1) return;
+            const t = e.touches[0]!;
+            onTouchStartRelocate(t.clientX, t.clientY);
+          }}
+          onTouchMove={(e) => {
+            if (typeof window !== 'undefined' && 'PointerEvent' in window) return;
+            const origin = longPressOriginRef.current;
+            if (!origin || !longPressTimerRef.current || e.touches.length !== 1) return;
+            const t = e.touches[0]!;
+            if (Math.abs(t.clientX - origin.x) > 10 || Math.abs(t.clientY - origin.y) > 10) {
+              clearLongPress();
+            }
+          }}
+          onTouchEnd={clearLongPress}
+          onTouchCancel={clearLongPress}
           onDragOver={(e) => onDragOver(e, appointment.employeeId, appointment.startTime)}
           onDragLeave={onDragLeave}
           onDrop={(e) => onDrop(e, appointment.employeeId, appointment.startTime)}
@@ -791,6 +854,7 @@ type AgendaGridVirtualRowsProps = {
   visibleFields: AgendaVisibleFields;
   appointmentClipboard?: { mode: 'copy' | 'cut' } | null;
   allowHtml5Drag: boolean;
+  onTouchRelocateStart?: (appointment: Appointment, clientX: number, clientY: number) => void;
   onSlotClick: (employeeId: string, time: string, opts?: AgendaSlotClickOptions) => void;
   onSlotPaste?: (employeeId: string, time: string) => void;
   onAppointmentClick?: (appointment: Appointment) => void;
@@ -823,6 +887,7 @@ function AgendaGridVirtualRows({
   visibleFields,
   appointmentClipboard = null,
   allowHtml5Drag,
+  onTouchRelocateStart,
   onSlotClick,
   onSlotPaste,
   onAppointmentClick,
@@ -905,6 +970,7 @@ function AgendaGridVirtualRows({
             onAppointmentCopy={onAppointmentCopy}
             onAppointmentCut={onAppointmentCut}
             allowHtml5Drag={allowHtml5Drag}
+            onTouchRelocateStart={onTouchRelocateStart}
             onDragStart={onDragStart}
             onDragEnd={onDragEnd}
             onDragOver={onDragOver}
@@ -952,6 +1018,9 @@ function AgendaGridVirtualRows({
 
               const slotCell = (
                 <div
+                  data-agenda-slot-emp={employee.id}
+                  data-agenda-slot-time={slot.time}
+                  data-agenda-slot-ok={canSchedule ? '1' : '0'}
                   className={`relative border-r border-border transition-colors ${
                     isHourMark ? 'border-t-2 border-border' : 'border-t border-border'
                   } ${
@@ -1188,6 +1257,87 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
     setDragOverSlot(null);
   }, [draggedAppointment, isSlotOccupiedByAppointment, onAppointmentMove]);
 
+  const touchRelocateActiveRef = React.useRef(false);
+
+  const handleTouchRelocateStart = React.useCallback(
+    (appointment: Appointment) => {
+      if (allowHtml5Drag || !onAppointmentMove) return;
+      if (appointment.paymentStatus === 'paid' || appointment.paymentStatus === 'invoiced') return;
+      touchRelocateActiveRef.current = true;
+      setDraggedAppointment(appointment.id);
+    },
+    [allowHtml5Drag, onAppointmentMove],
+  );
+
+  React.useEffect(() => {
+    if (allowHtml5Drag || !draggedAppointment || !touchRelocateActiveRef.current) return;
+
+    const slotFromPoint = (x: number, y: number) => {
+      const el = document.elementFromPoint(x, y) as HTMLElement | null;
+      const slot = el?.closest?.('[data-agenda-slot-emp]') as HTMLElement | null;
+      if (!slot || slot.getAttribute('data-agenda-slot-ok') !== '1') return null;
+      const employeeId = slot.getAttribute('data-agenda-slot-emp');
+      const time = slot.getAttribute('data-agenda-slot-time');
+      if (!employeeId || !time) return null;
+      return { employeeId, time };
+    };
+
+    const onMove = (x: number, y: number) => {
+      const hit = slotFromPoint(x, y);
+      setDragOverSlot(hit);
+    };
+
+    const onEnd = (x: number, y: number) => {
+      const hit = slotFromPoint(x, y);
+      const appointmentId = draggedAppointment;
+      touchRelocateActiveRef.current = false;
+      if (hit && appointmentId && onAppointmentMove) {
+        const occupied = isSlotOccupiedByAppointment(hit.employeeId, hit.time);
+        if (!occupied) onAppointmentMove(appointmentId, hit.employeeId, hit.time);
+      }
+      setDraggedAppointment(null);
+      setDragOverSlot(null);
+    };
+
+    const onPointerMove = (e: PointerEvent) => onMove(e.clientX, e.clientY);
+    const onPointerUp = (e: PointerEvent) => onEnd(e.clientX, e.clientY);
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0]!;
+      onMove(t.clientX, t.clientY);
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      const t = e.changedTouches[0];
+      if (!t) {
+        touchRelocateActiveRef.current = false;
+        setDraggedAppointment(null);
+        setDragOverSlot(null);
+        return;
+      }
+      onEnd(t.clientX, t.clientY);
+    };
+
+    document.addEventListener('pointermove', onPointerMove);
+    document.addEventListener('pointerup', onPointerUp);
+    document.addEventListener('pointercancel', onPointerUp);
+    document.addEventListener('touchmove', onTouchMove, { passive: true });
+    document.addEventListener('touchend', onTouchEnd);
+    document.addEventListener('touchcancel', onTouchEnd);
+    return () => {
+      document.removeEventListener('pointermove', onPointerMove);
+      document.removeEventListener('pointerup', onPointerUp);
+      document.removeEventListener('pointercancel', onPointerUp);
+      document.removeEventListener('touchmove', onTouchMove);
+      document.removeEventListener('touchend', onTouchEnd);
+      document.removeEventListener('touchcancel', onTouchEnd);
+    };
+  }, [
+    allowHtml5Drag,
+    draggedAppointment,
+    isSlotOccupiedByAppointment,
+    onAppointmentMove,
+  ]);
+
   const isSlotHighlighted = React.useCallback((employeeId: string, time: string): boolean => {
     return dragOverSlot?.employeeId === employeeId && dragOverSlot?.time === time;
   }, [dragOverSlot]);
@@ -1366,19 +1516,21 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
   /**
    * Viewport = min(shell.getBoundingClientRect, visualViewport) − gutter.
    * iOS a veces infla clientWidth del scroller al ancho del contenido.
+   * Coalesce en rAF: orientación / teclado disparan ráfagas de ResizeObserver.
    */
   React.useLayoutEffect(() => {
     const shell = shellRef.current;
     const vEl = scrollRootRef.current;
     if (!shell) return;
 
-    const measure = () => {
+    let raf = 0;
+    const measureNow = () => {
+      raf = 0;
       const shellW = Math.round(shell.getBoundingClientRect().width);
       const vv = Math.round(window.visualViewport?.width ?? window.innerWidth);
       const cap = Math.max(0, Math.min(shellW || vv, vv));
       setViewportCapPx(cap);
       const scrollerW = vEl ? Math.round(vEl.clientWidth) : shellW;
-      // Acotar scroller al cap de pantalla (evita clientWidth hinchado).
       const usable = Math.max(0, Math.min(scrollerW || cap, cap));
       const vp = Math.max(0, usable - TIME_GUTTER_PX);
       setEmployeesViewportPx(vp);
@@ -1397,16 +1549,24 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
       }
     };
 
-    measure();
-    const ro = new ResizeObserver(measure);
+    const scheduleMeasure = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(measureNow);
+    };
+
+    measureNow();
+    const ro = new ResizeObserver(scheduleMeasure);
     ro.observe(shell);
     if (vEl) ro.observe(vEl);
-    window.visualViewport?.addEventListener('resize', measure);
-    window.addEventListener('resize', measure);
+    window.visualViewport?.addEventListener('resize', scheduleMeasure);
+    window.addEventListener('resize', scheduleMeasure);
+    window.addEventListener('orientationchange', scheduleMeasure);
     return () => {
+      if (raf) cancelAnimationFrame(raf);
       ro.disconnect();
-      window.visualViewport?.removeEventListener('resize', measure);
-      window.removeEventListener('resize', measure);
+      window.visualViewport?.removeEventListener('resize', scheduleMeasure);
+      window.removeEventListener('resize', scheduleMeasure);
+      window.removeEventListener('orientationchange', scheduleMeasure);
     };
   }, [employees.length, timeSlots.length]);
 
@@ -1442,7 +1602,8 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
 
   /**
    * Pan H continuo: solo pinta transform en rAF (sin setState por frame).
-   * setState al soltar. touch-action:pan-y conserva el scroll vertical nativo.
+   * Pointer Events (iOS 13+) o Touch Events (Safari/iPad más antiguos).
+   * touch-action:pan-y conserva el scroll vertical nativo.
    */
   React.useEffect(() => {
     applyHOffset(hOffsetRef.current, true);
@@ -1453,7 +1614,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
     if (!surfaces.length) return;
 
     type DragState = {
-      pointerId: number;
+      id: number;
       startX: number;
       startY: number;
       startOffset: number;
@@ -1467,6 +1628,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
     let raf = 0;
     let pendingOffset: number | null = null;
     let momentumRaf = 0;
+    const usePointer = typeof window !== 'undefined' && 'PointerEvent' in window;
 
     const cancelMomentum = () => {
       if (momentumRaf) {
@@ -1495,16 +1657,14 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
       return Math.max(0, Math.min(max, next));
     };
 
-    const onPointerDown = (e: PointerEvent) => {
-      if (e.pointerType === 'mouse' && e.button !== 0) return;
+    const beginDrag = (target: HTMLElement, id: number, x: number, y: number) => {
       cancelMomentum();
-      const target = e.currentTarget as HTMLElement;
       drag = {
-        pointerId: e.pointerId,
-        startX: e.clientX,
-        startY: e.clientY,
+        id,
+        startX: x,
+        startY: y,
         startOffset: hOffsetRef.current,
-        lastX: e.clientX,
+        lastX: x,
         lastT: performance.now(),
         velocity: 0,
         axis: null,
@@ -1512,19 +1672,21 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
       };
     };
 
-    const onPointerMove = (e: PointerEvent) => {
-      if (!drag || drag.pointerId !== e.pointerId) return;
-      const dx = e.clientX - drag.startX;
-      const dy = e.clientY - drag.startY;
+    const moveDrag = (id: number, x: number, y: number, prevent: () => void) => {
+      if (!drag || drag.id !== id) return;
+      const dx = x - drag.startX;
+      const dy = y - drag.startY;
 
       if (drag.axis === null) {
         if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
         drag.axis = Math.abs(dx) >= Math.abs(dy) ? 'h' : 'v';
         if (drag.axis === 'h') {
-          try {
-            drag.target.setPointerCapture(e.pointerId);
-          } catch {
-            /* ignore */
+          if (usePointer) {
+            try {
+              drag.target.setPointerCapture(id);
+            } catch {
+              /* ignore */
+            }
           }
         } else {
           drag = null;
@@ -1533,13 +1695,13 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
       }
 
       if (drag.axis !== 'h') return;
-      e.preventDefault();
+      prevent();
 
       const now = performance.now();
       const dt = Math.max(1, now - drag.lastT);
-      const frameDx = e.clientX - drag.lastX;
+      const frameDx = x - drag.lastX;
       drag.velocity = frameDx / dt;
-      drag.lastX = e.clientX;
+      drag.lastX = x;
       drag.lastT = now;
 
       queuePaint(clampOffset(drag.startOffset - dx));
@@ -1572,16 +1734,18 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
       momentumRaf = requestAnimationFrame(tick);
     };
 
-    const endDrag = (e: PointerEvent) => {
-      if (!drag || drag.pointerId !== e.pointerId) return;
+    const finishDrag = (id: number) => {
+      if (!drag || drag.id !== id) return;
       const wasH = drag.axis === 'h';
       const vel = drag.velocity;
-      try {
-        if (drag.target.hasPointerCapture(e.pointerId)) {
-          drag.target.releasePointerCapture(e.pointerId);
+      if (usePointer) {
+        try {
+          if (drag.target.hasPointerCapture(id)) {
+            drag.target.releasePointerCapture(id);
+          }
+        } catch {
+          /* ignore */
         }
-      } catch {
-        /* ignore */
       }
       drag = null;
       if (raf) {
@@ -1600,6 +1764,32 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
       }
     };
 
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      beginDrag(e.currentTarget as HTMLElement, e.pointerId, e.clientX, e.clientY);
+    };
+    const onPointerMove = (e: PointerEvent) => {
+      moveDrag(e.pointerId, e.clientX, e.clientY, () => e.preventDefault());
+    };
+    const onPointerEnd = (e: PointerEvent) => finishDrag(e.pointerId);
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0]!;
+      beginDrag(e.currentTarget as HTMLElement, t.identifier, t.clientX, t.clientY);
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (!drag) return;
+      const t = Array.from(e.touches).find((x) => x.identifier === drag!.id);
+      if (!t) return;
+      moveDrag(t.identifier, t.clientX, t.clientY, () => e.preventDefault());
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      if (!drag) return;
+      const still = Array.from(e.touches).some((x) => x.identifier === drag!.id);
+      if (!still) finishDrag(drag.id);
+    };
+
     const onWheel = (e: WheelEvent) => {
       if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
       e.preventDefault();
@@ -1609,11 +1799,18 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
 
     for (const el of surfaces) {
       el.style.touchAction = 'pan-y';
-      el.addEventListener('pointerdown', onPointerDown);
-      el.addEventListener('pointermove', onPointerMove, { passive: false });
-      el.addEventListener('pointerup', endDrag);
-      el.addEventListener('pointercancel', endDrag);
-      el.addEventListener('lostpointercapture', endDrag);
+      if (usePointer) {
+        el.addEventListener('pointerdown', onPointerDown);
+        el.addEventListener('pointermove', onPointerMove, { passive: false });
+        el.addEventListener('pointerup', onPointerEnd);
+        el.addEventListener('pointercancel', onPointerEnd);
+        el.addEventListener('lostpointercapture', onPointerEnd);
+      } else {
+        el.addEventListener('touchstart', onTouchStart, { passive: true });
+        el.addEventListener('touchmove', onTouchMove, { passive: false });
+        el.addEventListener('touchend', onTouchEnd);
+        el.addEventListener('touchcancel', onTouchEnd);
+      }
       el.addEventListener('wheel', onWheel, { passive: false });
     }
 
@@ -1621,11 +1818,18 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
       cancelMomentum();
       if (raf) cancelAnimationFrame(raf);
       for (const el of surfaces) {
-        el.removeEventListener('pointerdown', onPointerDown);
-        el.removeEventListener('pointermove', onPointerMove);
-        el.removeEventListener('pointerup', endDrag);
-        el.removeEventListener('pointercancel', endDrag);
-        el.removeEventListener('lostpointercapture', endDrag);
+        if (usePointer) {
+          el.removeEventListener('pointerdown', onPointerDown);
+          el.removeEventListener('pointermove', onPointerMove);
+          el.removeEventListener('pointerup', onPointerEnd);
+          el.removeEventListener('pointercancel', onPointerEnd);
+          el.removeEventListener('lostpointercapture', onPointerEnd);
+        } else {
+          el.removeEventListener('touchstart', onTouchStart);
+          el.removeEventListener('touchmove', onTouchMove);
+          el.removeEventListener('touchend', onTouchEnd);
+          el.removeEventListener('touchcancel', onTouchEnd);
+        }
         el.removeEventListener('wheel', onWheel);
       }
     };
@@ -1770,6 +1974,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
                   visibleFields={visibleFields}
                   appointmentClipboard={appointmentClipboard}
                   allowHtml5Drag={allowHtml5Drag}
+                  onTouchRelocateStart={handleTouchRelocateStart}
                   onSlotClick={onSlotClick}
                   onSlotPaste={onSlotPaste}
                   onAppointmentClick={onAppointmentClick}

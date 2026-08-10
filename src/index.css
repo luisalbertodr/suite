@@ -160,26 +160,23 @@
     height: calc(var(--suite-vh) - 9.5rem);
   }
   .suite-h-agenda-viewport {
-    height: calc(var(--suite-vh) - 3.5rem - 6rem);
-    max-height: calc(var(--suite-vh) - 3.5rem - 6rem);
+    /* TopBar h-12 (3rem) + banda dock (~6rem), usando --suite-vh (visualViewport). */
+    height: calc(var(--suite-vh) - 3rem - 6rem);
+    max-height: calc(var(--suite-vh) - 3rem - 6rem);
   }
 
-  /* Vista agenda: sin scroll del documento (min-h-screen + 100vh desborda en Windows). */
+  /* Vista agenda: sin scroll del documento. Altura = viewport visible (no 100vh inflado iOS). */
   html.suite-page-scroll-lock,
   html.suite-page-scroll-lock body {
     overflow: hidden !important;
-    height: 100vh !important;
-    height: 100dvh !important;
-    max-height: 100vh !important;
-    max-height: 100dvh !important;
+    height: var(--suite-vh) !important;
+    max-height: var(--suite-vh) !important;
   }
 
   html.suite-page-scroll-lock #root,
   html.suite-page-scroll-lock .suite-app-shell {
-    height: 100vh !important;
-    height: 100dvh !important;
-    max-height: 100vh !important;
-    max-height: 100dvh !important;
+    height: var(--suite-vh) !important;
+    max-height: var(--suite-vh) !important;
     min-height: 0 !important;
     overflow: hidden !important;
   }

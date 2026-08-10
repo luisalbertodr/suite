@@ -96,8 +96,9 @@ export const DockBar: React.FC = () => {
 
   return createPortal(
     <div
-      className={`fixed bottom-4 left-0 right-0 flex justify-center px-2 ${DOCK_Z_CLASS} pointer-events-none`}
+      className={`fixed left-0 right-0 flex justify-center px-2 ${DOCK_Z_CLASS} pointer-events-none`}
       data-suite-dock-bar
+      style={{ bottom: 'max(0.75rem, env(safe-area-inset-bottom, 0px))' }}
     >
       <div
         ref={scrollRef}
@@ -107,7 +108,7 @@ export const DockBar: React.FC = () => {
           [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden
         "
       >
-        <div className="flex w-max items-end gap-1 px-3 py-2 bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl border border-white/20 dark:border-gray-700/50 rounded-2xl shadow-2xl shadow-black/10">
+        <div className="flex w-max items-end gap-1 px-3 py-2 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border border-white/20 dark:border-gray-700/50 rounded-2xl shadow-2xl shadow-black/10">
           {visibleItems.map((item) => {
             const isActive = isDockItemActive(location.pathname, item.path);
 
