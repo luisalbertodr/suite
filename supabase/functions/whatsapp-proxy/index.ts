@@ -64,6 +64,12 @@ import {
 } from '../_shared/whatsappProviderOpenwa.ts';
 import { OPENWA_WEBHOOK_EVENTS } from '../_shared/whatsappProviderTypes.ts';
 import {
+  metaDownloadMediaById,
+  metaGetPhoneStatus,
+  MetaCloudApiError,
+  type MetaCredentialFields,
+} from '../_shared/whatsappProviderMeta.ts';
+import {
   openwaMediaRequiresPublicUrl,
   wahaVoiceRequiresPublicUrl,
   isOggOpusBase64,
@@ -110,6 +116,12 @@ type WhatsappConfig = {
   openwa_base_url?: string | null;
   openwa_api_key?: string | null;
   openwa_session_name?: string | null;
+  meta_access_token?: string | null;
+  meta_phone_number_id?: string | null;
+  meta_waba_id?: string | null;
+  meta_app_secret?: string | null;
+  meta_verify_token?: string | null;
+  meta_graph_version?: string | null;
   webhook_secret: string | null;
   default_country_code: string | null;
   enabled: boolean;
@@ -2202,12 +2214,19 @@ serve(async (req) => {
       ...(cfgRow as WhatsappConfig),
       ...resolveWhatsappCredentials(cfgRow as WhatsappConfig),
     };
-    if (!cfg.base_url) {
-      return err(`Falta la URL base de ${providerLabel(proxyProvider(cfg))} en la configuración.`);
+    const provider = proxyProvider(cfg);
+    if (provider === 'meta') {
+      if (!cfg.meta_access_token && !cfg.api_key) {
+        return err('Meta Cloud API: falta el access token.');
+      }
+      if (!cfg.meta_phone_number_id && (!cfg.session_name || cfg.session_name === 'default')) {
+        return err('Meta Cloud API: falta el Phone Number ID.');
+      }
+    } else if (!cfg.base_url) {
+      return err(`Falta la URL base de ${providerLabel(provider)} en la configuración.`);
     }
 
     const sessionName = cfg.session_name || 'default';
-    const provider = proxyProvider(cfg);
     const providerCfg = proxyToProviderCfg(cfg);
     const publicSupabaseUrl = resolvePublicSupabaseUrlOrFallback();
     const updateCfg = async (values: Partial<WhatsappConfig>) => {
@@ -2219,6 +2238,42 @@ serve(async (req) => {
 
     switch (body.action) {
       case 'session.status': {
+        if (provider === 'meta') {
+          try {
+            const live = await metaGetPhoneStatus(
+              providerCfg as WhatsappProviderConfig & MetaCredentialFields,
+            );
+            await updateCfg({
+              last_status: live.internalStatus,
+              last_status_message: live.qualityRating
+                ? `quality=${live.qualityRating}`
+                : null,
+              last_status_at: new Date().toISOString(),
+              me_jid: live.meJid,
+              me_pushname: live.verifiedName,
+              qr_data_url: null,
+            });
+            return json({
+              ok: true,
+              status: live.internalStatus,
+              me: live.meJid
+                ? { id: live.meJid, pushName: live.verifiedName }
+                : null,
+              display_phone_number: live.displayPhoneNumber,
+              webhooks_configured: true,
+              noweb_store_enabled: false,
+              provider: 'meta',
+            });
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : 'Error consultando Meta Cloud API';
+            await updateCfg({
+              last_status: 'FAILED',
+              last_status_message: msg,
+              last_status_at: new Date().toISOString(),
+            });
+            return json({ ok: false, status: 'FAILED', error: msg, provider: 'meta' });
+          }
+        }
         if (provider === 'openwa') {
           try {
             const s = await openwaGetSession(providerCfg);
@@ -2289,6 +2344,31 @@ serve(async (req) => {
       }
 
       case 'session.start': {
+        if (provider === 'meta') {
+          try {
+            const live = await metaGetPhoneStatus(
+              providerCfg as WhatsappProviderConfig & MetaCredentialFields,
+            );
+            await updateCfg({
+              last_status: live.internalStatus,
+              last_status_message: null,
+              last_status_at: new Date().toISOString(),
+              me_jid: live.meJid,
+              me_pushname: live.verifiedName,
+              qr_data_url: null,
+            });
+            return json({
+              ok: true,
+              status: live.internalStatus,
+              webhooks_configured: true,
+              noweb_store_enabled: false,
+              provider: 'meta',
+              note: 'Meta Cloud API no usa sesión QR. Configura el webhook en Meta Developer.',
+            });
+          } catch (e) {
+            return err(e instanceof Error ? e.message : 'No se pudo validar Meta Cloud API');
+          }
+        }
         if (provider === 'openwa') {
           await openwaStartSession(providerCfg);
           let webhooksConfigured = false;
@@ -2342,6 +2422,14 @@ serve(async (req) => {
       }
 
       case 'session.stop': {
+        if (provider === 'meta') {
+          await updateCfg({
+            last_status: 'STOPPED',
+            last_status_message: 'Meta Cloud API: envío pausado en Suite (el número sigue en Meta).',
+            last_status_at: new Date().toISOString(),
+          });
+          return json({ ok: true, provider: 'meta' });
+        }
         if (provider === 'openwa') {
           await openwaStopSession(providerCfg);
           await updateCfg({
@@ -2369,6 +2457,11 @@ serve(async (req) => {
       }
 
       case 'session.logout': {
+        if (provider === 'meta') {
+          return err(
+            'Meta Cloud API no tiene logout de QR. Desvincula el número en Meta Business / WhatsApp Manager si hace falta.',
+          );
+        }
         if (provider === 'openwa') {
           try {
             await openwaLogoutSession(providerCfg);
@@ -2405,6 +2498,9 @@ serve(async (req) => {
       }
 
       case 'session.qr': {
+        if (provider === 'meta') {
+          return err('Meta Cloud API no usa código QR. El número se gestiona en Meta Business.');
+        }
         if (provider === 'openwa') {
           try {
             const qr = await openwaGetQr(providerCfg);
@@ -2446,6 +2542,26 @@ serve(async (req) => {
       }
 
       case 'system.ping': {
+        if (provider === 'meta') {
+          const ping = await providerPing(providerCfg);
+          return json({
+            ok: true,
+            provider: 'meta',
+            diagnostics: {
+              base_url: cfg.base_url ?? '',
+              session_name: sessionName,
+              public_ok: ping.ok,
+              public_status: ping.status,
+              auth_ok: ping.ok,
+              auth_status: ping.status,
+              session_in_list: ping.ok,
+              sessions: ping.ok
+                ? [{ name: sessionName, status: 'WORKING' }]
+                : [],
+            },
+          });
+        }
+
         // Diagnóstico paso a paso para diferenciar entre:
         //   1) Waha inalcanzable
         //   2) Waha alcanzable pero API key inválida
@@ -2515,6 +2631,21 @@ serve(async (req) => {
           );
         }
         const webhookUrl = buildWebhookUrl(publicSupabaseUrl, companyId, cfg.webhook_secret);
+        if (provider === 'meta') {
+          const verifyToken = (cfg.meta_verify_token || cfg.webhook_secret || '').trim();
+          return json({
+            ok: true,
+            provider: 'meta',
+            webhook_url: webhookUrl.replace(/([?&])secret=[^&]+/, '$1').replace(/\?$/, ''),
+            webhook_url_with_company: `${publicSupabaseUrl.replace(/\/+$/, '')}/functions/v1/whatsapp-webhook?company_id=${companyId}`,
+            verify_token: verifyToken,
+            events: ['messages', 'message_deliveries'],
+            webhooks_configured: true,
+            noweb_store_enabled: false,
+            note:
+              'En Meta Developer → WhatsApp → Configuration: Callback URL = webhook_url_with_company, Verify token = verify_token. Suscribe el WABA a messages.',
+          });
+        }
         if (provider === 'openwa') {
           const configured = await openwaConfigureWebhook(
             { ...providerCfg, webhook_secret: cfg.webhook_secret },
@@ -2570,7 +2701,7 @@ serve(async (req) => {
         const offset = Math.max(Number(body.offset ?? 0), 0);
         let data: Array<Record<string, unknown>> = [];
 
-        if (provider === 'openwa') {
+        if (provider === 'openwa' || provider === 'meta') {
           // getChats() vía Puppeteer tarda >120s y tumba OpenWA (ProtocolError).
           // Los chats llegan por webhook y están en whatsapp_chats.
           const { count, error: countErr } = await admin
@@ -2584,7 +2715,9 @@ serve(async (req) => {
             count: count ?? 0,
             source: 'database',
             warning:
-              'OpenWA: lista desde BD (getChats deshabilitado; use webhooks para chats nuevos)',
+              provider === 'meta'
+                ? 'Meta Cloud API: lista desde BD (los chats nuevos llegan por webhook)'
+                : 'OpenWA: lista desde BD (getChats deshabilitado; use webhooks para chats nuevos)',
           });
         } else {
           try {
@@ -2698,6 +2831,16 @@ serve(async (req) => {
         const offset = Math.max(Number(body.offset ?? 0), 0);
         const chatId = body.chat_id;
         if (!chatId) return err('Falta chat_id');
+        if (provider === 'meta') {
+          return json({
+            ok: true,
+            count: 0,
+            offset,
+            has_more: false,
+            source: 'database',
+            warning: 'Meta Cloud API no sincroniza historial; los mensajes llegan por webhook',
+          });
+        }
         if (provider === 'openwa') {
           const rawMessages = await openwaListChatMessages(providerCfg, chatId, limit, offset);
           const orderedTs = assignBatchOrderedIsos(
@@ -3377,20 +3520,54 @@ serve(async (req) => {
               return respondBytes(stored.buf, stored.contentType);
             }
 
-            const result =
-              provider === 'openwa'
-                ? await openwaDownloadMedia(
-                    providerCfg,
-                    body.chat_id,
-                    body.message_id,
-                    body.alt_chat_ids ?? [],
-                  )
-                : await downloadMediaViaMessage(
-                    cfg,
-                    sessionName,
-                    body.chat_id,
-                    body.message_id,
-                  );
+            let result: { buf: ArrayBuffer; contentType?: string | null };
+            if (provider === 'meta') {
+              const { data: msgRow } = await admin
+                .from('whatsapp_messages')
+                .select('raw, media_mime_type')
+                .eq('company_id', companyId)
+                .eq('waha_message_id', body.message_id)
+                .maybeSingle();
+              const raw = (msgRow?.raw ?? null) as Record<string, unknown> | null;
+              const mediaId =
+                (typeof raw?.mediaId === 'string' && raw.mediaId) ||
+                (raw?.media && typeof (raw.media as { id?: string }).id === 'string'
+                  ? (raw.media as { id: string }).id
+                  : null) ||
+                (typeof raw?._data === 'object' &&
+                raw._data &&
+                typeof (raw._data as Record<string, unknown>)[String(raw.type ?? 'image')] === 'object'
+                  ? ((raw._data as Record<string, Record<string, unknown>>)[String(raw.type ?? 'image')]?.id as string | undefined)
+                  : null);
+              if (!mediaId) {
+                throw new Error('Meta Cloud API: mensaje sin media id');
+              }
+              const downloaded = await metaDownloadMediaById(
+                providerCfg as WhatsappProviderConfig & MetaCredentialFields,
+                mediaId,
+              );
+              result = {
+                buf: downloaded.bytes.buffer.slice(
+                  downloaded.bytes.byteOffset,
+                  downloaded.bytes.byteOffset + downloaded.bytes.byteLength,
+                ) as ArrayBuffer,
+                contentType: downloaded.mime ?? msgRow?.media_mime_type ?? null,
+              };
+            } else if (provider === 'openwa') {
+              result = await openwaDownloadMedia(
+                providerCfg,
+                body.chat_id,
+                body.message_id,
+                body.alt_chat_ids ?? [],
+              );
+            } else {
+              result = await downloadMediaViaMessage(
+                cfg,
+                sessionName,
+                body.chat_id,
+                body.message_id,
+              );
+            }
 
             if (body.message_id) {
               const mime = result.contentType ?? 'application/octet-stream';
@@ -3421,8 +3598,13 @@ serve(async (req) => {
           }
         }
 
-        if (provider === 'openwa') {
-          return err('OpenWA requiere chat_id y message_id para descargar media', 400);
+        if (provider === 'openwa' || provider === 'meta') {
+          return err(
+            provider === 'meta'
+              ? 'Meta Cloud API requiere chat_id y message_id para descargar media'
+              : 'OpenWA requiere chat_id y message_id para descargar media',
+            400,
+          );
         }
 
         if (body.url && !isExternalCdnMediaUrl(body.url)) {

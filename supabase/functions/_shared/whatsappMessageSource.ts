@@ -38,7 +38,9 @@ export function messageSourceProvider(
   raw: unknown,
   explicit?: WhatsappProvider | null,
 ): WhatsappProvider | null {
-  if (explicit === 'openwa' || explicit === 'waha') return explicit;
+  if (explicit === 'openwa' || explicit === 'waha' || explicit === 'meta') return explicit;
+  const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null;
+  if (r?.source === 'meta') return 'meta';
   return isOpenwaStoredMessage(raw) ? 'openwa' : 'waha';
 }
 

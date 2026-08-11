@@ -8,6 +8,12 @@ import {
   trimSlash,
 } from './whatsappProviderTypes.ts';
 import { resolveOpenwaSessionId } from './whatsappProviderOpenwa.ts';
+import {
+  metaPing,
+  metaSendMedia,
+  metaSendText,
+  type MetaCredentialFields,
+} from './whatsappProviderMeta.ts';
 
 const OPENWA_VOICE_FILENAME = 'voice.ogg';
 const WAHA_VOICE_MIME = 'audio/ogg; codecs=opus';
@@ -87,7 +93,9 @@ function authHeaders(cfg: WhatsappProviderConfig): Headers {
 }
 
 function providerLabel(provider: WhatsappProvider): string {
-  return provider === 'openwa' ? 'OpenWA' : 'WAHA';
+  if (provider === 'openwa') return 'OpenWA';
+  if (provider === 'meta') return 'Meta Cloud API';
+  return 'WAHA';
 }
 
 export async function providerFetch(
@@ -157,6 +165,11 @@ export function resolveOutgoingMessageId(
   res: unknown,
   chatId: string,
 ): string | null {
+  if (provider === 'meta') {
+    const r = res as { messages?: Array<{ id?: string }> };
+    const id = r.messages?.[0]?.id;
+    return typeof id === 'string' && id.trim() ? id.trim() : null;
+  }
   if (provider === 'openwa') {
     const r = res as { messageId?: string; id?: string };
     if (r.messageId?.trim()) return r.messageId.trim();
@@ -206,6 +219,10 @@ export async function providerSendText(
   const provider = normalizeWhatsappProvider(cfg.provider);
   const sessionName = cfg.session_name || 'default';
 
+  if (provider === 'meta') {
+    return metaSendText(cfg as WhatsappProviderConfig & MetaCredentialFields, chatId, text, opts);
+  }
+
   if (provider === 'openwa') {
     const sessionId = await resolveOpenwaSessionId(cfg);
     const payload: Record<string, unknown> = { chatId, text };
@@ -250,6 +267,13 @@ export async function providerSendMedia(
   const provider = normalizeWhatsappProvider(cfg.provider);
   const sessionName = cfg.session_name || 'default';
   const base64 = stripBase64Prefix(media.base64);
+
+  if (provider === 'meta') {
+    return metaSendMedia(cfg as WhatsappProviderConfig & MetaCredentialFields, chatId, type, {
+      ...media,
+      base64,
+    });
+  }
 
   if (provider === 'openwa') {
     const sessionId = await resolveOpenwaSessionId(cfg);
@@ -345,6 +369,10 @@ export async function providerSendMedia(
 
 export async function providerPing(cfg: WhatsappProviderConfig): Promise<{ ok: boolean; status?: number }> {
   const provider = normalizeWhatsappProvider(cfg.provider);
+  if (provider === 'meta') {
+    const r = await metaPing(cfg as WhatsappProviderConfig & MetaCredentialFields);
+    return { ok: r.ok, status: r.status };
+  }
   if (provider === 'openwa') {
     try {
       await providerJson(cfg, '/health');
@@ -362,6 +390,10 @@ export async function providerListSessions(
   cfg: WhatsappProviderConfig,
 ): Promise<Array<{ name?: string; id?: string; status?: string }>> {
   const provider = normalizeWhatsappProvider(cfg.provider);
+  if (provider === 'meta') {
+    const phoneId = cfg.session_name || 'default';
+    return [{ id: phoneId, name: phoneId, status: 'WORKING' }];
+  }
   if (provider === 'openwa') {
     const data = await providerJson<Array<{ id?: string; name?: string; status?: string }>>(cfg, '/sessions');
     return Array.isArray(data) ? data : [];

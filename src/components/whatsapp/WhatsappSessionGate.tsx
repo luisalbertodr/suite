@@ -60,7 +60,7 @@ export const WhatsappSessionGate: React.FC<Props> = ({ config, onConnected }) =>
     connectedNotifiedRef.current = false;
     const id = setInterval(() => {
       sessionStatus.mutate(undefined, { onError: () => undefined });
-      if (status === 'SCAN_QR_CODE') {
+      if (status === 'SCAN_QR_CODE' && config.provider !== 'meta') {
         fetchQr.mutate(undefined, { onError: () => undefined });
       }
     }, 5000);
@@ -76,7 +76,13 @@ export const WhatsappSessionGate: React.FC<Props> = ({ config, onConnected }) =>
   const handleStart = async () => {
     try {
       await sessionStart.mutateAsync();
-      toast({ title: 'Sesión iniciada', description: 'Espera el QR…' });
+      toast({
+        title: config.provider === 'meta' ? 'Meta Cloud API' : 'Sesión iniciada',
+        description:
+          config.provider === 'meta'
+            ? 'Token y Phone Number ID validados.'
+            : 'Espera el QR…',
+      });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'No se pudo iniciar';
       toast({ title: 'Error', description: msg, variant: 'destructive' });
@@ -94,8 +100,9 @@ export const WhatsappSessionGate: React.FC<Props> = ({ config, onConnected }) =>
             <div>
               <CardTitle>Conectar WhatsApp</CardTitle>
               <CardDescription>
-                Vincula tu cuenta de WhatsApp con la plataforma a través de Waha
-                para enviar y recibir mensajes desde aquí.
+                {config.provider === 'meta'
+                  ? 'Meta Cloud API no requiere escanear QR. Comprueba el token y el Phone Number ID en Configuración → WhatsApp.'
+                  : 'Vincula tu cuenta de WhatsApp con la plataforma a través de WAHA/OpenWA para enviar y recibir mensajes desde aquí.'}
               </CardDescription>
             </div>
           </div>
@@ -169,12 +176,14 @@ export const WhatsappSessionGate: React.FC<Props> = ({ config, onConnected }) =>
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                 <div>
                   <p className="font-medium">
-                    La sesión Waha no está activa.
+                    {config.provider === 'meta'
+                      ? 'Meta Cloud API no está validada.'
+                      : 'La sesión Waha/OpenWA no está activa.'}
                   </p>
                   <p className="text-xs">
-                    Pulsa "Iniciar sesión" para arrancarla en el servidor Waha.
-                    Después aparecerá un código QR que tendrás que escanear
-                    desde tu móvil.
+                    {config.provider === 'meta'
+                      ? 'Pulsa «Comprobar» para validar el access token y el Phone Number ID en Graph.'
+                      : 'Pulsa "Iniciar sesión" para arrancarla. Después aparecerá un código QR que tendrás que escanear desde tu móvil.'}
                   </p>
                 </div>
               </div>
@@ -185,7 +194,11 @@ export const WhatsappSessionGate: React.FC<Props> = ({ config, onConnected }) =>
             {!isWorking ? (
               <Button onClick={handleStart} disabled={sessionStart.isPending}>
                 <Power className="mr-2 h-4 w-4" />
-                {sessionStart.isPending ? 'Iniciando…' : 'Iniciar sesión'}
+                {sessionStart.isPending
+                  ? 'Comprobando…'
+                  : config.provider === 'meta'
+                    ? 'Comprobar Meta'
+                    : 'Iniciar sesión'}
               </Button>
             ) : (
               <>

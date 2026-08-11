@@ -1,6 +1,7 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { providerJson } from './whatsappProviderClient.ts';
 import { openwaGetSession } from './whatsappProviderOpenwa.ts';
+import { metaGetPhoneStatus, type MetaCredentialFields } from './whatsappProviderMeta.ts';
 import {
   normalizeWhatsappProvider,
   type WhatsappProviderConfig,
@@ -11,11 +12,18 @@ export type LiveWhatsappSessionStatus = {
   meJid: string | null;
 };
 
-/** Consulta el estado real de la sesión en WAHA/OpenWA (no el cache de BD). */
+/** Consulta el estado real de la sesión en WAHA/OpenWA/Meta (no el cache de BD). */
 export async function fetchLiveWhatsappSessionStatus(
   cfg: WhatsappProviderConfig,
 ): Promise<LiveWhatsappSessionStatus> {
   const provider = normalizeWhatsappProvider(cfg.provider);
+  if (provider === 'meta') {
+    const live = await metaGetPhoneStatus(cfg as WhatsappProviderConfig & MetaCredentialFields);
+    return {
+      internalStatus: live.internalStatus,
+      meJid: live.meJid,
+    };
+  }
   if (provider === 'openwa') {
     const session = await openwaGetSession(cfg);
     return {

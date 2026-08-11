@@ -21,6 +21,11 @@ import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-
 import { processAutomationReply } from '../_shared/marketingWhatsappAutomation.ts';
 import { mapOpenwaStatusToInternal } from '../_shared/whatsappProviderTypes.ts';
 import {
+  isMetaCloudWebhookBody,
+  metaCloudWebhookToWahaEnvelopes,
+  verifyMetaHubSignature,
+} from '../_shared/whatsappProviderMeta.ts';
+import {
   sanitizeWhatsappMessageType,
   whatsappMediaPreviewLabel,
   inferWhatsappMediaFromRaw,
@@ -31,8 +36,8 @@ import { isoFromUnixSecondsLive } from '../_shared/whatsappMessageOrder.ts';
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers':
-    'authorization, x-client-info, apikey, content-type, x-webhook-secret',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'authorization, x-client-info, apikey, content-type, x-webhook-secret, x-hub-signature-256',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 };
 
 const json = (body: unknown, status = 200) =>
@@ -882,7 +887,7 @@ async function handleMessage(
   companyId: string,
   payload: WahaMessagePayload,
   mePushName?: string | null,
-  sourceProvider: 'waha' | 'openwa' = 'waha',
+  sourceProvider: 'waha' | 'openwa' | 'meta' = 'waha',
 ) {
   const m = normalizeMessage(payload, mePushName);
   if (!m) {
@@ -1217,80 +1222,174 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (!supabaseUrl || !serviceKey) {
+    return json({ error: 'Faltan SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY' }, 500);
+  }
+  const admin = createClient(supabaseUrl, serviceKey);
+  const url = new URL(req.url);
+  const companyIdQuery = url.searchParams.get('company_id');
+
+  // Meta Cloud API webhook verification (GET hub.challenge)
+  if (req.method === 'GET') {
+    const mode = url.searchParams.get('hub.mode');
+    const token = url.searchParams.get('hub.verify_token') ?? '';
+    const challenge = url.searchParams.get('hub.challenge') ?? '';
+    if (mode !== 'subscribe' || !token || !challenge) {
+      return json({ error: 'Parámetros hub.* inválidos' }, 400);
+    }
+    if (!companyIdQuery) {
+      return json({ error: 'Falta company_id en la URL del webhook Meta' }, 400);
+    }
+    const { data: cfgRow } = await admin
+      .from('whatsapp_config')
+      .select('webhook_secret, meta_verify_token, enabled, provider')
+      .eq('company_id', companyIdQuery)
+      .maybeSingle();
+    if (!cfgRow) return json({ error: 'Empresa no encontrada' }, 404);
+    const expected = (cfgRow.meta_verify_token || cfgRow.webhook_secret || '').trim();
+    if (!expected || expected !== token) {
+      return json({ error: 'Verify token inválido' }, 403);
+    }
+    return new Response(challenge, {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'text/plain' },
+    });
+  }
+
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
 
   try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL');
-    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-    if (!supabaseUrl || !serviceKey) {
-      return json({ error: 'Faltan SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY' }, 500);
-    }
-    const admin = createClient(supabaseUrl, serviceKey);
-
-    const url = new URL(req.url);
-    const companyIdQuery = url.searchParams.get('company_id');
     const secret =
       req.headers.get('X-Webhook-Secret') ??
       req.headers.get('x-webhook-secret') ??
       url.searchParams.get('secret') ??
       url.searchParams.get('webhook_secret') ??
       '';
-    if (!secret) {
-      return json(
-        {
-          error:
-            'Falta X-Webhook-Secret (header) o ?secret=... / ?webhook_secret=... (query)',
-        },
-        401,
-      );
+
+    const bodyText = await req.text();
+    let rawBody: unknown = null;
+    try {
+      rawBody = bodyText ? JSON.parse(bodyText) : null;
+    } catch {
+      return json({ error: 'JSON inválido' }, 400);
     }
+
+    const isMeta = isMetaCloudWebhookBody(rawBody);
+    const hubSig = req.headers.get('X-Hub-Signature-256') ?? req.headers.get('x-hub-signature-256');
 
     let cfgRow: {
       company_id: string;
       webhook_secret: string | null;
       enabled: boolean;
       me_pushname: string | null;
+      provider?: string | null;
+      meta_app_secret?: string | null;
+      meta_verify_token?: string | null;
     } | null = null;
-    if (companyIdQuery) {
+
+    if (isMeta) {
+      if (!companyIdQuery) {
+        return json({ error: 'Webhook Meta requiere ?company_id= en la Callback URL' }, 400);
+      }
       const { data } = await admin
         .from('whatsapp_config')
-        .select('company_id, webhook_secret, enabled, me_pushname')
+        .select(
+          'company_id, webhook_secret, enabled, me_pushname, provider, meta_app_secret, meta_verify_token',
+        )
         .eq('company_id', companyIdQuery)
         .maybeSingle();
       cfgRow = data ?? null;
+      if (!cfgRow) return json({ error: 'Empresa no encontrada' }, 404);
+      if (!cfgRow.enabled) return json({ ok: true, ignored: 'disabled' });
+      const appSecret = (cfgRow.meta_app_secret || '').trim();
+      if (appSecret) {
+        const ok = await verifyMetaHubSignature(bodyText, appSecret, hubSig);
+        if (!ok) return json({ error: 'Firma Meta inválida (X-Hub-Signature-256)' }, 401);
+      } else if (secret) {
+        const expected = (cfgRow.webhook_secret || '').trim();
+        if (!expected || expected !== secret) {
+          return json({ error: 'Secreto inválido' }, 401);
+        }
+      }
+      // Sin app_secret ni secret: aceptar solo si provider=meta (entorno de prueba).
+      else if ((cfgRow.provider ?? '') !== 'meta') {
+        return json({ error: 'Configura meta_app_secret o webhook_secret' }, 401);
+      }
     } else {
-      const { data } = await admin
-        .from('whatsapp_config')
-        .select('company_id, webhook_secret, enabled, me_pushname')
-        .eq('webhook_secret', secret)
-        .limit(1);
-      cfgRow = (data && data[0]) ?? null;
-    }
-    if (!cfgRow) return json({ error: 'Empresa no encontrada' }, 404);
-    if (!cfgRow.webhook_secret || cfgRow.webhook_secret !== secret) {
-      return json({ error: 'Secreto inválido' }, 401);
-    }
-    if (!cfgRow.enabled) return json({ ok: true, ignored: 'disabled' });
+      if (!secret) {
+        return json(
+          {
+            error:
+              'Falta X-Webhook-Secret (header) o ?secret=... / ?webhook_secret=... (query)',
+          },
+          401,
+        );
+      }
+      if (companyIdQuery) {
+        const { data } = await admin
+          .from('whatsapp_config')
+          .select(
+            'company_id, webhook_secret, enabled, me_pushname, provider, meta_app_secret, meta_verify_token',
+          )
+          .eq('company_id', companyIdQuery)
+          .maybeSingle();
+        cfgRow = data ?? null;
+      } else {
+        const { data } = await admin
+          .from('whatsapp_config')
+          .select(
+            'company_id, webhook_secret, enabled, me_pushname, provider, meta_app_secret, meta_verify_token',
+          )
+          .eq('webhook_secret', secret)
+          .limit(1);
+        cfgRow = (data && data[0]) ?? null;
+      }
+      if (!cfgRow) return json({ error: 'Empresa no encontrada' }, 404);
+      if (!cfgRow.webhook_secret || cfgRow.webhook_secret !== secret) {
+        return json({ error: 'Secreto inválido' }, 401);
+      }
+      if (!cfgRow.enabled) return json({ ok: true, ignored: 'disabled' });
 
-    const bodyText = await req.text();
-    const openwaSig = req.headers.get('X-OpenWA-Signature');
-    if (openwaSig && !(await verifyOpenwaSignature(bodyText, cfgRow.webhook_secret, openwaSig))) {
-      return json({ error: 'Firma OpenWA inválida (X-OpenWA-Signature)' }, 401);
+      const openwaSig = req.headers.get('X-OpenWA-Signature');
+      if (openwaSig && !(await verifyOpenwaSignature(bodyText, cfgRow.webhook_secret, openwaSig))) {
+        return json({ error: 'Firma OpenWA inválida (X-OpenWA-Signature)' }, 401);
+      }
+    }
+
+    const companyId = cfgRow.company_id;
+
+    if (isMeta) {
+      const envelopes = metaCloudWebhookToWahaEnvelopes(rawBody);
+      let handled = 0;
+      for (const envelope of envelopes) {
+        const event = (envelope.event ?? '').toLowerCase();
+        if (event === 'message' || event === 'message.any') {
+          await handleMessage(
+            admin,
+            companyId,
+            (envelope.payload ?? {}) as WahaMessagePayload,
+            cfgRow.me_pushname,
+            'meta',
+          );
+          handled += 1;
+        } else if (event === 'message.ack') {
+          await handleAck(admin, companyId, (envelope.payload ?? {}) as WahaMessagePayload);
+          handled += 1;
+        }
+      }
+      return json({ ok: true, provider: 'meta', handled, events: envelopes.length });
     }
 
     let envelope: WahaEnvelope;
-    let fromOpenwa = false;
-    try {
-      const rawBody = bodyText ? JSON.parse(bodyText) : null;
-      fromOpenwa = isOpenwaWebhookBody(rawBody);
-      envelope = fromOpenwa
-        ? openwaToWahaEnvelope(rawBody as OpenwaWebhookEnvelope)
-        : (rawBody as WahaEnvelope);
-    } catch {
-      return json({ error: 'Body JSON inválido' }, 400);
-    }
+    const fromOpenwa = isOpenwaWebhookBody(rawBody);
+    envelope = fromOpenwa
+      ? openwaToWahaEnvelope(rawBody as OpenwaWebhookEnvelope)
+      : (rawBody as WahaEnvelope);
+
     const event = (envelope.event ?? '').toLowerCase();
-    const companyId = cfgRow.company_id;
 
     if (event === 'test') {
       return json({ ok: true, test: true });
@@ -1349,11 +1448,11 @@ serve(async (req) => {
           .eq('chat_id', groupId);
       }
     }
-    // Eventos desconocidos: 200 OK silencioso (Waha no reintenta).
 
-    return json({ ok: true });
+    return json({ ok: true, provider: fromOpenwa ? 'openwa' : 'waha', event });
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Error inesperado';
+    console.error('whatsapp-webhook error', e);
     return json({ error: msg }, 500);
   }
 });

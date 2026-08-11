@@ -226,6 +226,8 @@ export const Whatsapp: React.FC = () => {
     webhookFixAttempted.current = true;
 
     const isOpenwa = config.provider === 'openwa';
+    const isMeta = config.provider === 'meta';
+    if (isMeta) return;
 
     sessionStatus.mutate(undefined, {
 

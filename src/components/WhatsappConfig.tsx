@@ -32,7 +32,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { useWhatsappConfig, type WhatsappConfigRow } from '@/hooks/useWhatsappConfig';
 
-type WhatsappProviderId = 'waha' | 'openwa';
+type WhatsappProviderId = 'waha' | 'openwa' | 'meta';
 
 type ProviderDraft = {
   baseUrl: string;
@@ -43,6 +43,7 @@ function emptyDrafts(): Record<WhatsappProviderId, ProviderDraft> {
   return {
     waha: { baseUrl: '', sessionName: 'default' },
     openwa: { baseUrl: '', sessionName: 'default' },
+    meta: { baseUrl: 'v21.0', sessionName: '' },
   };
 }
 
@@ -53,27 +54,33 @@ function storedApiKeyForProvider(
   if (p === 'openwa') {
     return config.openwa_api_key ?? (config.provider === 'openwa' ? config.api_key : null);
   }
-  return config.waha_api_key ?? (config.provider !== 'openwa' ? config.api_key : null);
+  if (p === 'meta') {
+    return config.meta_access_token ?? (config.provider === 'meta' ? config.api_key : null);
+  }
+  return config.waha_api_key ?? (config.provider === 'waha' || !config.provider ? config.api_key : null);
 }
 
 function draftsFromConfig(config: WhatsappConfigRow): Record<WhatsappProviderId, ProviderDraft> {
   const activeIsOpenwa = config.provider === 'openwa';
+  const activeIsMeta = config.provider === 'meta';
   return {
     waha: {
       baseUrl:
-        config.waha_base_url ?? (!activeIsOpenwa ? config.base_url ?? '' : ''),
+        config.waha_base_url ?? (!activeIsOpenwa && !activeIsMeta ? config.base_url ?? '' : ''),
       sessionName:
         config.waha_session_name ??
-        (!activeIsOpenwa ? config.session_name : null) ??
-        'default',
+        (!activeIsOpenwa && !activeIsMeta ? config.session_name ?? 'default' : 'default'),
     },
     openwa: {
       baseUrl:
         config.openwa_base_url ?? (activeIsOpenwa ? config.base_url ?? '' : ''),
       sessionName:
         config.openwa_session_name ??
-        (activeIsOpenwa ? config.session_name : null) ??
-        'default',
+        (activeIsOpenwa ? config.session_name ?? 'default' : 'default'),
+    },
+    meta: {
+      baseUrl: config.meta_graph_version ?? 'v21.0',
+      sessionName: config.meta_phone_number_id ?? (activeIsMeta ? config.session_name ?? '' : ''),
     },
   };
 }
@@ -136,11 +143,17 @@ export const WhatsappConfig: React.FC = () => {
   const [apiKeyInputs, setApiKeyInputs] = useState<Record<WhatsappProviderId, string>>({
     waha: '',
     openwa: '',
+    meta: '',
   });
   const [hasStoredKeys, setHasStoredKeys] = useState<Record<WhatsappProviderId, boolean>>({
     waha: false,
     openwa: false,
+    meta: false,
   });
+  const [metaWabaId, setMetaWabaId] = useState('');
+  const [metaAppSecret, setMetaAppSecret] = useState('');
+  const [metaVerifyToken, setMetaVerifyToken] = useState('');
+  const [hasMetaAppSecret, setHasMetaAppSecret] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const [webhookSecret, setWebhookSecret] = useState('');
   const [defaultCountry, setDefaultCountry] = useState('34');
@@ -152,7 +165,7 @@ export const WhatsappConfig: React.FC = () => {
   const apiKey = apiKeyInputs[provider];
   const hasStoredKey = hasStoredKeys[provider];
   const activeProvider: WhatsappProviderId =
-    config?.provider === 'openwa' ? 'openwa' : 'waha';
+    config?.provider === 'openwa' ? 'openwa' : config?.provider === 'meta' ? 'meta' : 'waha';
   const needsSaveToActivate = provider !== activeProvider;
 
   useEffect(() => {
@@ -161,9 +174,16 @@ export const WhatsappConfig: React.FC = () => {
     setHasStoredKeys({
       waha: hasStoredKeyForProvider(config, 'waha'),
       openwa: hasStoredKeyForProvider(config, 'openwa'),
+      meta: hasStoredKeyForProvider(config, 'meta'),
     });
-    setApiKeyInputs({ waha: '', openwa: '' });
-    setProvider(config.provider === 'openwa' ? 'openwa' : 'waha');
+    setApiKeyInputs({ waha: '', openwa: '', meta: '' });
+    setProvider(
+      config.provider === 'openwa' ? 'openwa' : config.provider === 'meta' ? 'meta' : 'waha',
+    );
+    setMetaWabaId(config.meta_waba_id ?? '');
+    setMetaVerifyToken(config.meta_verify_token ?? '');
+    setMetaAppSecret('');
+    setHasMetaAppSecret(!!config.meta_app_secret);
     setWebhookSecret(config.webhook_secret ?? '');
     setDefaultCountry(config.default_country_code ?? '34');
     setEnabled(config.enabled ?? true);
@@ -174,6 +194,11 @@ export const WhatsappConfig: React.FC = () => {
     config?.waha_session_name,
     config?.openwa_base_url,
     config?.openwa_session_name,
+    config?.meta_phone_number_id,
+    config?.meta_graph_version,
+    config?.meta_waba_id,
+    config?.meta_verify_token,
+    config?.meta_app_secret,
     config?.base_url,
     config?.session_name,
     config?.webhook_secret,
@@ -202,10 +227,23 @@ export const WhatsappConfig: React.FC = () => {
   const handleApplyWebhook = async () => {
     try {
       const res = await configureWebhook.mutateAsync(undefined);
-      const providerLabel = activeProvider === 'openwa' ? 'OpenWA' : 'WAHA';
+      const providerLabel =
+        activeProvider === 'openwa'
+          ? 'OpenWA'
+          : activeProvider === 'meta'
+            ? 'Meta Cloud API'
+            : 'WAHA';
       toast({
-        title: `Webhook aplicado en ${providerLabel}`,
-        description: `Eventos: ${res.events.join(', ')}`,
+        title:
+          activeProvider === 'meta'
+            ? 'Datos webhook Meta listos'
+            : `Webhook aplicado en ${providerLabel}`,
+        description:
+          activeProvider === 'meta'
+            ? (res as { webhook_url_with_company?: string; verify_token?: string; note?: string })
+                .note ??
+              `URL: ${(res as { webhook_url_with_company?: string }).webhook_url_with_company ?? ''} · verify: ${(res as { verify_token?: string }).verify_token ?? ''}`
+            : `Eventos: ${res.events.join(', ')}`,
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'No se pudo aplicar el webhook';
@@ -269,8 +307,17 @@ export const WhatsappConfig: React.FC = () => {
     try {
       const wahaDraft = drafts.waha;
       const openwaDraft = drafts.openwa;
+      const metaDraft = drafts.meta;
       const activeDraft = drafts[provider];
       const activeApiKey = apiKeyInputs[provider].trim();
+      const activeBaseUrl =
+        provider === 'meta'
+          ? `https://graph.facebook.com/${(metaDraft.baseUrl || 'v21.0').trim()}`
+          : activeDraft.baseUrl.trim() || null;
+      const activeSession =
+        provider === 'meta'
+          ? metaDraft.sessionName.trim() || 'default'
+          : activeDraft.sessionName.trim() || 'default';
 
       await upsertConfig.mutateAsync({
         provider,
@@ -278,21 +325,30 @@ export const WhatsappConfig: React.FC = () => {
         waha_session_name: wahaDraft.sessionName.trim() || 'default',
         openwa_base_url: openwaDraft.baseUrl.trim() || null,
         openwa_session_name: openwaDraft.sessionName.trim() || 'default',
-        base_url: activeDraft.baseUrl.trim() || null,
-        session_name: activeDraft.sessionName.trim() || 'default',
+        meta_phone_number_id: metaDraft.sessionName.trim() || null,
+        meta_graph_version: metaDraft.baseUrl.trim() || 'v21.0',
+        meta_waba_id: metaWabaId.trim() || null,
+        meta_verify_token: metaVerifyToken.trim() || null,
+        base_url: activeBaseUrl,
+        session_name: activeSession,
         webhook_secret: webhookSecret.trim() || null,
         default_country_code: defaultCountry.trim() || null,
         enabled,
         ...(apiKeyInputs.waha.trim() ? { waha_api_key: apiKeyInputs.waha.trim() } : {}),
         ...(apiKeyInputs.openwa.trim() ? { openwa_api_key: apiKeyInputs.openwa.trim() } : {}),
+        ...(apiKeyInputs.meta.trim() ? { meta_access_token: apiKeyInputs.meta.trim() } : {}),
+        ...(metaAppSecret.trim() ? { meta_app_secret: metaAppSecret.trim() } : {}),
         ...(activeApiKey ? { api_key: activeApiKey } : {}),
       });
-      setApiKeyInputs({ waha: '', openwa: '' });
+      setApiKeyInputs({ waha: '', openwa: '', meta: '' });
+      setMetaAppSecret('');
       setShowKey(false);
       setHasStoredKeys((prev) => ({
         waha: prev.waha || !!apiKeyInputs.waha.trim(),
         openwa: prev.openwa || !!apiKeyInputs.openwa.trim(),
+        meta: prev.meta || !!apiKeyInputs.meta.trim(),
       }));
+      if (metaAppSecret.trim()) setHasMetaAppSecret(true);
       toast({ title: 'Configuración WhatsApp guardada' });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'No se pudo guardar';
@@ -302,7 +358,8 @@ export const WhatsappConfig: React.FC = () => {
 
   const handleClearKey = async () => {
     try {
-      const keyField = provider === 'openwa' ? 'openwa_api_key' : 'waha_api_key';
+      const keyField =
+        provider === 'openwa' ? 'openwa_api_key' : provider === 'meta' ? 'meta_access_token' : 'waha_api_key';
       await upsertConfig.mutateAsync({
         [keyField]: null,
         ...(activeProvider === provider ? { api_key: null } : {}),
@@ -408,7 +465,9 @@ export const WhatsappConfig: React.FC = () => {
               <Label>Proveedor API</Label>
               <Select
                 value={provider}
-                onValueChange={(v) => setProvider(v === 'openwa' ? 'openwa' : 'waha')}
+                onValueChange={(v) =>
+                  setProvider(v === 'openwa' ? 'openwa' : v === 'meta' ? 'meta' : 'waha')
+                }
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -416,38 +475,64 @@ export const WhatsappConfig: React.FC = () => {
                 <SelectContent>
                   <SelectItem value="waha">WAHA (devlikeapro)</SelectItem>
                   <SelectItem value="openwa">OpenWA (open-wa.org)</SelectItem>
+                  <SelectItem value="meta">Meta Cloud API (oficial)</SelectItem>
                 </SelectContent>
               </Select>
               <p className="text-[11px] text-muted-foreground">
-                WAHA: URL típica <code className="text-xs">http://host:3333</code>. OpenWA:
-                <code className="text-xs"> http://host:2785</code>. Cada proveedor guarda sus propios
-                datos; al cambiar el selector no se pierden.
+                WAHA/OpenWA: sesión QR no oficial. Meta Cloud API: canal oficial (plantillas + ventana
+                24h). Cada proveedor guarda sus credenciales; puedes volver a WAHA/OpenWA cuando
+                quieras.
               </p>
               {needsSaveToActivate ? (
                 <p className="text-[11px] text-amber-700 dark:text-amber-300">
-                  Estás editando {provider === 'openwa' ? 'OpenWA' : 'WAHA'}. Guarda para activarlo
-                  (ahora en uso: {activeProvider === 'openwa' ? 'OpenWA' : 'WAHA'}).
+                  Estás editando{' '}
+                  {provider === 'openwa' ? 'OpenWA' : provider === 'meta' ? 'Meta Cloud API' : 'WAHA'}.
+                  Guarda para activarlo (ahora en uso:{' '}
+                  {activeProvider === 'openwa'
+                    ? 'OpenWA'
+                    : activeProvider === 'meta'
+                      ? 'Meta Cloud API'
+                      : 'WAHA'}
+                  ).
                 </p>
               ) : null}
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="wa-base-url">URL base del servidor</Label>
-              <Input
-                id="wa-base-url"
-                value={baseUrl}
-                onChange={(e) => updateDraft({ baseUrl: e.target.value })}
-                placeholder={
-                  provider === 'openwa' ? 'http://192.168.1.10:2785' : 'https://waha.lipoout.com'
-                }
-              />
-              <p className="text-[11px] text-muted-foreground">
-                Endpoint HTTP de tu instancia {provider === 'openwa' ? 'OpenWA' : 'WAHA'}.
-              </p>
-            </div>
+            {provider === 'meta' ? (
+              <div className="space-y-2">
+                <Label htmlFor="wa-base-url">Versión Graph API</Label>
+                <Input
+                  id="wa-base-url"
+                  value={baseUrl}
+                  onChange={(e) => updateDraft({ baseUrl: e.target.value })}
+                  placeholder="v21.0"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  P.ej. <code className="text-xs">v21.0</code>. Suite usa{' '}
+                  <code className="text-xs">https://graph.facebook.com/&#123;versión&#125;</code>.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label htmlFor="wa-base-url">URL base del servidor</Label>
+                <Input
+                  id="wa-base-url"
+                  value={baseUrl}
+                  onChange={(e) => updateDraft({ baseUrl: e.target.value })}
+                  placeholder={
+                    provider === 'openwa' ? 'http://192.168.1.10:2785' : 'https://waha.lipoout.com'
+                  }
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Endpoint HTTP de tu instancia {provider === 'openwa' ? 'OpenWA' : 'WAHA'}.
+                </p>
+              </div>
+            )}
 
             <div className="space-y-2">
-              <Label htmlFor="wa-api-key">API key (X-Api-Key)</Label>
+              <Label htmlFor="wa-api-key">
+                {provider === 'meta' ? 'Access token (Bearer)' : 'API key (X-Api-Key)'}
+              </Label>
               <div className="flex items-center gap-2">
                 <div className="relative flex-1">
                   <Input
@@ -460,7 +545,9 @@ export const WhatsappConfig: React.FC = () => {
                     placeholder={
                       hasStoredKey
                         ? `Guardada (${maskToken(config ? storedApiKeyForProvider(config, provider) : null)}). Deja en blanco para no cambiar.`
-                        : `Tu API key de ${provider === 'openwa' ? 'OpenWA' : 'WAHA'}…`
+                        : provider === 'meta'
+                          ? 'Token permanente de System User / WhatsApp…'
+                          : `Tu API key de ${provider === 'openwa' ? 'OpenWA' : 'WAHA'}…`
                     }
                   />
                   <button
@@ -486,18 +573,68 @@ export const WhatsappConfig: React.FC = () => {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="wa-session">Nombre de sesión</Label>
+              <Label htmlFor="wa-session">
+                {provider === 'meta' ? 'Phone Number ID' : 'Nombre de sesión'}
+              </Label>
               <Input
                 id="wa-session"
                 value={sessionName}
                 onChange={(e) => updateDraft({ sessionName: e.target.value })}
-                placeholder="default"
+                placeholder={provider === 'meta' ? '123456789012345' : 'default'}
               />
               <p className="text-[11px] text-muted-foreground">
-                Identificador de sesión en {provider === 'openwa' ? 'OpenWA' : 'WAHA'} (se guarda por
-                proveedor).
+                {provider === 'meta'
+                  ? 'ID del número en Meta (WhatsApp → API Setup), no el E.164.'
+                  : `Identificador de sesión en ${provider === 'openwa' ? 'OpenWA' : 'WAHA'} (se guarda por proveedor).`}
               </p>
             </div>
+
+            {provider === 'meta' ? (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="wa-meta-waba">WABA ID (opcional)</Label>
+                  <Input
+                    id="wa-meta-waba"
+                    value={metaWabaId}
+                    onChange={(e) => setMetaWabaId(e.target.value)}
+                    placeholder="WhatsApp Business Account ID"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="wa-meta-app-secret">App Secret</Label>
+                  <Input
+                    id="wa-meta-app-secret"
+                    type="password"
+                    value={metaAppSecret}
+                    onChange={(e) => setMetaAppSecret(e.target.value)}
+                    placeholder={
+                      hasMetaAppSecret
+                        ? 'Guardado. Déjalo en blanco para no cambiar.'
+                        : 'Para validar X-Hub-Signature-256'
+                    }
+                  />
+                </div>
+                <div className="space-y-2 md:col-span-2">
+                  <Label htmlFor="wa-meta-verify">Verify token (hub.verify_token)</Label>
+                  <Input
+                    id="wa-meta-verify"
+                    value={metaVerifyToken}
+                    onChange={(e) => setMetaVerifyToken(e.target.value)}
+                    placeholder="Si vacío, Suite usará el secreto del webhook"
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    Callback URL en Meta:{' '}
+                    <code className="text-xs break-all">
+                      {((import.meta.env.VITE_SUPABASE_URL as string | undefined) ?? '').replace(
+                        /\/+$/,
+                        '',
+                      )}
+                      /functions/v1/whatsapp-webhook?company_id=…
+                    </code>
+                  </p>
+                </div>
+              </>
+            ) : null}
 
             <div className="space-y-2">
               <Label htmlFor="wa-country">Prefijo país por defecto</Label>
@@ -582,7 +719,15 @@ export const WhatsappConfig: React.FC = () => {
             <div>
               <CardTitle>Webhook para recibir mensajes</CardTitle>
               <CardDescription>
-                {activeProvider === 'openwa' ? (
+                {activeProvider === 'meta' ? (
+                  <>
+                    En Meta Developer → WhatsApp → Configuration: Callback URL ={' '}
+                    <code className="text-xs">…/whatsapp-webhook?company_id=&#123;uuid&#125;</code>,
+                    Verify token = el de abajo (o el secreto del webhook). Suscribe el WABA al campo{' '}
+                    <code>messages</code>. El botón genera la URL y el token a copiar (Meta no se
+                    configura por API desde Suite).
+                  </>
+                ) : activeProvider === 'openwa' ? (
                   <>
                     Suite registra el webhook en OpenWA vía{' '}
                     <code className="text-xs">POST /api/sessions/&#123;id&#125;/webhooks</code>{' '}
@@ -681,7 +826,9 @@ export const WhatsappConfig: React.FC = () => {
                 !webhookSecret
               }
               title={
-                activeProvider === 'openwa'
+                activeProvider === 'meta'
+                  ? 'Muestra la Callback URL y verify token para Meta Developer'
+                  : activeProvider === 'openwa'
                   ? 'Registra POST /api/sessions/{id}/webhooks en OpenWA'
                   : 'Configura automáticamente el webhook en WAHA con la URL + eventos correctos'
               }
@@ -689,7 +836,9 @@ export const WhatsappConfig: React.FC = () => {
               <Webhook className="mr-2 h-3.5 w-3.5" />
               {configureWebhook.isPending
                 ? 'Aplicando…'
-                : activeProvider === 'openwa'
+                : activeProvider === 'meta'
+                  ? 'Obtener datos webhook Meta'
+                  : activeProvider === 'openwa'
                   ? 'Aplicar webhook en OpenWA'
                   : 'Aplicar webhook en WAHA'}
             </Button>
@@ -706,8 +855,9 @@ export const WhatsappConfig: React.FC = () => {
             <div>
               <CardTitle>Sesión de WhatsApp</CardTitle>
               <CardDescription>
-                Controla la sesión que Waha mantiene con WhatsApp. Aquí puedes
-                iniciarla, detenerla o desvincular el teléfono.
+                {activeProvider === 'meta'
+                  ? 'Meta Cloud API no usa QR. «Iniciar / comprobar» valida el token y el Phone Number ID en Graph.'
+                  : 'Controla la sesión que WAHA/OpenWA mantiene con WhatsApp (iniciar, QR, detener o desvincular).'}
               </CardDescription>
             </div>
           </div>
@@ -728,12 +878,16 @@ export const WhatsappConfig: React.FC = () => {
               onClick={() => sessionStart.mutate()}
               disabled={sessionStart.isPending}
             >
-              {sessionStart.isPending ? 'Iniciando…' : 'Iniciar sesión'}
+              {sessionStart.isPending
+                ? 'Comprobando…'
+                : activeProvider === 'meta'
+                  ? 'Comprobar Meta Cloud API'
+                  : 'Iniciar sesión'}
             </Button>
             <Button
               variant="outline"
               onClick={() => fetchQr.mutate()}
-              disabled={fetchQr.isPending}
+              disabled={fetchQr.isPending || activeProvider === 'meta'}
             >
               {fetchQr.isPending ? 'Pidiendo QR…' : 'Refrescar QR'}
             </Button>

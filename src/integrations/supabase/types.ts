@@ -4798,6 +4798,12 @@ export type Database = {
           openwa_base_url: string | null
           openwa_api_key: string | null
           openwa_session_name: string | null
+          meta_access_token: string | null
+          meta_phone_number_id: string | null
+          meta_waba_id: string | null
+          meta_app_secret: string | null
+          meta_verify_token: string | null
+          meta_graph_version: string | null
           qr_data_url: string | null
           qr_updated_at: string | null
           session_name: string
@@ -4823,6 +4829,12 @@ export type Database = {
           openwa_base_url?: string | null
           openwa_api_key?: string | null
           openwa_session_name?: string | null
+          meta_access_token?: string | null
+          meta_phone_number_id?: string | null
+          meta_waba_id?: string | null
+          meta_app_secret?: string | null
+          meta_verify_token?: string | null
+          meta_graph_version?: string | null
           qr_data_url?: string | null
           qr_updated_at?: string | null
           session_name?: string
@@ -4848,6 +4860,12 @@ export type Database = {
           openwa_base_url?: string | null
           openwa_api_key?: string | null
           openwa_session_name?: string | null
+          meta_access_token?: string | null
+          meta_phone_number_id?: string | null
+          meta_waba_id?: string | null
+          meta_app_secret?: string | null
+          meta_verify_token?: string | null
+          meta_graph_version?: string | null
           qr_data_url?: string | null
           qr_updated_at?: string | null
           session_name?: string
