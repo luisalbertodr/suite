@@ -1,8 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
@@ -10,6 +9,7 @@ import { Archive, ArchiveRestore, Plus, Search, Edit2, Users, Mail, Phone } from
 import { useToast } from '@/hooks/use-toast';
 import { ClienteForm } from './ClienteForm';
 import { ClienteDetailView } from './ClienteDetailView';
+import { ClientesTopBarSearchControls } from './ClientesTopBarSearchControls';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { useWorkCenter } from '@/hooks/useWorkCenter';
 import { useCustomerSearch, type CustomerListMode } from '@/hooks/useCustomerSearch';
@@ -143,19 +143,81 @@ export const Clientes: React.FC = () => {
     onError: () => toast({ title: 'Error al restaurar', variant: 'destructive' }),
   });
 
-  const openNewCustomerForm = () => {
+  const openNewCustomerForm = useCallback(() => {
     setSelectedCustomer(null);
     setView('form');
-  };
+  }, []);
 
-  const topBarActions = useMemo(() => (
-    <Button
-      onClick={openNewCustomerForm}
-      className="h-7 bg-sky-500 px-2 text-xs text-white hover:bg-sky-600"
-    >
-      <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo Cliente
-    </Button>
-  ), []);
+  const isArchivedMode = listMode === 'archived';
+  const viewRef = React.useRef(view);
+  viewRef.current = view;
+  const searchTermRef = React.useRef(searchTerm);
+  searchTermRef.current = searchTerm;
+
+  const returnToCustomerList = useCallback(() => {
+    setView('list');
+    setSelectedCustomerId(null);
+    setSelectedCustomer(null);
+    setInitialQuestionnaireId(null);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('customer');
+        next.delete('tab');
+        next.delete('questionnaire');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
+
+  const onSearchTermChange = useCallback(
+    (term: string) => {
+      setSearchTerm(term);
+      // Al buscar desde ficha/formulario, volver al listado sin desmontar el input.
+      if (term.trim() && viewRef.current !== 'list') {
+        returnToCustomerList();
+      }
+    },
+    [returnToCustomerList],
+  );
+
+  const onListModeChange = useCallback(
+    (mode: CustomerListMode) => {
+      setListMode(mode);
+      setSearchTerm('');
+      if (viewRef.current !== 'list') {
+        returnToCustomerList();
+      }
+    },
+    [returnToCustomerList],
+  );
+
+  const getInitialSearchTerm = useCallback(() => searchTermRef.current, []);
+
+  const topBarActions = useMemo(
+    () => (
+      <div className="flex min-w-0 max-w-full flex-wrap items-center justify-center gap-1.5">
+        <ClientesTopBarSearchControls
+          listMode={listMode}
+          getInitialSearchTerm={getInitialSearchTerm}
+          onListModeChange={onListModeChange}
+          onSearchTermChange={onSearchTermChange}
+        />
+        {!isArchivedMode ? (
+          <Button
+            type="button"
+            onClick={openNewCustomerForm}
+            className="h-7 shrink-0 bg-sky-500 px-2 text-xs text-white hover:bg-sky-600"
+          >
+            <Plus className="mr-1 h-3.5 w-3.5" /> Nuevo Cliente
+          </Button>
+        ) : null}
+      </div>
+    ),
+    // Sin searchTerm: el input no se remonta al teclear; getInitialSearchTerm restaura al volver.
+    [listMode, isArchivedMode, getInitialSearchTerm, onListModeChange, onSearchTermChange, openNewCustomerForm],
+  );
 
   useRegisterTopBarContent(
     {
@@ -218,56 +280,15 @@ export const Clientes: React.FC = () => {
   }
 
   const searchHintReady = listMode === 'archived' || isCustomerSearchQueryReady(searchTerm);
-  const isArchivedMode = listMode === 'archived';
 
   return (
     <div className="space-y-6">
       <Card>
-        <CardHeader className="pb-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Users className="w-4 h-4" />
-              {isArchivedMode ? 'Clientes archivados' : 'Lista de Clientes'}
-            </CardTitle>
-            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
-              <Button
-                type="button"
-                variant={isArchivedMode ? 'default' : 'outline'}
-                onClick={() => {
-                  setListMode(isArchivedMode ? 'active' : 'archived');
-                  setSearchTerm('');
-                }}
-                className="h-9 shrink-0"
-              >
-                <Archive className="w-4 h-4 mr-2" />
-                {isArchivedMode ? 'Ver activos' : 'Archivados'}
-              </Button>
-              {!isArchivedMode && (
-                <Button
-                  type="button"
-                  onClick={openNewCustomerForm}
-                  className="h-9 shrink-0 bg-sky-500 text-white hover:bg-sky-600"
-                >
-                  <Plus className="w-4 h-4 mr-2" />
-                  Nuevo Cliente
-                </Button>
-              )}
-              <div className="relative w-full sm:w-72">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground w-4 h-4" />
-                <Input
-                  placeholder={
-                    isArchivedMode
-                      ? 'Buscar archivados…'
-                      : `Buscar (mín. ${CUSTOMER_SEARCH_MIN_CHARS} letras o números)…`
-                  }
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-9 h-9"
-                  autoFocus
-                />
-              </div>
-            </div>
-          </div>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Users className="w-4 h-4" />
+            {isArchivedMode ? 'Clientes archivados' : 'Lista de Clientes'}
+          </CardTitle>
         </CardHeader>
         <CardContent>
           {!searchHintReady ? (
@@ -279,14 +300,6 @@ export const Clientes: React.FC = () => {
               <p className="text-xs text-muted-foreground mt-1">
                 Nombre, DNI, teléfono, email o código legacy.
               </p>
-              <Button
-                type="button"
-                onClick={openNewCustomerForm}
-                className="mt-6 bg-sky-500 text-white hover:bg-sky-600"
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                Nuevo Cliente
-              </Button>
             </div>
           ) : isLoading ? (
             <div className="flex justify-center py-8">

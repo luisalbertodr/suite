@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import type { PostgrestError } from '@supabase/supabase-js';
 import { bonoSessionsDisplay } from '@/lib/bonoSessionsDisplay';
+import { isBonoUsable } from '@/lib/bonoUsable';
 
 export type ActiveBonoCoverageLine = {
   index: number;
@@ -28,6 +29,8 @@ export type CustomerActiveBono = {
   article_id?: string | null;
   article_price?: number;
   article_duration?: number;
+  fecha_vencimiento?: string | null;
+  estado?: string | null;
 };
 
 const isMissingRelation = (error: PostgrestError | null) =>
@@ -59,7 +62,9 @@ function parseCoverage(raw: unknown): ActiveBonoCoverageLine[] {
 async function fetchVoucherBonos(companyId: string, customerId: string): Promise<CustomerActiveBono[]> {
   const { data, error } = await supabase
     .from('customer_vouchers')
-    .select('id,article_id,total_sessions,used_sessions,is_active,bonus_definition_id,coverage_items,voucher_code,articles(descripcion,precio,duration_minutes)')
+    .select(
+      'id,article_id,total_sessions,used_sessions,is_active,expiry_date,bonus_definition_id,coverage_items,voucher_code,articles(descripcion,precio,duration_minutes)',
+    )
     .eq('company_id', companyId)
     .eq('customer_id', customerId)
     .eq('is_active', true)
@@ -71,6 +76,8 @@ async function fetchVoucherBonos(companyId: string, customerId: string): Promise
       const coverage_items = parseCoverage(v.coverage_items);
       const sesiones_totales = Number(v.total_sessions || 0);
       const sesiones_usadas = Number(v.used_sessions || 0);
+      const fecha_vencimiento = v.expiry_date ?? null;
+      const estado = v.is_active === false ? 'completado' : 'activo';
       const base = {
         id: String(v.id),
         nombre: v.voucher_code || v.articles?.descripcion || 'Bono',
@@ -82,10 +89,18 @@ async function fetchVoucherBonos(companyId: string, customerId: string): Promise
         article_id: v.article_id ? String(v.article_id) : null,
         article_price: Math.max(0, Number(v.articles?.precio || 0)),
         article_duration: Math.max(0, Number(v.articles?.duration_minutes || 0)),
+        fecha_vencimiento,
+        estado,
       };
       return { ...base, remaining: bonoSessionsDisplay(base).remaining };
     })
-    .filter((b) => b.remaining > 0);
+    .filter((b) =>
+      isBonoUsable({
+        estado: b.estado,
+        remaining: b.remaining,
+        fecha_vencimiento: b.fecha_vencimiento,
+      }),
+    );
 }
 
 export async function fetchCustomerActiveBonos(
@@ -94,10 +109,10 @@ export async function fetchCustomerActiveBonos(
 ): Promise<CustomerActiveBono[]> {
   const { data: bonosRows, error: bonosError } = await supabase
     .from('bonos')
-    .select('id,nombre,legacy_codboncli,sesiones_totales,sesiones_usadas,estado,coverage_items')
+    .select('id,nombre,legacy_codboncli,sesiones_totales,sesiones_usadas,estado,fecha_vencimiento,coverage_items')
     .eq('company_id', companyId)
     .eq('customer_id', customerId)
-    .neq('estado', 'completado')
+    .eq('estado', 'activo')
     .order('created_at', { ascending: false });
 
   if (!bonosError) {
@@ -114,10 +129,18 @@ export async function fetchCustomerActiveBonos(
           sesiones_usadas,
           coverage_items,
           storage: 'bonos' as const,
+          fecha_vencimiento: row.fecha_vencimiento ?? null,
+          estado: row.estado ?? null,
         };
         return { ...base, remaining: bonoSessionsDisplay(base).remaining };
       })
-      .filter((b) => b.remaining > 0);
+      .filter((b) =>
+        isBonoUsable({
+          estado: b.estado,
+          remaining: b.remaining,
+          fecha_vencimiento: b.fecha_vencimiento,
+        }),
+      );
   }
 
   if (!isMissingRelation(bonosError)) throw bonosError;

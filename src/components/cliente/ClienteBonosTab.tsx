@@ -12,6 +12,7 @@ import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { bonoSessionsDisplay } from '@/lib/bonoSessionsDisplay';
+import { isBonoExpired as isBonoExpiredShared, isBonoUsable as isBonoUsableShared } from '@/lib/bonoUsable';
 import { useCustomerPurchasedProducts } from '@/hooks/useCustomerPurchasedProducts';
 import { fetchBonoPurchaseAppointmentMap } from '@/lib/customerBonoAppointmentLinks';
 import { AppointmentCitaLink } from '@/components/cliente/AppointmentCitaLink';
@@ -118,26 +119,18 @@ const fmtShortDate = (value: string | null | undefined) => {
 const toDateInputValue = (value: string | null | undefined) =>
   value ? String(value).slice(0, 10) : '';
 
-const isBonoExpired = (b: BonusRow) => {
-  if (!b.fecha_vencimiento) return false;
-  const vence = new Date(String(b.fecha_vencimiento).slice(0, 10) + 'T23:59:59');
-  return !Number.isNaN(vence.getTime()) && vence < new Date();
-};
+const isBonoExpired = (b: BonusRow) => isBonoExpiredShared(b.fecha_vencimiento);
 
-const isBonoUsable = (b: BonusRow) => {
-  if (String(b.estado).toLowerCase() === 'completado') return false;
-  if (
-    bonoSessionsDisplay({
+const isBonoUsable = (b: BonusRow) =>
+  isBonoUsableShared({
+    estado: b.estado,
+    remaining: bonoSessionsDisplay({
       sesiones_totales: b.sesiones_totales,
       sesiones_usadas: b.sesiones_usadas,
       coverage_items: b.coverage_items,
-    }).remaining <= 0
-  ) {
-    return false;
-  }
-  if (isBonoExpired(b)) return false;
-  return true;
-};
+    }).remaining,
+    fecha_vencimiento: b.fecha_vencimiento,
+  });
 
 const bonoInactiveLabel = (b: BonusRow) => {
   if (isBonoExpired(b)) return 'Vencido';
@@ -485,7 +478,7 @@ export const ClienteBonosTab: React.FC<Props> = ({ customerId, onAppointmentClic
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['bonos', customerId] });
-      queryClient.invalidateQueries({ queryKey: ['active-vouchers', customerId] });
+      queryClient.invalidateQueries({ queryKey: ['customer-active-bonos'] });
       queryClient.invalidateQueries({ queryKey: ['customer_day_timeline', customerId] });
       setShowNewForm(false);
       resetForm();
@@ -520,6 +513,7 @@ export const ClienteBonosTab: React.FC<Props> = ({ customerId, onAppointmentClic
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['bonos', customerId] });
+      queryClient.invalidateQueries({ queryKey: ['customer-active-bonos'] });
       queryClient.invalidateQueries({ queryKey: ['customer_day_timeline', customerId] });
       toast({ title: 'Sesión registrada' });
     },
@@ -563,6 +557,7 @@ export const ClienteBonosTab: React.FC<Props> = ({ customerId, onAppointmentClic
     },
     onSuccess: (amount) => {
       queryClient.invalidateQueries({ queryKey: ['bonos', customerId] });
+      queryClient.invalidateQueries({ queryKey: ['customer-active-bonos'] });
       queryClient.invalidateQueries({ queryKey: ['customer_day_timeline', customerId] });
       toast({ title: 'Cobro registrado', description: `${amount.toFixed(2)} €` });
     },

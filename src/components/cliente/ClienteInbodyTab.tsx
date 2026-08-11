@@ -497,10 +497,28 @@ function ScaleWeighNowControls({
 
   if (active?.status === 'fulfilled') {
     return (
-      <Badge variant="secondary" className={cn('gap-1', compact ? 'text-[10px]' : 'text-xs')}>
-        <Scale className="h-3.5 w-3.5" />
-        Medición vinculada
-      </Badge>
+      <div className="flex items-center gap-2">
+        <Badge variant="secondary" className={cn('gap-1', compact ? 'text-[10px]' : 'text-xs')}>
+          <Scale className="h-3.5 w-3.5" />
+          Medición vinculada
+        </Badge>
+        <Button
+          type="button"
+          variant="outline"
+          size={compact ? 'sm' : 'default'}
+          disabled={isLoading || start.isPending || savingProfile}
+          onClick={onClickWeighNow}
+          title="Nuevo pesaje"
+        >
+          {start.isPending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Scale className="h-4 w-4" />
+          )}
+          <span className="ml-1.5">Pesar otra vez</span>
+        </Button>
+        {profileDialog}
+      </div>
     );
   }
 

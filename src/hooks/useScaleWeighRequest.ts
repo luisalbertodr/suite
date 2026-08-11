@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 
 export const SCALE_WEIGH_TTL_SECONDS = 5 * 60;
+/** Cuánto mostrar «Medición vinculada» antes de volver a «Pesar ahora». */
+export const SCALE_WEIGH_FULFILLED_HOLD_MS = 8_000;
 
 export type ScaleWeighRequestStatus = 'open' | 'fulfilled' | 'cancelled' | 'expired';
 
@@ -41,7 +43,8 @@ export function useActiveScaleWeighRequest(
     enabled: Boolean(companyId && customerId),
     refetchInterval: (query) => {
       const row = query.state.data as ScaleWeighRequest | null | undefined;
-      if (row?.status === 'open') return 2_000;
+      // Seguir poll mientras esperamos báscula o el flash de «vinculada».
+      if (row?.status === 'open' || row?.status === 'fulfilled') return 1_500;
       return false;
     },
     queryFn: async (): Promise<ScaleWeighRequest | null> => {
@@ -72,10 +75,12 @@ export function useActiveScaleWeighRequest(
         return null;
       }
 
-      // Tras cumplirse, mostrar unos segundos y luego dejar de destacar
+      // Tras cumplirse, flash breve; luego null para reactivar «Pesar ahora».
       if (row.status === 'fulfilled') {
         const fulfilledAt = row.fulfilled_at ? new Date(row.fulfilled_at).getTime() : 0;
-        if (Date.now() - fulfilledAt > 60_000) return null;
+        if (!fulfilledAt || Date.now() - fulfilledAt > SCALE_WEIGH_FULFILLED_HOLD_MS) {
+          return null;
+        }
       }
 
       return row;

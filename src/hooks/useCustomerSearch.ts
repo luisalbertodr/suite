@@ -1,13 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import {
-  filterCustomersBySearch,
   isCustomerSearchQueryReady,
   type CustomerSearchRow,
 } from '@/lib/customerSearch';
 
-const DEBOUNCE_MS = 300;
+const DEBOUNCE_MS = 180;
 
 export type CustomerListMode = 'active' | 'archived';
 
@@ -31,29 +30,30 @@ export function useCustomerSearch(
   const query = useQuery({
     queryKey: ['customers-search', mode, companyId, debouncedQuery],
     enabled: queryReady,
+    placeholderData: keepPreviousData,
     queryFn: async () => {
       const q = debouncedQuery.trim();
       if (mode === 'archived') {
         const { data, error } = await supabase.rpc('search_archived_customers', {
           p_catalog_company_id: companyId!,
           p_query: q || null,
-          p_limit: 100,
+          p_limit: 80,
         });
         if (error) throw error;
-        const rows = (data ?? []) as CustomerSearchRow[];
-        return q ? filterCustomersBySearch(rows, q) : rows;
+        return (data ?? []) as CustomerSearchRow[];
       }
 
       if (!isCustomerSearchQueryReady(q)) return [];
       const { data, error } = await supabase.rpc('search_customers', {
         p_catalog_company_id: companyId!,
         p_query: q,
-        p_limit: 100,
+        p_limit: 80,
       });
       if (error) throw error;
-      return filterCustomersBySearch((data ?? []) as CustomerSearchRow[], q);
+      // El RPC ya filtra por tokens; no refiltrar en cliente (ahorra trabajo y evita desajustes).
+      return (data ?? []) as CustomerSearchRow[];
     },
-    staleTime: 30_000,
+    staleTime: 60_000,
   });
 
   return {
