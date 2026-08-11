@@ -19,6 +19,10 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
+import {
+  TopBarCustomerLookup,
+  topBarShowsCustomerLookup,
+} from '@/components/TopBarCustomerLookup';
 
 const ROUTE_TITLES: Record<string, string> = {
   '/inicio': 'Inicio',
@@ -41,6 +45,8 @@ const ROUTE_TITLES: Record<string, string> = {
 
 /** Por debajo de esto se oculta el título de pestaña para dar sitio al centro. */
 const HIDE_TITLE_MAX_PX = 920;
+/** En pantallas anchas nunca apilar: el falso positivo venía de medir mal el centro. */
+const NEVER_STACK_MIN_PX = 1200;
 const TOPBAR_SINGLE_H = '3rem';
 const TOPBAR_DOUBLE_H = '6rem';
 
@@ -68,12 +74,12 @@ export const TopBar: React.FC = () => {
   const [stacked, setStacked] = useState(false);
 
   const headerRef = useRef<HTMLElement>(null);
-  const leftRef = useRef<HTMLDivElement>(null);
-  const rightRef = useRef<HTMLDivElement>(null);
   const actionsRef = useRef<HTMLDivElement>(null);
-  const actionsWidthRef = useRef(0);
   const stackedRef = useRef(stacked);
   stackedRef.current = stacked;
+
+  const showCustomerLookup = topBarShowsCustomerLookup(pathname);
+  const hasCenterActions = Boolean(content.actions) || showCustomerLookup;
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentDateTime(new Date()), 1000);
@@ -89,31 +95,36 @@ export const TopBar: React.FC = () => {
 
   useLayoutEffect(() => {
     const applyStacked = (next: boolean) => {
+      if (stackedRef.current === next) {
+        setTopbarHeightVar(next);
+        return;
+      }
       setStacked(next);
       setTopbarHeightVar(next);
     };
 
     const measure = () => {
-      if (!content.actions) {
+      const header = headerRef.current;
+      const actions = actionsRef.current;
+      if (!header || !hasCenterActions || !actions) {
         applyStacked(false);
-        actionsWidthRef.current = 0;
         return;
       }
-      const header = headerRef.current;
-      const left = leftRef.current;
-      const right = rightRef.current;
-      const actions = actionsRef.current;
-      if (!header || !left || !right || !actions) return;
 
-      actionsWidthRef.current = Math.max(actionsWidthRef.current, actions.scrollWidth);
-      const needed = Math.max(actions.scrollWidth, actionsWidthRef.current);
-      const sideGaps = 32;
-      const centerBudget = Math.max(0, header.clientWidth - left.scrollWidth - right.scrollWidth - sideGaps);
+      const width = header.clientWidth;
+      // Pantalla completa / ancha: una sola fila siempre.
+      if (width >= NEVER_STACK_MIN_PX) {
+        applyStacked(false);
+        return;
+      }
+
+      // Grid 3 columnas iguales → el centro dispone de ~1/3 del ancho.
+      const centerBudget = width / 3 - 16;
+      const needed = actions.scrollWidth;
 
       if (stackedRef.current) {
-        // Volver a una sola fila solo si sobra margen (evita parpadeo).
-        if (needed <= centerBudget - 12) applyStacked(false);
-      } else if (needed > centerBudget + 1 || actions.scrollWidth > actions.clientWidth + 1) {
+        if (needed <= centerBudget - 20) applyStacked(false);
+      } else if (needed > centerBudget + 8) {
         applyStacked(true);
       }
     };
@@ -121,22 +132,13 @@ export const TopBar: React.FC = () => {
     measure();
     const ro = new ResizeObserver(() => measure());
     if (headerRef.current) ro.observe(headerRef.current);
-    if (leftRef.current) ro.observe(leftRef.current);
-    if (rightRef.current) ro.observe(rightRef.current);
     if (actionsRef.current) ro.observe(actionsRef.current);
     window.addEventListener('resize', measure);
     return () => {
       ro.disconnect();
       window.removeEventListener('resize', measure);
     };
-  }, [content.actions, hideRouteTitle, billingScopeEnabled, stacked]);
-
-  useEffect(() => {
-    if (!content.actions) {
-      actionsWidthRef.current = 0;
-      setTopbarHeightVar(false);
-    }
-  }, [content.actions]);
+  }, [content.actions, hideRouteTitle, billingScopeEnabled, showCustomerLookup, hasCenterActions, stacked]);
 
   useEffect(() => () => setTopbarHeightVar(false), []);
 
@@ -256,11 +258,12 @@ export const TopBar: React.FC = () => {
     </>
   );
 
-  const actionsNode = content.actions ? (
+  const actionsNode = hasCenterActions ? (
     <div
       ref={actionsRef}
-      className="flex min-w-0 max-w-full flex-wrap items-center justify-center gap-1.5"
+      className="flex min-w-0 max-w-full flex-nowrap items-center justify-center gap-1.5"
     >
+      {showCustomerLookup ? <TopBarCustomerLookup /> : null}
       {content.actions}
     </div>
   ) : null;
@@ -276,13 +279,11 @@ export const TopBar: React.FC = () => {
       {stacked ? (
         <div className="flex h-full flex-col">
           <div className="flex h-12 items-center justify-between gap-2 px-2 sm:gap-3 sm:px-5">
-            <div ref={leftRef} className="flex min-w-0 items-center gap-2.5">
+            <div className="flex min-w-0 items-center gap-2.5">
               {brandBlock}
               {titleBlock}
             </div>
-            <div ref={rightRef} className="flex shrink-0 items-center justify-end gap-2 sm:gap-3">
-              {rightControls}
-            </div>
+            <div className="flex shrink-0 items-center justify-end gap-2 sm:gap-3">{rightControls}</div>
           </div>
           <div className="flex h-12 min-w-0 items-center justify-center border-t border-border/50 px-2 sm:px-5">
             {actionsNode}
@@ -290,7 +291,7 @@ export const TopBar: React.FC = () => {
         </div>
       ) : (
         <div className="grid h-full grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-2 px-2 sm:gap-3 sm:px-5">
-          <div ref={leftRef} className="flex min-w-0 items-center gap-2.5">
+          <div className="flex min-w-0 items-center gap-2.5">
             {brandBlock}
             {titleBlock}
           </div>
@@ -299,9 +300,7 @@ export const TopBar: React.FC = () => {
             {actionsNode}
           </div>
 
-          <div ref={rightRef} className="flex min-w-0 items-center justify-end gap-2 sm:gap-3">
-            {rightControls}
-          </div>
+          <div className="flex min-w-0 items-center justify-end gap-2 sm:gap-3">{rightControls}</div>
         </div>
       )}
     </header>
