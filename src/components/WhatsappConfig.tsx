@@ -116,6 +116,8 @@ export const WhatsappConfig: React.FC = () => {
     sessionStop,
     sessionLogout,
     fetchQr,
+    metaValidate,
+    metaConfigureWebhook,
     configureWebhook,
     ping,
     purgeHistory,
@@ -329,6 +331,10 @@ export const WhatsappConfig: React.FC = () => {
         meta_graph_version: metaDraft.baseUrl.trim() || 'v21.0',
         meta_waba_id: metaWabaId.trim() || null,
         meta_verify_token: metaVerifyToken.trim() || null,
+        meta_linked: !!(
+          metaDraft.sessionName.trim() &&
+          (apiKeyInputs.meta.trim() || hasStoredKeys.meta || config?.meta_access_token || config?.meta_linked)
+        ),
         base_url: activeBaseUrl,
         session_name: activeSession,
         webhook_secret: webhookSecret.trim() || null,
@@ -349,10 +355,64 @@ export const WhatsappConfig: React.FC = () => {
         meta: prev.meta || !!apiKeyInputs.meta.trim(),
       }));
       if (metaAppSecret.trim()) setHasMetaAppSecret(true);
-      toast({ title: 'Configuración WhatsApp guardada' });
+      toast({
+        title: 'Configuración WhatsApp guardada',
+        description:
+          provider === 'meta'
+            ? 'Meta es el motor exclusivo (sin QR). Para coexistencia elige OpenWA/WAHA y conserva Meta abajo.'
+            : undefined,
+      });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'No se pudo guardar';
       toast({ title: 'Error', description: msg, variant: 'destructive' });
+    }
+  };
+
+  const activateHybridOpenwa = async () => {
+    try {
+      const openwaDraft = drafts.openwa;
+      const base =
+        openwaDraft.baseUrl.trim() ||
+        config?.openwa_base_url ||
+        (config?.provider === 'openwa' ? config.base_url : null);
+      if (!base) {
+        toast({
+          title: 'Falta URL OpenWA',
+          description: 'Indica la URL base de OpenWA y guarda, o rellénala antes de activar el híbrido.',
+          variant: 'destructive',
+        });
+        setProvider('openwa');
+        return;
+      }
+      await upsertConfig.mutateAsync({
+        provider: 'openwa',
+        openwa_base_url: base,
+        openwa_session_name:
+          openwaDraft.sessionName.trim() || config?.openwa_session_name || 'default',
+        base_url: base,
+        session_name:
+          openwaDraft.sessionName.trim() || config?.openwa_session_name || 'default',
+        meta_phone_number_id: drafts.meta.sessionName.trim() || config?.meta_phone_number_id || null,
+        meta_graph_version: drafts.meta.baseUrl.trim() || config?.meta_graph_version || 'v21.0',
+        meta_waba_id: metaWabaId.trim() || config?.meta_waba_id || null,
+        meta_verify_token: metaVerifyToken.trim() || config?.meta_verify_token || null,
+        meta_linked: true,
+        ...(apiKeyInputs.openwa.trim() ? { openwa_api_key: apiKeyInputs.openwa.trim() } : {}),
+        ...(apiKeyInputs.meta.trim() ? { meta_access_token: apiKeyInputs.meta.trim() } : {}),
+        ...(apiKeyInputs.openwa.trim() ? { api_key: apiKeyInputs.openwa.trim() } : {}),
+      });
+      setProvider('openwa');
+      toast({
+        title: 'Modo híbrido activo',
+        description:
+          'Motor OpenWA (QR) restaurado. Credenciales Meta conservadas para Cloud API en coexistencia.',
+      });
+    } catch (e) {
+      toast({
+        title: 'Error',
+        description: e instanceof Error ? e.message : 'No se pudo activar el híbrido',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -429,8 +489,9 @@ export const WhatsappConfig: React.FC = () => {
               <div>
                 <CardTitle>Integración con WhatsApp</CardTitle>
                 <CardDescription>
-                  Elige el motor API (WAHA o OpenWA), configura URL y API key, y vincula la cuenta
-                  escaneando el QR. Los mensajes se persisten en Supabase vía webhook.
+                  Motor QR (WAHA/OpenWA) para chatear desde Suite, y opcionalmente canal oficial Meta
+                  Cloud API en coexistencia (mismo número). No elijas Meta como motor si quieres seguir
+                  vinculando con QR.
                 </CardDescription>
               </div>
             </div>
@@ -462,7 +523,7 @@ export const WhatsappConfig: React.FC = () => {
         <CardContent className="space-y-4">
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2 md:col-span-2">
-              <Label>Proveedor API</Label>
+              <Label>Motor de mensajería</Label>
               <Select
                 value={provider}
                 onValueChange={(v) =>
@@ -473,16 +534,40 @@ export const WhatsappConfig: React.FC = () => {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="waha">WAHA (devlikeapro)</SelectItem>
-                  <SelectItem value="openwa">OpenWA (open-wa.org)</SelectItem>
-                  <SelectItem value="meta">Meta Cloud API (oficial)</SelectItem>
+                  <SelectItem value="waha">WAHA (QR)</SelectItem>
+                  <SelectItem value="openwa">OpenWA (QR)</SelectItem>
+                  <SelectItem value="meta">Meta Cloud API (exclusivo, sin QR)</SelectItem>
                 </SelectContent>
               </Select>
               <p className="text-[11px] text-muted-foreground">
-                WAHA/OpenWA: sesión QR no oficial. Meta Cloud API: canal oficial (plantillas + ventana
-                24h). Cada proveedor guarda sus credenciales; puedes volver a WAHA/OpenWA cuando
-                quieras.
+                Para coexistencia Meta + QR: deja el motor en OpenWA/WAHA y configura Meta en la
+                sección «Canal oficial Meta» (abajo). Solo usa «Meta exclusivo» si no necesitas QR.
               </p>
+              {activeProvider === 'meta' ? (
+                <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/40 p-3 text-xs space-y-2">
+                  <p className="font-medium text-amber-900 dark:text-amber-100">
+                    Meta está como motor exclusivo: Suite no muestra el QR de la app.
+                  </p>
+                  <p className="text-amber-800 dark:text-amber-200">
+                    Meta permite coexistencia con dispositivos vinculados. Activa el híbrido para
+                    volver a OpenWA (QR) sin borrar las credenciales Cloud API.
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    disabled={upsertConfig.isPending}
+                    onClick={() => void activateHybridOpenwa()}
+                  >
+                    Activar híbrido OpenWA + Meta
+                  </Button>
+                </div>
+              ) : null}
+              {config?.meta_linked && activeProvider !== 'meta' ? (
+                <Badge variant="outline" className="text-[10px] font-normal">
+                  Canal Meta vinculado (coexistencia)
+                </Badge>
+              ) : null}
               {needsSaveToActivate ? (
                 <p className="text-[11px] text-amber-700 dark:text-amber-300">
                   Estás editando{' '}
@@ -634,7 +719,147 @@ export const WhatsappConfig: React.FC = () => {
                   </p>
                 </div>
               </>
-            ) : null}
+            ) : (
+              <div className="md:col-span-2 space-y-3 rounded-lg border border-emerald-200/70 bg-emerald-50/40 dark:border-emerald-900/40 dark:bg-emerald-950/20 p-3">
+                <div>
+                  <p className="text-sm font-medium">Canal oficial Meta (coexistencia)</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Guarda token y Phone Number ID sin cambiar el motor QR. Meta puede convivir con
+                    el dispositivo vinculado por OpenWA/WAHA.
+                  </p>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="wa-meta-graph">Versión Graph API</Label>
+                    <Input
+                      id="wa-meta-graph"
+                      value={drafts.meta.baseUrl}
+                      onChange={(e) =>
+                        setDrafts((prev) => ({
+                          ...prev,
+                          meta: { ...prev.meta, baseUrl: e.target.value },
+                        }))
+                      }
+                      placeholder="v21.0"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="wa-meta-phone">Phone Number ID</Label>
+                    <Input
+                      id="wa-meta-phone"
+                      value={drafts.meta.sessionName}
+                      onChange={(e) =>
+                        setDrafts((prev) => ({
+                          ...prev,
+                          meta: { ...prev.meta, sessionName: e.target.value },
+                        }))
+                      }
+                      placeholder="123456789012345"
+                    />
+                  </div>
+                  <div className="space-y-2 md:col-span-2">
+                    <Label htmlFor="wa-meta-token">Access token (Bearer)</Label>
+                    <Input
+                      id="wa-meta-token"
+                      type={showKey ? 'text' : 'password'}
+                      value={apiKeyInputs.meta}
+                      onChange={(e) =>
+                        setApiKeyInputs((prev) => ({ ...prev, meta: e.target.value }))
+                      }
+                      placeholder={
+                        hasStoredKeys.meta
+                          ? `Guardado (${maskToken(config ? storedApiKeyForProvider(config, 'meta') : null)}). Déjalo en blanco para no cambiar.`
+                          : 'Token permanente de System User / WhatsApp…'
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="wa-meta-waba-h">WABA ID (opcional)</Label>
+                    <Input
+                      id="wa-meta-waba-h"
+                      value={metaWabaId}
+                      onChange={(e) => setMetaWabaId(e.target.value)}
+                      placeholder="WhatsApp Business Account ID"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="wa-meta-app-secret-h">App Secret</Label>
+                    <Input
+                      id="wa-meta-app-secret-h"
+                      type="password"
+                      value={metaAppSecret}
+                      onChange={(e) => setMetaAppSecret(e.target.value)}
+                      placeholder={
+                        hasMetaAppSecret
+                          ? 'Guardado. Déjalo en blanco para no cambiar.'
+                          : 'Para validar X-Hub-Signature-256'
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2 md:col-span-2">
+                    <Label htmlFor="wa-meta-verify-h">Verify token (hub.verify_token)</Label>
+                    <Input
+                      id="wa-meta-verify-h"
+                      value={metaVerifyToken}
+                      onChange={(e) => setMetaVerifyToken(e.target.value)}
+                      placeholder="Si vacío, Suite usará el secreto del webhook"
+                    />
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    disabled={metaValidate.isPending}
+                    onClick={() =>
+                      metaValidate.mutate(undefined, {
+                        onSuccess: (res) =>
+                          toast({
+                            title: 'Meta Cloud API OK',
+                            description:
+                              res.note ??
+                              [res.verified_name, res.display_phone_number].filter(Boolean).join(' · '),
+                          }),
+                        onError: (e) =>
+                          toast({
+                            title: 'Meta no válida',
+                            description: e instanceof Error ? e.message : 'Error',
+                            variant: 'destructive',
+                          }),
+                      })
+                    }
+                  >
+                    {metaValidate.isPending ? 'Comprobando…' : 'Comprobar Meta'}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={metaConfigureWebhook.isPending}
+                    onClick={() =>
+                      metaConfigureWebhook.mutate(undefined, {
+                        onSuccess: (res) =>
+                          toast({
+                            title: 'Datos webhook Meta',
+                            description:
+                              res.note ??
+                              `URL: ${res.webhook_url_with_company ?? ''} · verify: ${res.verify_token ?? ''}`,
+                          }),
+                        onError: (e) =>
+                          toast({
+                            title: 'Error',
+                            description: e instanceof Error ? e.message : 'Error',
+                            variant: 'destructive',
+                          }),
+                      })
+                    }
+                  >
+                    {metaConfigureWebhook.isPending ? '…' : 'URL webhook Meta'}
+                  </Button>
+                </div>
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label htmlFor="wa-country">Prefijo país por defecto</Label>
@@ -856,7 +1081,7 @@ export const WhatsappConfig: React.FC = () => {
               <CardTitle>Sesión de WhatsApp</CardTitle>
               <CardDescription>
                 {activeProvider === 'meta'
-                  ? 'Meta Cloud API no usa QR. «Iniciar / comprobar» valida el token y el Phone Number ID en Graph.'
+                  ? 'Meta Cloud API exclusiva no usa QR. Activa el híbrido OpenWA + Meta en la tarjeta superior para recuperar el QR sin perder Cloud API.'
                   : 'Controla la sesión que WAHA/OpenWA mantiene con WhatsApp (iniciar, QR, detener o desvincular).'}
               </CardDescription>
             </div>

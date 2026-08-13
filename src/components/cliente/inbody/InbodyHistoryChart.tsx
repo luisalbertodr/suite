@@ -77,7 +77,23 @@ export const InbodyHistoryChart: React.FC<Props> = ({
     return { min: latest.min!, max: latest.max! };
   }, [series]);
 
-  if (measurements.length < 2) return null;
+  if (measurements.length < 2) {
+    return (
+      <Card className="border-sky-100/50 dark:border-sky-900/20">
+        <CardHeader className={cn('pb-2', compact && 'py-3')}>
+          <CardTitle className={cn('text-sm flex items-center gap-2', compact && 'text-xs')}>
+            <TrendingUp className="h-4 w-4 text-sky-600 dark:text-sky-300" />
+            Evolución por sesiones
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground text-center py-6">
+            Se necesitan al menos 2 mediciones para comparar parámetros entre sesiones.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
 
   const groupedParams = INBODY_CHART_PARAMS.reduce(
     (acc, p) => {

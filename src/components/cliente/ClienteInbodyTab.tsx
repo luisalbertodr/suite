@@ -863,16 +863,6 @@ export const ClienteInbodyTab: React.FC<Props> = ({
         />
       )}
 
-      {selected && (
-        <InbodyReportExport
-          key={`inbody-report-${customerId}-${selected.id}`}
-          customerId={customerId}
-          measurement={selected}
-          customerName={customerName ?? undefined}
-          compact={compact}
-        />
-      )}
-
       <InbodyCompositionEvolutionChart
         measurements={measurements}
         selectedId={selected?.id}
@@ -886,6 +876,16 @@ export const ClienteInbodyTab: React.FC<Props> = ({
         compact={compact}
         onSelectSession={setSelectedId}
       />
+
+      {selected && (
+        <InbodyReportExport
+          key={`inbody-report-${customerId}-${selected.id}`}
+          customerId={customerId}
+          measurement={selected}
+          customerName={customerName ?? undefined}
+          compact={compact}
+        />
+      )}
 
       {selected && (
         <InbodySegmentalSilhouette

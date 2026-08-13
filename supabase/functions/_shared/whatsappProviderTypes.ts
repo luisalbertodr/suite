@@ -145,3 +145,25 @@ export function resolveWhatsappCredentials(
     session_name: cfg.waha_session_name ?? cfg.session_name ?? 'default',
   };
 }
+
+/** Credenciales Meta Cloud API independientemente del motor QR activo. */
+export function resolveMetaCredentials(
+  cfg: WhatsappConfigDbRow,
+): (WhatsappProviderConfig & WhatsappProviderCredentialColumns) | null {
+  const token = (cfg.meta_access_token ?? '').trim() || null;
+  const phoneId = (cfg.meta_phone_number_id ?? '').trim() || null;
+  if (!token || !phoneId) return null;
+  const version = (cfg.meta_graph_version ?? 'v21.0').trim() || 'v21.0';
+  const graphVersion = version.startsWith('v') ? version : `v${version}`;
+  return {
+    ...cfg,
+    provider: 'meta',
+    base_url: `https://graph.facebook.com/${graphVersion}`,
+    api_key: token,
+    session_name: phoneId,
+  };
+}
+
+export function hasMetaCloudCredentials(cfg: WhatsappConfigDbRow): boolean {
+  return resolveMetaCredentials(cfg) != null;
+}

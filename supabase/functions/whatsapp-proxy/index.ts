@@ -33,6 +33,7 @@ import {
   normalizeWhatsappProvider,
   providerLabel,
   resolveWhatsappCredentials,
+  resolveMetaCredentials,
   extractProviderErrorMessage,
   type WhatsappProvider,
   type WhatsappProviderConfig,
@@ -122,6 +123,7 @@ type WhatsappConfig = {
   meta_app_secret?: string | null;
   meta_verify_token?: string | null;
   meta_graph_version?: string | null;
+  meta_linked?: boolean | null;
   webhook_secret: string | null;
   default_country_code: string | null;
   enabled: boolean;
@@ -169,6 +171,8 @@ type ActionBody = {
 } & (
   | { action: 'session.status' | 'session.start' | 'session.stop' | 'session.logout' | 'session.qr' }
   | { action: 'session.configure_webhook'; webhook_url?: string }
+  | { action: 'meta.validate' }
+  | { action: 'meta.configure_webhook' }
   | { action: 'system.ping' }
   | { action: 'chats.list'; limit?: number; offset?: number }
   | {
@@ -2499,7 +2503,9 @@ serve(async (req) => {
 
       case 'session.qr': {
         if (provider === 'meta') {
-          return err('Meta Cloud API no usa código QR. El número se gestiona en Meta Business.');
+          return err(
+            'El motor activo es Meta Cloud API (sin QR). En Configuración → WhatsApp elige OpenWA/WAHA como motor de mensajería para vincular con QR; las credenciales Meta se conservan en coexistencia.',
+          );
         }
         if (provider === 'openwa') {
           try {
@@ -2622,6 +2628,66 @@ serve(async (req) => {
         }
 
         return json({ ok: true, diagnostics: result });
+      }
+
+      case 'meta.validate': {
+        const metaCfg = resolveMetaCredentials(cfgRow as WhatsappConfig);
+        if (!metaCfg) {
+          return err(
+            'Faltan credenciales Meta (access token y Phone Number ID). Guárdalas sin cambiar el motor QR.',
+          );
+        }
+        try {
+          const live = await metaGetPhoneStatus(
+            metaCfg as WhatsappProviderConfig & MetaCredentialFields,
+          );
+          await updateCfg({
+            meta_linked: true,
+            // No tocar last_status / qr_data_url / me_* del motor QR.
+          });
+          return json({
+            ok: true,
+            provider: 'meta',
+            status: live.internalStatus,
+            display_phone_number: live.displayPhoneNumber,
+            verified_name: live.verifiedName,
+            quality_rating: live.qualityRating,
+            me_jid: live.meJid,
+            note:
+              'Meta Cloud API validada. El motor de mensajería/QR sigue siendo ' +
+              providerLabel(provider) +
+              '.',
+          });
+        } catch (e) {
+          const msg =
+            e instanceof MetaCloudApiError
+              ? e.message
+              : e instanceof Error
+                ? e.message
+                : 'Error validando Meta Cloud API';
+          return err(msg);
+        }
+      }
+
+      case 'meta.configure_webhook': {
+        const metaCfg = resolveMetaCredentials(cfgRow as WhatsappConfig);
+        if (!metaCfg && !(cfg.meta_verify_token || cfg.webhook_secret)) {
+          return err('Configura Meta (token + Phone Number ID) y un verify token o webhook_secret.');
+        }
+        const verifyToken = (cfg.meta_verify_token || cfg.webhook_secret || '').trim();
+        if (!verifyToken) {
+          return err('Falta verify token Meta o secreto del webhook.');
+        }
+        await updateCfg({ meta_linked: true });
+        return json({
+          ok: true,
+          provider: 'meta',
+          webhook_url_with_company: `${publicSupabaseUrl.replace(/\/+$/, '')}/functions/v1/whatsapp-webhook?company_id=${companyId}`,
+          verify_token: verifyToken,
+          events: ['messages', 'message_deliveries'],
+          note:
+            'En Meta Developer → WhatsApp → Configuration: Callback URL = webhook_url_with_company, Verify token = verify_token. El motor QR (OpenWA/WAHA) no se modifica.',
+        });
       }
 
       case 'session.configure_webhook': {

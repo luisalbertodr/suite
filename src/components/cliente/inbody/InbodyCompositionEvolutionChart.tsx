@@ -63,7 +63,26 @@ export const InbodyCompositionEvolutionChart: React.FC<Props> = ({
     [measurements, selectedId],
   );
 
-  if (measurements.length < 2 || series.length < 2) return null;
+  if (measurements.length < 2 || series.length < 2) {
+    return (
+      <Card className="border-sky-100/50 dark:border-sky-900/20">
+        <CardHeader className={cn('pb-2', compact && 'py-3')}>
+          <CardTitle className={cn('text-sm flex items-center gap-2', compact && 'text-xs')}>
+            <Activity className="h-4 w-4 text-sky-600 dark:text-sky-300" />
+            <InbodySectionHelp metricId="weight_kg" title="Evolución composición corporal" />
+          </CardTitle>
+          <p className="text-[10px] text-muted-foreground mt-1">
+            Barras por sesión y líneas rectas entre mediciones de peso, MME y masa grasa (kg).
+          </p>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground text-center py-6">
+            Se necesitan al menos 2 mediciones con peso, MME o masa grasa para mostrar la evolución.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card className="border-sky-100/50 dark:border-sky-900/20">

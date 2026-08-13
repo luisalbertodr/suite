@@ -4804,6 +4804,7 @@ export type Database = {
           meta_app_secret: string | null
           meta_verify_token: string | null
           meta_graph_version: string | null
+          meta_linked: boolean
           qr_data_url: string | null
           qr_updated_at: string | null
           session_name: string
@@ -4835,6 +4836,7 @@ export type Database = {
           meta_app_secret?: string | null
           meta_verify_token?: string | null
           meta_graph_version?: string | null
+          meta_linked?: boolean
           qr_data_url?: string | null
           qr_updated_at?: string | null
           session_name?: string
@@ -4866,6 +4868,7 @@ export type Database = {
           meta_app_secret?: string | null
           meta_verify_token?: string | null
           meta_graph_version?: string | null
+          meta_linked?: boolean
           qr_data_url?: string | null
           qr_updated_at?: string | null
           session_name?: string

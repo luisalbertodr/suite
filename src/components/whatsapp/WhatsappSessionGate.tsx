@@ -101,7 +101,7 @@ export const WhatsappSessionGate: React.FC<Props> = ({ config, onConnected }) =>
               <CardTitle>Conectar WhatsApp</CardTitle>
               <CardDescription>
                 {config.provider === 'meta'
-                  ? 'Meta Cloud API no requiere escanear QR. Comprueba el token y el Phone Number ID en Configuración → WhatsApp.'
+                  ? 'Meta Cloud API está como motor exclusivo (sin QR). En Configuración → WhatsApp pulsa «Activar híbrido OpenWA + Meta» para recuperar el QR y mantener Cloud API.'
                   : 'Vincula tu cuenta de WhatsApp con la plataforma a través de WAHA/OpenWA para enviar y recibir mensajes desde aquí.'}
               </CardDescription>
             </div>
@@ -177,12 +177,12 @@ export const WhatsappSessionGate: React.FC<Props> = ({ config, onConnected }) =>
                 <div>
                   <p className="font-medium">
                     {config.provider === 'meta'
-                      ? 'Meta Cloud API no está validada.'
+                      ? 'Motor Meta exclusivo (sin QR).'
                       : 'La sesión Waha/OpenWA no está activa.'}
                   </p>
                   <p className="text-xs">
                     {config.provider === 'meta'
-                      ? 'Pulsa «Comprobar» para validar el access token y el Phone Number ID en Graph.'
+                      ? 'Para escanear el QR de la app, activa el híbrido OpenWA + Meta en Configuración → WhatsApp.'
                       : 'Pulsa "Iniciar sesión" para arrancarla. Después aparecerá un código QR que tendrás que escanear desde tu móvil.'}
                   </p>
                 </div>

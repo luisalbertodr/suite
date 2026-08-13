@@ -17,6 +17,8 @@ export type WhatsappProxyAction = {
   | { action: 'session.logout' }
   | { action: 'session.qr' }
   | { action: 'session.configure_webhook'; webhook_url?: string }
+  | { action: 'meta.validate' }
+  | { action: 'meta.configure_webhook' }
   | { action: 'system.ping' }
   | { action: 'chats.list'; limit?: number; offset?: number }
   | {
@@ -337,6 +339,29 @@ export const useWhatsappConfig = () => {
     onSuccess: invalidate,
   });
 
+  const metaValidate = useMutation({
+    mutationFn: async () =>
+      invokeWhatsappProxy<{
+        ok: boolean;
+        status?: string;
+        display_phone_number?: string;
+        verified_name?: string;
+        note?: string;
+      }>({ action: 'meta.validate' }),
+    onSuccess: invalidate,
+  });
+
+  const metaConfigureWebhook = useMutation({
+    mutationFn: async () =>
+      invokeWhatsappProxy<{
+        ok: boolean;
+        webhook_url_with_company?: string;
+        verify_token?: string;
+        note?: string;
+      }>({ action: 'meta.configure_webhook' }),
+    onSuccess: invalidate,
+  });
+
   const configureWebhook = useMutation({
     mutationFn: async (input?: { webhook_url?: string }) =>
       invokeWhatsappProxy<{
@@ -422,6 +447,8 @@ export const useWhatsappConfig = () => {
     sessionStop,
     sessionLogout,
     fetchQr,
+    metaValidate,
+    metaConfigureWebhook,
     configureWebhook,
     ping,
     purgeHistory,
