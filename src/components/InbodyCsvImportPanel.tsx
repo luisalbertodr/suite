@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { Activity, FileUp, Loader2, Upload } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -18,6 +18,7 @@ import {
   type InbodyCustomerLinkStats,
   type UnmatchedInbodyUser,
 } from '@/lib/inbodyCsvImport';
+import { cn } from '@/lib/utils';
 
 type PendingImport = {
   rows: InbodyCsvImportRow[];
@@ -26,24 +27,37 @@ type PendingImport = {
 };
 
 interface InbodyCsvImportPanelProps {
-  /** En ficha de cliente: UI más compacta al final de la pestaña InBody */
+  /**
+   * `panel` (default): tarjeta completa (Configuración).
+   * `button`: botón compacto junto a «Pesar»; importa sin crear fichas.
+   * @deprecated `embedded` equivale a `button` (compatibilidad).
+   */
+  variant?: 'panel' | 'button';
+  /** @deprecated Usar variant="button" */
   embedded?: boolean;
   customerId?: string;
   taxId?: string | null;
   customerName?: string | null;
+  compact?: boolean;
+  className?: string;
 }
 
 export const InbodyCsvImportPanel: React.FC<InbodyCsvImportPanelProps> = ({
+  variant,
   embedded = false,
-  customerId,
-  taxId,
-  customerName,
+  customerId: _customerId,
+  taxId: _taxId,
+  customerName: _customerName,
+  compact,
+  className,
 }) => {
+  const mode = variant ?? (embedded ? 'button' : 'panel');
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { companyId } = useCompanyFilter();
   const { catalogHostCompanyId } = useWorkCenter();
   const catalogCompanyId = catalogHostCompanyId ?? companyId;
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [csvText, setCsvText] = useState('');
   const [preview, setPreview] = useState<InbodyCsvImportRow[] | null>(null);
@@ -85,6 +99,102 @@ export const InbodyCsvImportPanel: React.FC<InbodyCsvImportPanelProps> = ({
     [preview],
   );
 
+  const resetForm = () => {
+    setPreview(null);
+    setCsvText('');
+    setFileName(null);
+    setParseErrors([]);
+    setSkipped(0);
+    setSkippedBlank(0);
+    setPendingImport(null);
+    setUnmatchedItems([]);
+    setWizardOpen(false);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const finishImport = async (
+    rows: InbodyCsvImportRow[],
+    result: ReturnType<typeof parseInbodyCsv>,
+    linkStats?: InbodyCustomerLinkStats,
+  ) => {
+    const count = await upsertInbodyCsvRows(rows);
+    await queryClient.invalidateQueries({ queryKey: ['inbody_measurements'] });
+    await queryClient.invalidateQueries({ queryKey: ['dashboard-recent-activity'] });
+    await queryClient.invalidateQueries({ queryKey: ['customers-search'] });
+
+    const linked = rows.filter((r) => r.customer_id).length;
+    const orphan = rows.length - linked;
+    const extras: string[] = [];
+    if (linkStats) {
+      if (linkStats.linked > 0) extras.push(`${linkStats.linked} ficha(s) vinculada(s).`);
+      if (linkStats.created > 0) extras.push(`${linkStats.created} ficha(s) nueva(s).`);
+      if (linkStats.skipped > 0) extras.push(`${linkStats.skipped} DNI sin ficha (solo InBody).`);
+    } else if (orphan > 0) {
+      extras.push(
+        `${orphan} sin ficha por DNI (se vincularán al completar el DNI del cliente).`,
+      );
+    }
+
+    toast({
+      title:
+        result.suspicious > 0 || result.skipped > 0
+          ? 'Importación completada con avisos'
+          : 'Importación completada',
+      description: [importSummary(count, result), `Vinculadas: ${linked}.`, ...extras]
+        .filter(Boolean)
+        .join(' '),
+    });
+
+    if (result.skipped > 0) {
+      toast({
+        title: 'Filas omitidas',
+        description: result.errors.slice(0, 3).join(' ') || `${result.skipped} filas no importadas.`,
+      });
+    }
+
+    resetForm();
+  };
+
+  /** Importa CSV sin crear clientes: vínculo por DNI; el resto queda huérfano para auto-link. */
+  const importCsvWithoutCreatingClients = async (text: string) => {
+    if (!companyId) {
+      toast({ title: 'Empresa no seleccionada', variant: 'destructive' });
+      return;
+    }
+    if (!text.trim()) {
+      toast({ title: 'Selecciona un archivo CSV', variant: 'destructive' });
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const customerMap = await loadCustomerTaxMap(companyId);
+      const batch = `lookinbody_csv_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}`;
+      const result = applyParseResult(parseInbodyCsv(text, companyId, customerMap, batch));
+      const rows = result.rows;
+
+      if (!rows.length) {
+        toast({
+          title: 'No hay filas válidas para importar',
+          description: result.errors[0] ?? 'Revisa DNI y fecha en el CSV.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const enriched = enrichInbodyRowsWithCustomerMap(rows, customerMap);
+      await finishImport(enriched, result);
+    } catch (e) {
+      toast({
+        title: 'Error al importar',
+        description: e instanceof Error ? e.message : 'Error desconocido',
+        variant: 'destructive',
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleFile = async (file: File | null) => {
     if (!file) return;
     setFileName(file.name);
@@ -94,6 +204,10 @@ export const InbodyCsvImportPanel: React.FC<InbodyCsvImportPanelProps> = ({
     setParseErrors([]);
     setSkipped(0);
     setSkippedBlank(0);
+
+    if (mode === 'button') {
+      await importCsvWithoutCreatingClients(text);
+    }
   };
 
   const handlePreview = async () => {
@@ -132,49 +246,6 @@ export const InbodyCsvImportPanel: React.FC<InbodyCsvImportPanelProps> = ({
     } finally {
       setBusy(false);
     }
-  };
-
-  const finishImport = async (
-    rows: InbodyCsvImportRow[],
-    result: ReturnType<typeof parseInbodyCsv>,
-    linkStats?: InbodyCustomerLinkStats,
-  ) => {
-    const count = await upsertInbodyCsvRows(rows);
-    await queryClient.invalidateQueries({ queryKey: ['inbody_measurements'] });
-    await queryClient.invalidateQueries({ queryKey: ['dashboard-recent-activity'] });
-    await queryClient.invalidateQueries({ queryKey: ['customers-search'] });
-
-    const extras: string[] = [];
-    if (linkStats) {
-      if (linkStats.linked > 0) extras.push(`${linkStats.linked} ficha(s) vinculada(s).`);
-      if (linkStats.created > 0) extras.push(`${linkStats.created} ficha(s) nueva(s).`);
-      if (linkStats.skipped > 0) extras.push(`${linkStats.skipped} DNI sin ficha (solo InBody).`);
-    }
-
-    toast({
-      title:
-        result.suspicious > 0 || result.skipped > 0
-          ? 'Importación completada con avisos'
-          : 'Importación completada',
-      description: [importSummary(count, result), ...extras].filter(Boolean).join(' '),
-    });
-
-    if (result.skipped > 0) {
-      toast({
-        title: 'Filas omitidas',
-        description: result.errors.slice(0, 3).join(' ') || `${result.skipped} filas no importadas.`,
-      });
-    }
-
-    setPreview(null);
-    setCsvText('');
-    setFileName(null);
-    setParseErrors([]);
-    setSkipped(0);
-    setSkippedBlank(0);
-    setPendingImport(null);
-    setUnmatchedItems([]);
-    setWizardOpen(false);
   };
 
   const handleImport = async () => {
@@ -259,78 +330,83 @@ export const InbodyCsvImportPanel: React.FC<InbodyCsvImportPanelProps> = ({
     });
   };
 
+  const fileInput = (
+    <input
+      ref={fileInputRef}
+      type="file"
+      accept=".csv,text/csv,text/plain"
+      className="hidden"
+      onChange={(e) => void handleFile(e.target.files?.[0] ?? null)}
+    />
+  );
+
+  if (mode === 'button') {
+    return (
+      <div className={cn('inline-flex', className)}>
+        <Button
+          type="button"
+          variant="outline"
+          size={compact ? 'sm' : 'default'}
+          disabled={busy || !companyId}
+          className="gap-1.5"
+          title="Importar CSV de Lookin'Body. Vincula por DNI; sin ficha se guardan para auto-vincular al completar el DNI."
+          onClick={() => fileInputRef.current?.click()}
+        >
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
+          <span className="ml-0.5">Importar InBody</span>
+        </Button>
+        {fileInput}
+      </div>
+    );
+  }
+
   return (
     <>
-      <Card className={embedded ? 'border-dashed' : undefined}>
-        <CardHeader className={embedded ? 'pb-2' : undefined}>
-          <CardTitle className={`flex items-center gap-2 ${embedded ? 'text-sm' : 'text-base'}`}>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
             <Activity className="h-4 w-4 text-emerald-600" />
-            {embedded ? 'Importar mediciones InBody (CSV)' : "InBody / Lookin'Body — Importar CSV"}
+            InBody / Lookin&apos;Body — Importar CSV
           </CardTitle>
-          <CardDescription className={embedded ? 'text-xs' : undefined}>
-            {embedded ? (
-              <>
-                Sube un CSV de Lookin&apos;Body para añadir mediciones
-                {taxId ? (
-                  <>
-                    {' '}
-                    (se vincularán por DNI <strong>{taxId}</strong>
-                    {customerName ? ` — ${customerName}` : ''}).
-                  </>
-                ) : (
-                  '. Añade el DNI del cliente para vincular automáticamente.'
-                )}
-              </>
-            ) : (
-              <>
-                Sube un CSV exportado desde Lookin&apos;Body. Si el DNI no tiene ficha, te pediremos el
-                nombre para buscar la ficha existente (aunque no tenga DNI) o crear una nueva.
-              </>
-            )}
+          <CardDescription>
+            Sube un CSV exportado desde Lookin&apos;Body. Si el DNI no tiene ficha, te pediremos el
+            nombre para buscar la ficha existente (aunque no tenga DNI) o crear una nueva.
           </CardDescription>
         </CardHeader>
-        <CardContent className={`space-y-4 ${embedded ? 'pt-0' : ''}`}>
-          {!embedded && (
-            <Alert>
-              <Upload className="h-4 w-4" />
-              <AlertTitle>Columnas reconocidas</AlertTitle>
-              <AlertDescription className="text-xs space-y-1">
-                <p>
-                  Obligatorias: <code className="rounded bg-muted px-1">ID</code> / USER_ID (DNI),{' '}
-                  <code className="rounded bg-muted px-1">Date&amp;Times</code> (o Fecha).
-                </p>
-                <p>
-                  Soporta <strong>dbbackup.CSV</strong> de Lookin&apos;Body (65 columnas numeradas) y CSV
-                  genérico con WEIGHT, SMM, BFM, TBW, FFM, BMI, PBF, WHR, BMR, segmentos e impedancia.
-                </p>
-                <p>Soporta delimitador coma, punto y coma o tabulador.</p>
-              </AlertDescription>
-            </Alert>
-          )}
+        <CardContent className="space-y-4">
+          <Alert>
+            <Upload className="h-4 w-4" />
+            <AlertTitle>Columnas reconocidas</AlertTitle>
+            <AlertDescription className="text-xs space-y-1">
+              <p>
+                Obligatorias: <code className="rounded bg-muted px-1">ID</code> / USER_ID (DNI),{' '}
+                <code className="rounded bg-muted px-1">Date&amp;Times</code> (o Fecha).
+              </p>
+              <p>
+                Soporta <strong>dbbackup.CSV</strong> de Lookin&apos;Body (65 columnas numeradas) y CSV
+                genérico con WEIGHT, SMM, BFM, TBW, FFM, BMI, PBF, WHR, BMR, segmentos e impedancia.
+              </p>
+              <p>Soporta delimitador coma, punto y coma o tabulador.</p>
+            </AlertDescription>
+          </Alert>
 
           <div className="flex flex-wrap items-center gap-3">
-            <Button variant="outline" className="gap-2" size={embedded ? 'sm' : 'default'} asChild disabled={busy}>
+            <Button variant="outline" className="gap-2" asChild disabled={busy}>
               <label>
                 <FileUp className="h-4 w-4" />
                 {fileName || 'Seleccionar CSV'}
-                <input
-                  type="file"
-                  accept=".csv,text/csv,text/plain"
-                  className="hidden"
-                  onChange={(e) => void handleFile(e.target.files?.[0] ?? null)}
-                />
+                {fileInput}
               </label>
             </Button>
             <Button
               variant="secondary"
-              size={embedded ? 'sm' : 'default'}
               onClick={() => void handlePreview()}
               disabled={busy || !csvText}
             >
               {busy ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               Vista previa
             </Button>
-            <Button size={embedded ? 'sm' : 'default'} onClick={() => void handleImport()} disabled={busy || !csvText || wizardOpen}>
+            <Button onClick={() => void handleImport()} disabled={busy || !csvText || wizardOpen}>
               {busy ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               Importar
             </Button>
@@ -356,6 +432,11 @@ export const InbodyCsvImportPanel: React.FC<InbodyCsvImportPanelProps> = ({
               {skipped > 0 && (
                 <p className="text-amber-700 dark:text-amber-400">
                   {skipped} fila(s) omitida(s) por DNI o fecha inválidos (el resto se importará)
+                </p>
+              )}
+              {skippedBlank > 0 && (
+                <p className="text-muted-foreground">
+                  {skippedBlank} fila(s) en blanco omitida(s)
                 </p>
               )}
             </div>

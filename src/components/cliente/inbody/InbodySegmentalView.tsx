@@ -58,7 +58,7 @@ export const InbodySegmentalView: React.FC<Props> = ({ lean, fat, className }) =
   return (
     <div className={cn('grid md:grid-cols-2 gap-4', className)}>
       <div>
-        <h4 className="text-sm font-semibold mb-3 text-foreground">Masa magra segmental</h4>
+        <h4 className="text-sm font-semibold mb-3 text-foreground">Masa muscular segmental</h4>
         <div className="flex flex-wrap gap-2 justify-center">
           {SEGMENTS.map((seg) => {
             const entry = lean[seg.key];

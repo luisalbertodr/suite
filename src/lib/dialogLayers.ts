@@ -3,7 +3,7 @@ export const SUITE_TOP_BANNER_Z = 'z-[280]';
 
 /**
  * Diálogos / toasts que deben quedar por encima del banner de aviso
- * (p. ej. perfil «Pesar ahora» o errores de guardado) y por debajo del dock.
+ * (p. ej. perfil «Pesar» o errores de guardado) y por debajo del dock.
  */
 export const ABOVE_TOP_BANNER_Z = 'z-[290]';
 

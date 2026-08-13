@@ -335,7 +335,7 @@ export const InbodySegmentalSilhouette: React.FC<Props> = ({
       <CardContent className={cn('pb-4', compact && 'px-3')}>
         <div className="grid md:grid-cols-2 gap-3">
           <SegmentPanel
-            title="Masa magra segmental"
+            title="Masa muscular segmental"
             variant="lean"
             sideLabelLeft="Derecho"
             sideLabelRight="Izquierdo"

@@ -1,4 +1,4 @@
-/** Utilidades de perfil para MorphoScan / «Pesar ahora». */
+/** Utilidades de perfil para MorphoScan / «Pesar». */
 
 export type ScaleSex = 'M' | 'F';
 

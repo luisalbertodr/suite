@@ -64,7 +64,7 @@ function CompositionBarMarker({
   );
 }
 
-/** Peso, MME y masa grasa con barras de rango y curva azul tipo informe InBody. */
+/** Peso, MME y masa grasa con barras de rango y líneas rectas tipo informe InBody. */
 export const InbodyCompositionRangeGroup: React.FC<Props> = ({ measurement, className }) => {
   const bfmRange = useMemo(() => resolveBodyFatMassRangeKg(measurement), [measurement]);
 

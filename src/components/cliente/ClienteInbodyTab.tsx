@@ -60,7 +60,6 @@ import { InbodyHistoryChart } from './inbody/InbodyHistoryChart';
 import { InbodyCompositionEvolutionChart } from './inbody/InbodyCompositionEvolutionChart';
 import { InbodySegmentalSilhouette } from './inbody/InbodySegmentalSilhouette';
 import { InbodyReportExport } from './inbody/InbodyReportExport';
-import { MorphoClinicalExtrasPanel } from './inbody/MorphoClinicalExtrasPanel';
 import { InbodyNutritionPanel } from './inbody/InbodyNutritionPanel';
 import { InbodyMetricHelp, InbodySectionHelp } from './inbody/InbodyMetricHelp';
 import { InbodyCsvImportPanel } from '@/components/InbodyCsvImportPanel';
@@ -451,7 +450,7 @@ function ScaleWeighNowControls({
     return (
       <Button type="button" variant="outline" size={compact ? 'sm' : 'default'} disabled>
         <Scale className="h-4 w-4" />
-        <span className="ml-1.5">Pesar ahora</span>
+        <span className="ml-1.5">Pesar</span>
       </Button>
     );
   }
@@ -515,7 +514,7 @@ function ScaleWeighNowControls({
           ) : (
             <Scale className="h-4 w-4" />
           )}
-          <span className="ml-1.5">Pesar otra vez</span>
+          <span className="ml-1.5">Pesar</span>
         </Button>
         {profileDialog}
       </div>
@@ -536,7 +535,7 @@ function ScaleWeighNowControls({
         ) : (
           <Scale className="h-4 w-4" />
         )}
-        <span className="ml-1.5">Pesar ahora</span>
+        <span className="ml-1.5">Pesar</span>
       </Button>
       {profileDialog}
     </>
@@ -612,6 +611,7 @@ function MeasurementSessionBar({
           clinicalProfile={clinicalProfile}
           compact={compact}
         />
+        <InbodyCsvImportPanel variant="button" compact={compact} />
       </div>
 
       <div className={compact ? 'text-xs' : 'text-sm'}>
@@ -674,7 +674,7 @@ function MeasurementReport({
           <p className="text-[10px] text-muted-foreground mt-1">
             {isMorpho
               ? 'Misma lectura clínica que InBody: banda verde = rango normal; línea azul = valor (Suite BIA si hay impedancia).'
-              : 'Banda verde = rango normal InBody. Línea azul = valor medido; la curva une peso, MME y masa grasa.'}
+              : 'Banda verde = rango normal InBody. Línea azul = valor medido; las líneas unen peso, MME y masa grasa.'}
           </p>
         </CardHeader>
         <CardContent className="space-y-2">
@@ -798,12 +798,19 @@ export const ClienteInbodyTab: React.FC<Props> = ({
         <div className="text-center py-10 text-sm text-destructive">
           No se pudieron cargar las mediciones de báscula.
         </div>
-        <InbodyCsvImportPanel
-          embedded
-          customerId={customerId}
-          taxId={taxId}
-          customerName={customerName}
-        />
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <ScaleWeighNowControls
+            customerId={customerId}
+            taxId={taxId}
+            companyId={companyId}
+            customerName={customerName}
+            heightCm={heightCm}
+            birthDate={birthDate}
+            clinicalProfile={clinicalProfile}
+            compact={compact}
+          />
+          <InbodyCsvImportPanel variant="button" compact={compact} />
+        </div>
       </div>
     );
   }
@@ -816,26 +823,24 @@ export const ClienteInbodyTab: React.FC<Props> = ({
           <div>
             <p className="font-medium text-foreground">Sin mediciones de báscula</p>
             <p className="text-sm mt-1 max-w-sm mx-auto">
-              Pulsa «Pesar ahora» y sube al paciente a la MorphoScan, o importa un CSV de Lookin&apos;Body.
+              Pulsa «Pesar» y sube al paciente a la MorphoScan, o «Importar InBody» con un CSV de
+              Lookin&apos;Body.
             </p>
           </div>
-          <ScaleWeighNowControls
-            customerId={customerId}
-            taxId={taxId}
-            companyId={companyId}
-            customerName={customerName}
-            heightCm={heightCm}
-            birthDate={birthDate}
-            clinicalProfile={clinicalProfile}
-            compact={compact}
-          />
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <ScaleWeighNowControls
+              customerId={customerId}
+              taxId={taxId}
+              companyId={companyId}
+              customerName={customerName}
+              heightCm={heightCm}
+              birthDate={birthDate}
+              clinicalProfile={clinicalProfile}
+              compact={compact}
+            />
+            <InbodyCsvImportPanel variant="button" compact={compact} />
+          </div>
         </div>
-        <InbodyCsvImportPanel
-          embedded
-          customerId={customerId}
-          taxId={taxId}
-          customerName={customerName}
-        />
       </div>
     );
   }
@@ -854,6 +859,16 @@ export const ClienteInbodyTab: React.FC<Props> = ({
           heightCm={heightCm}
           birthDate={birthDate}
           clinicalProfile={clinicalProfile}
+          compact={compact}
+        />
+      )}
+
+      {selected && (
+        <InbodyReportExport
+          key={`inbody-report-${customerId}-${selected.id}`}
+          customerId={customerId}
+          measurement={selected}
+          customerName={customerName ?? undefined}
           compact={compact}
         />
       )}
@@ -892,27 +907,6 @@ export const ClienteInbodyTab: React.FC<Props> = ({
           compact={compact}
         />
       )}
-
-      {selected && isMorphoScanMeasurement(selected) ? (
-        <MorphoClinicalExtrasPanel measurement={selected} />
-      ) : null}
-
-      {selected && (
-        <InbodyReportExport
-          key={`inbody-report-${customerId}-${selected.id}`}
-          customerId={customerId}
-          measurement={selected}
-          customerName={customerName ?? undefined}
-          compact={compact}
-        />
-      )}
-
-      <InbodyCsvImportPanel
-        embedded
-        customerId={customerId}
-        taxId={taxId}
-        customerName={customerName}
-      />
 
       <p className="text-[10px] text-muted-foreground italic text-center pt-2">
         Utilice sus resultados como referencia cuando consulte a su médico o entrenador personal.

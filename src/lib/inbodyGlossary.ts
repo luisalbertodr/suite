@@ -109,9 +109,9 @@ export const INBODY_GLOSSARY: Record<InbodyMetricId, InbodyGlossaryEntry> = {
       'Negativo: kg de grasa recomendados a perder; positivo: ganancia de grasa sugerida (ej. bajo peso); cero: en rango. No es una prescripción médica.',
   },
   segmental_lean: {
-    shortLabel: 'Masa magra segm.',
-    fullName: 'Masa magra segmental',
-    description: 'Distribución de la masa magra por brazos, tronco y piernas (vista frontal anatómica).',
+    shortLabel: 'Masa muscular segm.',
+    fullName: 'Masa muscular segmental',
+    description: 'Distribución de la masa muscular por brazos, tronco y piernas (vista frontal anatómica).',
     interpretation:
       'Permite detectar desequilibrios entre lados o segmentos (ej. pierna dominante vs no dominante). Compare simetría derecha/izquierda.',
   },
@@ -123,8 +123,8 @@ export const INBODY_GLOSSARY: Record<InbodyMetricId, InbodyGlossaryEntry> = {
       'Muestra dónde se acumula la grasa (abdomen, extremidades…). Los rangos normales dependen del sexo y los calcula el InBody.',
   },
   segment_lean_eval: {
-    shortLabel: '% normal magra',
-    fullName: 'Evaluación de masa magra segmental (% normal)',
+    shortLabel: '% normal muscular',
+    fullName: 'Evaluación de masa muscular segmental (% normal)',
     description: 'Porcentaje respecto al valor de referencia InBody para ese segmento, sexo y edad (100 % = ideal).',
     interpretation:
       '90–110 %: Normal. Por debajo de 90 %: Bajo (déficit relativo en ese segmento). Por encima de 110 %: Alto (exceso relativo).',

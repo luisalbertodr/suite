@@ -10,8 +10,6 @@ import {
 import {
   ACTIVITY_FACTORS,
   buildWeeklyExercisePlan,
-  exerciseKcal,
-  INBODY_EXERCISE_GRID,
   recommendedDailyKcal,
   type ActivityLevel,
   type InbodyGoal,
@@ -103,43 +101,6 @@ export const InbodyNutritionPanel: React.FC<Props> = ({ measurement, compact }) 
                 ? ` (rango ${formatInbodyNumber(measurement.bmr_min_kcal, 0)}–${formatInbodyNumber(measurement.bmr_max_kcal, 0)})`
                 : ''}
             </p>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card className="border-sky-100/50 dark:border-sky-900/20">
-        <CardHeader className="pb-2">
-          <CardTitle className={compact ? 'text-sm' : 'text-base'}>
-            Gasto energético (30 min)
-          </CardTitle>
-          <p className="text-[10px] text-muted-foreground mt-1">
-            MET × peso (kg) × 0,5 h — compendio de actividades físicas.
-          </p>
-        </CardHeader>
-        <CardContent className="overflow-x-auto">
-          {weight <= 0 ? (
-            <p className="text-xs text-muted-foreground">Sin peso en la medición.</p>
-          ) : (
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-muted-foreground border-b">
-                  <th className="text-left py-1 pr-2">Actividad</th>
-                  <th className="text-right py-1 px-2">MET</th>
-                  <th className="text-right py-1 pl-2">kcal / 30 min</th>
-                </tr>
-              </thead>
-              <tbody>
-                {INBODY_EXERCISE_GRID.flat().map((act) => (
-                  <tr key={act.name} className="border-b border-border/30 last:border-0">
-                    <td className="py-1 pr-2">{act.name}</td>
-                    <td className="text-right py-1 px-2 tabular-nums">{act.met}</td>
-                    <td className="text-right py-1 pl-2 tabular-nums font-medium">
-                      {exerciseKcal(act.met, weight, 30)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
           )}
         </CardContent>
       </Card>

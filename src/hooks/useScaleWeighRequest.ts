@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 
 export const SCALE_WEIGH_TTL_SECONDS = 5 * 60;
-/** Cuánto mostrar «Medición vinculada» antes de volver a «Pesar ahora». */
+/** Cuánto mostrar «Medición vinculada» antes de volver a «Pesar». */
 export const SCALE_WEIGH_FULFILLED_HOLD_MS = 8_000;
 
 export type ScaleWeighRequestStatus = 'open' | 'fulfilled' | 'cancelled' | 'expired';
@@ -75,7 +75,7 @@ export function useActiveScaleWeighRequest(
         return null;
       }
 
-      // Tras cumplirse, flash breve; luego null para reactivar «Pesar ahora».
+      // Tras cumplirse, flash breve; luego null para reactivar «Pesar».
       if (row.status === 'fulfilled') {
         const fulfilledAt = row.fulfilled_at ? new Date(row.fulfilled_at).getTime() : 0;
         if (!fulfilledAt || Date.now() - fulfilledAt > SCALE_WEIGH_FULFILLED_HOLD_MS) {

@@ -393,20 +393,12 @@ export function inbodyBarRowCenterYpct(rowIndex: number, rowCount: number, barHe
   return (center / total) * 100;
 }
 
-/** Curva suave que une los marcadores azules de composición corporal (perfil InBody). */
+/** Líneas rectas que unen los marcadores azules de composición corporal (perfil InBody). */
 export function inbodyMarkerCurvePathFromPoints(points: InbodyCurvePoint[]): string {
   if (points.length < 2) return '';
-  if (points.length === 2) {
-    const [a, b] = points;
-    return `M ${a.x} ${a.y} L ${b.x} ${b.y}`;
-  }
-  const [a, b, c] = points;
-  const t = 0.38;
-  return [
-    `M ${a.x} ${a.y}`,
-    `C ${a.x} ${a.y - (b.y - a.y) * t}, ${b.x + (b.x - a.x) * t} ${b.y}, ${b.x} ${b.y}`,
-    `C ${b.x - (c.x - b.x) * t} ${b.y}, ${c.x} ${c.y + (c.y - b.y) * t}, ${c.x} ${c.y}`,
-  ].join(' ');
+  return points
+    .map((p, index) => `${index === 0 ? 'M' : 'L'} ${p.x} ${p.y}`)
+    .join(' ');
 }
 
 export function inbodyMarkerCurvePath(points: InbodyMarkerCurvePoint[]): string {
