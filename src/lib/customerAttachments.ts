@@ -42,8 +42,21 @@ export function isCustomerAttachmentImage(
   url: string,
   kind: CustomerAttachmentKind,
 ): boolean {
-  if (kind === 'photo' || kind === 'consent') return true;
+  // Fotos clínicas y firmas: siempre tratables como imagen.
+  // Documentos escaneados (JPEG/PNG) también se previsualizan, pero el `kind`
+  // sigue siendo `document` para filtrar galería / OCR futuro.
+  if (kind === 'photo') return true;
   return IMAGE_EXT.test(url);
+}
+
+/** Foto de ficha (no documento escaneado ni PDF). */
+export function isPhotoGalleryItem(item: Pick<CustomerAttachment, 'kind'>): boolean {
+  return item.kind === 'photo';
+}
+
+/** Documento / consentimiento / otro (incluye escaneos marcados como documento). */
+export function isDocumentGalleryItem(item: Pick<CustomerAttachment, 'kind'>): boolean {
+  return item.kind !== 'photo';
 }
 
 /** ID de fila en daily_customer_log_assets si el adjunto se puede borrar desde Suite. */

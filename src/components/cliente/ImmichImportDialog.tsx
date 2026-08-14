@@ -166,6 +166,8 @@ export const ImmichImportDialog: React.FC<Props> = ({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [importing, setImporting] = useState(false);
+  /** Marca los archivos seleccionados como documento (ficha/consentimiento) para OCR futuro. */
+  const [importAsDocument, setImportAsDocument] = useState(false);
 
   const allAssets = useMemo(
     () => dayGroups.flatMap((g) => g.assets),
@@ -191,6 +193,7 @@ export const ImmichImportDialog: React.FC<Props> = ({
     setHasMoreNewer(false);
     setLoadError(null);
     setSelected(new Set());
+    setImportAsDocument(false);
     loadingOlderRef.current = false;
     loadingNewerRef.current = false;
   }, []);
@@ -419,6 +422,7 @@ export const ImmichImportDialog: React.FC<Props> = ({
           const { blob, fileName, mimeType } = await downloadImmichAsset(assetId);
           const itemDate = asset ? assetDate(asset) : anchorDate;
           const title = asset?.originalFileName ?? 'Immich';
+          const assetKind = importAsDocument ? 'document' : undefined;
           if (importToAppointment) {
             const file = new File([blob], fileName, {
               type: mimeType || blob.type || 'application/octet-stream',
@@ -430,6 +434,7 @@ export const ImmichImportDialog: React.FC<Props> = ({
               companyId,
               logDate: logDate!,
               title,
+              assetKind,
             });
           } else {
             await uploadCustomerLogAsset({
@@ -440,6 +445,7 @@ export const ImmichImportDialog: React.FC<Props> = ({
               companyId,
               logDate: itemDate,
               title,
+              assetKind,
             });
           }
           ok += 1;
@@ -509,11 +515,29 @@ export const ImmichImportDialog: React.FC<Props> = ({
           </Button>
         </div>
 
+        <div className="flex items-start gap-2 rounded-md border border-amber-200/80 bg-amber-50/70 dark:border-amber-900/50 dark:bg-amber-950/30 px-3 py-2 shrink-0">
+          <Checkbox
+            id="immich-as-document"
+            checked={importAsDocument}
+            onCheckedChange={(v) => setImportAsDocument(v === true)}
+            className="mt-0.5"
+          />
+          <label htmlFor="immich-as-document" className="text-xs leading-snug cursor-pointer select-none">
+            <span className="font-medium text-foreground">Marcar como documento</span>
+            <span className="block text-muted-foreground mt-0.5">
+              Fichas en papel, consentimientos firmados u otros escaneos. Quedarán en «Documentos» de la
+              ficha (preparado para OCR).
+            </span>
+          </label>
+        </div>
+
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground shrink-0">
           <span>
             {loadingInitial
               ? 'Cargando…'
-              : `${totalFiles} archivo(s) en ${dayGroups.length} día(s) · ${selected.size} seleccionado(s)`}
+              : `${totalFiles} archivo(s) en ${dayGroups.length} día(s) · ${selected.size} seleccionado(s)${
+                  importAsDocument && selected.size > 0 ? ' · como documento' : ''
+                }`}
           </span>
           <div className="flex items-center gap-1">
             {hasMoreNewer ? (
@@ -657,6 +681,8 @@ export const ImmichImportDialog: React.FC<Props> = ({
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Importando…
               </>
+            ) : importAsDocument ? (
+              `Importar ${selected.size || ''} como documento(s)`
             ) : (
               `Importar ${selected.size || ''} archivo(s)`
             )}
