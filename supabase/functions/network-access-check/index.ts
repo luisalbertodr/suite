@@ -14,19 +14,75 @@ const json = (body: unknown, status = 200) =>
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
 
-/** Extrae la IP del cliente desde cabeceras de proxy (Kong/Nginx). */
-function extractClientIp(req: Request): string | null {
-  const forwarded = req.headers.get('x-forwarded-for');
-  if (forwarded) {
-    // Primer hop = cliente original (el resto suelen ser proxies internos).
-    const first = forwarded.split(',')[0]?.trim();
-    if (first) return first;
+/** Peer de Kong hacia Nginx (no es IP de usuario). */
+function isKongPeerHop(ip: string | null | undefined): boolean {
+  if (!ip) return false;
+  const v = ip.trim();
+  return v === '192.168.99.112' || v === '192.168.99.110';
+}
+
+function isLoopbackOrDockerGw(ip: string | null | undefined): boolean {
+  if (!ip) return true;
+  const v = ip.trim();
+  if (!v) return true;
+  if (v === '127.0.0.1' || v === '::1') return true;
+  if (/^172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.1$/.test(v)) return true;
+  if (/^192\.168\.(48|64|128|176|208)\.1$/.test(v)) return true;
+  return false;
+}
+
+function isTrailingProxyHop(ip: string): boolean {
+  return isKongPeerHop(ip) || isLoopbackOrDockerGw(ip);
+}
+
+/**
+ * Extrae la IP del cliente.
+ *
+ * Cadena: navegador → firewall(10.10.10.1) → Nginx(112) → Kong → edge.
+ * XFF típico: "<IP que vio Nginx>, 192.168.99.112" (+ a veces gateway Docker).
+ * Tras quitar hops de proxy al final, el último hop restante es el $remote_addr
+ * de Nginx (no el primer hop, falsificable por el cliente).
+ */
+function extractClientIp(req: Request): {
+  ip: string | null;
+  source: string;
+  debug: Record<string, string | null>;
+} {
+  const xff = req.headers.get('x-forwarded-for');
+  const realIp = req.headers.get('x-real-ip')?.trim() || null;
+  const cf = req.headers.get('cf-connecting-ip')?.trim() || null;
+  const debug = {
+    'x-forwarded-for': xff,
+    'x-real-ip': realIp,
+    'cf-connecting-ip': cf,
+  };
+
+  const hops = (xff ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  let end = hops.length;
+  while (end > 0 && isTrailingProxyHop(hops[end - 1])) {
+    end -= 1;
   }
-  const realIp = req.headers.get('x-real-ip')?.trim();
-  if (realIp) return realIp;
-  const cf = req.headers.get('cf-connecting-ip')?.trim();
-  if (cf) return cf;
-  return null;
+
+  if (end > 0) {
+    const asserted = hops[end - 1];
+    if (asserted && !isTrailingProxyHop(asserted)) {
+      return { ip: asserted, source: 'x-forwarded-for-nginx-asserted', debug };
+    }
+  }
+
+  if (realIp && !isTrailingProxyHop(realIp)) {
+    return { ip: realIp, source: 'x-real-ip', debug };
+  }
+
+  if (cf && !isLoopbackOrDockerGw(cf)) {
+    return { ip: cf, source: 'cf-connecting-ip', debug };
+  }
+
+  return { ip: null, source: 'none', debug };
 }
 
 serve(async (req) => {
@@ -44,7 +100,7 @@ serve(async (req) => {
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
     if (!supabaseUrl || !anonKey || !serviceKey) {
-      return json({ error: 'Missing Supabase env' }, 500);
+      return json({ error: 'Missing Supabase env', allowed: false }, 500);
     }
 
     const authHeader = req.headers.get('Authorization');
@@ -66,10 +122,19 @@ serve(async (req) => {
     }
 
     const admin = createClient(supabaseUrl, serviceKey);
-    const clientIp = extractClientIp(req);
+    const extracted = extractClientIp(req);
+    const clientIp = extracted.ip;
 
-    // Las restricciones de red aplican también a superusers si tienen CIDRs
-    // configurados. Sin filas = sin restricción (cualquier IP).
+    console.log(
+      JSON.stringify({
+        msg: 'network-access-check',
+        userId: user.id,
+        clientIp,
+        source: extracted.source,
+        debug: extracted.debug,
+      }),
+    );
+
     const { count, error: countError } = await admin
       .from('user_allowed_networks')
       .select('id', { count: 'exact', head: true })
@@ -87,24 +152,36 @@ serve(async (req) => {
         allowed: true,
         restricted: false,
         clientIp,
+        ipSource: extracted.source,
         userId: user.id,
+      });
+    }
+
+    if (!clientIp) {
+      return json({
+        allowed: false,
+        restricted: true,
+        clientIp: null,
+        ipSource: extracted.source,
+        userId: user.id,
+        reason: 'ip_unknown',
       });
     }
 
     const { data: allowed, error: rpcError } = await admin.rpc('user_client_ip_allowed', {
       p_user_id: user.id,
-      p_ip: clientIp ?? '',
+      p_ip: clientIp,
     });
 
     if (rpcError) {
       console.error('network-access-check rpc error', rpcError);
-      // Con restricción configurada, fallar cerrado ante error de comprobación.
       return json(
         {
           error: rpcError.message,
           allowed: false,
           restricted: true,
           clientIp,
+          ipSource: extracted.source,
           reason: 'check_error',
         },
         200,
@@ -115,6 +192,7 @@ serve(async (req) => {
       allowed: allowed === true,
       restricted: true,
       clientIp,
+      ipSource: extracted.source,
       userId: user.id,
       reason: allowed === true ? null : 'ip_not_allowed',
     });

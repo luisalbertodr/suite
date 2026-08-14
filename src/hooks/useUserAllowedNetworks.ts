@@ -15,22 +15,23 @@ export const NETWORK_PRESETS: Array<{ cidr: string; label: string; description: 
   {
     cidr: '10.10.10.0/24',
     label: 'Clínica (proxy)',
-    description: 'IP vista por el proxy Nginx (la más habitual en clínica)',
+    description:
+      'Tráfico que llega vía el firewall/proxy 10.10.10.x. Si la IP real no se reenvía, interior y exterior se ven iguales: usa IP pública fija para remoto.',
   },
   {
     cidr: '192.168.99.0/24',
     label: 'Clínica (LAN)',
-    description: 'Red interna 192.168.99.x',
+    description: 'Solo si la IP real del cliente es 192.168.99.x (acceso LAN directo)',
   },
   {
     cidr: '192.168.1.0/24',
     label: 'Oficina / casa',
-    description: 'Red 192.168.1.x',
+    description: 'Solo si la IP real del cliente es 192.168.1.x (no la IP privada de tu PC en casa detrás de NAT)',
   },
   {
     cidr: '0.0.0.0/0',
     label: 'Cualquier IP (externo)',
-    description: 'Permite acceso desde internet',
+    description: 'Anula la restricción: permite acceso desde cualquier red',
   },
 ];
 
@@ -101,6 +102,24 @@ export function useUserAllowedNetworks(userId: string | null | undefined) {
         const {
           data: { user },
         } = await supabase.auth.getUser();
+
+        // Si se añade una red concreta, quitar 0.0.0.0/0 (si no, la restricción no hace nada).
+        if (normalized !== '0.0.0.0/0') {
+          const { error: delAnyError } = await supabase
+            .from('user_allowed_networks')
+            .delete()
+            .eq('user_id', userId)
+            .eq('cidr', '0.0.0.0/0');
+          if (delAnyError) throw delAnyError;
+        } else {
+          // 0.0.0.0/0 = sin restricción efectiva: limpiar el resto.
+          const { error: clearError } = await supabase
+            .from('user_allowed_networks')
+            .delete()
+            .eq('user_id', userId);
+          if (clearError) throw clearError;
+        }
+
         const { error } = await supabase.from('user_allowed_networks').insert({
           user_id: userId,
           cidr: normalized,
@@ -115,7 +134,11 @@ export function useUserAllowedNetworks(userId: string | null | undefined) {
           }
           return false;
         }
-        toast.success('Red añadida');
+        toast.success(
+          normalized === '0.0.0.0/0'
+            ? 'Acceso desde cualquier IP'
+            : 'Red añadida (se quitó «Cualquier IP» si estaba)',
+        );
         await fetchNetworks();
         return true;
       } catch (e) {
