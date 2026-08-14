@@ -1170,11 +1170,67 @@ async function verifyOpenwaSignature(
   return hex === expected;
 }
 
+/** Evita bucles de restart cuando WAHA emite FAILED en ráfaga. */
+const wahaFailedRestartAt = new Map<string, number>();
+const WAHA_FAILED_RESTART_COOLDOWN_MS = 25_000;
+
+function trimSlash(url: string): string {
+  return url.replace(/\/+$/, '');
+}
+
+function bytesToBase64(buf: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < buf.length; i += 0x8000) {
+    binary += String.fromCharCode(...buf.subarray(i, Math.min(buf.length, i + 0x8000)));
+  }
+  return btoa(binary);
+}
+
+type WahaConn = { baseUrl: string; apiKey: string | null; sessionName: string };
+
+async function wahaFetchQrDataUrl(conn: WahaConn): Promise<string | null> {
+  const headers = new Headers();
+  if (conn.apiKey) headers.set('X-Api-Key', conn.apiKey);
+  const url =
+    `${trimSlash(conn.baseUrl)}/api/${encodeURIComponent(conn.sessionName)}/auth/qr?format=image`;
+  const resp = await fetch(url, { headers, signal: AbortSignal.timeout(20_000) });
+  if (!resp.ok) {
+    console.warn('whatsapp-webhook: fetch QR failed', resp.status, await resp.text().catch(() => ''));
+    return null;
+  }
+  const buf = new Uint8Array(await resp.arrayBuffer());
+  if (buf.length < 200) return null;
+  return `data:image/png;base64,${bytesToBase64(buf)}`;
+}
+
+/** Reinicia sesión FAILED (p. ej. QR agotado) para generar un QR nuevo. */
+async function wahaRestartSession(conn: WahaConn): Promise<boolean> {
+  const headers = new Headers({ 'Content-Type': 'application/json' });
+  if (conn.apiKey) headers.set('X-Api-Key', conn.apiKey);
+  const base = trimSlash(conn.baseUrl);
+  const name = encodeURIComponent(conn.sessionName);
+  const tryPost = async (path: string, body?: string) => {
+    const r = await fetch(`${base}${path}`, {
+      method: 'POST',
+      headers,
+      body: body ?? '{}',
+      signal: AbortSignal.timeout(30_000),
+    });
+    return r.ok || r.status === 201;
+  };
+  // Preferir /restart; si no existe, stop+start.
+  if (await tryPost(`/api/sessions/${name}/restart`)) return true;
+  await tryPost(`/api/sessions/${name}/stop`).catch(() => false);
+  if (await tryPost(`/api/sessions/${name}/start`)) return true;
+  return tryPost(`/api/sessions/start`, JSON.stringify({ name: conn.sessionName }));
+}
+
 async function handleStateChange(
   admin: SupabaseClient,
   companyId: string,
   envelope: WahaEnvelope,
   eventName: string,
+  wahaConn?: WahaConn | null,
 ) {
   const payload = envelope.payload as
     | { status?: string; state?: string; message?: string; qr?: string | null }
@@ -1198,24 +1254,57 @@ async function handleStateChange(
   if (!status && eventName !== 'session.status' && eventName !== 'state.change') {
     return;
   }
+  const statusUpper = (status ?? '').toUpperCase();
+  let qrDataUrl: string | undefined;
   const qrRaw = payload?.qr;
-  const qrDataUrl =
-    typeof qrRaw === 'string' && qrRaw.length > 0
-      ? qrRaw.startsWith('data:')
-        ? qrRaw
-        : `data:image/png;base64,${qrRaw}`
-      : undefined;
+  if (typeof qrRaw === 'string' && qrRaw.length > 0) {
+    qrDataUrl = qrRaw.startsWith('data:') ? qrRaw : `data:image/png;base64,${qrRaw}`;
+  }
+  // WAHA re-emite SCAN_QR_CODE cada vez que rota el QR (60s + varios de 20s).
+  // Hay que pedir la imagen actualizada; si no, la UI se queda con un QR caducado.
+  if (statusUpper === 'SCAN_QR_CODE' && wahaConn && !qrDataUrl) {
+    const fetched = await wahaFetchQrDataUrl(wahaConn).catch((e) => {
+      console.warn('whatsapp-webhook: QR refresh error', e);
+      return null;
+    });
+    if (fetched) qrDataUrl = fetched;
+  }
+
   await admin
     .from('whatsapp_config')
     .update({
       ...(status ? { last_status: status } : {}),
       last_status_message: payload?.message ?? null,
       last_status_at: new Date().toISOString(),
-      ...(qrDataUrl ? { qr_data_url: qrDataUrl } : {}),
+      ...(qrDataUrl ? { qr_data_url: qrDataUrl, qr_updated_at: new Date().toISOString() } : {}),
       ...(envelope.me?.id ? { me_jid: envelope.me.id } : {}),
       ...(envelope.me?.pushName ? { me_pushname: envelope.me.pushName } : {}),
     })
     .eq('company_id', companyId);
+
+  // Tras agotar los QR, WAHA pasa a FAILED. Reiniciar genera un ciclo nuevo de QR.
+  if (statusUpper === 'FAILED' && wahaConn) {
+    const last = wahaFailedRestartAt.get(companyId) ?? 0;
+    const now = Date.now();
+    if (now - last >= WAHA_FAILED_RESTART_COOLDOWN_MS) {
+      wahaFailedRestartAt.set(companyId, now);
+      console.log('whatsapp-webhook: auto-restart WAHA tras FAILED (QR agotado)', companyId);
+      const ok = await wahaRestartSession(wahaConn).catch((e) => {
+        console.warn('whatsapp-webhook: restart tras FAILED falló', e);
+        return false;
+      });
+      if (ok) {
+        await admin
+          .from('whatsapp_config')
+          .update({
+            last_status: 'STARTING',
+            last_status_message: 'QR caducado: regenerando…',
+            last_status_at: new Date().toISOString(),
+          })
+          .eq('company_id', companyId);
+      }
+    }
+  }
 }
 
 serve(async (req) => {
@@ -1289,6 +1378,12 @@ serve(async (req) => {
       meta_linked?: boolean | null;
       meta_app_secret?: string | null;
       meta_verify_token?: string | null;
+      base_url?: string | null;
+      api_key?: string | null;
+      waha_base_url?: string | null;
+      waha_api_key?: string | null;
+      session_name?: string | null;
+      waha_session_name?: string | null;
     } | null = null;
 
     if (isMeta) {
@@ -1333,7 +1428,7 @@ serve(async (req) => {
         const { data } = await admin
           .from('whatsapp_config')
           .select(
-            'company_id, webhook_secret, enabled, me_pushname, provider, meta_app_secret, meta_verify_token',
+            'company_id, webhook_secret, enabled, me_pushname, provider, meta_linked, meta_app_secret, meta_verify_token, base_url, api_key, waha_base_url, waha_api_key, session_name, waha_session_name',
           )
           .eq('company_id', companyIdQuery)
           .maybeSingle();
@@ -1342,7 +1437,7 @@ serve(async (req) => {
         const { data } = await admin
           .from('whatsapp_config')
           .select(
-            'company_id, webhook_secret, enabled, me_pushname, provider, meta_app_secret, meta_verify_token',
+            'company_id, webhook_secret, enabled, me_pushname, provider, meta_app_secret, meta_verify_token, base_url, api_key, waha_base_url, waha_api_key, session_name, waha_session_name',
           )
           .eq('webhook_secret', secret)
           .limit(1);
@@ -1411,7 +1506,24 @@ serve(async (req) => {
       event === 'session.status' ||
       event === 'engine.event'
     ) {
-      await handleStateChange(admin, companyId, envelope, event);
+      const provider = (cfgRow.provider ?? 'waha').toLowerCase();
+      const baseUrl =
+        (provider === 'waha'
+          ? cfgRow.waha_base_url || cfgRow.base_url
+          : cfgRow.base_url) || null;
+      const apiKey =
+        provider === 'waha'
+          ? cfgRow.waha_api_key || cfgRow.api_key || null
+          : cfgRow.api_key || null;
+      const sessionName =
+        (provider === 'waha'
+          ? cfgRow.waha_session_name || cfgRow.session_name
+          : cfgRow.session_name) || 'default';
+      const wahaConn =
+        provider !== 'meta' && provider !== 'openwa' && baseUrl
+          ? { baseUrl, apiKey, sessionName }
+          : null;
+      await handleStateChange(admin, companyId, envelope, event, wahaConn);
     } else if (event === 'chat.archive') {
       const p = (envelope.payload ?? {}) as { chatId?: string; archived?: boolean };
       if (p.chatId) {

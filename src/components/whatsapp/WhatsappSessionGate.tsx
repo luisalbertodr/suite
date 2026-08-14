@@ -40,6 +40,8 @@ export const WhatsappSessionGate: React.FC<Props> = ({ config, onConnected }) =>
   } = useWhatsappConfig();
 
   const connectedNotifiedRef = useRef(false);
+  const autoRenewBusyRef = useRef(false);
+  const lastAutoRenewAtRef = useRef(0);
 
   // Refresca el estado al montar
   useEffect(() => {
@@ -47,7 +49,7 @@ export const WhatsappSessionGate: React.FC<Props> = ({ config, onConnected }) =>
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Auto-poll cada 5s mientras NO esté working
+  // Auto-poll cada 5s mientras NO esté working; pide QR actualizado en cada ciclo.
   useEffect(() => {
     const status = (config.last_status ?? '').toUpperCase();
     if (status === 'WORKING') {
@@ -68,11 +70,44 @@ export const WhatsappSessionGate: React.FC<Props> = ({ config, onConnected }) =>
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config.last_status]);
 
+  // Si WAHA agota los QR → FAILED: reinicia sola la sesión para un QR nuevo.
+  useEffect(() => {
+    const status = (config.last_status ?? '').toUpperCase();
+    if (config.provider === 'meta' || (status !== 'FAILED' && status !== 'STOPPED')) return;
+    // STOPPED sin me: suele ser el force-stop tras QR; no tocar si el usuario detuvo una sesión WORKING.
+    if (status === 'STOPPED' && config.me_jid) return;
+
+    const now = Date.now();
+    if (autoRenewBusyRef.current || now - lastAutoRenewAtRef.current < 20_000) return;
+    autoRenewBusyRef.current = true;
+    lastAutoRenewAtRef.current = now;
+
+    (async () => {
+      try {
+        // session.qr del proxy reinicia si hace falta y guarda el PNG nuevo.
+        await fetchQr.mutateAsync();
+      } catch {
+        try {
+          await sessionStart.mutateAsync();
+          await fetchQr.mutateAsync();
+        } catch {
+          /* el poll mostrará el error; el usuario puede pulsar renovar */
+        }
+      } finally {
+        autoRenewBusyRef.current = false;
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.last_status, config.provider, config.me_jid]);
+
   const status = (config.last_status ?? '').toUpperCase();
   const isWorking = status === 'WORKING';
   const isScanning = status === 'SCAN_QR_CODE';
   const isStarting = status === 'STARTING';
   const isFailed = status === 'FAILED';
+  const isRenewingQr =
+    (isFailed || (status === 'STOPPED' && !config.me_jid)) &&
+    (fetchQr.isPending || sessionStart.isPending);
 
   const handleStart = async () => {
     try {
@@ -122,7 +157,7 @@ export const WhatsappSessionGate: React.FC<Props> = ({ config, onConnected }) =>
               <CardDescription>
                 {config.provider === 'meta'
                   ? 'Meta Cloud API está como motor exclusivo (sin QR). En Configuración → WhatsApp pulsa «Activar híbrido WAHA + Meta» para recuperar el QR de WhatsApp Business y mantener Cloud API.'
-                  : 'Vincula WhatsApp Business con Suite escaneando el QR de WAHA (Ajustes → Dispositivos vinculados).'}
+                  : 'Vincula WhatsApp Business con Suite escaneando el QR de WAHA (Ajustes → Dispositivos vinculados). El QR se renueva solo al caducar.'}
               </CardDescription>
             </div>
           </div>
@@ -149,7 +184,7 @@ export const WhatsappSessionGate: React.FC<Props> = ({ config, onConnected }) =>
             </Button>
           </div>
 
-          {isScanning ? (
+          {isScanning || isRenewingQr ? (
             <div className="space-y-3">
               <p className="text-sm">
                 Abre <strong>WhatsApp Business</strong> en el móvil →{' '}
@@ -157,27 +192,21 @@ export const WhatsappSessionGate: React.FC<Props> = ({ config, onConnected }) =>
                 <strong>Vincular un dispositivo</strong> y escanea este código.
               </p>
               <div className="flex justify-center rounded-lg border bg-white p-4">
-                {config.qr_data_url ? (
+                {config.qr_data_url && isScanning ? (
                   <img
                     src={config.qr_data_url}
                     alt="QR de WhatsApp"
                     className="h-64 w-64 object-contain"
                   />
                 ) : (
-                  <div className="flex h-64 w-64 items-center justify-center text-sm text-muted-foreground">
-                    {fetchQr.isPending ? (
-                      <Loader2 className="h-6 w-6 animate-spin" />
-                    ) : (
-                      <Button size="sm" onClick={() => fetchQr.mutate()}>
-                        <QrCode className="mr-2 h-4 w-4" />
-                        Obtener QR
-                      </Button>
-                    )}
+                  <div className="flex h-64 w-64 flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-6 w-6 animate-spin" />
+                    {isRenewingQr ? 'Renovando QR caducado…' : 'Obteniendo QR…'}
                   </div>
                 )}
               </div>
               <p className="text-center text-[11px] text-muted-foreground">
-                El estado se actualiza solo cada pocos segundos.
+                WhatsApp rota el QR cada ~20–60 s; Suite lo actualiza solo. Si caduca del todo, se regenera automáticamente.
               </p>
             </div>
           ) : isWorking ? (

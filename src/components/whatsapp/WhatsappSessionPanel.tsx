@@ -42,6 +42,8 @@ export const WhatsappSessionPanel: React.FC<Props> = ({ config, onConnected }) =
   } = useWhatsappConfig();
 
   const connectedNotifiedRef = useRef(false);
+  const autoRenewBusyRef = useRef(false);
+  const lastAutoRenewAtRef = useRef(0);
 
   useEffect(() => {
     sessionStatus.mutate(undefined, { onError: () => undefined });
@@ -68,10 +70,37 @@ export const WhatsappSessionPanel: React.FC<Props> = ({ config, onConnected }) =
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config.last_status]);
 
+  useEffect(() => {
+    const status = (config.last_status ?? '').toUpperCase();
+    if (status !== 'FAILED' && !(status === 'STOPPED' && !config.me_jid)) return;
+    const now = Date.now();
+    if (autoRenewBusyRef.current || now - lastAutoRenewAtRef.current < 20_000) return;
+    autoRenewBusyRef.current = true;
+    lastAutoRenewAtRef.current = now;
+    (async () => {
+      try {
+        await fetchQr.mutateAsync();
+      } catch {
+        try {
+          await sessionStart.mutateAsync();
+          await fetchQr.mutateAsync();
+        } catch {
+          /* ignore */
+        }
+      } finally {
+        autoRenewBusyRef.current = false;
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.last_status, config.me_jid]);
+
   const status = (config.last_status ?? '').toUpperCase();
   const isWorking = status === 'WORKING';
   const isScanning = status === 'SCAN_QR_CODE';
   const isStarting = status === 'STARTING';
+  const isRenewingQr =
+    (status === 'FAILED' || (status === 'STOPPED' && !config.me_jid)) &&
+    (fetchQr.isPending || sessionStart.isPending);
 
   const handleStart = async () => {
     try {
@@ -121,33 +150,30 @@ export const WhatsappSessionPanel: React.FC<Props> = ({ config, onConnected }) =
           </Button>
         </div>
 
-        {isScanning ? (
+        {isScanning || isRenewingQr ? (
           <div className="space-y-3">
             <p className="text-sm">
-              Abre WhatsApp en tu móvil → <strong>Ajustes</strong> →{' '}
+              Abre WhatsApp Business en el móvil → <strong>Ajustes</strong> →{' '}
               <strong>Dispositivos vinculados</strong> →{' '}
               <strong>Vincular un dispositivo</strong> y escanea este código.
             </p>
             <div className="flex justify-center rounded-lg border bg-white p-4 dark:bg-zinc-950">
-              {config.qr_data_url ? (
+              {config.qr_data_url && isScanning ? (
                 <img
                   src={config.qr_data_url}
                   alt="QR de WhatsApp"
                   className="h-56 w-56 object-contain"
                 />
               ) : (
-                <div className="flex h-56 w-56 items-center justify-center text-sm text-muted-foreground">
-                  {fetchQr.isPending ? (
-                    <Loader2 className="h-6 w-6 animate-spin" />
-                  ) : (
-                    <Button size="sm" onClick={() => fetchQr.mutate()}>
-                      <QrCode className="mr-2 h-4 w-4" />
-                      Obtener QR
-                    </Button>
-                  )}
+                <div className="flex h-56 w-56 flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                  {isRenewingQr ? 'Renovando QR caducado…' : 'Obteniendo QR…'}
                 </div>
               )}
             </div>
+            <p className="text-center text-[11px] text-muted-foreground">
+              El QR se actualiza solo al rotar o caducar.
+            </p>
           </div>
         ) : isWorking ? (
           <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300">

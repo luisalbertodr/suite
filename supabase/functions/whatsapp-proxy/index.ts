@@ -2522,13 +2522,70 @@ serve(async (req) => {
         }
         // Waha expone /api/{session}/auth/qr?format=image (devuelve PNG) o
         // ?format=raw (devuelve el código de texto). Probamos image primero.
-        const resp = await wahaFetch(
-          cfg,
-          `/api/${encodeURIComponent(sessionName)}/auth/qr?format=image`,
-        );
+        // Si la sesión está FAILED (QR agotado), reiniciar y volver a pedir el QR.
+        const fetchQrImage = async (): Promise<Response> =>
+          wahaFetch(
+            cfg,
+            `/api/${encodeURIComponent(sessionName)}/auth/qr?format=image`,
+          );
+        let resp = await fetchQrImage();
         if (!resp.ok) {
           const text = await resp.text();
-          return err(`Waha QR: HTTP ${resp.status} ${text.slice(0, 200)}`);
+          const needsRestart =
+            resp.status === 422 ||
+            /FAILED|STOPPED|not as expected|QR/i.test(text);
+          if (needsRestart) {
+            try {
+              await wahaJson(cfg, `/api/sessions/${encodeURIComponent(sessionName)}/restart`, {
+                method: 'POST',
+                body: JSON.stringify({}),
+              });
+            } catch {
+              try {
+                await wahaJson(cfg, `/api/sessions/${encodeURIComponent(sessionName)}/stop`, {
+                  method: 'POST',
+                  body: JSON.stringify({}),
+                });
+              } catch {
+                /* ignore */
+              }
+              try {
+                await wahaJson(cfg, `/api/sessions/${encodeURIComponent(sessionName)}/start`, {
+                  method: 'POST',
+                  body: JSON.stringify({}),
+                });
+              } catch {
+                await wahaJson(cfg, `/api/sessions/start`, {
+                  method: 'POST',
+                  body: JSON.stringify({ name: sessionName }),
+                }).catch(() => undefined);
+              }
+            }
+            await updateCfg({
+              last_status: 'STARTING',
+              last_status_message: 'QR caducado: regenerando…',
+              last_status_at: new Date().toISOString(),
+            });
+            // Esperar a que pase a SCAN_QR_CODE
+            for (let i = 0; i < 8; i++) {
+              await new Promise((r) => setTimeout(r, 1500));
+              try {
+                const s = await wahaJson<{ status?: string }>(
+                  cfg,
+                  `/api/sessions/${encodeURIComponent(sessionName)}`,
+                );
+                const st = (s.status ?? '').toUpperCase();
+                if (st === 'SCAN_QR_CODE' || st === 'WORKING') break;
+              } catch {
+                /* keep waiting */
+              }
+            }
+            resp = await fetchQrImage();
+          }
+          if (!resp.ok) {
+            const text2 = await resp.text().catch(() => text);
+            return err(`Waha QR: HTTP ${resp.status} ${text2.slice(0, 200)}`);
+          }
         }
         const buf = new Uint8Array(await resp.arrayBuffer());
         // Codifica a base64 manualmente (chunks para no romper la pila de
@@ -2543,6 +2600,8 @@ serve(async (req) => {
         await updateCfg({
           qr_data_url: dataUrl,
           qr_updated_at: new Date().toISOString(),
+          last_status: 'SCAN_QR_CODE',
+          last_status_at: new Date().toISOString(),
         });
         return json({ ok: true, qr_data_url: dataUrl });
       }
