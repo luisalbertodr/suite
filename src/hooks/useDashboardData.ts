@@ -5,6 +5,13 @@ import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { useWorkCenter } from '@/hooks/useWorkCenter';
 import { format } from 'date-fns';
 
+import {
+  enrichDailyBillingWithExpenses,
+  enrichYearBillingWithExpenses,
+  fetchBankExpensesDaily,
+  fetchBankExpensesMonthly,
+  type BankExpenseSplit,
+} from '@/lib/bankExpenses';
 import { familiesCacheKey } from '@/lib/dashboardBillingCache';
 import {
   fetchDashboardRecentActivity,
@@ -118,6 +125,16 @@ export const useDashboardData = (
     billingView,
     familiesKey,
   ] as const;
+  const yearExpensesQueryKey = [
+    'dashboard-year-bank-expenses',
+    yearsSorted.join(','),
+  ] as const;
+  const dailyExpensesQueryKey = [
+    'dashboard-daily-bank-expenses',
+    billingScopeKey,
+    yearsSorted.join(','),
+    periodKey,
+  ] as const;
 
   const familiesFilter = useMemo<DashboardBillingFamiliesFilter>(
     () => ({ selectedFamilies, billingView }),
@@ -213,7 +230,7 @@ export const useDashboardData = (
     [yearBillingSnapshotKey],
   );
 
-  const yearBilling = useMemo((): YearBillingRow[] | undefined => {
+  const yearBillingBase = useMemo((): YearBillingRow[] | undefined => {
     const byYear = new Map<number, YearBillingYearData | undefined>();
     for (const year of yearsSorted) {
       const match = yearQueries.find((query) => query.data?.year === year);
@@ -224,7 +241,31 @@ export const useDashboardData = (
   }, [yearQueries, yearsSorted, cachedYearBilling]);
 
   const {
-    data: dailyComparison,
+    data: yearExpenses,
+    isFetching: yearExpensesFetching,
+  } = useQuery({
+    queryKey: yearExpensesQueryKey,
+    queryFn: async () => {
+      const entries = await Promise.all(
+        yearsSorted.map(async (year) => [year, await fetchBankExpensesMonthly(year)] as const),
+      );
+      return new Map<number, BankExpenseSplit>(entries);
+    },
+    enabled: !!companyId && !companyLoading,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+    refetchOnMount: 'always',
+    placeholderData: keepPreviousData,
+  });
+
+  const yearBilling = useMemo((): YearBillingRow[] | undefined => {
+    if (!yearBillingBase) return undefined;
+    if (!yearExpenses) return yearBillingBase;
+    return enrichYearBillingWithExpenses(yearBillingBase, yearsSorted, yearExpenses);
+  }, [yearBillingBase, yearExpenses, yearsSorted]);
+
+  const {
+    data: dailyComparisonRaw,
     isFetching: dailyComparisonFetching,
   } = useQuery({
     queryKey: dailyComparisonQueryKey,
@@ -239,6 +280,56 @@ export const useDashboardData = (
     placeholderData: keepPreviousData,
     ...dashboardQueryCacheOptions<DailyBillingRow[]>(dailyComparisonQueryKey),
   });
+
+  const dailyExpenseRange = useMemo(() => {
+    const keys = new Set<string>();
+    for (const row of dailyComparisonRaw ?? []) {
+      for (const year of yearsSorted) {
+        if (period.mode === 'rolling' && row.dayKey) {
+          keys.add(`${year}-${row.dayKey.slice(5)}`);
+        } else if (period.mode === 'month') {
+          const day = Number(row.name);
+          if (!day) continue;
+          const daysInMonth = new Date(year, period.month, 0).getDate();
+          if (day > daysInMonth) continue;
+          keys.add(
+            `${year}-${String(period.month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+          );
+        }
+      }
+    }
+    const sorted = [...keys].sort();
+    return sorted.length ? { from: sorted[0]!, to: sorted[sorted.length - 1]! } : null;
+  }, [dailyComparisonRaw, yearsSorted, period]);
+
+  const {
+    data: dailyExpenses,
+    isFetching: dailyExpensesFetching,
+  } = useQuery({
+    queryKey: [...dailyExpensesQueryKey, dailyExpenseRange?.from, dailyExpenseRange?.to],
+    queryFn: async () => {
+      if (!dailyExpenseRange) {
+        return { medicina: new Map<string, number>(), estetica: new Map<string, number>() };
+      }
+      return fetchBankExpensesDaily(dailyExpenseRange.from, dailyExpenseRange.to);
+    },
+    enabled: !!companyId && !companyLoading && !!dailyExpenseRange,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+    refetchOnMount: 'always',
+    placeholderData: keepPreviousData,
+  });
+
+  const dailyComparison = useMemo((): DailyBillingRow[] | undefined => {
+    if (!dailyComparisonRaw) return undefined;
+    if (!dailyExpenses) return dailyComparisonRaw;
+    return enrichDailyBillingWithExpenses(
+      dailyComparisonRaw,
+      yearsSorted,
+      dailyExpenses,
+      period,
+    );
+  }, [dailyComparisonRaw, dailyExpenses, yearsSorted, period]);
 
   const {
     data: recentActivity,
@@ -270,12 +361,12 @@ export const useDashboardData = (
   }, [recentActivity, activityQueryKey]);
 
   useEffect(() => {
-    if (dailyComparison?.length) writeDashboardQueryCache(dailyComparisonQueryKey, dailyComparison);
-  }, [dailyComparison, dailyComparisonQueryKey]);
+    if (dailyComparisonRaw?.length) writeDashboardQueryCache(dailyComparisonQueryKey, dailyComparisonRaw);
+  }, [dailyComparisonRaw, dailyComparisonQueryKey]);
 
   useEffect(() => {
-    if (yearBilling?.length) writeDashboardQueryCache(yearBillingSnapshotKey, yearBilling);
-  }, [yearBilling, yearBillingSnapshotKey]);
+    if (yearBillingBase?.length) writeDashboardQueryCache(yearBillingSnapshotKey, yearBillingBase);
+  }, [yearBillingBase, yearBillingSnapshotKey]);
 
   useEffect(() => {
     for (const query of yearQueries) {
@@ -299,7 +390,11 @@ export const useDashboardData = (
   const yearBillingFetching = yearQueries.some((query) => query.isFetching);
   const hasCachedMain = Boolean(main?.stats);
   const isInitialLoading = (companyLoading || wcLoading) || (mainLoading && !hasCachedMain);
-  const isChartsFetching = yearBillingFetching || dailyComparisonFetching;
+  const isChartsFetching =
+    yearBillingFetching ||
+    dailyComparisonFetching ||
+    yearExpensesFetching ||
+    dailyExpensesFetching;
   const isBackgroundRefreshing =
     panelActive &&
     !isInitialLoading &&

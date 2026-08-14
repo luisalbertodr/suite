@@ -1,0 +1,569 @@
+import { supabase } from '@/lib/supabase';
+import {
+  ESTETICA_COMPANY_ID,
+  MEDICINA_COMPANY_ID,
+} from '@/lib/workCenterBilling';
+import type {
+  ComparisonPeriod,
+  DailyBillingRow,
+  YearBillingRow,
+} from '@/lib/salesRevenue';
+
+/** Devolución de fondos aportados: no cuenta como gasto. */
+export const CONTRIBUTION_RETURN_CONCEPT =
+  'Transferencia Inmediata A Favor de Diaz Rodriguez Luis Alberto';
+
+const PAGE = 1000;
+
+export type BankEntity = 'medicina' | 'estetica';
+
+export type ParsedBankMovement = {
+  movementDate: string;
+  concept: string;
+  amount: number;
+  isExpense: boolean;
+  isContributionReturn: boolean;
+  fingerprint: string;
+};
+
+export type BankExpenseSplit = {
+  medicina: Map<number, number>;
+  estetica: Map<number, number>;
+};
+
+export type BankExpenseDaySplit = {
+  medicina: Map<string, number>;
+  estetica: Map<string, number>;
+};
+
+export type BankMovementListRow = {
+  id: string;
+  company_id: string;
+  movement_date: string;
+  concept: string;
+  amount: number;
+  is_expense: boolean;
+  is_contribution_return: boolean;
+  source_filename: string | null;
+  created_at: string;
+};
+
+type RpcExpenseMonthRow = {
+  month_num: number;
+  month_key: string;
+  company_id: string;
+  total: number;
+};
+
+type RpcExpenseDayRow = {
+  day_date: string;
+  day_key: string;
+  company_id: string;
+  total: number;
+};
+
+export function companyIdForBankEntity(entity: BankEntity): string {
+  return entity === 'medicina' ? MEDICINA_COMPANY_ID : ESTETICA_COMPANY_ID;
+}
+
+export function normalizeBankConcept(concept: string): string {
+  return String(concept ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+export function isContributionReturnConcept(concept: string): boolean {
+  const needle = normalizeBankConcept(CONTRIBUTION_RETURN_CONCEPT);
+  return normalizeBankConcept(concept).includes(needle);
+}
+
+export function classifyBankAmount(
+  concept: string,
+  amount: number,
+): { isExpense: boolean; isContributionReturn: boolean } {
+  const isContributionReturn = isContributionReturnConcept(concept);
+  const isExpense = amount < 0 && !isContributionReturn;
+  return { isExpense, isContributionReturn };
+}
+
+/** Importe ES/EU: 1.234,56 | -1234,56 | 1,234.56 | (123.45) */
+export function parseBankAmount(raw: string): number | null {
+  let s = String(raw ?? '').trim();
+  if (!s) return null;
+  const paren = /^\((.+)\)$/.exec(s);
+  if (paren) s = `-${paren[1]!.trim()}`;
+  s = s.replace(/\s/g, '').replace(/€/g, '').replace(/EUR/gi, '');
+  if (!s || s === '-' || s === '+') return null;
+
+  const neg = s.startsWith('-');
+  const pos = s.startsWith('+');
+  if (neg || pos) s = s.slice(1);
+
+  const lastComma = s.lastIndexOf(',');
+  const lastDot = s.lastIndexOf('.');
+  if (lastComma >= 0 && lastDot >= 0) {
+    if (lastComma > lastDot) {
+      s = s.replace(/\./g, '').replace(',', '.');
+    } else {
+      s = s.replace(/,/g, '');
+    }
+  } else if (lastComma >= 0) {
+    const decimals = s.length - lastComma - 1;
+    s = decimals <= 2 ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
+  } else if (lastDot >= 0) {
+    const decimals = s.length - lastDot - 1;
+    if (decimals > 2) s = s.replace(/\./g, '');
+  }
+
+  const n = Number(s);
+  if (!Number.isFinite(n)) return null;
+  return neg ? -n : n;
+}
+
+/** Fecha DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD */
+export function parseBankDate(raw: string): string | null {
+  const s = String(raw ?? '').trim();
+  if (!s) return null;
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const dmy = /^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/.exec(s);
+  if (!dmy) return null;
+  let year = Number(dmy[3]);
+  if (year < 100) year += year >= 70 ? 1900 : 2000;
+  const month = String(Number(dmy[2])).padStart(2, '0');
+  const day = String(Number(dmy[1])).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function detectDelimiter(headerLine: string): ';' | ',' | '\t' {
+  const sc = (headerLine.match(/;/g) ?? []).length;
+  const cc = (headerLine.match(/,/g) ?? []).length;
+  const tc = (headerLine.match(/\t/g) ?? []).length;
+  if (tc >= sc && tc >= cc && tc > 0) return '\t';
+  if (sc >= cc) return ';';
+  return ',';
+}
+
+function splitCsvLine(line: string, delimiter: string): string[] {
+  const out: string[] = [];
+  let field = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const c = line[i]!;
+    if (inQuotes) {
+      if (c === '"' && line[i + 1] === '"') {
+        field += '"';
+        i += 1;
+      } else if (c === '"') {
+        inQuotes = false;
+      } else {
+        field += c;
+      }
+    } else if (c === '"') {
+      inQuotes = true;
+    } else if (c === delimiter) {
+      out.push(field);
+      field = '';
+    } else {
+      field += c;
+    }
+  }
+  out.push(field);
+  return out.map((v) => v.trim());
+}
+
+function normalizeHeader(h: string): string {
+  return h
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+const DATE_HEADERS = new Set([
+  'fecha',
+  'fecha_operacion',
+  'fecha_valor',
+  'f_operacion',
+  'f_valor',
+  'date',
+  'operation_date',
+  'value_date',
+]);
+
+const CONCEPT_HEADERS = new Set([
+  'concepto',
+  'descripcion',
+  'description',
+  'detalle',
+  'narrativa',
+  'concept',
+  'movimiento',
+]);
+
+const AMOUNT_HEADERS = new Set([
+  'importe',
+  'amount',
+  'cantidad',
+  'cargo',
+  'abono',
+  'importe_eur',
+  'importe_euros',
+  'valor',
+]);
+
+function findColumnIndex(headers: string[], candidates: Set<string>): number {
+  for (let i = 0; i < headers.length; i += 1) {
+    if (candidates.has(headers[i]!)) return i;
+  }
+  return -1;
+}
+
+export function bankMovementFingerprint(
+  movementDate: string,
+  concept: string,
+  amount: number,
+): string {
+  const amt = amount.toFixed(2);
+  return `${movementDate}|${normalizeBankConcept(concept)}|${amt}`;
+}
+
+/**
+ * Parsea extracto bancario CSV/TSV (BBVA, Santander, export genérico ES).
+ * Cabeceras flexibles: Fecha / Concepto / Importe.
+ */
+export function parseBankMovementsCsv(text: string): {
+  rows: ParsedBankMovement[];
+  errors: string[];
+} {
+  const cleaned = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const lines = cleaned.split('\n').filter((line) => line.trim().length > 0);
+  if (lines.length < 2) {
+    return { rows: [], errors: ['El archivo no tiene filas de datos.'] };
+  }
+
+  const delimiter = detectDelimiter(lines[0]!);
+  const headers = splitCsvLine(lines[0]!, delimiter).map(normalizeHeader);
+  let dateIdx = findColumnIndex(headers, DATE_HEADERS);
+  let conceptIdx = findColumnIndex(headers, CONCEPT_HEADERS);
+  let amountIdx = findColumnIndex(headers, AMOUNT_HEADERS);
+
+  // Fallback posicional habitual: Fecha;Concepto;Importe
+  if (dateIdx < 0) dateIdx = 0;
+  if (conceptIdx < 0) conceptIdx = Math.min(1, headers.length - 1);
+  if (amountIdx < 0) {
+    amountIdx = headers.findIndex((h) => h.includes('importe') || h.includes('amount'));
+    if (amountIdx < 0) amountIdx = Math.min(2, headers.length - 1);
+  }
+
+  const rows: ParsedBankMovement[] = [];
+  const errors: string[] = [];
+  const seen = new Set<string>();
+
+  for (let i = 1; i < lines.length; i += 1) {
+    const cols = splitCsvLine(lines[i]!, delimiter);
+    if (cols.every((c) => !c.trim())) continue;
+    const movementDate = parseBankDate(cols[dateIdx] ?? '');
+    const amount = parseBankAmount(cols[amountIdx] ?? '');
+    const concept = String(cols[conceptIdx] ?? '').trim();
+    if (!movementDate || amount == null) {
+      errors.push(`Fila ${i + 1}: fecha o importe inválidos.`);
+      continue;
+    }
+    const { isExpense, isContributionReturn } = classifyBankAmount(concept, amount);
+    const fingerprint = bankMovementFingerprint(movementDate, concept, amount);
+    if (seen.has(fingerprint)) continue;
+    seen.add(fingerprint);
+    rows.push({
+      movementDate,
+      concept,
+      amount,
+      isExpense,
+      isContributionReturn,
+      fingerprint,
+    });
+  }
+
+  return { rows, errors };
+}
+
+export async function importBankMovements(params: {
+  entity: BankEntity;
+  rows: ParsedBankMovement[];
+  sourceFilename?: string;
+}): Promise<{ inserted: number; skipped: number; expenseTotal: number }> {
+  const companyId = companyIdForBankEntity(params.entity);
+  const batchId = crypto.randomUUID();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  let inserted = 0;
+  let skipped = 0;
+  let expenseTotal = 0;
+
+  for (let offset = 0; offset < params.rows.length; offset += PAGE) {
+    const chunk = params.rows.slice(offset, offset + PAGE);
+    const payload = chunk.map((row) => ({
+      company_id: companyId,
+      movement_date: row.movementDate,
+      concept: row.concept,
+      amount: row.amount,
+      is_expense: row.isExpense,
+      is_contribution_return: row.isContributionReturn,
+      fingerprint: row.fingerprint,
+      source_filename: params.sourceFilename ?? null,
+      import_batch_id: batchId,
+      created_by: user?.id ?? null,
+    }));
+
+    const { data, error } = await supabase
+      .from('bank_movements')
+      .upsert(payload, {
+        onConflict: 'company_id,fingerprint',
+        ignoreDuplicates: true,
+      })
+      .select('id, is_expense, amount');
+
+    if (error) throw error;
+    const got = data?.length ?? 0;
+    inserted += got;
+    skipped += chunk.length - got;
+    for (const row of data ?? []) {
+      if (row.is_expense) expenseTotal += Math.abs(Number(row.amount ?? 0));
+    }
+  }
+
+  return { inserted, skipped, expenseTotal };
+}
+
+export async function listBankMovements(
+  entity: BankEntity | 'all',
+  limit = 200,
+): Promise<BankMovementListRow[]> {
+  let query = supabase
+    .from('bank_movements')
+    .select(
+      'id, company_id, movement_date, concept, amount, is_expense, is_contribution_return, source_filename, created_at',
+    )
+    .order('movement_date', { ascending: false })
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (entity !== 'all') {
+    query = query.eq('company_id', companyIdForBankEntity(entity));
+  } else {
+    query = query.in('company_id', [MEDICINA_COMPANY_ID, ESTETICA_COMPANY_ID]);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data ?? []) as BankMovementListRow[];
+}
+
+export async function summarizeBankExpenses(entity: BankEntity | 'all'): Promise<{
+  expenseCount: number;
+  expenseTotal: number;
+  contributionReturnCount: number;
+  movementCount: number;
+}> {
+  let query = supabase
+    .from('bank_movements')
+    .select('amount, is_expense, is_contribution_return');
+
+  if (entity !== 'all') {
+    query = query.eq('company_id', companyIdForBankEntity(entity));
+  } else {
+    query = query.in('company_id', [MEDICINA_COMPANY_ID, ESTETICA_COMPANY_ID]);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+  let expenseCount = 0;
+  let expenseTotal = 0;
+  let contributionReturnCount = 0;
+  for (const row of data ?? []) {
+    if (row.is_contribution_return) contributionReturnCount += 1;
+    if (row.is_expense) {
+      expenseCount += 1;
+      expenseTotal += Math.abs(Number(row.amount ?? 0));
+    }
+  }
+  return {
+    expenseCount,
+    expenseTotal,
+    contributionReturnCount,
+    movementCount: data?.length ?? 0,
+  };
+}
+
+function emptyMonthSplit(): BankExpenseSplit {
+  return { medicina: new Map(), estetica: new Map() };
+}
+
+export async function fetchBankExpensesMonthly(year: number): Promise<BankExpenseSplit> {
+  const out = emptyMonthSplit();
+  try {
+    const { data, error } = await supabase.rpc('dashboard_bank_expenses_monthly', {
+      p_year: year,
+    });
+    if (error) throw error;
+    for (const row of (data ?? []) as RpcExpenseMonthRow[]) {
+      const total = Number(row.total ?? 0);
+      if (row.company_id === MEDICINA_COMPANY_ID) {
+        out.medicina.set(row.month_num, (out.medicina.get(row.month_num) ?? 0) + total);
+      } else if (row.company_id === ESTETICA_COMPANY_ID) {
+        out.estetica.set(row.month_num, (out.estetica.get(row.month_num) ?? 0) + total);
+      }
+    }
+    return out;
+  } catch {
+    const { data, error } = await supabase
+      .from('bank_movements')
+      .select('company_id, movement_date, amount')
+      .eq('is_expense', true)
+      .gte('movement_date', `${year}-01-01`)
+      .lte('movement_date', `${year}-12-31`);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      const monthNum = Number(String(row.movement_date).slice(5, 7));
+      const total = Math.abs(Number(row.amount ?? 0));
+      if (row.company_id === MEDICINA_COMPANY_ID) {
+        out.medicina.set(monthNum, (out.medicina.get(monthNum) ?? 0) + total);
+      } else if (row.company_id === ESTETICA_COMPANY_ID) {
+        out.estetica.set(monthNum, (out.estetica.get(monthNum) ?? 0) + total);
+      }
+    }
+    return out;
+  }
+}
+
+export async function fetchBankExpensesDaily(
+  fromDate: string,
+  toDate: string,
+): Promise<BankExpenseDaySplit> {
+  const out: BankExpenseDaySplit = {
+    medicina: new Map(),
+    estetica: new Map(),
+  };
+  try {
+    const { data, error } = await supabase.rpc('dashboard_bank_expenses_daily', {
+      p_from_date: fromDate,
+      p_to_date: toDate,
+    });
+    if (error) throw error;
+    for (const row of (data ?? []) as RpcExpenseDayRow[]) {
+      const total = Number(row.total ?? 0);
+      if (row.company_id === MEDICINA_COMPANY_ID) {
+        out.medicina.set(row.day_key, (out.medicina.get(row.day_key) ?? 0) + total);
+      } else if (row.company_id === ESTETICA_COMPANY_ID) {
+        out.estetica.set(row.day_key, (out.estetica.get(row.day_key) ?? 0) + total);
+      }
+    }
+    return out;
+  } catch {
+    const { data, error } = await supabase
+      .from('bank_movements')
+      .select('company_id, movement_date, amount')
+      .eq('is_expense', true)
+      .gte('movement_date', fromDate)
+      .lte('movement_date', toDate);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      const dayKey = String(row.movement_date).slice(0, 10);
+      const total = Math.abs(Number(row.amount ?? 0));
+      if (row.company_id === MEDICINA_COMPANY_ID) {
+        out.medicina.set(dayKey, (out.medicina.get(dayKey) ?? 0) + total);
+      } else if (row.company_id === ESTETICA_COMPANY_ID) {
+        out.estetica.set(dayKey, (out.estetica.get(dayKey) ?? 0) + total);
+      }
+    }
+    return out;
+  }
+}
+
+function num(row: YearBillingRow | DailyBillingRow, key: string): number {
+  return Number(row[key] ?? 0);
+}
+
+/** Añade claves gasto/beneficio a filas mensuales ya cargadas. */
+export function enrichYearBillingWithExpenses(
+  rows: YearBillingRow[],
+  years: number[],
+  byYear: Map<number, BankExpenseSplit>,
+): YearBillingRow[] {
+  return rows.map((row) => {
+    const next: YearBillingRow = { ...row };
+    const monthNum = row.monthNum;
+    for (const year of years) {
+      const split = byYear.get(year);
+      const gastoMed = split?.medicina.get(monthNum) ?? 0;
+      const gastoEst = split?.estetica.get(monthNum) ?? 0;
+      const gasto = gastoMed + gastoEst;
+      const factMed = num(row, `${year}_medicina`);
+      const factEst = num(row, `${year}_estetica`);
+      const fact = num(row, String(year));
+      next[`${year}_gasto_medicina`] = gastoMed;
+      next[`${year}_gasto_estetica`] = gastoEst;
+      next[`${year}_gasto`] = gasto;
+      next[`${year}_beneficio_medicina`] = factMed - gastoMed;
+      next[`${year}_beneficio_estetica`] = factEst - gastoEst;
+      next[`${year}_beneficio`] = fact - gasto;
+    }
+    return next;
+  });
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
+export function dailyExpenseDayKey(
+  row: DailyBillingRow,
+  year: number,
+  period: ComparisonPeriod,
+): string | null {
+  if (period.mode === 'rolling') {
+    if (row.dayKey && /^\d{4}-\d{2}-\d{2}$/.test(row.dayKey)) {
+      return `${year}-${row.dayKey.slice(5)}`;
+    }
+    return null;
+  }
+  const day = Number(row.name);
+  if (!Number.isFinite(day) || day < 1) return null;
+  const daysInMonth = new Date(year, period.month, 0).getDate();
+  if (day > daysInMonth) return null;
+  return `${year}-${pad2(period.month)}-${pad2(day)}`;
+}
+
+/** Añade claves gasto/beneficio a filas diarias de comparativa. */
+export function enrichDailyBillingWithExpenses(
+  rows: DailyBillingRow[],
+  years: number[],
+  expenses: BankExpenseDaySplit,
+  period: ComparisonPeriod,
+): DailyBillingRow[] {
+  return rows.map((row) => {
+    const next: DailyBillingRow = { ...row };
+    for (const year of years) {
+      const dayKey = dailyExpenseDayKey(row, year, period);
+      const gastoMed = dayKey ? expenses.medicina.get(dayKey) ?? 0 : 0;
+      const gastoEst = dayKey ? expenses.estetica.get(dayKey) ?? 0 : 0;
+      const gasto = gastoMed + gastoEst;
+      const factMed = num(row, `${year}_medicina`);
+      const factEst = num(row, `${year}_estetica`);
+      const fact = num(row, String(year));
+      next[`${year}_gasto_medicina`] = gastoMed;
+      next[`${year}_gasto_estetica`] = gastoEst;
+      next[`${year}_gasto`] = gasto;
+      next[`${year}_beneficio_medicina`] = factMed - gastoMed;
+      next[`${year}_beneficio_estetica`] = factEst - gastoEst;
+      next[`${year}_beneficio`] = fact - gasto;
+    }
+    return next;
+  });
+}

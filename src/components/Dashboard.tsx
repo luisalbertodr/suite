@@ -47,8 +47,6 @@ import {
   type ComparisonPeriod,
   COMPARISON_MONTH_NAMES,
   comparisonPeriodLabel,
-  yearBillingDataKey,
-  yearBillingLegend,
 } from '@/lib/salesRevenue';
 import {
   ESTETICA_COMPANY_ID,
@@ -61,6 +59,13 @@ import {
   defaultBillingViewForAssigned,
   resolveAllowedBillingViews,
 } from '@/lib/billingEntityAccess';
+import {
+  DashboardSeriesLegend,
+  defaultDashboardSeriesVisibility,
+  seriesForBillingView,
+  type DashboardSeriesId,
+  type DashboardSeriesMeta,
+} from '@/components/dashboard/DashboardSeriesLegend';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabase';
@@ -76,6 +81,19 @@ function yearColorForIndex(idx: number): string {
   return YEAR_COLORS[idx % YEAR_COLORS.length];
 }
 
+function seriesLabelFromDataKey(key: string): string {
+  if (/_gasto_medicina$/.test(key)) return 'Gasto M';
+  if (/_gasto_estetica$/.test(key)) return 'Gasto E';
+  if (/_gasto$/.test(key)) return 'Gasto T';
+  if (/_beneficio_medicina$/.test(key)) return 'Benef. M';
+  if (/_beneficio_estetica$/.test(key)) return 'Benef. E';
+  if (/_beneficio$/.test(key)) return 'Benef. T';
+  if (/_medicina$/.test(key)) return 'Fact. M';
+  if (/_estetica$/.test(key)) return 'Fact. E';
+  if (/^\d{4}$/.test(key)) return 'Fact. T';
+  return key;
+}
+
 function comparisonTooltipFormatter(
   v: number,
   _name: string,
@@ -83,17 +101,10 @@ function comparisonTooltipFormatter(
 ): [string, string] {
   const key = String(item.dataKey ?? '');
   const year = key.match(/^(\d{4})/)?.[1] ?? key;
-  const entity = key.endsWith('_medicina')
-    ? 'M'
-    : key.endsWith('_estetica')
-      ? 'E'
-      : /^\d{4}$/.test(key)
-        ? 'T'
-        : '';
-  const label = entity ? `${year} ${entity}` : year;
+  const metric = seriesLabelFromDataKey(key);
   return [
     `€${Number(v).toLocaleString('es-ES', { minimumFractionDigits: 2 })}`,
-    label,
+    `${year} ${metric}`,
   ];
 }
 
@@ -140,118 +151,33 @@ function activityVisual(type: DashboardRecentActivityType): {
   }
 }
 
-function YearEntityChartLines({
-  year,
-  color,
-  keySuffix = '',
-}: {
-  year: number;
-  color: string;
-  keySuffix?: string;
-}) {
-  const suffix = keySuffix ? `-${keySuffix}` : '';
-  return [
-    <Line
-      key={`${year}-total${suffix}`}
-      type="monotone"
-      dataKey={String(year)}
-      name="T"
-      stroke={color}
-      strokeWidth={3}
-      dot={false}
-      legendType="none"
-      connectNulls
-    />,
-    <Line
-      key={`${year}-med${suffix}`}
-      type="monotone"
-      dataKey={`${year}_medicina`}
-      name="M"
-      stroke={color}
-      strokeWidth={2}
-      strokeDasharray="6 3 2 3"
-      dot={{ r: 2 }}
-      legendType="none"
-      connectNulls
-    />,
-    <Line
-      key={`${year}-est${suffix}`}
-      type="monotone"
-      dataKey={`${year}_estetica`}
-      name="E"
-      stroke={color}
-      strokeWidth={2}
-      strokeDasharray="4 3"
-      dot={{ r: 2 }}
-      legendType="none"
-      connectNulls
-    />,
-  ];
-}
-
-function ComparisonChartLegend({
-  years,
-  showEntityLines,
-}: {
+function renderDashboardSeriesLines(params: {
   years: number[];
-  showEntityLines: boolean;
+  series: DashboardSeriesMeta[];
+  visibility: Record<DashboardSeriesId, boolean>;
+  keySuffix: string;
 }) {
-  return (
-    <div className="flex flex-wrap justify-center gap-x-5 gap-y-2 pt-2">
-      {years.map((year, idx) => {
-        const color = yearColorForIndex(idx);
-        return (
-          <div key={year} className="flex items-center gap-2 text-xs">
-            <span className="font-semibold text-foreground tabular-nums">{year}</span>
-            {showEntityLines ? (
-              <>
-                <span className="flex items-center gap-1 text-muted-foreground">
-                  <svg width="16" height="8" aria-hidden className="shrink-0">
-                    <line x1="0" y1="4" x2="16" y2="4" stroke={color} strokeWidth="2.5" />
-                  </svg>
-                  T
-                </span>
-                <span className="flex items-center gap-1 text-muted-foreground">
-                  <svg width="16" height="8" aria-hidden className="shrink-0">
-                    <line
-                      x1="0"
-                      y1="4"
-                      x2="16"
-                      y2="4"
-                      stroke={color}
-                      strokeWidth="2"
-                      strokeDasharray="4 2 1 2"
-                    />
-                  </svg>
-                  M
-                </span>
-                <span className="flex items-center gap-1 text-muted-foreground">
-                  <svg width="16" height="8" aria-hidden className="shrink-0">
-                    <line
-                      x1="0"
-                      y1="4"
-                      x2="16"
-                      y2="4"
-                      stroke={color}
-                      strokeWidth="2"
-                      strokeDasharray="4 3"
-                    />
-                  </svg>
-                  E
-                </span>
-              </>
-            ) : (
-              <span className="flex items-center text-muted-foreground">
-                <svg width="16" height="8" aria-hidden className="shrink-0">
-                  <line x1="0" y1="4" x2="16" y2="4" stroke={color} strokeWidth="2" />
-                </svg>
-              </span>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
+  const { years, series, visibility, keySuffix } = params;
+
+  return years.flatMap((year, idx) => {
+    const yearColor = yearColorForIndex(idx);
+    return series
+      .filter((meta) => visibility[meta.id])
+      .map((meta) => (
+        <Line
+          key={`${meta.id}-${year}-${keySuffix}`}
+          type="monotone"
+          dataKey={meta.dataKey(year)}
+          name={meta.label}
+          stroke={meta.strokeForYear(yearColor)}
+          strokeWidth={meta.strokeWidth}
+          strokeDasharray={meta.strokeDasharray}
+          dot={meta.entity === 'total' ? false : { r: 2 }}
+          legendType="none"
+          connectNulls
+        />
+      ));
+  });
 }
 
 function toggleYear(selected: number[], year: number): number[] {
@@ -300,6 +226,9 @@ export const Dashboard: React.FC = () => {
   const [selectedYears, setSelectedYears] = useState<number[]>([nowYear, nowYear - 1]);
   const [selectedFamilies, setSelectedFamilies] = useState<string[] | null>(null);
   const [activityTypeFilter, setActivityTypeFilter] = useState<DashboardRecentActivityFilter>('all');
+  const [seriesVisibility, setSeriesVisibility] = useState<Record<DashboardSeriesId, boolean>>(() =>
+    defaultDashboardSeriesVisibility(true, 'both'),
+  );
   const defaultRange = useMemo(() => currentMonthRange(), []);
   const [boardFromDate, setBoardFromDate] = useState(defaultRange.from);
   const [boardToDate, setBoardToDate] = useState(defaultRange.to);
@@ -537,11 +466,6 @@ export const Dashboard: React.FC = () => {
     </div>
   );
 
-  const currencyTooltip = (v: number, name: string) => [
-    `€${Number(v).toLocaleString('es-ES', { minimumFractionDigits: 2 })}`,
-    name,
-  ];
-
   const monthlyRevenueLabel =
     billingView === 'medicina'
       ? 'Facturación Mes (Medicina)'
@@ -616,7 +540,26 @@ export const Dashboard: React.FC = () => {
 
   const chartRows = yearBilling ?? [];
   const comparisonRows = dailyComparison ?? [];
-  const showEntityLines = isMultiEntity && billingView === 'both';
+  const activeSeries = useMemo(
+    () => seriesForBillingView(Boolean(isMultiEntity), billingView),
+    [isMultiEntity, billingView],
+  );
+
+  useEffect(() => {
+    setSeriesVisibility(defaultDashboardSeriesVisibility(Boolean(isMultiEntity), billingView));
+  }, [isMultiEntity, billingView]);
+
+  const toggleSeries = (id: DashboardSeriesId) => {
+    setSeriesVisibility((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const legendProps = {
+    years: selectedYears,
+    yearColor: yearColorForIndex,
+    visibility: seriesVisibility,
+    onToggle: toggleSeries,
+    series: activeSeries,
+  };
 
   return (
     <div className="relative space-y-4">
@@ -757,59 +700,37 @@ export const Dashboard: React.FC = () => {
             {chartControls}
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
             <div className="relative bg-card rounded-xl shadow-lg p-6 border">
               <ChartLoadingOverlay show={isChartsFetching} />
               <div className="mb-4">
-                <h3 className="text-base font-semibold text-foreground">Facturación por mes</h3>
+                <h3 className="text-base font-semibold text-foreground">Facturación y beneficio por mes</h3>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Beneficio = facturación − gastos bancarios importados.
+                </p>
               </div>
-              <ResponsiveContainer width="100%" height={280}>
-                <LineChart data={chartRows}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis dataKey="name" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                  <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px' }}
-                    formatter={showEntityLines ? comparisonTooltipFormatter : (v: number, name: string) => currencyTooltip(v, name)}
-                  />
-                  {showEntityLines
-                    ? selectedYears.flatMap((year, idx) =>
-                        YearEntityChartLines({
-                          year,
-                          color: yearColorForIndex(idx),
-                          keySuffix: 'monthly',
-                        }),
-                      )
-                    : selectedYears.map((year, idx) => (
-                        <Line
-                          key={`${year}-${billingView}`}
-                          type="monotone"
-                          dataKey={yearBillingDataKey(year, billingView)}
-                          name={yearBillingLegend(year, billingView)}
-                          stroke={yearColorForIndex(idx)}
-                          strokeWidth={2.5}
-                          dot={{ r: 3 }}
-                          legendType={showEntityLines ? 'none' : undefined}
-                          connectNulls
-                        />
-                      ))}
-                </LineChart>
-              </ResponsiveContainer>
-              {showEntityLines ? (
-                <ComparisonChartLegend years={selectedYears} showEntityLines />
-              ) : (
-                <div className="flex flex-wrap justify-center gap-x-5 gap-y-2 pt-2">
-                  {selectedYears.map((year, idx) => (
-                    <div key={year} className="flex items-center gap-1.5 text-xs">
-                      <span
-                        className="inline-block h-0.5 w-5 rounded-full"
-                        style={{ backgroundColor: yearColorForIndex(idx) }}
+              <div className="flex flex-col gap-4 lg:flex-row">
+                <div className="min-w-0 flex-1">
+                  <ResponsiveContainer width="100%" height={280}>
+                    <LineChart data={chartRows}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="name" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                      <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px' }}
+                        formatter={comparisonTooltipFormatter}
                       />
-                      <span className="font-semibold text-foreground tabular-nums">{year}</span>
-                    </div>
-                  ))}
+                      {renderDashboardSeriesLines({
+                        years: selectedYears,
+                        series: activeSeries,
+                        visibility: seriesVisibility,
+                        keySuffix: 'monthly',
+                      })}
+                    </LineChart>
+                  </ResponsiveContainer>
                 </div>
-              )}
+                <DashboardSeriesLegend {...legendProps} />
+              </div>
             </div>
 
             <div className="relative bg-card rounded-xl shadow-lg p-6 border">
@@ -854,45 +775,31 @@ export const Dashboard: React.FC = () => {
                   <Activity className="w-3.5 h-3.5" /> IVA incl.
                 </div>
               </div>
-              <ResponsiveContainer width="100%" height={280}>
-                <LineChart data={comparisonRows}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis dataKey="name" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                  <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px' }}
-                    formatter={comparisonTooltipFormatter}
-                  />
-                  {showEntityLines
-                    ? selectedYears.flatMap((year, idx) =>
-                        YearEntityChartLines({
-                          year,
-                          color: yearColorForIndex(idx),
-                          keySuffix: 'daily',
-                        }),
-                      )
-                    : selectedYears.map((year, idx) => (
-                        <Line
-                          key={`${year}-${billingView}`}
-                          type="monotone"
-                          dataKey={yearBillingDataKey(year, billingView)}
-                          name={String(year)}
-                          stroke={yearColorForIndex(idx)}
-                          strokeWidth={2.5}
-                          dot={{ r: 3 }}
-                          legendType="none"
-                          connectNulls
-                        />
-                      ))}
-                </LineChart>
-              </ResponsiveContainer>
-              <ComparisonChartLegend
-                years={selectedYears}
-                showEntityLines={showEntityLines}
-              />
+              <div className="flex flex-col gap-4 lg:flex-row">
+                <div className="min-w-0 flex-1">
+                  <ResponsiveContainer width="100%" height={280}>
+                    <LineChart data={comparisonRows}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="name" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                      <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px' }}
+                        formatter={comparisonTooltipFormatter}
+                      />
+                      {renderDashboardSeriesLines({
+                        years: selectedYears,
+                        series: activeSeries,
+                        visibility: seriesVisibility,
+                        keySuffix: 'daily',
+                      })}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+                <DashboardSeriesLegend {...legendProps} />
+              </div>
               <p className="text-[11px] text-muted-foreground mt-2">
                 {isMultiEntity
-                  ? `Medicina: familias 025, 23-BMED, 33-SKYMEDIC y Fotrej/manchas de 09-Facial. El resto es Estética. ${comparisonPeriodLabel(comparisonPeriod)}.`
+                  ? `Medicina: familias 025, 23-BMED, 33-SKYMEDIC y Fotrej/manchas de 09-Facial. El resto es Estética. ${comparisonPeriodLabel(comparisonPeriod)}. Activa/desactiva curvas en la leyenda (común a ambos gráficos).`
                   : `${comparisonPeriodLabel(comparisonPeriod)}. Selecciona varios años para comparar día a día.`}
               </p>
             </div>

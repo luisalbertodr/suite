@@ -13,7 +13,8 @@ import { VerifactuStatus } from './VerifactuStatus';
 import { VerifactuCertificates } from './VerifactuCertificates';
 import { VerifactuXMLDocuments } from './VerifactuXMLDocuments';
 import { VerifactuQueueMonitor } from './VerifactuQueueMonitor';
-import { Plus, Search, FileText, Settings, History, File, ListOrdered, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, Search, FileText, Settings, History, File, ListOrdered, ChevronLeft, ChevronRight, Wallet } from 'lucide-react';
+import { GastosBancarios } from './GastosBancarios';
 import { format } from 'date-fns';
 import { TPV_SALE_INVOICE_PREFILL_KEY } from '@/lib/appointmentSales';
 import {
@@ -330,10 +331,14 @@ export const Facturas: React.FC = () => {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="invoices" className="flex items-center space-x-2">
             <FileText className="w-4 h-4" />
             <span>Facturas</span>
+          </TabsTrigger>
+          <TabsTrigger value="gastos" className="flex items-center space-x-2">
+            <Wallet className="w-4 h-4" />
+            <span>Gastos</span>
           </TabsTrigger>
           <TabsTrigger value="certificates" className="flex items-center space-x-2">
             <Settings className="w-4 h-4" />
@@ -473,6 +478,10 @@ export const Facturas: React.FC = () => {
               </>
             )}
           </div>
+        </TabsContent>
+
+        <TabsContent value="gastos" className="space-y-4">
+          <GastosBancarios />
         </TabsContent>
 
         <TabsContent value="certificates">
