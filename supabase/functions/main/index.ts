@@ -134,6 +134,40 @@ async function resolveRolePermissionIds(
   return (rolePerms || []).map((rp: any) => rp.permission_id).filter(Boolean);
 }
 
+/** Borra user_permissions / overrides de empresas sin user_company_roles. */
+async function purgeOrphanUserPermissions(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  userId: string,
+): Promise<void> {
+  const { data: memberships } = await supabaseAdmin
+    .from("user_company_roles")
+    .select("company_id")
+    .eq("user_id", userId);
+  const memberIds = new Set(
+    (memberships || []).map((r: { company_id?: string }) => r.company_id).filter(Boolean),
+  );
+  const { data: orphanRows } = await supabaseAdmin
+    .from("user_permissions")
+    .select("id, company_id")
+    .eq("user_id", userId);
+  const orphanIds = (orphanRows || [])
+    .filter((r: { id: string; company_id: string }) => !memberIds.has(r.company_id))
+    .map((r: { id: string }) => r.id);
+  if (orphanIds.length) {
+    await supabaseAdmin.from("user_permissions").delete().in("id", orphanIds);
+  }
+  const { data: orphanOverrides } = await supabaseAdmin
+    .from("user_permission_overrides")
+    .select("id, company_id")
+    .eq("user_id", userId);
+  const orphanOverrideIds = (orphanOverrides || [])
+    .filter((r: { id: string; company_id: string }) => !memberIds.has(r.company_id))
+    .map((r: { id: string }) => r.id);
+  if (orphanOverrideIds.length) {
+    await supabaseAdmin.from("user_permission_overrides").delete().in("id", orphanOverrideIds);
+  }
+}
+
 async function fetchUserProfileForList(
   supabaseAdmin: ReturnType<typeof createClient>,
   userId: string,
@@ -199,23 +233,38 @@ async function listUsers(input: { isSuperuser?: boolean }, req: Request) {
         .from("user_company_roles")
         .select("id, role:roles(name, description), company_id")
         .eq("user_id", user.id);
-      if (profile?.company_id) {
-        rolesQuery = rolesQuery.eq("company_id", profile.company_id);
-      } else if (targetCompanyId) {
-        rolesQuery = rolesQuery.eq("company_id", targetCompanyId);
-      }
+      // Devolver todos los roles por empresa (Medicina/Estética independientes).
       const { data: roles } = await rolesQuery;
 
-      let permissionIds: string[] = [];
-      const permCompanyId = profile?.company_id ?? targetCompanyId;
-      if (permCompanyId) {
+      const memberCompanyIds = [
+        ...new Set(
+          (roles || [])
+            .map((r: { company_id?: string }) => r.company_id)
+            .filter((id: string | undefined): id is string => !!id),
+        ),
+      ];
+      if (profile?.company_id && !memberCompanyIds.includes(profile.company_id)) {
+        memberCompanyIds.push(profile.company_id);
+      }
+
+      const permissionsByCompany: Record<string, string[]> = {};
+      if (memberCompanyIds.length) {
         const { data: perms } = await supabaseAdmin
           .from("user_permissions")
-          .select("permission_id")
+          .select("permission_id, company_id")
           .eq("user_id", user.id)
-          .eq("company_id", permCompanyId);
-        permissionIds = (perms || []).map((p: any) => p.permission_id).filter(Boolean);
+          .in("company_id", memberCompanyIds);
+        for (const row of perms || []) {
+          const cid = (row as { company_id?: string }).company_id;
+          const pid = (row as { permission_id?: string }).permission_id;
+          if (!cid || !pid) continue;
+          if (!permissionsByCompany[cid]) permissionsByCompany[cid] = [];
+          permissionsByCompany[cid].push(pid);
+        }
       }
+
+      const permCompanyId = profile?.company_id ?? targetCompanyId ?? memberCompanyIds[0];
+      const permissionIds = permCompanyId ? (permissionsByCompany[permCompanyId] || []) : [];
 
       return {
         id: user.id,
@@ -227,6 +276,7 @@ async function listUsers(input: { isSuperuser?: boolean }, req: Request) {
         employee_name: employeeName,
         user_company_roles: roles || [],
         permission_ids: permissionIds,
+        permissions_by_company: permissionsByCompany,
       };
     }),
   );
@@ -449,12 +499,14 @@ async function updateUser(
     return jsonResponse({ success: false, error: "company_id is required" }, 400);
   }
 
-  if (input.company_id || input.employee_id !== undefined) {
+  if (input.employee_id !== undefined) {
+    // Empleado vinculado al perfil principal; no mover el perfil al cambiar permisos de otra empresa.
+    const profileCompanyId = profileRows?.[0]?.company_id || companyId;
     const { error: profileError } = await supabaseAdmin
       .from("user_profiles")
       .upsert({
         user_id: input.userId,
-        company_id: companyId,
+        company_id: profileCompanyId,
         employee_id: input.employee_id ?? null,
       }, { onConflict: "company_id,user_id" });
     if (profileError) {
@@ -530,6 +582,7 @@ async function updateUser(
         );
       }
     }
+    await purgeOrphanUserPermissions(supabaseAdmin, input.userId);
   } else if (hasExplicitPermissionSet) {
     await supabaseAdmin
       .from("user_permissions")
@@ -552,6 +605,7 @@ async function updateUser(
         );
       }
     }
+    await purgeOrphanUserPermissions(supabaseAdmin, input.userId);
   }
 
   return jsonResponse({ success: true, message: "Usuario actualizado correctamente" }, 200);

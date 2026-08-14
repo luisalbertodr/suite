@@ -68,7 +68,11 @@ export const DockBar: React.FC = () => {
   useNotificationSoundOnIncrease(whatsappUnread, 'whatsapp', { enabled: canSeeWhatsapp });
 
   const visibleItems = dockItems.filter((item) => {
-    if (permissionsLoading) return true;
+    // No fall-open en Marketing/WhatsApp: evita flash de pestañas sin permiso.
+    if (permissionsLoading) {
+      if (item.path === '/marketing' || item.path === '/whatsapp') return false;
+      return true;
+    }
     if (item.path === '/marketing') return canSeeMarketing;
     if (item.phoneAccess) return canAccessPhone(hasPermission);
     if (item.permission) {

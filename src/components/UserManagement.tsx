@@ -110,48 +110,93 @@ export const UserManagement = () => {
     companyId ||
     null;
 
-  const resolveUserRoleId = (user: any): string => {
-    const profileCompanyId = user?.profiles?.company_id;
-    const companyRole = user?.user_company_roles?.find(
-      (ucr: { company_id?: string }) => !profileCompanyId || ucr.company_id === profileCompanyId,
-    ) ?? user?.user_company_roles?.[0];
+  const assignedCompanyIdsForUser = (user: any): string[] => {
+    const fromRoles = (user?.user_company_roles || [])
+      .map((ucr: { company_id?: string }) => ucr.company_id)
+      .filter(Boolean) as string[];
+    const ids = new Set<string>(fromRoles);
+    if (user?.profiles?.company_id) ids.add(user.profiles.company_id);
+    return [...ids];
+  };
+
+  const companyLabel = (id: string) =>
+    billingCompanies.find((c) => c.id === id)?.short_name?.trim() ||
+    billingCompanies.find((c) => c.id === id)?.name ||
+    id.slice(0, 8);
+
+  const resolveUserRoleId = (user: any, forCompanyId?: string | null): string => {
+    const targetCompanyId = forCompanyId || user?.profiles?.company_id;
+    const companyRole =
+      user?.user_company_roles?.find(
+        (ucr: { company_id?: string }) => !targetCompanyId || ucr.company_id === targetCompanyId,
+      ) ?? user?.user_company_roles?.[0];
     const roleName = companyRole?.role?.name;
     return roleName ? (roles.find((r) => r.name === roleName)?.id || '') : '';
   };
 
+  const loadPermissionsForCompany = async (user: any, targetCompanyId: string) => {
+    const cached = user?.permissions_by_company?.[targetCompanyId];
+    if (Array.isArray(cached)) {
+      setEditPermissionIds(cached);
+      setEditPermissionsTouched(false);
+      return;
+    }
+    const { data, error } = await supabase
+      .from('user_permissions')
+      .select('permission_id')
+      .eq('user_id', user.id)
+      .eq('company_id', targetCompanyId);
+    if (error) {
+      console.error('loadPermissionsForCompany', error);
+      setEditPermissionIds([]);
+    } else {
+      setEditPermissionIds((data || []).map((r: { permission_id: string }) => r.permission_id).filter(Boolean));
+    }
+    setEditPermissionsTouched(false);
+  };
+
   const handleEditUser = async (user: any) => {
     setEditingUser(user);
-    const roleId = resolveUserRoleId(user);
+    const profileCompanyId = resolveUserCompanyId(user);
+    const initialPermCompany = profileCompanyId ?? companyId ?? '';
+    setPermissionsCompanyId(initialPermCompany);
+    const roleId = resolveUserRoleId(user, initialPermCompany);
     setEditRoleId(roleId);
     setEditEmployeeId(user?.profiles?.employee_id || 'none');
-    setEditPermissionIds(Array.isArray(user?.permission_ids) ? user.permission_ids : []);
-    setEditPermissionsTouched(false);
     setEditNewPassword('');
     setEditNewPasswordConfirm('');
     setShowEditPassword(false);
-    const profileCompanyId = resolveUserCompanyId(user);
-    setPermissionsCompanyId(profileCompanyId ?? companyId ?? '');
     setIsEditOpen(true);
-    const roleIdForPanel = resolveUserRoleId(user);
-    if (roleIdForPanel) {
-      const inherited = await getRoleDefaultPermissionIds(roleIdForPanel);
-      setEditRolePermissionIds(inherited);
+    if (initialPermCompany) {
+      await loadPermissionsForCompany(user, initialPermCompany);
+    } else {
+      setEditPermissionIds(Array.isArray(user?.permission_ids) ? user.permission_ids : []);
+      setEditPermissionsTouched(false);
+    }
+    if (roleId) {
+      setEditRolePermissionIds(await getRoleDefaultPermissionIds(roleId));
     } else {
       setEditRolePermissionIds([]);
     }
   };
 
   const handlePermissionsCompanyChange = async (nextCompanyId: string) => {
+    if (editPermissionsTouched) {
+      const ok = window.confirm(
+        'Hay cambios de permisos sin guardar en la empresa actual. ¿Cambiar de empresa y descartarlos?',
+      );
+      if (!ok) return;
+    }
     setPermissionsCompanyId(nextCompanyId);
     if (!editingUser) return;
-    const companyRole = editingUser.user_company_roles?.find(
-      (ucr: { company_id?: string; role?: { name: string } }) => ucr.company_id === nextCompanyId,
-    );
-    const roleName = companyRole?.role?.name;
-    const roleId = roleName ? (roles.find((r) => r.name === roleName)?.id || '') : '';
+    const roleId = resolveUserRoleId(editingUser, nextCompanyId);
+    setEditRoleId(roleId);
     if (roleId) {
       setEditRolePermissionIds(await getRoleDefaultPermissionIds(roleId));
+    } else {
+      setEditRolePermissionIds([]);
     }
+    await loadPermissionsForCompany(editingUser, nextCompanyId);
   };
 
   const getRoleDefaultPermissionIds = async (roleId: string): Promise<string[]> => {
@@ -257,22 +302,28 @@ export const UserManagement = () => {
   const handleUpdateUser = async () => {
     if (!editingUser?.id) return;
     const profileCompanyId = resolveUserCompanyId(editingUser);
-    if (!profileCompanyId) {
+    const scopeCompanyId = permissionsCompanyId || profileCompanyId;
+    if (!scopeCompanyId) {
       toast.error('No se ha podido resolver la empresa del usuario');
       return;
     }
-    const originalRoleId = resolveUserRoleId(editingUser);
+    const originalRoleId = resolveUserRoleId(editingUser, scopeCompanyId);
     const roleChanged = !!editRoleId && editRoleId !== originalRoleId;
     setUpdatingUser(true);
     try {
       const ok = await updateUser({
         userId: editingUser.id,
+        // company_id = empresa cuyos permisos/rol se editan (Medicina o Estética).
+        company_id: scopeCompanyId,
         ...(roleChanged ? { role_id: editRoleId } : {}),
-        company_id: profileCompanyId,
-        employee_id: editEmployeeId === 'none' ? null : editEmployeeId,
+        // Empleado solo en el perfil principal; no al cambiar de empresa de permisos.
+        ...(scopeCompanyId === profileCompanyId
+          ? { employee_id: editEmployeeId === 'none' ? null : editEmployeeId }
+          : {}),
         ...(editPermissionsTouched ? { permission_ids: editPermissionIds } : {}),
       });
       if (!ok) return;
+      setEditPermissionsTouched(false);
       setIsEditOpen(false);
       setEditingUser(null);
     } finally {
@@ -448,8 +499,37 @@ export const UserManagement = () => {
             </TabsList>
 
             <TabsContent value="datos" className="space-y-3">
+              {isMultiEntity && billingCompanies.length > 1 && editingUser?.id ? (
+                <div className="space-y-1.5">
+                  <Label>Empresa (rol y permisos independientes)</Label>
+                  <Select
+                    value={permissionsCompanyId}
+                    onValueChange={(v) => void handlePermissionsCompanyChange(v)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Empresa" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {assignedCompanyIdsForUser(editingUser).map((id) => (
+                        <SelectItem key={id} value={id}>
+                          {companyLabel(id)}
+                          {id === resolveUserCompanyId(editingUser) ? ' (perfil)' : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-muted-foreground">
+                    Los permisos de Medicina y Estética se guardan por separado. Cambia de empresa,
+                    ajusta Ver/Editar Marketing u otros, y pulsa Guardar.
+                  </p>
+                </div>
+              ) : null}
+
               <div className="space-y-1.5">
-                <Label>Rol base (empresa del perfil)</Label>
+                <Label>
+                  Rol
+                  {permissionsCompanyId ? ` · ${companyLabel(permissionsCompanyId)}` : ' base'}
+                </Label>
                 <Select value={editRoleId} onValueChange={handleEditRoleChange}>
                   <SelectTrigger>
                     <SelectValue placeholder="Seleccionar rol" />
@@ -463,28 +543,34 @@ export const UserManagement = () => {
                   </SelectContent>
                 </Select>
               </div>
+              {(!permissionsCompanyId ||
+                permissionsCompanyId === resolveUserCompanyId(editingUser)) && (
+                <div className="space-y-1.5">
+                  <Label>Empleado vinculado (opcional)</Label>
+                  <Select value={editEmployeeId} onValueChange={setEditEmployeeId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Sin vincular" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Sin vincular</SelectItem>
+                      {agendaEmployees.map((emp) => (
+                        <SelectItem key={emp.id} value={emp.id}>
+                          {emp.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-muted-foreground">
+                    Vincular un usuario con un empleado de agenda permite que reciba notificaciones
+                    personales y aparezca como recurso en sus citas.
+                  </p>
+                </div>
+              )}
               <div className="space-y-1.5">
-                <Label>Empleado vinculado (opcional)</Label>
-                <Select value={editEmployeeId} onValueChange={setEditEmployeeId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Sin vincular" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Sin vincular</SelectItem>
-                    {agendaEmployees.map((emp) => (
-                      <SelectItem key={emp.id} value={emp.id}>
-                        {emp.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-[11px] text-muted-foreground">
-                  Vincular un usuario con un empleado de agenda permite que reciba notificaciones
-                  personales y aparezca como recurso en sus citas.
-                </p>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Permisos del rol (ALLOW base)</Label>
+                <Label>
+                  Permisos ALLOW
+                  {permissionsCompanyId ? ` · ${companyLabel(permissionsCompanyId)}` : ''}
+                </Label>
                 <div className="max-h-52 overflow-auto rounded border p-2 space-y-1">
                   {permissions.map((perm) => {
                     const checked = editPermissionIds.includes(perm.id);
@@ -507,8 +593,8 @@ export const UserManagement = () => {
                   })}
                 </div>
                 <p className="text-[11px] text-muted-foreground">
-                  Estos permisos se guardan junto al rol (compatibilidad). Para excepciones
-                  ALLOW/DENY usa la pestaña <em>Excepciones de permisos</em>.
+                  Se guardan solo para la empresa seleccionada. Para denegar un permiso del rol usa la
+                  pestaña <em>Excepciones</em> (también por empresa).
                 </p>
               </div>
 
@@ -518,8 +604,8 @@ export const UserManagement = () => {
                     <p className="font-medium">Centro Medicina + Estética</p>
                     <p>
                       Asigna el rol <strong>{RECEPTION_ROLE_NAME}</strong> en{' '}
-                      <strong>ambas empresas</strong> (bloque inferior). Marketing solo en Estética;
-                      WhatsApp y llamadas perdidas en las dos.
+                      <strong>ambas empresas</strong> (bloque inferior) si debe operar en las dos.
+                      Marketing y el resto de permisos se configuran arriba eligiendo empresa.
                     </p>
                   </div>
                   <UserCompanyAccessPanel
@@ -544,9 +630,11 @@ export const UserManagement = () => {
                 <Button
                   type="button"
                   onClick={handleUpdateUser}
-                  disabled={updatingUser || !resolveUserCompanyId(editingUser)}
+                  disabled={updatingUser || !permissionsCompanyId}
                 >
-                  {updatingUser ? 'Guardando...' : 'Guardar cambios'}
+                  {updatingUser
+                    ? 'Guardando...'
+                    : `Guardar${permissionsCompanyId ? ` (${companyLabel(permissionsCompanyId)})` : ''}`}
                 </Button>
               </div>
             </TabsContent>
@@ -573,7 +661,7 @@ export const UserManagement = () => {
                         </SelectContent>
                       </Select>
                       <p className="text-[11px] text-muted-foreground">
-                        Los permisos dependen de la empresa activa del usuario. Configura Estética y Medicina por separado.
+                        Misma empresa que en Datos: los DENY/ALLOW de excepciones son independientes por empresa.
                       </p>
                     </div>
                   ) : null}

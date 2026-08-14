@@ -21,11 +21,13 @@ interface UserWithDetails {
   permission_ids?: string[];
   user_company_roles?: Array<{
     id: string;
+    company_id?: string;
     role: {
       name: string;
       description: string;
     };
   }>;
+  permissions_by_company?: Record<string, string[]>;
 }
 
 interface CreateUserPayload {
