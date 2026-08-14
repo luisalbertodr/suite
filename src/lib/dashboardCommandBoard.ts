@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { repairStyleText } from '@/lib/styleTextEncoding';
+import { fetchBankExpenseTotalForPeriod } from '@/lib/bankExpenses';
 
 export type CommandBoardColumnStats = {
   total: number;
@@ -50,6 +51,7 @@ export type CommandBoardStats = {
   };
   cash: { in: number; out: number };
   purchases: { total: number; debts: number };
+  expenses: { total: number };
   profit: { net: number };
 };
 
@@ -88,12 +90,12 @@ export function normalizeCommandBoardStats(
   data: CommandBoardStats | null | undefined,
 ): CommandBoardStats | null {
   if (!data?.sales) return data ?? null;
-  if (Array.isArray(data.sales.employeeSales)) return data;
   return {
     ...data,
+    expenses: data.expenses ?? { total: 0 },
     sales: {
       ...data.sales,
-      employeeSales: [],
+      employeeSales: Array.isArray(data.sales.employeeSales) ? data.sales.employeeSales : [],
     },
   };
 }
@@ -107,10 +109,15 @@ export function parseCommandBoardStats(raw: unknown): CommandBoardStats | null {
   const period = (data.period ?? {}) as Record<string, unknown>;
   const cash = (data.cash ?? {}) as Record<string, unknown>;
   const purchases = (data.purchases ?? {}) as Record<string, unknown>;
+  const expenses = (data.expenses ?? {}) as Record<string, unknown>;
   const profit = (data.profit ?? {}) as Record<string, unknown>;
   const services = (sales.services ?? {}) as Record<string, unknown>;
   const products = (sales.products ?? {}) as Record<string, unknown>;
   const newClients = (clients.new ?? {}) as Record<string, unknown>;
+
+  const purchasesTotal = num(purchases.total);
+  const expensesTotal = num(expenses.total);
+  const invoiced = columnStats(sales.invoiced as Record<string, unknown>);
 
   return normalizeCommandBoardStats({
     period: {
@@ -119,7 +126,7 @@ export function parseCommandBoardStats(raw: unknown): CommandBoardStats | null {
     },
     sales: {
       tickets: columnStats(sales.tickets as Record<string, unknown>),
-      invoiced: columnStats(sales.invoiced as Record<string, unknown>),
+      invoiced,
       avgTicket: columnStats(sales.avgTicket as Record<string, unknown>),
       services: { amount: num(services.amount), count: num(services.count) },
       products: { amount: num(products.amount), count: num(products.count) },
@@ -146,8 +153,14 @@ export function parseCommandBoardStats(raw: unknown): CommandBoardStats | null {
       billedHours: num(reservations.billedHours),
     },
     cash: { in: num(cash.in), out: num(cash.out) },
-    purchases: { total: num(purchases.total), debts: num(purchases.debts) },
-    profit: { net: num(profit.net) },
+    purchases: { total: purchasesTotal, debts: num(purchases.debts) },
+    expenses: { total: expensesTotal },
+    profit: {
+      net:
+        Math.round(
+          (invoiced.other - purchasesTotal - expensesTotal) * 100,
+        ) / 100,
+    },
   });
 }
 
@@ -167,7 +180,24 @@ export async function fetchDashboardCommandBoardStats(opts: {
     p_billing_company_id: opts.billingCompanyId ?? null,
   });
   if (error) throw error;
-  const parsed = parseCommandBoardStats(data);
+
+  let expenseTotal = 0;
+  try {
+    expenseTotal = await fetchBankExpenseTotalForPeriod({
+      fromDate: opts.fromDate,
+      toDate: opts.toDate,
+      companyId: opts.billingCompanyId ?? null,
+    });
+  } catch (err) {
+    console.warn('command board bank expenses:', err);
+  }
+
+  const withExpenses =
+    data && typeof data === 'object'
+      ? { ...(data as Record<string, unknown>), expenses: { total: expenseTotal } }
+      : { expenses: { total: expenseTotal } };
+
+  const parsed = parseCommandBoardStats(withExpenses);
   if (!parsed) throw new Error('Respuesta inválida del cuadro de mandos');
   return parsed;
 }

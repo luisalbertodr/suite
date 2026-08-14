@@ -76,7 +76,7 @@ type Props = {
 };
 
 export function DashboardCommandBoard({ data, billingView = 'both' }: Props) {
-  const { sales, clients, reservations, cash, purchases, profit } = data;
+  const { sales, clients, reservations, cash, purchases, expenses, profit } = data;
   const employeeSales = sales.employeeSales ?? [];
   const entityLabel =
     billingView === 'medicina'
@@ -86,8 +86,9 @@ export function DashboardCommandBoard({ data, billingView = 'both' }: Props) {
         : null;
   const profitTitle = entityLabel ? `Beneficios (${entityLabel})` : 'Beneficios';
   const profitLabel = entityLabel
-    ? `Beneficio Neto ${entityLabel} (Ventas − Compras)`
-    : 'Beneficio Neto (Ventas − Compras)';
+    ? `Beneficio Neto ${entityLabel} (Ventas − Compras − Gastos)`
+    : 'Beneficio Neto (Ventas − Compras − Gastos)';
+  const expensesTitle = entityLabel ? `Gastos (${entityLabel})` : 'Gastos';
   const salesHint = entityLabel
     ? `Importes por líneas Suite → ${entityLabel} (familias/artículos).`
     : 'Ambas empresas (split Suite por línea en filtro Medicina/Estética).';
@@ -242,6 +243,15 @@ export function DashboardCommandBoard({ data, billingView = 'both' }: Props) {
             rows={[
               { label: 'Total Facturas de Compra', value: eur(purchases.total) },
               { label: 'Total Deudas en Compras', value: eur(purchases.debts) },
+            ]}
+          />
+          <SideBlock
+            title={expensesTitle}
+            rows={[
+              {
+                label: 'Total Gastos bancarios',
+                value: eur(expenses?.total ?? 0),
+              },
             ]}
           />
           <SideBlock

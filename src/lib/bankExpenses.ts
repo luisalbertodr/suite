@@ -549,6 +549,30 @@ export async function summarizeBankExpenses(entity: BankEntity | 'all'): Promise
   };
 }
 
+export async function fetchBankExpenseTotalForPeriod(opts: {
+  fromDate: string;
+  toDate: string;
+  /** null/undefined = Medicina + Estética */
+  companyId?: string | null;
+}): Promise<number> {
+  let query = supabase
+    .from('bank_movements')
+    .select('amount')
+    .eq('is_expense', true)
+    .gte('movement_date', opts.fromDate)
+    .lte('movement_date', opts.toDate);
+
+  if (opts.companyId) {
+    query = query.eq('company_id', opts.companyId);
+  } else {
+    query = query.in('company_id', [MEDICINA_COMPANY_ID, ESTETICA_COMPANY_ID]);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data ?? []).reduce((sum, row) => sum + Math.abs(Number(row.amount ?? 0)), 0);
+}
+
 function emptyMonthSplit(): BankExpenseSplit {
   return { medicina: new Map(), estetica: new Map() };
 }
