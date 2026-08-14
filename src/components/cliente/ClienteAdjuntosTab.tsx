@@ -12,6 +12,8 @@ import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import {
   deletableCustomerAttachmentAssetId,
   groupCustomerAttachmentsByDate,
+  isDocumentGalleryItem,
+  isPhotoGalleryItem,
 } from '@/lib/customerAttachments';
 import { AttachmentLightbox, AttachmentThumbnail } from '@/components/cliente/AttachmentLightbox';
 import { ImmichImportDialog } from '@/components/cliente/ImmichImportDialog';
@@ -22,6 +24,8 @@ interface Props {
   customerId: string;
   compact?: boolean;
 }
+
+type GalleryFilter = 'photos' | 'documents';
 
 function formatGroupDate(ymd: string): string {
   try {
@@ -44,6 +48,7 @@ export const ClienteAdjuntosTab: React.FC<Props> = ({ customerId, compact }) => 
   const { companyId } = useCompanyFilter();
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [immichOpen, setImmichOpen] = useState(false);
+  const [galleryFilter, setGalleryFilter] = useState<GalleryFilter>('photos');
   const { toast } = useToast();
   const { uploadMany, isUploading } = useCustomerFileUpload(customerId, companyId ?? undefined);
 
@@ -66,13 +71,27 @@ export const ClienteAdjuntosTab: React.FC<Props> = ({ customerId, compact }) => 
     }
   };
 
-  const groups = useMemo(() => groupCustomerAttachmentsByDate(attachments), [attachments]);
+  const photoAttachments = useMemo(
+    () => attachments.filter(isPhotoGalleryItem),
+    [attachments],
+  );
+  const documentAttachments = useMemo(
+    () => attachments.filter(isDocumentGalleryItem),
+    [attachments],
+  );
+
+  const visibleAttachments = galleryFilter === 'photos' ? photoAttachments : documentAttachments;
+
+  const groups = useMemo(
+    () => groupCustomerAttachmentsByDate(visibleAttachments),
+    [visibleAttachments],
+  );
 
   const flatIndexById = useMemo(() => {
     const map = new Map<string, number>();
-    attachments.forEach((item, i) => map.set(item.id, i));
+    visibleAttachments.forEach((item, i) => map.set(item.id, i));
     return map;
-  }, [attachments]);
+  }, [visibleAttachments]);
 
   const openLightbox = (id: string) => {
     const idx = flatIndexById.get(id);
@@ -110,6 +129,8 @@ export const ClienteAdjuntosTab: React.FC<Props> = ({ customerId, compact }) => 
   }
 
   const canImport = Boolean(companyId && customer.data);
+  const photoCount = photoAttachments.length;
+  const docCount = documentAttachments.length;
 
   const importActions = canImport ? (
     <div className="flex flex-wrap items-center gap-2">
@@ -143,6 +164,59 @@ export const ClienteAdjuntosTab: React.FC<Props> = ({ customerId, compact }) => 
     />
   ) : null;
 
+  const galleryToggle = (
+    <div
+      className="inline-flex items-center gap-1 rounded-lg border border-border/70 bg-muted/30 p-1"
+      role="tablist"
+      aria-label="Ver fotos o documentos"
+    >
+      <button
+        type="button"
+        role="tab"
+        aria-selected={galleryFilter === 'photos'}
+        onClick={() => {
+          setGalleryFilter('photos');
+          setLightboxIndex(null);
+        }}
+        className={cn(
+          'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm transition-colors',
+          galleryFilter === 'photos'
+            ? 'bg-background text-foreground shadow-sm'
+            : 'text-muted-foreground hover:text-foreground',
+        )}
+        title="Ver fotos"
+      >
+        <ImageIcon className="h-4 w-4" />
+        <span className="tabular-nums">{photoCount}</span>
+        <span className="sr-only sm:not-sr-only sm:inline">
+          foto{photoCount === 1 ? '' : 's'}
+        </span>
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={galleryFilter === 'documents'}
+        onClick={() => {
+          setGalleryFilter('documents');
+          setLightboxIndex(null);
+        }}
+        className={cn(
+          'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm transition-colors',
+          galleryFilter === 'documents'
+            ? 'bg-background text-foreground shadow-sm'
+            : 'text-muted-foreground hover:text-foreground',
+        )}
+        title="Ver documentos"
+      >
+        <Paperclip className="h-4 w-4" />
+        <span className="tabular-nums">{docCount}</span>
+        <span className="sr-only sm:not-sr-only sm:inline">
+          documento{docCount === 1 ? '' : 's'}
+        </span>
+      </button>
+    </div>
+  );
+
   if (!attachments.length) {
     return (
       <div
@@ -155,7 +229,8 @@ export const ClienteAdjuntosTab: React.FC<Props> = ({ customerId, compact }) => 
         <div>
           <p className="font-medium text-foreground">Sin adjuntos</p>
           <p className="text-sm text-muted-foreground mt-1 max-w-sm mx-auto">
-            Las fotos de citas, historial clínico y consentimientos firmados aparecerán aquí ordenados por fecha.
+            Las fotos de citas, historial clínico y consentimientos firmados aparecerán aquí ordenados
+            por fecha. Desde Immich puedes marcar escaneos como documento.
           </p>
         </div>
         <div className="flex justify-center w-full">{importActions}</div>
@@ -164,64 +239,64 @@ export const ClienteAdjuntosTab: React.FC<Props> = ({ customerId, compact }) => 
     );
   }
 
-  const photoCount = attachments.filter((a) => a.isImage).length;
-  const docCount = attachments.length - photoCount;
-
   return (
     <>
       {immichDialog}
       <div className={cn('space-y-5', compact && 'space-y-4')}>
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
-            <span className="flex items-center gap-1.5">
-              <ImageIcon className="h-4 w-4" />
-              {photoCount} foto{photoCount === 1 ? '' : 's'}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            {galleryToggle}
+            <span className="text-xs text-muted-foreground">
+              Pulsa el icono de foto o de adjunto para cambiar de vista
             </span>
-            <span className="flex items-center gap-1.5">
-              <Paperclip className="h-4 w-4" />
-              {docCount} documento{docCount === 1 ? '' : 's'}
-            </span>
-            <span className="text-xs">Pulsa una miniatura para ver a pantalla completa</span>
           </div>
           {importActions}
         </div>
 
-        {groups.map((group) => (
-          <section key={group.date}>
-            <h3
-              className={cn(
-                'font-semibold text-foreground capitalize sticky top-0 z-[1] py-1.5',
-                'bg-background/95 backdrop-blur-sm border-b border-border/40 mb-2',
-                compact ? 'text-xs' : 'text-sm',
-              )}
-            >
-              {formatGroupDate(group.date)}
-              <span className="ml-2 font-normal text-muted-foreground tabular-nums">
-                ({group.items.length})
-              </span>
-            </h3>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
-              {group.items.map((item) => (
-                <AttachmentThumbnail
-                  key={item.id}
-                  item={item}
-                  onClick={() => openLightbox(item.id)}
-                  onDelete={
-                    deletableCustomerAttachmentAssetId(item)
-                      ? () => handleDelete(item.id)
-                      : undefined
-                  }
-                  deleting={isRemoving}
-                />
-              ))}
-            </div>
-          </section>
-        ))}
+        {groups.length === 0 ? (
+          <div className="rounded-lg border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
+            {galleryFilter === 'photos'
+              ? 'No hay fotos en esta ficha. Cambia a documentos o importa desde Immich.'
+              : 'No hay documentos. En Immich marca «Marcar como documento» al importar escaneos o consentimientos.'}
+          </div>
+        ) : (
+          groups.map((group) => (
+            <section key={group.date}>
+              <h3
+                className={cn(
+                  'font-semibold text-foreground capitalize sticky top-0 z-[1] py-1.5',
+                  'bg-background/95 backdrop-blur-sm border-b border-border/40 mb-2',
+                  compact ? 'text-xs' : 'text-sm',
+                )}
+              >
+                {formatGroupDate(group.date)}
+                <span className="ml-2 font-normal text-muted-foreground tabular-nums">
+                  ({group.items.length})
+                </span>
+              </h3>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
+                {group.items.map((item) => (
+                  <AttachmentThumbnail
+                    key={item.id}
+                    item={item}
+                    onClick={() => openLightbox(item.id)}
+                    onDelete={
+                      deletableCustomerAttachmentAssetId(item)
+                        ? () => handleDelete(item.id)
+                        : undefined
+                    }
+                    deleting={isRemoving}
+                  />
+                ))}
+              </div>
+            </section>
+          ))
+        )}
       </div>
 
       {lightboxIndex != null && (
         <AttachmentLightbox
-          items={attachments}
+          items={visibleAttachments}
           index={lightboxIndex}
           onIndexChange={setLightboxIndex}
           onClose={() => setLightboxIndex(null)}

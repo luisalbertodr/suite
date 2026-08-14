@@ -195,6 +195,11 @@ export function AttachmentThumbnail({ item, onClick, onDelete, deleting, classNa
             <span className="text-[10px] line-clamp-2 text-center leading-tight">{item.title}</span>
           </div>
         )}
+        {item.kind !== 'photo' ? (
+          <span className="absolute top-1 left-1 z-[1] rounded bg-amber-600/90 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-white pointer-events-none">
+            {item.kind === 'consent' ? 'Consent.' : 'Doc.'}
+          </span>
+        ) : null}
         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent px-2 py-1.5 pt-6 pointer-events-none">
           <p className="text-[10px] text-white truncate">{item.title}</p>
           <p className="text-[9px] text-white/75 truncate">{item.sourceLabel}</p>
