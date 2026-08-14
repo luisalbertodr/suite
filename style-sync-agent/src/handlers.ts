@@ -59,16 +59,25 @@ async function faclinJson(deps: EntityEngineDeps | undefined, src: DbfRow): Prom
     if (dbfStr(row, "serfac") !== serfac) return false;
     return lineMatchesKey(row, "numfac", numfac);
   });
+  // FACLIN.subtot ya es el importe de línea (IVA incl.) que suma TOTFAC.
+  // TANIVA es código de tipo de IVA (1/2/…), no un porcentaje: no re-aplicar IVA.
   return JSON.stringify(
-    lines.map((ln) => ({
-      codart: dbfStr(ln, "codart"),
-      desart: dbfStr(ln, "desart"),
-      cantidad: dbfNum(ln, "cant") || 1,
-      precio: dbfNum(ln, "preven"),
-      subtot: dbfNum(ln, "subtot"),
-      iva: dbfNum(ln, "subtot") * (dbfNum(ln, "taniva") / 100),
-      total: dbfNum(ln, "subtot") * (1 + dbfNum(ln, "taniva") / 100),
-    })),
+    lines.map((ln) => {
+      const subtot = dbfNum(ln, "subtot");
+      const codart = dbfStr(ln, "codart");
+      const desart = dbfStr(ln, "desart");
+      return {
+        codart,
+        desart,
+        // Sufijo [codart] para desambiguar descripciones repetidas (p.ej. EXOSOMAS Facial vs Exosomas Medicina).
+        desart_key: codart ? `${desart} [${codart}]` : desart,
+        cantidad: dbfNum(ln, "cant") || 1,
+        precio: dbfNum(ln, "preven"),
+        subtot,
+        iva: 0,
+        total: subtot,
+      };
+    }),
   );
 }
 
