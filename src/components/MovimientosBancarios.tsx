@@ -6,15 +6,20 @@ import { Loader2, Upload, Wallet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import {
   CONTRIBUTION_RETURN_CONCEPT,
+  SL_INTERNAL_TRANSFER_CONCEPT,
+  bankMovementKind,
   importBankMovements,
   listBankMovements,
+  parseBankAmount,
   parseBankMovementsCsv,
   summarizeBankExpenses,
   type BankEntity,
+  type BankMovementKind,
 } from '@/lib/bankExpenses';
 import { MEDICINA_COMPANY_ID } from '@/lib/workCenterBilling';
 
@@ -22,22 +27,75 @@ function euro(n: number): string {
   return `€${n.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-export const GastosBancarios: React.FC = () => {
+function kindBadge(kind: BankMovementKind) {
+  switch (kind) {
+    case 'expense':
+      return <Badge variant="destructive">Gasto</Badge>;
+    case 'contribution_return':
+      return <Badge variant="outline">Devolución aportación</Badge>;
+    case 'internal_transfer':
+      return <Badge variant="outline">Traspaso / interno</Badge>;
+    case 'income':
+      return <Badge variant="secondary">Ingreso</Badge>;
+    default:
+      return <Badge variant="secondary">Otros</Badge>;
+  }
+}
+
+function parseOptionalAmount(raw: string): number | null {
+  const t = raw.trim();
+  if (!t) return null;
+  return parseBankAmount(t);
+}
+
+export const MovimientosBancarios: React.FC = () => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [filter, setFilter] = useState<BankEntity | 'all'>('all');
+  const [entityFilter, setEntityFilter] = useState<BankEntity | 'all'>('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [amountMinRaw, setAmountMinRaw] = useState('');
+  const [amountMaxRaw, setAmountMaxRaw] = useState('');
+  const [conceptFilter, setConceptFilter] = useState('');
+  const [applied, setApplied] = useState({
+    dateFrom: '',
+    dateTo: '',
+    amountMinRaw: '',
+    amountMaxRaw: '',
+    concept: '',
+  });
   const medicinaInputRef = useRef<HTMLInputElement>(null);
   const esteticaInputRef = useRef<HTMLInputElement>(null);
   const [importingEntity, setImportingEntity] = useState<BankEntity | null>(null);
 
+  const amountMin = useMemo(() => parseOptionalAmount(applied.amountMinRaw), [applied.amountMinRaw]);
+  const amountMax = useMemo(() => parseOptionalAmount(applied.amountMaxRaw), [applied.amountMaxRaw]);
+
   const listQuery = useQuery({
-    queryKey: ['bank-movements', filter],
-    queryFn: () => listBankMovements(filter, 250),
+    queryKey: [
+      'bank-movements',
+      entityFilter,
+      applied.dateFrom,
+      applied.dateTo,
+      applied.amountMinRaw,
+      applied.amountMaxRaw,
+      applied.concept,
+    ],
+    queryFn: () =>
+      listBankMovements({
+        entity: entityFilter,
+        dateFrom: applied.dateFrom || null,
+        dateTo: applied.dateTo || null,
+        amountMin,
+        amountMax,
+        concept: applied.concept || null,
+        limit: 3000,
+      }),
   });
 
   const summaryQuery = useQuery({
-    queryKey: ['bank-movements-summary', filter],
-    queryFn: () => summarizeBankExpenses(filter),
+    queryKey: ['bank-movements-summary', entityFilter],
+    queryFn: () => summarizeBankExpenses(entityFilter),
   });
 
   const importMutation = useMutation({
@@ -65,7 +123,7 @@ export const GastosBancarios: React.FC = () => {
       });
       toast({
         title: `Importación ${vars.entity === 'medicina' ? 'Medicina' : 'Estética'}`,
-        description: `${result.inserted} nuevos · ${result.skipped} ya existían · gastos ${euro(result.expenseTotal)} (${result.parsedCount} filas leídas${result.parseErrors ? `, ${result.parseErrors} avisos` : ''}).`,
+        description: `${result.inserted} sincronizados · gastos ${euro(result.expenseTotal)} (${result.parsedCount} filas leídas${result.parseErrors ? `, ${result.parseErrors} avisos` : ''}).`,
       });
     },
     onError: (err: Error) => {
@@ -84,8 +142,48 @@ export const GastosBancarios: React.FC = () => {
     importMutation.mutate({ entity, file });
   };
 
+  const applyFilters = () => {
+    if (amountMinRaw.trim() && parseOptionalAmount(amountMinRaw) == null) {
+      toast({ title: 'Importe mínimo inválido', variant: 'destructive' });
+      return;
+    }
+    if (amountMaxRaw.trim() && parseOptionalAmount(amountMaxRaw) == null) {
+      toast({ title: 'Importe máximo inválido', variant: 'destructive' });
+      return;
+    }
+    setApplied({
+      dateFrom,
+      dateTo,
+      amountMinRaw,
+      amountMaxRaw,
+      concept: conceptFilter.trim(),
+    });
+  };
+
+  const clearFilters = () => {
+    setDateFrom('');
+    setDateTo('');
+    setAmountMinRaw('');
+    setAmountMaxRaw('');
+    setConceptFilter('');
+    setApplied({
+      dateFrom: '',
+      dateTo: '',
+      amountMinRaw: '',
+      amountMaxRaw: '',
+      concept: '',
+    });
+  };
+
   const rows = listQuery.data ?? [];
   const summary = summaryQuery.data;
+  const hasActiveFilters = Boolean(
+    applied.dateFrom ||
+      applied.dateTo ||
+      applied.amountMinRaw ||
+      applied.amountMaxRaw ||
+      applied.concept,
+  );
 
   const entityLabel = useMemo(
     () =>
@@ -103,12 +201,12 @@ export const GastosBancarios: React.FC = () => {
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-lg">
             <Wallet className="h-5 w-5" />
-            Gastos bancarios
+            Movimientos bancarios
           </CardTitle>
           <CardDescription>
-            Importa extractos CSV de Santander One (Medicina y Estética). Se ignora el preámbulo
-            (titular, IBAN, saldos). Los movimientos negativos cuentan como gasto, excepto «
-            {CONTRIBUTION_RETURN_CONCEPT}» (devolución de aportaciones).
+            Importa extractos CSV de Santander One (Medicina y Estética). Los negativos cuentan como
+            gasto, excepto devoluciones de aportación («{CONTRIBUTION_RETURN_CONCEPT}»), transferencias
+            a la SL («{SL_INTERNAL_TRANSFER_CONCEPT}») y conceptos «Traspaso…» a cuenta particular.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -160,6 +258,87 @@ export const GastosBancarios: React.FC = () => {
             </Button>
           </div>
 
+          <div className="grid gap-3 rounded-lg border bg-muted/20 p-3 sm:grid-cols-2 lg:grid-cols-6">
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Desde</label>
+              <Input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="h-9"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Hasta</label>
+              <Input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="h-9"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Importe mín.</label>
+              <Input
+                type="text"
+                inputMode="decimal"
+                placeholder="-500,00"
+                value={amountMinRaw}
+                onChange={(e) => setAmountMinRaw(e.target.value)}
+                className="h-9"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Importe máx.</label>
+              <Input
+                type="text"
+                inputMode="decimal"
+                placeholder="0,00"
+                value={amountMaxRaw}
+                onChange={(e) => setAmountMaxRaw(e.target.value)}
+                className="h-9"
+              />
+            </div>
+            <div className="space-y-1 sm:col-span-2 lg:col-span-2">
+              <label className="text-xs font-medium text-muted-foreground">Concepto</label>
+              <Input
+                type="text"
+                placeholder="Buscar en concepto…"
+                value={conceptFilter}
+                onChange={(e) => setConceptFilter(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') applyFilters();
+                }}
+                className="h-9"
+              />
+            </div>
+            <div className="flex flex-wrap items-end gap-2 sm:col-span-2 lg:col-span-6">
+              <Button type="button" size="sm" onClick={applyFilters}>
+                Filtrar
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={clearFilters}
+                disabled={!hasActiveFilters && !dateFrom && !dateTo && !amountMinRaw && !amountMaxRaw && !conceptFilter}
+              >
+                Limpiar
+              </Button>
+              <Tabs
+                value={entityFilter}
+                onValueChange={(v) => setEntityFilter(v as BankEntity | 'all')}
+                className="ml-auto"
+              >
+                <TabsList>
+                  <TabsTrigger value="all">Todas</TabsTrigger>
+                  <TabsTrigger value="medicina">Medicina</TabsTrigger>
+                  <TabsTrigger value="estetica">Estética</TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
+          </div>
+
           {summary ? (
             <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
               <span>
@@ -173,21 +352,15 @@ export const GastosBancarios: React.FC = () => {
                 Devoluciones aportación:{' '}
                 <strong className="text-foreground">{summary.contributionReturnCount}</strong>
               </span>
+              {hasActiveFilters ? (
+                <span>
+                  Filtrados: <strong className="text-foreground">{rows.length}</strong>
+                </span>
+              ) : null}
             </div>
           ) : null}
         </CardContent>
       </Card>
-
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-base font-semibold">Movimientos recientes</h2>
-        <Tabs value={filter} onValueChange={(v) => setFilter(v as BankEntity | 'all')}>
-          <TabsList>
-            <TabsTrigger value="all">Todas</TabsTrigger>
-            <TabsTrigger value="medicina">Medicina</TabsTrigger>
-            <TabsTrigger value="estetica">Estética</TabsTrigger>
-          </TabsList>
-        </Tabs>
-      </div>
 
       {listQuery.isLoading ? (
         <div className="flex items-center justify-center py-12 text-muted-foreground">
@@ -196,7 +369,9 @@ export const GastosBancarios: React.FC = () => {
         </div>
       ) : rows.length === 0 ? (
         <p className="py-8 text-center text-sm text-muted-foreground">
-          Aún no hay movimientos importados ({entityLabel[filter]}).
+          {hasActiveFilters
+            ? 'Ningún movimiento coincide con los filtros.'
+            : `Aún no hay movimientos importados (${entityLabel[entityFilter]}).`}
         </p>
       ) : (
         <div className="overflow-x-auto rounded-lg border">
@@ -213,6 +388,7 @@ export const GastosBancarios: React.FC = () => {
             <tbody>
               {rows.map((row) => {
                 const area = row.company_id === MEDICINA_COMPANY_ID ? 'Medicina' : 'Estética';
+                const kind = bankMovementKind(row);
                 return (
                   <tr key={row.id} className="border-t">
                     <td className="whitespace-nowrap px-3 py-2 tabular-nums">
@@ -231,15 +407,7 @@ export const GastosBancarios: React.FC = () => {
                     >
                       {euro(row.amount)}
                     </td>
-                    <td className="px-3 py-2">
-                      {row.is_expense ? (
-                        <Badge variant="destructive">Gasto</Badge>
-                      ) : row.is_contribution_return ? (
-                        <Badge variant="outline">Devolución</Badge>
-                      ) : (
-                        <Badge variant="secondary">Otros</Badge>
-                      )}
-                    </td>
+                    <td className="px-3 py-2">{kindBadge(kind)}</td>
                   </tr>
                 );
               })}
@@ -250,3 +418,6 @@ export const GastosBancarios: React.FC = () => {
     </div>
   );
 };
+
+/** @deprecated alias */
+export const GastosBancarios = MovimientosBancarios;

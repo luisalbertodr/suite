@@ -14,7 +14,7 @@ import { VerifactuCertificates } from './VerifactuCertificates';
 import { VerifactuXMLDocuments } from './VerifactuXMLDocuments';
 import { VerifactuQueueMonitor } from './VerifactuQueueMonitor';
 import { Plus, Search, FileText, Settings, History, File, ListOrdered, ChevronLeft, ChevronRight, Wallet } from 'lucide-react';
-import { GastosBancarios } from './GastosBancarios';
+import { MovimientosBancarios } from './MovimientosBancarios';
 import { format } from 'date-fns';
 import { TPV_SALE_INVOICE_PREFILL_KEY } from '@/lib/appointmentSales';
 import {
@@ -336,9 +336,9 @@ export const Facturas: React.FC = () => {
             <FileText className="w-4 h-4" />
             <span>Facturas</span>
           </TabsTrigger>
-          <TabsTrigger value="gastos" className="flex items-center space-x-2">
+          <TabsTrigger value="movimientos" className="flex items-center space-x-2">
             <Wallet className="w-4 h-4" />
-            <span>Gastos</span>
+            <span>Movimientos</span>
           </TabsTrigger>
           <TabsTrigger value="certificates" className="flex items-center space-x-2">
             <Settings className="w-4 h-4" />
@@ -480,8 +480,8 @@ export const Facturas: React.FC = () => {
           </div>
         </TabsContent>
 
-        <TabsContent value="gastos" className="space-y-4">
-          <GastosBancarios />
+        <TabsContent value="movimientos" className="space-y-4">
+          <MovimientosBancarios />
         </TabsContent>
 
         <TabsContent value="certificates">

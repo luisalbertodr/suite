@@ -13,9 +13,20 @@ import type {
 export const CONTRIBUTION_RETURN_CONCEPT =
   'Transferencia Inmediata A Favor de Diaz Rodriguez Luis Alberto';
 
+/** Traspaso Estética → SL Medicina: no es gasto operativo (luego se devuelve). */
+export const SL_INTERNAL_TRANSFER_CONCEPT =
+  'Transferencia Inmediata A Favor De Delgado Lamas Medicina Estética';
+
 const PAGE = 1000;
 
 export type BankEntity = 'medicina' | 'estetica';
+
+export type BankMovementKind =
+  | 'expense'
+  | 'contribution_return'
+  | 'internal_transfer'
+  | 'income'
+  | 'other';
 
 export type ParsedBankMovement = {
   movementDate: string;
@@ -23,6 +34,7 @@ export type ParsedBankMovement = {
   amount: number;
   isExpense: boolean;
   isContributionReturn: boolean;
+  isInternalTransfer: boolean;
   fingerprint: string;
 };
 
@@ -46,6 +58,16 @@ export type BankMovementListRow = {
   is_contribution_return: boolean;
   source_filename: string | null;
   created_at: string;
+};
+
+export type BankMovementListFilters = {
+  entity?: BankEntity | 'all';
+  dateFrom?: string | null;
+  dateTo?: string | null;
+  amountMin?: number | null;
+  amountMax?: number | null;
+  concept?: string | null;
+  limit?: number;
 };
 
 type RpcExpenseMonthRow = {
@@ -80,13 +102,47 @@ export function isContributionReturnConcept(concept: string): boolean {
   return normalizeBankConcept(concept).includes(needle);
 }
 
+/**
+ * Traspasos internos / a cuenta particular: no restan del beneficio.
+ * - Transferencia inmediata a favor de Delgado Lamas Medicina (Estética → SL)
+ * - Conceptos «Traspaso …» (p. ej. a cuenta particular)
+ */
+export function isInternalOrPersonalTransferConcept(concept: string): boolean {
+  const n = normalizeBankConcept(concept);
+  if (!n) return false;
+  if (n.includes('transferencia inmediata a favor de delgado lamas medicina')) return true;
+  if (/\btraspaso\b/.test(n)) return true;
+  return false;
+}
+
 export function classifyBankAmount(
   concept: string,
   amount: number,
-): { isExpense: boolean; isContributionReturn: boolean } {
+): {
+  isExpense: boolean;
+  isContributionReturn: boolean;
+  isInternalTransfer: boolean;
+} {
   const isContributionReturn = isContributionReturnConcept(concept);
-  const isExpense = amount < 0 && !isContributionReturn;
-  return { isExpense, isContributionReturn };
+  const isInternalTransfer =
+    !isContributionReturn && isInternalOrPersonalTransferConcept(concept);
+  const isExpense = amount < 0 && !isContributionReturn && !isInternalTransfer;
+  return { isExpense, isContributionReturn, isInternalTransfer };
+}
+
+export function bankMovementKind(row: {
+  concept: string;
+  amount: number;
+  is_expense: boolean;
+  is_contribution_return: boolean;
+}): BankMovementKind {
+  if (row.is_contribution_return || isContributionReturnConcept(row.concept)) {
+    return 'contribution_return';
+  }
+  if (isInternalOrPersonalTransferConcept(row.concept)) return 'internal_transfer';
+  if (row.is_expense) return 'expense';
+  if (row.amount > 0) return 'income';
+  return 'other';
 }
 
 /** Importe ES/EU: 1.234,56 | -1234,56 | 1,234.56 | (123.45) */
@@ -351,7 +407,10 @@ export function parseBankMovementsCsv(text: string): {
       }
       continue;
     }
-    const { isExpense, isContributionReturn } = classifyBankAmount(concept, amount);
+    const { isExpense, isContributionReturn, isInternalTransfer } = classifyBankAmount(
+      concept,
+      amount,
+    );
     const fingerprint = bankMovementFingerprint(movementDate, concept, amount);
     if (seen.has(fingerprint)) continue;
     seen.add(fingerprint);
@@ -361,6 +420,7 @@ export function parseBankMovementsCsv(text: string): {
       amount,
       isExpense,
       isContributionReturn,
+      isInternalTransfer,
       fingerprint,
     });
   }
@@ -398,18 +458,16 @@ export async function importBankMovements(params: {
       created_by: user?.id ?? null,
     }));
 
+    // Actualiza flags al reimportar (reclasifica gastos / exclusiones).
     const { data, error } = await supabase
       .from('bank_movements')
-      .upsert(payload, {
-        onConflict: 'company_id,fingerprint',
-        ignoreDuplicates: true,
-      })
+      .upsert(payload, { onConflict: 'company_id,fingerprint' })
       .select('id, is_expense, amount');
 
     if (error) throw error;
     const got = data?.length ?? 0;
     inserted += got;
-    skipped += chunk.length - got;
+    skipped += Math.max(0, chunk.length - got);
     for (const row of data ?? []) {
       if (row.is_expense) expenseTotal += Math.abs(Number(row.amount ?? 0));
     }
@@ -419,9 +477,11 @@ export async function importBankMovements(params: {
 }
 
 export async function listBankMovements(
-  entity: BankEntity | 'all',
-  limit = 200,
+  filters: BankMovementListFilters = {},
 ): Promise<BankMovementListRow[]> {
+  const entity = filters.entity ?? 'all';
+  const limit = filters.limit ?? 2000;
+
   let query = supabase
     .from('bank_movements')
     .select(
@@ -436,6 +496,17 @@ export async function listBankMovements(
   } else {
     query = query.in('company_id', [MEDICINA_COMPANY_ID, ESTETICA_COMPANY_ID]);
   }
+
+  if (filters.dateFrom) query = query.gte('movement_date', filters.dateFrom);
+  if (filters.dateTo) query = query.lte('movement_date', filters.dateTo);
+  if (filters.amountMin != null && Number.isFinite(filters.amountMin)) {
+    query = query.gte('amount', filters.amountMin);
+  }
+  if (filters.amountMax != null && Number.isFinite(filters.amountMax)) {
+    query = query.lte('amount', filters.amountMax);
+  }
+  const concept = filters.concept?.trim();
+  if (concept) query = query.ilike('concept', `%${concept}%`);
 
   const { data, error } = await query;
   if (error) throw error;
