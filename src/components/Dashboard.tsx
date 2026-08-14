@@ -473,6 +473,29 @@ export const Dashboard: React.FC = () => {
         ? 'Facturación Mes (Estética)'
         : 'Facturación Mes';
 
+  const chartRows = yearBilling ?? [];
+  const comparisonRows = dailyComparison ?? [];
+  const activeSeries = useMemo(
+    () => seriesForBillingView(Boolean(isMultiEntity), billingView),
+    [isMultiEntity, billingView],
+  );
+
+  useEffect(() => {
+    setSeriesVisibility(defaultDashboardSeriesVisibility(Boolean(isMultiEntity), billingView));
+  }, [isMultiEntity, billingView]);
+
+  const toggleSeries = (id: DashboardSeriesId) => {
+    setSeriesVisibility((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const legendProps = {
+    years: selectedYears,
+    yearColor: yearColorForIndex,
+    visibility: seriesVisibility,
+    onToggle: toggleSeries,
+    series: activeSeries,
+  };
+
   if (isInitialLoading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[400px] space-y-4">
@@ -537,29 +560,6 @@ export const Dashboard: React.FC = () => {
       color: 'from-emerald-500 to-emerald-600',
     },
   ];
-
-  const chartRows = yearBilling ?? [];
-  const comparisonRows = dailyComparison ?? [];
-  const activeSeries = useMemo(
-    () => seriesForBillingView(Boolean(isMultiEntity), billingView),
-    [isMultiEntity, billingView],
-  );
-
-  useEffect(() => {
-    setSeriesVisibility(defaultDashboardSeriesVisibility(Boolean(isMultiEntity), billingView));
-  }, [isMultiEntity, billingView]);
-
-  const toggleSeries = (id: DashboardSeriesId) => {
-    setSeriesVisibility((prev) => ({ ...prev, [id]: !prev[id] }));
-  };
-
-  const legendProps = {
-    years: selectedYears,
-    yearColor: yearColorForIndex,
-    visibility: seriesVisibility,
-    onToggle: toggleSeries,
-    series: activeSeries,
-  };
 
   return (
     <div className="relative space-y-4">
