@@ -1286,6 +1286,7 @@ serve(async (req) => {
       enabled: boolean;
       me_pushname: string | null;
       provider?: string | null;
+      meta_linked?: boolean | null;
       meta_app_secret?: string | null;
       meta_verify_token?: string | null;
     } | null = null;
@@ -1297,7 +1298,7 @@ serve(async (req) => {
       const { data } = await admin
         .from('whatsapp_config')
         .select(
-          'company_id, webhook_secret, enabled, me_pushname, provider, meta_app_secret, meta_verify_token',
+          'company_id, webhook_secret, enabled, me_pushname, provider, meta_linked, meta_app_secret, meta_verify_token',
         )
         .eq('company_id', companyIdQuery)
         .maybeSingle();
@@ -1314,8 +1315,8 @@ serve(async (req) => {
           return json({ error: 'Secreto inválido' }, 401);
         }
       }
-      // Sin app_secret ni secret: aceptar solo si provider=meta (entorno de prueba).
-      else if ((cfgRow.provider ?? '') !== 'meta') {
+      // Sin app_secret ni secret: aceptar si motor Meta exclusivo o canal Meta vinculado (híbrido).
+      else if ((cfgRow.provider ?? '') !== 'meta' && !cfgRow.meta_linked) {
         return json({ error: 'Configura meta_app_secret o webhook_secret' }, 401);
       }
     } else {

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ChevronDown, ChevronUp, Download, Loader2, Share2 } from 'lucide-react';
+import { Download, Loader2, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import type { InbodyMeasurement } from '@/lib/inbodyMeasurements';
@@ -39,8 +39,7 @@ export const InbodyReportExport: React.FC<Props> = ({
   compact,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<'download' | 'share' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
@@ -48,13 +47,6 @@ export const InbodyReportExport: React.FC<Props> = ({
   const sessionKey = inbodyReportSessionKey(measurement);
 
   useEffect(() => {
-    if (!previewOpen) {
-      clearPreviewCanvas(canvasRef.current);
-      setLoading(false);
-      setError(null);
-      return;
-    }
-
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -91,7 +83,7 @@ export const InbodyReportExport: React.FC<Props> = ({
     return () => {
       cancelled = true;
     };
-  }, [previewOpen, customerId, customerName, logoUrlLight, sessionKey, INBODY_REPORT_TEMPLATE_VERSION]);
+  }, [customerId, customerName, logoUrlLight, sessionKey, INBODY_REPORT_TEMPLATE_VERSION]);
 
   const handleDownload = async () => {
     setBusy('download');
@@ -133,12 +125,29 @@ export const InbodyReportExport: React.FC<Props> = ({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
+        <div className="rounded-lg border bg-white overflow-hidden flex justify-center max-h-[min(80vh,900px)] relative min-h-[120px]">
+          <canvas
+            ref={canvasRef}
+            className={`max-w-full h-auto object-contain transition-opacity ${loading ? 'opacity-0' : 'opacity-100'}`}
+            aria-label="Vista previa informe InBody"
+            aria-hidden={loading}
+          />
+          {loading ? (
+            <div className="absolute inset-0 flex items-center justify-center py-16 text-sm text-muted-foreground gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Generando vista previa…
+            </div>
+          ) : null}
+        </div>
+
+        {error ? <p className="text-xs text-destructive">{error}</p> : null}
+
         <div className="flex flex-wrap gap-2">
           <Button
             type="button"
             variant="default"
             size={compact ? 'sm' : 'default'}
-            disabled={busy != null}
+            disabled={loading || busy != null}
             onClick={() => void handleDownload()}
           >
             {busy === 'download' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Download className="h-4 w-4 mr-2" />}
@@ -148,45 +157,13 @@ export const InbodyReportExport: React.FC<Props> = ({
             type="button"
             variant="outline"
             size={compact ? 'sm' : 'default'}
-            disabled={busy != null}
+            disabled={loading || busy != null}
             onClick={() => void handleShare()}
           >
             {busy === 'share' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Share2 className="h-4 w-4 mr-2" />}
             Compartir / WhatsApp
           </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size={compact ? 'sm' : 'default'}
-            onClick={() => setPreviewOpen((v) => !v)}
-          >
-            {previewOpen ? (
-              <ChevronUp className="h-4 w-4 mr-2" />
-            ) : (
-              <ChevronDown className="h-4 w-4 mr-2" />
-            )}
-            {previewOpen ? 'Ocultar vista previa' : 'Ver vista previa'}
-          </Button>
         </div>
-
-        {error ? <p className="text-xs text-destructive">{error}</p> : null}
-
-        {previewOpen ? (
-          <div className="rounded-lg border bg-white overflow-hidden flex justify-center max-h-[min(80vh,900px)] relative min-h-[120px]">
-            <canvas
-              ref={canvasRef}
-              className={`max-w-full h-auto object-contain transition-opacity ${loading ? 'opacity-0' : 'opacity-100'}`}
-              aria-label="Vista previa informe InBody"
-              aria-hidden={loading}
-            />
-            {loading ? (
-              <div className="absolute inset-0 flex items-center justify-center py-16 text-sm text-muted-foreground gap-2">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Generando vista previa…
-              </div>
-            ) : null}
-          </div>
-        ) : null}
       </CardContent>
     </Card>
   );

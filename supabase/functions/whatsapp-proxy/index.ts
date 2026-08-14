@@ -2504,7 +2504,7 @@ serve(async (req) => {
       case 'session.qr': {
         if (provider === 'meta') {
           return err(
-            'El motor activo es Meta Cloud API (sin QR). En Configuración → WhatsApp elige OpenWA/WAHA como motor de mensajería para vincular con QR; las credenciales Meta se conservan en coexistencia.',
+            'El motor activo es Meta Cloud API (sin QR). En Configuración → WhatsApp activa el híbrido WAHA + Meta para vincular con QR de WhatsApp Business; las credenciales Meta se conservan.',
           );
         }
         if (provider === 'openwa') {

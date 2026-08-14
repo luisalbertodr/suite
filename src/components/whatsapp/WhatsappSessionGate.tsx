@@ -72,6 +72,7 @@ export const WhatsappSessionGate: React.FC<Props> = ({ config, onConnected }) =>
   const isWorking = status === 'WORKING';
   const isScanning = status === 'SCAN_QR_CODE';
   const isStarting = status === 'STARTING';
+  const isFailed = status === 'FAILED';
 
   const handleStart = async () => {
     try {
@@ -89,6 +90,25 @@ export const WhatsappSessionGate: React.FC<Props> = ({ config, onConnected }) =>
     }
   };
 
+  const handleFreshQr = async () => {
+    try {
+      await sessionLogout.mutateAsync();
+      await sessionStart.mutateAsync();
+      fetchQr.mutate(undefined, { onError: () => undefined });
+      toast({
+        title: 'QR renovado',
+        description:
+          'Escanea el código desde WhatsApp Business → Ajustes → Dispositivos vinculados.',
+      });
+    } catch (e) {
+      toast({
+        title: 'No se pudo renovar el QR',
+        description: e instanceof Error ? e.message : 'Error desconocido',
+        variant: 'destructive',
+      });
+    }
+  };
+
   return (
     <div className="flex h-full items-center justify-center bg-zinc-50 dark:bg-zinc-900">
       <Card className="w-full max-w-md">
@@ -101,8 +121,8 @@ export const WhatsappSessionGate: React.FC<Props> = ({ config, onConnected }) =>
               <CardTitle>Conectar WhatsApp</CardTitle>
               <CardDescription>
                 {config.provider === 'meta'
-                  ? 'Meta Cloud API está como motor exclusivo (sin QR). En Configuración → WhatsApp pulsa «Activar híbrido OpenWA + Meta» para recuperar el QR y mantener Cloud API.'
-                  : 'Vincula tu cuenta de WhatsApp con la plataforma a través de WAHA/OpenWA para enviar y recibir mensajes desde aquí.'}
+                  ? 'Meta Cloud API está como motor exclusivo (sin QR). En Configuración → WhatsApp pulsa «Activar híbrido WAHA + Meta» para recuperar el QR de WhatsApp Business y mantener Cloud API.'
+                  : 'Vincula WhatsApp Business con Suite escaneando el QR de WAHA (Ajustes → Dispositivos vinculados).'}
               </CardDescription>
             </div>
           </div>
@@ -132,8 +152,8 @@ export const WhatsappSessionGate: React.FC<Props> = ({ config, onConnected }) =>
           {isScanning ? (
             <div className="space-y-3">
               <p className="text-sm">
-                Abre WhatsApp en tu móvil → <strong>Ajustes</strong> →{' '}
-                <strong>Dispositivos vinculados</strong> →{' '}
+                Abre <strong>WhatsApp Business</strong> en el móvil →{' '}
+                <strong>Ajustes</strong> → <strong>Dispositivos vinculados</strong> →{' '}
                 <strong>Vincular un dispositivo</strong> y escanea este código.
               </p>
               <div className="flex justify-center rounded-lg border bg-white p-4">
@@ -178,12 +198,12 @@ export const WhatsappSessionGate: React.FC<Props> = ({ config, onConnected }) =>
                   <p className="font-medium">
                     {config.provider === 'meta'
                       ? 'Motor Meta exclusivo (sin QR).'
-                      : 'La sesión Waha/OpenWA no está activa.'}
+                      : 'La sesión WAHA no está activa.'}
                   </p>
                   <p className="text-xs">
                     {config.provider === 'meta'
-                      ? 'Para escanear el QR de la app, activa el híbrido OpenWA + Meta en Configuración → WhatsApp.'
-                      : 'Pulsa "Iniciar sesión" para arrancarla. Después aparecerá un código QR que tendrás que escanear desde tu móvil.'}
+                      ? 'Para escanear el QR de WhatsApp Business, activa el híbrido WAHA + Meta en Configuración → WhatsApp.'
+                      : 'Pulsa "Iniciar sesión" para arrancarla. Después aparecerá un código QR: en el móvil abre WhatsApp Business → Ajustes → Dispositivos vinculados → Vincular un dispositivo.'}
                   </p>
                 </div>
               </div>
@@ -191,6 +211,12 @@ export const WhatsappSessionGate: React.FC<Props> = ({ config, onConnected }) =>
           )}
 
           <div className="flex flex-wrap items-center justify-end gap-2">
+            {isFailed && config.provider !== 'meta' ? (
+              <Button onClick={() => void handleFreshQr()} disabled={sessionLogout.isPending || sessionStart.isPending}>
+                <QrCode className="mr-2 h-4 w-4" />
+                {sessionLogout.isPending || sessionStart.isPending ? 'Renovando…' : 'Nueva vinculación QR'}
+              </Button>
+            ) : null}
             {!isWorking ? (
               <Button onClick={handleStart} disabled={sessionStart.isPending}>
                 <Power className="mr-2 h-4 w-4" />

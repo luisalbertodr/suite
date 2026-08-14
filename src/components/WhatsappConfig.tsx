@@ -359,7 +359,7 @@ export const WhatsappConfig: React.FC = () => {
         title: 'Configuración WhatsApp guardada',
         description:
           provider === 'meta'
-            ? 'Meta es el motor exclusivo (sin QR). Para coexistencia elige OpenWA/WAHA y conserva Meta abajo.'
+            ? 'Meta es el motor exclusivo (sin QR). Para coexistencia elige WAHA y conserva Meta abajo.'
             : undefined,
       });
     } catch (e) {
@@ -368,44 +368,44 @@ export const WhatsappConfig: React.FC = () => {
     }
   };
 
-  const activateHybridOpenwa = async () => {
+  const activateHybridWaha = async () => {
     try {
-      const openwaDraft = drafts.openwa;
+      const wahaDraft = drafts.waha;
       const base =
-        openwaDraft.baseUrl.trim() ||
-        config?.openwa_base_url ||
-        (config?.provider === 'openwa' ? config.base_url : null);
+        wahaDraft.baseUrl.trim() ||
+        config?.waha_base_url ||
+        (config?.provider === 'waha' || !config?.provider ? config?.base_url : null);
       if (!base) {
         toast({
-          title: 'Falta URL OpenWA',
-          description: 'Indica la URL base de OpenWA y guarda, o rellénala antes de activar el híbrido.',
+          title: 'Falta URL WAHA',
+          description: 'Indica la URL base de WAHA y guarda, o rellénala antes de activar el híbrido.',
           variant: 'destructive',
         });
-        setProvider('openwa');
+        setProvider('waha');
         return;
       }
       await upsertConfig.mutateAsync({
-        provider: 'openwa',
-        openwa_base_url: base,
-        openwa_session_name:
-          openwaDraft.sessionName.trim() || config?.openwa_session_name || 'default',
+        provider: 'waha',
+        waha_base_url: base,
+        waha_session_name:
+          wahaDraft.sessionName.trim() || config?.waha_session_name || 'default',
         base_url: base,
         session_name:
-          openwaDraft.sessionName.trim() || config?.openwa_session_name || 'default',
+          wahaDraft.sessionName.trim() || config?.waha_session_name || 'default',
         meta_phone_number_id: drafts.meta.sessionName.trim() || config?.meta_phone_number_id || null,
         meta_graph_version: drafts.meta.baseUrl.trim() || config?.meta_graph_version || 'v21.0',
         meta_waba_id: metaWabaId.trim() || config?.meta_waba_id || null,
         meta_verify_token: metaVerifyToken.trim() || config?.meta_verify_token || null,
         meta_linked: true,
-        ...(apiKeyInputs.openwa.trim() ? { openwa_api_key: apiKeyInputs.openwa.trim() } : {}),
+        ...(apiKeyInputs.waha.trim() ? { waha_api_key: apiKeyInputs.waha.trim() } : {}),
         ...(apiKeyInputs.meta.trim() ? { meta_access_token: apiKeyInputs.meta.trim() } : {}),
-        ...(apiKeyInputs.openwa.trim() ? { api_key: apiKeyInputs.openwa.trim() } : {}),
+        ...(apiKeyInputs.waha.trim() ? { api_key: apiKeyInputs.waha.trim() } : {}),
       });
-      setProvider('openwa');
+      setProvider('waha');
       toast({
         title: 'Modo híbrido activo',
         description:
-          'Motor OpenWA (QR) restaurado. Credenciales Meta conservadas para Cloud API en coexistencia.',
+          'Motor WAHA (QR) restaurado. Escanea el QR con WhatsApp Business. Credenciales Meta conservadas.',
       });
     } catch (e) {
       toast({
@@ -489,9 +489,9 @@ export const WhatsappConfig: React.FC = () => {
               <div>
                 <CardTitle>Integración con WhatsApp</CardTitle>
                 <CardDescription>
-                  Motor QR (WAHA/OpenWA) para chatear desde Suite, y opcionalmente canal oficial Meta
-                  Cloud API en coexistencia (mismo número). No elijas Meta como motor si quieres seguir
-                  vinculando con QR.
+                  Motor WAHA con QR para vincular WhatsApp Business en el móvil, y opcionalmente canal
+                  oficial Meta Cloud API en coexistencia (mismo número). No elijas Meta como motor si
+                  quieres seguir usando el QR.
                 </CardDescription>
               </div>
             </div>
@@ -540,8 +540,8 @@ export const WhatsappConfig: React.FC = () => {
                 </SelectContent>
               </Select>
               <p className="text-[11px] text-muted-foreground">
-                Para coexistencia Meta + QR: deja el motor en OpenWA/WAHA y configura Meta en la
-                sección «Canal oficial Meta» (abajo). Solo usa «Meta exclusivo» si no necesitas QR.
+                Híbrido recomendado: motor <strong>WAHA</strong> (QR de WhatsApp Business) + sección
+                «Canal oficial Meta» abajo. Solo usa «Meta exclusivo» si no necesitas QR.
               </p>
               {activeProvider === 'meta' ? (
                 <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/40 p-3 text-xs space-y-2">
@@ -550,16 +550,16 @@ export const WhatsappConfig: React.FC = () => {
                   </p>
                   <p className="text-amber-800 dark:text-amber-200">
                     Meta permite coexistencia con dispositivos vinculados. Activa el híbrido para
-                    volver a OpenWA (QR) sin borrar las credenciales Cloud API.
+                    volver a WAHA (QR WhatsApp Business) sin borrar las credenciales Cloud API.
                   </p>
                   <Button
                     type="button"
                     size="sm"
                     variant="secondary"
                     disabled={upsertConfig.isPending}
-                    onClick={() => void activateHybridOpenwa()}
+                    onClick={() => void activateHybridWaha()}
                   >
-                    Activar híbrido OpenWA + Meta
+                    Activar híbrido WAHA + Meta
                   </Button>
                 </div>
               ) : null}
@@ -722,10 +722,10 @@ export const WhatsappConfig: React.FC = () => {
             ) : (
               <div className="md:col-span-2 space-y-3 rounded-lg border border-emerald-200/70 bg-emerald-50/40 dark:border-emerald-900/40 dark:bg-emerald-950/20 p-3">
                 <div>
-                  <p className="text-sm font-medium">Canal oficial Meta (coexistencia)</p>
+                  <p className="text-sm font-medium">Canal oficial Meta (coexistencia con WAHA)</p>
                   <p className="text-[11px] text-muted-foreground">
-                    Guarda token y Phone Number ID sin cambiar el motor QR. Meta puede convivir con
-                    el dispositivo vinculado por OpenWA/WAHA.
+                    Guarda token y Phone Number ID sin cambiar el motor QR. El QR de WAHA se escanea
+                    en WhatsApp Business → Dispositivos vinculados.
                   </p>
                 </div>
                 <div className="grid gap-3 md:grid-cols-2">
@@ -1081,8 +1081,8 @@ export const WhatsappConfig: React.FC = () => {
               <CardTitle>Sesión de WhatsApp</CardTitle>
               <CardDescription>
                 {activeProvider === 'meta'
-                  ? 'Meta Cloud API exclusiva no usa QR. Activa el híbrido OpenWA + Meta en la tarjeta superior para recuperar el QR sin perder Cloud API.'
-                  : 'Controla la sesión que WAHA/OpenWA mantiene con WhatsApp (iniciar, QR, detener o desvincular).'}
+                  ? 'Meta Cloud API exclusiva no usa QR. Activa el híbrido WAHA + Meta arriba para recuperar el QR de WhatsApp Business sin perder Cloud API.'
+                  : 'Inicia la sesión WAHA y escanea el QR con WhatsApp Business en el móvil (Dispositivos vinculados).'}
               </CardDescription>
             </div>
           </div>
