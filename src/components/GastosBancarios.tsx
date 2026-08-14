@@ -106,9 +106,9 @@ export const GastosBancarios: React.FC = () => {
             Gastos bancarios
           </CardTitle>
           <CardDescription>
-            Importa extractos CSV de Medicina y Estética. Los movimientos negativos cuentan como
-            gasto (se restan del beneficio), excepto «{CONTRIBUTION_RETURN_CONCEPT}» (devolución de
-            aportaciones).
+            Importa extractos CSV de Santander One (Medicina y Estética). Se ignora el preámbulo
+            (titular, IBAN, saldos). Los movimientos negativos cuentan como gasto, excepto «
+            {CONTRIBUTION_RETURN_CONCEPT}» (devolución de aportaciones).
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

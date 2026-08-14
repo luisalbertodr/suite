@@ -184,16 +184,16 @@ function normalizeHeader(h: string): string {
     .replace(/^_+|_+$/g, '');
 }
 
-const DATE_HEADERS = new Set([
-  'fecha',
+const DATE_HEADERS_PRIORITY = [
   'fecha_operacion',
-  'fecha_valor',
+  'fecha',
   'f_operacion',
-  'f_valor',
-  'date',
   'operation_date',
+  'fecha_valor',
+  'f_valor',
   'value_date',
-]);
+  'date',
+] as const;
 
 const CONCEPT_HEADERS = new Set([
   'concepto',
@@ -205,22 +205,94 @@ const CONCEPT_HEADERS = new Set([
   'movimiento',
 ]);
 
-const AMOUNT_HEADERS = new Set([
+const AMOUNT_HEADERS_PRIORITY = [
   'importe',
+  'importe_eur',
+  'importe_euros',
   'amount',
   'cantidad',
   'cargo',
   'abono',
-  'importe_eur',
-  'importe_euros',
-  'valor',
-]);
+] as const;
 
-function findColumnIndex(headers: string[], candidates: Set<string>): number {
-  for (let i = 0; i < headers.length; i += 1) {
-    if (candidates.has(headers[i]!)) return i;
+function findHeaderIndex(headers: string[], priority: readonly string[]): number {
+  for (const key of priority) {
+    const idx = headers.indexOf(key);
+    if (idx >= 0) return idx;
   }
   return -1;
+}
+
+function findConceptIndex(headers: string[]): number {
+  for (let i = 0; i < headers.length; i += 1) {
+    if (CONCEPT_HEADERS.has(headers[i]!)) return i;
+  }
+  return headers.findIndex((h) => h.includes('concepto') || h.includes('descripcion'));
+}
+
+function findAmountIndex(headers: string[]): number {
+  const exact = findHeaderIndex(headers, AMOUNT_HEADERS_PRIORITY);
+  if (exact >= 0) return exact;
+  // No usar "saldo" ni "fecha_valor": solo columnas de importe.
+  return headers.findIndex((h) => h.startsWith('importe') || h === 'amount');
+}
+
+function findDateIndex(headers: string[]): number {
+  const exact = findHeaderIndex(headers, DATE_HEADERS_PRIORITY);
+  if (exact >= 0) return exact;
+  return headers.findIndex(
+    (h) =>
+      h.startsWith('fecha') &&
+      !h.includes('hasta') &&
+      !h.includes('desde') &&
+      !h.includes('export'),
+  );
+}
+
+function looksLikeMovementsHeader(headers: string[]): boolean {
+  const dateIdx = findDateIndex(headers);
+  const conceptIdx = findConceptIndex(headers);
+  const amountIdx = findAmountIndex(headers);
+  if (dateIdx < 0 || conceptIdx < 0 || amountIdx < 0) return false;
+  // Evitar filas de metadatos tipo "Titular,Saldo disponible,Saldo real"
+  const joined = headers.join('|');
+  if (joined.includes('titular') && joined.includes('saldo') && !joined.includes('concepto')) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Localiza la fila de cabecera real (Santander One / Medicina / Estética
+ * incluyen preámbulo con cuenta, titular y saldos).
+ */
+function findMovementsHeaderRow(lines: string[]): {
+  headerIndex: number;
+  delimiter: ';' | ',' | '\t';
+  headers: string[];
+  dateIdx: number;
+  conceptIdx: number;
+  amountIdx: number;
+} | null {
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]!;
+    // Las cabeceras reales mencionan Fecha/Concepto/Importe; el preámbulo no.
+    const lower = line.toLowerCase();
+    if (!lower.includes('concepto') || !lower.includes('importe')) continue;
+    if (!lower.includes('fecha')) continue;
+
+    const delimiter = detectDelimiter(line);
+    const headers = splitCsvLine(line, delimiter).map(normalizeHeader);
+    if (!looksLikeMovementsHeader(headers)) continue;
+
+    const dateIdx = findDateIndex(headers);
+    const conceptIdx = findConceptIndex(headers);
+    const amountIdx = findAmountIndex(headers);
+    if (dateIdx < 0 || conceptIdx < 0 || amountIdx < 0) continue;
+
+    return { headerIndex: i, delimiter, headers, dateIdx, conceptIdx, amountIdx };
+  }
+  return null;
 }
 
 export function bankMovementFingerprint(
@@ -233,8 +305,8 @@ export function bankMovementFingerprint(
 }
 
 /**
- * Parsea extracto bancario CSV/TSV (BBVA, Santander, export genérico ES).
- * Cabeceras flexibles: Fecha / Concepto / Importe.
+ * Parsea extractos Santander One Empresa (Medicina / Estética) y CSV genéricos ES.
+ * Ignora el preámbulo (titular, IBAN, saldos) hasta la cabecera de movimientos.
  */
 export function parseBankMovementsCsv(text: string): {
   rows: ParsedBankMovement[];
@@ -246,32 +318,37 @@ export function parseBankMovementsCsv(text: string): {
     return { rows: [], errors: ['El archivo no tiene filas de datos.'] };
   }
 
-  const delimiter = detectDelimiter(lines[0]!);
-  const headers = splitCsvLine(lines[0]!, delimiter).map(normalizeHeader);
-  let dateIdx = findColumnIndex(headers, DATE_HEADERS);
-  let conceptIdx = findColumnIndex(headers, CONCEPT_HEADERS);
-  let amountIdx = findColumnIndex(headers, AMOUNT_HEADERS);
-
-  // Fallback posicional habitual: Fecha;Concepto;Importe
-  if (dateIdx < 0) dateIdx = 0;
-  if (conceptIdx < 0) conceptIdx = Math.min(1, headers.length - 1);
-  if (amountIdx < 0) {
-    amountIdx = headers.findIndex((h) => h.includes('importe') || h.includes('amount'));
-    if (amountIdx < 0) amountIdx = Math.min(2, headers.length - 1);
+  const header = findMovementsHeaderRow(lines);
+  if (!header) {
+    return {
+      rows: [],
+      errors: [
+        'No se encontró la cabecera de movimientos (Fecha / Concepto / Importe). Revisa el CSV de Santander.',
+      ],
+    };
   }
 
+  const { headerIndex, delimiter, dateIdx, conceptIdx, amountIdx } = header;
   const rows: ParsedBankMovement[] = [];
   const errors: string[] = [];
   const seen = new Set<string>();
 
-  for (let i = 1; i < lines.length; i += 1) {
+  for (let i = headerIndex + 1; i < lines.length; i += 1) {
     const cols = splitCsvLine(lines[i]!, delimiter);
     if (cols.every((c) => !c.trim())) continue;
+
+    // Filas residuales de metadatos / totales
+    const first = (cols[dateIdx] ?? '').trim();
+    if (!first || /^movimientos/i.test(first) || /^titular/i.test(first)) continue;
+
     const movementDate = parseBankDate(cols[dateIdx] ?? '');
     const amount = parseBankAmount(cols[amountIdx] ?? '');
     const concept = String(cols[conceptIdx] ?? '').trim();
     if (!movementDate || amount == null) {
-      errors.push(`Fila ${i + 1}: fecha o importe inválidos.`);
+      // No bombardear con errores de filas vacías o basura residual
+      if (first || concept) {
+        errors.push(`Fila ${i + 1}: fecha o importe inválidos («${first}» / «${cols[amountIdx] ?? ''}»).`);
+      }
       continue;
     }
     const { isExpense, isContributionReturn } = classifyBankAmount(concept, amount);
