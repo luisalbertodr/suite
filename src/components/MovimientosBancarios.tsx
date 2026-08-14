@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
+import { useBankMovementsAccess } from '@/hooks/useBankMovementsAccess';
 import {
   CONTRIBUTION_RETURN_CONCEPT,
   SL_INTERNAL_TRANSFER_CONCEPT,
@@ -51,6 +52,14 @@ function parseOptionalAmount(raw: string): number | null {
 export const MovimientosBancarios: React.FC = () => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const {
+    loading: accessLoading,
+    canAccess,
+    canMedicina,
+    canEstetica,
+    canImportEntity,
+    defaultEntity,
+  } = useBankMovementsAccess();
   const [entityFilter, setEntityFilter] = useState<BankEntity | 'all'>('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -68,6 +77,17 @@ export const MovimientosBancarios: React.FC = () => {
   const esteticaInputRef = useRef<HTMLInputElement>(null);
   const [importingEntity, setImportingEntity] = useState<BankEntity | null>(null);
 
+  useEffect(() => {
+    if (accessLoading) return;
+    setEntityFilter((prev) => {
+      if (prev === 'all' && canMedicina && canEstetica) return 'all';
+      if (prev === 'all') return defaultEntity;
+      if (prev === 'medicina' && !canMedicina) return defaultEntity;
+      if (prev === 'estetica' && !canEstetica) return defaultEntity;
+      return prev;
+    });
+  }, [accessLoading, canMedicina, canEstetica, defaultEntity]);
+
   const amountMin = useMemo(() => parseOptionalAmount(applied.amountMinRaw), [applied.amountMinRaw]);
   const amountMax = useMemo(() => parseOptionalAmount(applied.amountMaxRaw), [applied.amountMaxRaw]);
 
@@ -80,6 +100,8 @@ export const MovimientosBancarios: React.FC = () => {
       applied.amountMinRaw,
       applied.amountMaxRaw,
       applied.concept,
+      canMedicina,
+      canEstetica,
     ],
     queryFn: () =>
       listBankMovements({
@@ -91,15 +113,20 @@ export const MovimientosBancarios: React.FC = () => {
         concept: applied.concept || null,
         limit: 3000,
       }),
+    enabled: canAccess && !accessLoading,
   });
 
   const summaryQuery = useQuery({
-    queryKey: ['bank-movements-summary', entityFilter],
+    queryKey: ['bank-movements-summary', entityFilter, canMedicina, canEstetica],
     queryFn: () => summarizeBankExpenses(entityFilter),
+    enabled: canAccess && !accessLoading,
   });
 
   const importMutation = useMutation({
     mutationFn: async (params: { entity: BankEntity; file: File }) => {
+      if (!canImportEntity(params.entity)) {
+        throw new Error('No tienes permiso para importar movimientos de esa empresa.');
+      }
       const text = await params.file.text();
       const parsed = parseBankMovementsCsv(text);
       if (!parsed.rows.length) {
@@ -138,6 +165,14 @@ export const MovimientosBancarios: React.FC = () => {
 
   const onPickFile = (entity: BankEntity, file: File | undefined) => {
     if (!file) return;
+    if (!canImportEntity(entity)) {
+      toast({
+        title: 'Sin permiso',
+        description: 'No estás autorizado para esa empresa.',
+        variant: 'destructive',
+      });
+      return;
+    }
     setImportingEntity(entity);
     importMutation.mutate({ entity, file });
   };
@@ -195,6 +230,23 @@ export const MovimientosBancarios: React.FC = () => {
     [],
   );
 
+  if (accessLoading) {
+    return (
+      <div className="flex items-center justify-center py-12 text-muted-foreground">
+        <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+        Comprobando permisos…
+      </div>
+    );
+  }
+
+  if (!canAccess) {
+    return (
+      <p className="py-8 text-center text-sm text-muted-foreground">
+        No tienes permiso para ver movimientos bancarios.
+      </p>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <Card>
@@ -204,58 +256,72 @@ export const MovimientosBancarios: React.FC = () => {
             Movimientos bancarios
           </CardTitle>
           <CardDescription>
-            Importa extractos CSV de Santander One (Medicina y Estética). Los negativos cuentan como
-            gasto, excepto devoluciones de aportación («{CONTRIBUTION_RETURN_CONCEPT}»), transferencias
-            a la SL («{SL_INTERNAL_TRANSFER_CONCEPT}») y conceptos «Traspaso…» a cuenta particular.
+            Importa extractos CSV de Santander One
+            {canMedicina && canEstetica
+              ? ' (Medicina y Estética)'
+              : canMedicina
+                ? ' (Medicina)'
+                : ' (Estética)'}
+            . Los negativos cuentan como gasto, excepto devoluciones de aportación («
+            {CONTRIBUTION_RETURN_CONCEPT}»), transferencias a la SL («{SL_INTERNAL_TRANSFER_CONCEPT}»)
+            y conceptos «Traspaso…» a cuenta particular.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap gap-2">
-            <input
-              ref={medicinaInputRef}
-              type="file"
-              accept=".csv,text/csv,text/plain,.txt"
-              className="hidden"
-              onChange={(e) => {
-                onPickFile('medicina', e.target.files?.[0]);
-                e.target.value = '';
-              }}
-            />
-            <input
-              ref={esteticaInputRef}
-              type="file"
-              accept=".csv,text/csv,text/plain,.txt"
-              className="hidden"
-              onChange={(e) => {
-                onPickFile('estetica', e.target.files?.[0]);
-                e.target.value = '';
-              }}
-            />
-            <Button
-              type="button"
-              onClick={() => medicinaInputRef.current?.click()}
-              disabled={importMutation.isPending}
-            >
-              {importingEntity === 'medicina' ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Upload className="mr-2 h-4 w-4" />
-              )}
-              Importar Medicina
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => esteticaInputRef.current?.click()}
-              disabled={importMutation.isPending}
-            >
-              {importingEntity === 'estetica' ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Upload className="mr-2 h-4 w-4" />
-              )}
-              Importar Estética
-            </Button>
+            {canMedicina ? (
+              <>
+                <input
+                  ref={medicinaInputRef}
+                  type="file"
+                  accept=".csv,text/csv,text/plain,.txt"
+                  className="hidden"
+                  onChange={(e) => {
+                    onPickFile('medicina', e.target.files?.[0]);
+                    e.target.value = '';
+                  }}
+                />
+                <Button
+                  type="button"
+                  onClick={() => medicinaInputRef.current?.click()}
+                  disabled={importMutation.isPending}
+                >
+                  {importingEntity === 'medicina' ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Upload className="mr-2 h-4 w-4" />
+                  )}
+                  Importar Medicina
+                </Button>
+              </>
+            ) : null}
+            {canEstetica ? (
+              <>
+                <input
+                  ref={esteticaInputRef}
+                  type="file"
+                  accept=".csv,text/csv,text/plain,.txt"
+                  className="hidden"
+                  onChange={(e) => {
+                    onPickFile('estetica', e.target.files?.[0]);
+                    e.target.value = '';
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => esteticaInputRef.current?.click()}
+                  disabled={importMutation.isPending}
+                >
+                  {importingEntity === 'estetica' ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Upload className="mr-2 h-4 w-4" />
+                  )}
+                  Importar Estética
+                </Button>
+              </>
+            ) : null}
           </div>
 
           <div className="grid gap-3 rounded-lg border bg-muted/20 p-3 sm:grid-cols-2 lg:grid-cols-6">
@@ -331,9 +397,11 @@ export const MovimientosBancarios: React.FC = () => {
                 className="ml-auto"
               >
                 <TabsList>
-                  <TabsTrigger value="all">Todas</TabsTrigger>
-                  <TabsTrigger value="medicina">Medicina</TabsTrigger>
-                  <TabsTrigger value="estetica">Estética</TabsTrigger>
+                  {canMedicina && canEstetica ? (
+                    <TabsTrigger value="all">Todas</TabsTrigger>
+                  ) : null}
+                  {canMedicina ? <TabsTrigger value="medicina">Medicina</TabsTrigger> : null}
+                  {canEstetica ? <TabsTrigger value="estetica">Estética</TabsTrigger> : null}
                 </TabsList>
               </Tabs>
             </div>

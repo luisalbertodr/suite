@@ -20,6 +20,12 @@ export const MENU_PERMISSIONS: MenuPermission[] = [
   { resource: 'quotes', action: 'read', label: 'Presupuestos', description: 'Ver y gestionar presupuestos' },
   { resource: 'presupuestos_n', action: 'read', label: 'PresupuestosN', description: 'Ver y gestionar presupuestos N' },
   { resource: 'invoices', action: 'read', label: 'Facturas', description: 'Ver y gestionar facturas' },
+  {
+    resource: 'bank_movements',
+    action: 'read',
+    label: 'Movimientos bancarios',
+    description: 'Ver e importar movimientos bancarios en Facturación (por defecto solo admin; por empresa)',
+  },
   { resource: 'delivery_notes', action: 'read', label: 'Alb. Entrada', description: 'Ver y gestionar albaranes de entrada' },
   { resource: 'delivery_notes_out', action: 'read', label: 'Alb. Salida', description: 'Ver y gestionar albaranes de salida' },
   { resource: 'suppliers', action: 'read', label: 'Proveedores', description: 'Ver y gestionar proveedores' },

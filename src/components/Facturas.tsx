@@ -26,6 +26,7 @@ import { useToast } from '@/hooks/use-toast';
 import { buildInvoiceSearchOrFilter, searchCustomerIdsByIlike } from '@/lib/customerSearch';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { useWorkCenter } from '@/hooks/useWorkCenter';
+import { useBankMovementsAccess } from '@/hooks/useBankMovementsAccess';
 
 const PAGE_SIZE = 50;
 
@@ -64,6 +65,15 @@ export const Facturas: React.FC = () => {
   const { companyId, loading: companyLoading } = useCompanyFilter();
   const { catalogHostCompanyId } = useWorkCenter();
   const catalogCompanyId = catalogHostCompanyId ?? companyId;
+  const { canAccess: canSeeMovimientos, loading: movimientosAccessLoading } =
+    useBankMovementsAccess();
+
+  useEffect(() => {
+    if (movimientosAccessLoading) return;
+    if (activeTab === 'movimientos' && !canSeeMovimientos) {
+      setActiveTab('invoices');
+    }
+  }, [activeTab, canSeeMovimientos, movimientosAccessLoading]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedSearch(searchTerm.trim()), 350);
@@ -331,15 +341,19 @@ export const Facturas: React.FC = () => {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-6">
+        <TabsList
+          className={`grid w-full ${canSeeMovimientos ? 'grid-cols-6' : 'grid-cols-5'}`}
+        >
           <TabsTrigger value="invoices" className="flex items-center space-x-2">
             <FileText className="w-4 h-4" />
             <span>Facturas</span>
           </TabsTrigger>
-          <TabsTrigger value="movimientos" className="flex items-center space-x-2">
-            <Wallet className="w-4 h-4" />
-            <span>Movimientos</span>
-          </TabsTrigger>
+          {canSeeMovimientos ? (
+            <TabsTrigger value="movimientos" className="flex items-center space-x-2">
+              <Wallet className="w-4 h-4" />
+              <span>Movimientos</span>
+            </TabsTrigger>
+          ) : null}
           <TabsTrigger value="certificates" className="flex items-center space-x-2">
             <Settings className="w-4 h-4" />
             <span>Certificados</span>
@@ -480,9 +494,11 @@ export const Facturas: React.FC = () => {
           </div>
         </TabsContent>
 
-        <TabsContent value="movimientos" className="space-y-4">
-          <MovimientosBancarios />
-        </TabsContent>
+        {canSeeMovimientos ? (
+          <TabsContent value="movimientos" className="space-y-4">
+            <MovimientosBancarios />
+          </TabsContent>
+        ) : null}
 
         <TabsContent value="certificates">
           <VerifactuCertificates />
