@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { User, LogOut, Settings, ChevronDown, Moon, Sun, LayoutDashboard } from 'lucide-react';
+import { User, LogOut, Settings, ChevronDown, Moon, Sun } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from 'next-themes';
@@ -47,6 +47,8 @@ const ROUTE_TITLES: Record<string, string> = {
 const HIDE_TITLE_MAX_PX = 920;
 /** En pantallas anchas nunca apilar: el falso positivo venía de medir mal el centro. */
 const NEVER_STACK_MIN_PX = 1200;
+/** Por debajo de esto, fecha arriba y hora debajo en el chip de ahora. */
+const STACK_DATETIME_MAX_PX = 1100;
 const TOPBAR_SINGLE_H = '3rem';
 const TOPBAR_DOUBLE_H = '6rem';
 
@@ -62,7 +64,6 @@ export const TopBar: React.FC = () => {
   const { pathname } = useLocation();
   const { user, signOut } = useAuth();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
-  const canSeeDashboard = permissionsLoading || hasPermission('dashboard', 'read');
   const canSeeSettings = permissionsLoading || hasPermission('settings', 'read');
   const { theme, resolvedTheme, setTheme } = useTheme();
   const { loading: companyLoading } = useCompanyFilter();
@@ -71,6 +72,7 @@ export const TopBar: React.FC = () => {
   const { content } = useTopBarContent();
   const [currentDateTime, setCurrentDateTime] = useState(new Date());
   const [hideRouteTitle, setHideRouteTitle] = useState(false);
+  const [stackDateTime, setStackDateTime] = useState(false);
   const [stacked, setStacked] = useState(false);
 
   const headerRef = useRef<HTMLElement>(null);
@@ -87,7 +89,11 @@ export const TopBar: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    const check = () => setHideRouteTitle(window.innerWidth < HIDE_TITLE_MAX_PX);
+    const check = () => {
+      const w = window.innerWidth;
+      setHideRouteTitle(w < HIDE_TITLE_MAX_PX);
+      setStackDateTime(w < STACK_DATETIME_MAX_PX);
+    };
     check();
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
@@ -216,13 +222,27 @@ export const TopBar: React.FC = () => {
         type="button"
         onClick={goToAgendaNow}
         title="Ir a la agenda en la fecha y hora actuales"
-        className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-muted/40 px-2 py-1 text-xs text-foreground/80 hover:bg-muted hover:text-foreground transition-colors tabular-nums"
+        className={cn(
+          'inline-flex rounded-md border border-border/60 bg-muted/40 px-2 py-1 text-xs text-foreground/80 hover:bg-muted hover:text-foreground transition-colors tabular-nums',
+          stackDateTime
+            ? 'flex-col items-end gap-0 leading-tight'
+            : 'items-center gap-1.5',
+        )}
       >
-        <span className="font-semibold">{timeLabel}</span>
-        <span className="text-foreground/50" aria-hidden>
-          ·
-        </span>
-        <span className="font-medium capitalize">{dateLabel}</span>
+        {stackDateTime ? (
+          <>
+            <span className="font-medium capitalize">{dateLabel}</span>
+            <span className="font-semibold">{timeLabel}</span>
+          </>
+        ) : (
+          <>
+            <span className="font-semibold">{timeLabel}</span>
+            <span className="text-foreground/50" aria-hidden>
+              ·
+            </span>
+            <span className="font-medium capitalize">{dateLabel}</span>
+          </>
+        )}
       </button>
 
       <DropdownMenu>
@@ -236,19 +256,13 @@ export const TopBar: React.FC = () => {
           <ChevronDown className="h-3 w-3 text-foreground/40" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-48">
-          {canSeeDashboard ? (
-            <DropdownMenuItem className="text-xs" onClick={() => navigate('/inicio')}>
-              <LayoutDashboard className="h-3.5 w-3.5 mr-2" />
-              Dashboard
-            </DropdownMenuItem>
-          ) : null}
           {canSeeSettings ? (
             <DropdownMenuItem className="text-xs" onClick={() => navigate('/configuracion')}>
               <Settings className="h-3.5 w-3.5 mr-2" />
               Configuración
             </DropdownMenuItem>
           ) : null}
-          {canSeeDashboard || canSeeSettings ? <DropdownMenuSeparator /> : null}
+          {canSeeSettings ? <DropdownMenuSeparator /> : null}
           <DropdownMenuItem className="text-xs text-destructive" onClick={signOut}>
             <LogOut className="h-3.5 w-3.5 mr-2" />
             Cerrar Sesión

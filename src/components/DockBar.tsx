@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Calendar, ShoppingBag, Receipt, Users, Package, Megaphone, MessageCircle, Phone } from 'lucide-react';
+import { Calendar, ShoppingBag, Receipt, Users, Package, Megaphone, MessageCircle, Phone, LayoutDashboard } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useWhatsappUnread } from '@/hooks/useWhatsappUnread';
 import { useMarketingUnread } from '@/hooks/useMarketingUnread';
@@ -38,6 +38,7 @@ const dockItems: DockItem[] = [
   },
   { label: 'Marketing', path: '/marketing', icon: Megaphone, color: 'text-rose-500', permission: { resource: 'marketing', action: 'read' } },
   { label: 'WhatsApp', path: '/whatsapp', icon: MessageCircle, color: 'text-emerald-600', permission: { resource: 'whatsapp', action: 'read' } },
+  { label: 'Dashboard', path: '/inicio', icon: LayoutDashboard, color: 'text-indigo-500', permission: { resource: 'dashboard', action: 'read' } },
 ];
 
 const FACTURACION_PATHS = [
@@ -68,9 +69,11 @@ export const DockBar: React.FC = () => {
   useNotificationSoundOnIncrease(whatsappUnread, 'whatsapp', { enabled: canSeeWhatsapp });
 
   const visibleItems = dockItems.filter((item) => {
-    // No fall-open en Marketing/WhatsApp: evita flash de pestañas sin permiso.
+    // No fall-open en Marketing/WhatsApp/Dashboard: evita flash de pestañas sin permiso.
     if (permissionsLoading) {
-      if (item.path === '/marketing' || item.path === '/whatsapp') return false;
+      if (item.path === '/marketing' || item.path === '/whatsapp' || item.path === '/inicio') {
+        return false;
+      }
       return true;
     }
     if (item.path === '/marketing') return canSeeMarketing;
