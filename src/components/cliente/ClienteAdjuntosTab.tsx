@@ -25,7 +25,7 @@ interface Props {
   compact?: boolean;
 }
 
-type GalleryFilter = 'photos' | 'documents';
+type GalleryFilter = 'all' | 'photos' | 'documents';
 
 function formatGroupDate(ymd: string): string {
   try {
@@ -48,7 +48,8 @@ export const ClienteAdjuntosTab: React.FC<Props> = ({ customerId, compact }) => 
   const { companyId } = useCompanyFilter();
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [immichOpen, setImmichOpen] = useState(false);
-  const [galleryFilter, setGalleryFilter] = useState<GalleryFilter>('photos');
+  /** Por defecto todo: los importados previos no deben «desaparecer». */
+  const [galleryFilter, setGalleryFilter] = useState<GalleryFilter>('all');
   const { toast } = useToast();
   const { uploadMany, isUploading } = useCustomerFileUpload(customerId, companyId ?? undefined);
 
@@ -80,7 +81,11 @@ export const ClienteAdjuntosTab: React.FC<Props> = ({ customerId, compact }) => 
     [attachments],
   );
 
-  const visibleAttachments = galleryFilter === 'photos' ? photoAttachments : documentAttachments;
+  const visibleAttachments = useMemo(() => {
+    if (galleryFilter === 'photos') return photoAttachments;
+    if (galleryFilter === 'documents') return documentAttachments;
+    return attachments;
+  }, [galleryFilter, photoAttachments, documentAttachments, attachments]);
 
   const groups = useMemo(
     () => groupCustomerAttachmentsByDate(visibleAttachments),
@@ -105,6 +110,11 @@ export const ClienteAdjuntosTab: React.FC<Props> = ({ customerId, compact }) => 
     if (!assetId) return;
     if (!window.confirm(`¿Eliminar «${item.title}»?`)) return;
     void removeAttachment(assetId);
+  };
+
+  const selectFilter = (next: GalleryFilter) => {
+    setGalleryFilter((prev) => (prev === next ? 'all' : next));
+    setLightboxIndex(null);
   };
 
   if (isLoading) {
@@ -168,51 +178,41 @@ export const ClienteAdjuntosTab: React.FC<Props> = ({ customerId, compact }) => 
     <div
       className="inline-flex items-center gap-1 rounded-lg border border-border/70 bg-muted/30 p-1"
       role="tablist"
-      aria-label="Ver fotos o documentos"
+      aria-label="Filtrar fotos o documentos"
     >
       <button
         type="button"
         role="tab"
         aria-selected={galleryFilter === 'photos'}
-        onClick={() => {
-          setGalleryFilter('photos');
-          setLightboxIndex(null);
-        }}
+        onClick={() => selectFilter('photos')}
         className={cn(
           'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm transition-colors',
           galleryFilter === 'photos'
             ? 'bg-background text-foreground shadow-sm'
             : 'text-muted-foreground hover:text-foreground',
         )}
-        title="Ver fotos"
+        title={galleryFilter === 'photos' ? 'Mostrar todos' : 'Ver solo fotos'}
       >
         <ImageIcon className="h-4 w-4" />
         <span className="tabular-nums">{photoCount}</span>
-        <span className="sr-only sm:not-sr-only sm:inline">
-          foto{photoCount === 1 ? '' : 's'}
-        </span>
+        <span className="hidden sm:inline">foto{photoCount === 1 ? '' : 's'}</span>
       </button>
       <button
         type="button"
         role="tab"
         aria-selected={galleryFilter === 'documents'}
-        onClick={() => {
-          setGalleryFilter('documents');
-          setLightboxIndex(null);
-        }}
+        onClick={() => selectFilter('documents')}
         className={cn(
           'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm transition-colors',
           galleryFilter === 'documents'
             ? 'bg-background text-foreground shadow-sm'
             : 'text-muted-foreground hover:text-foreground',
         )}
-        title="Ver documentos"
+        title={galleryFilter === 'documents' ? 'Mostrar todos' : 'Ver solo documentos'}
       >
         <Paperclip className="h-4 w-4" />
         <span className="tabular-nums">{docCount}</span>
-        <span className="sr-only sm:not-sr-only sm:inline">
-          documento{docCount === 1 ? '' : 's'}
-        </span>
+        <span className="hidden sm:inline">documento{docCount === 1 ? '' : 's'}</span>
       </button>
     </div>
   );
@@ -247,7 +247,11 @@ export const ClienteAdjuntosTab: React.FC<Props> = ({ customerId, compact }) => 
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
             {galleryToggle}
             <span className="text-xs text-muted-foreground">
-              Pulsa el icono de foto o de adjunto para cambiar de vista
+              {galleryFilter === 'all'
+                ? 'Mostrando todo · pulsa foto o adjunto para filtrar'
+                : galleryFilter === 'photos'
+                  ? 'Solo fotos · pulsa de nuevo para ver todo'
+                  : 'Solo documentos · pulsa de nuevo para ver todo'}
             </span>
           </div>
           {importActions}
@@ -256,8 +260,10 @@ export const ClienteAdjuntosTab: React.FC<Props> = ({ customerId, compact }) => 
         {groups.length === 0 ? (
           <div className="rounded-lg border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
             {galleryFilter === 'photos'
-              ? 'No hay fotos en esta ficha. Cambia a documentos o importa desde Immich.'
-              : 'No hay documentos. En Immich marca «Marcar como documento» al importar escaneos o consentimientos.'}
+              ? 'No hay fotos en esta ficha. Pulsa el icono de adjunto o quita el filtro.'
+              : galleryFilter === 'documents'
+                ? 'No hay documentos. En Immich marca «Marcar como documento» al importar escaneos.'
+                : 'No hay adjuntos en esta vista.'}
           </div>
         ) : (
           groups.map((group) => (
