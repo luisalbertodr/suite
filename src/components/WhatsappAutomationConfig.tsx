@@ -37,6 +37,7 @@ import {
   useWhatsappAutomationSettings,
 } from '@/hooks/useWhatsappAutomationSettings';
 import { useMetaConfig } from '@/hooks/useMetaConfig';
+import { useMarketingCtwaCampaigns } from '@/hooks/useMarketingCtwaCampaigns';
 import { MARKETING_HOST_COMPANY_ID } from '@/lib/marketingScope';
 import { MetaFormWhatsappAudioField } from '@/components/meta/MetaFormWhatsappAudioField';
 import {
@@ -63,6 +64,8 @@ export const WhatsappAutomationConfig: React.FC = () => {
   const { data: settings, isLoading, save, sendTest } = useWhatsappAutomationSettings();
   const { data: log } = useWhatsappAutomationLog(15);
   const { forms, isLoading: metaFormsLoading, updateForm } = useMetaConfig(MARKETING_HOST_COMPANY_ID);
+  const { campaigns: ctwaCampaigns, isLoading: ctwaLoading } =
+    useMarketingCtwaCampaigns(MARKETING_HOST_COMPANY_ID);
 
   const [testMode, setTestMode] = useState(true);
   const [testPhone, setTestPhone] = useState('667435503');
@@ -389,11 +392,73 @@ export const WhatsappAutomationConfig: React.FC = () => {
         <TabsContent value="campanas" className="mt-4 space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Audio por campaña (Meta)</CardTitle>
+              <CardTitle className="text-base">Audio por campaña WhatsApp</CardTitle>
               <CardDescription>
-                Sube el audio de cada formulario/campaña para enviarlo manualmente con el botón
-                <strong> Audio campaña</strong> en el chat. No se envía solo al entrar el lead.
-                Usa OGG/Opus para nota de voz nativa.
+                Campañas de <strong>Marketing → WhatsApp campaña</strong>. El audio se guarda en el
+                formulario Meta vinculado y se envía con el botón <strong>Audio campaña</strong> del
+                chat. No se envía solo al entrar el lead. Usa OGG/Opus para nota de voz nativa.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {ctwaLoading || metaFormsLoading ? (
+                <p className="text-sm text-muted-foreground">Cargando campañas…</p>
+              ) : (ctwaCampaigns ?? []).length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No hay campañas WhatsApp. Créalas en Marketing → WhatsApp campaña.
+                </p>
+              ) : (
+                (ctwaCampaigns ?? []).map((campaign) => {
+                  const linkedForm = (forms ?? []).find((f) => f.id === campaign.meta_form_id);
+                  return (
+                    <div key={campaign.id} className="rounded-lg border p-3 space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-medium">{campaign.name}</p>
+                        {campaign.is_default ? (
+                          <Badge variant="secondary" className="text-[10px]">
+                            Por defecto
+                          </Badge>
+                        ) : null}
+                        {!campaign.enabled ? (
+                          <Badge variant="outline" className="text-[10px]">
+                            Pausada
+                          </Badge>
+                        ) : null}
+                      </div>
+                      {linkedForm ? (
+                        <>
+                          <p className="text-[11px] text-muted-foreground">
+                            Formulario Meta:{' '}
+                            <span className="font-medium text-foreground">
+                              {linkedForm.form_name?.trim() || linkedForm.form_id}
+                            </span>
+                          </p>
+                          <MetaFormWhatsappAudioField
+                            form={linkedForm}
+                            companyId={linkedForm.company_id}
+                            updateForm={updateForm}
+                            onToast={toast}
+                            checkboxLabel="Audio de campaña disponible"
+                            checkboxHint="Solo envío manual desde el chat WhatsApp (botón Audio campaña)."
+                          />
+                        </>
+                      ) : (
+                        <p className="text-sm text-amber-700 dark:text-amber-400">
+                          Sin formulario Meta vinculado. Enlázalo en Marketing → WhatsApp campaña
+                          para poder subir el audio aquí.
+                        </p>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Audio por formulario Meta</CardTitle>
+              <CardDescription>
+                Leads que llegan por formularios de Meta Ads (no solo Click to WhatsApp).
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -404,21 +469,31 @@ export const WhatsappAutomationConfig: React.FC = () => {
                   No hay formularios Meta. Configúralos en Meta / Leads.
                 </p>
               ) : (
-                (forms ?? []).map((form) => (
-                  <div key={form.id} className="rounded-lg border p-3 space-y-2">
-                    <p className="text-sm font-medium">
-                      {form.form_name?.trim() || form.form_id}
-                    </p>
-                    <MetaFormWhatsappAudioField
-                      form={form}
-                      companyId={form.company_id}
-                      updateForm={updateForm}
-                      onToast={toast}
-                      checkboxLabel="Audio de campaña disponible"
-                      checkboxHint="Solo envío manual desde el chat WhatsApp (botón Audio campaña)."
-                    />
-                  </div>
-                ))
+                (forms ?? []).map((form) => {
+                  const usedBy = (ctwaCampaigns ?? []).filter((c) => c.meta_form_id === form.id);
+                  return (
+                    <div key={form.id} className="rounded-lg border p-3 space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-medium">
+                          {form.form_name?.trim() || form.form_id}
+                        </p>
+                        {usedBy.map((c) => (
+                          <Badge key={c.id} variant="outline" className="text-[10px]">
+                            WA: {c.name}
+                          </Badge>
+                        ))}
+                      </div>
+                      <MetaFormWhatsappAudioField
+                        form={form}
+                        companyId={form.company_id}
+                        updateForm={updateForm}
+                        onToast={toast}
+                        checkboxLabel="Audio de campaña disponible"
+                        checkboxHint="Solo envío manual desde el chat WhatsApp (botón Audio campaña)."
+                      />
+                    </div>
+                  );
+                })
               )}
             </CardContent>
           </Card>

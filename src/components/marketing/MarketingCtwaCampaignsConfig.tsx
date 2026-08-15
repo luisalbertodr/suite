@@ -164,7 +164,8 @@ function CampaignEditor({
             </SelectContent>
           </Select>
           <p className="text-[10px] text-muted-foreground">
-            Sirve para audio de campaña / señal Stripe del formulario.
+            Sirve para audio de campaña / señal Stripe del formulario. El audio se sube en
+            Configuración → Marketing → Audios campaña.
           </p>
         </div>
 

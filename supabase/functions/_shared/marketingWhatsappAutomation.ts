@@ -1254,12 +1254,69 @@ function isMetaSourceLead(source: string | null | undefined): boolean {
   );
 }
 
-/** Formulario Meta con audio de campaña para un lead (por meta_form_id o nombre de campaña). */
+/** Formulario Meta vinculado a una campaña CTWA (por id o por nombre de campaña del lead). */
+async function resolveMetaFormViaCtwaCampaign(
+  admin: SupabaseClient,
+  companyId: string,
+  lead: {
+    ctwa_campaign_id?: string | null;
+    campaign?: string | null;
+    form_name?: string | null;
+    source?: string | null;
+  },
+): Promise<MetaFormAutomation | null> {
+  const { listMarketingCtwaCampaigns, resolveMarketingCtwaCampaign } = await import(
+    './marketingCtwaCampaigns.ts'
+  );
+
+  if (lead.ctwa_campaign_id?.trim()) {
+    const { data: ctwa } = await admin
+      .from('marketing_ctwa_campaigns')
+      .select('id, meta_form_id')
+      .eq('id', lead.ctwa_campaign_id.trim())
+      .eq('company_id', companyId)
+      .maybeSingle();
+    if (ctwa?.meta_form_id) {
+      const byCtwa = await loadMetaFormAutomation(admin, ctwa.meta_form_id as string);
+      if (byCtwa) return byCtwa;
+    }
+  }
+
+  const source = (lead.source ?? '').trim().toLowerCase();
+  const campaign = lead.campaign?.trim();
+  // Empareja por nombre de campaña CTWA aunque el lead sea source=whatsapp
+  // (p. ej. «Glow Pepitas Oro - Was» con formulario Meta vinculado).
+  if (campaign) {
+    const ctwaByName = await resolveMarketingCtwaCampaign(admin, companyId, {
+      campaign,
+      formName: lead.form_name,
+      allowDefaultFallback: false,
+    });
+    if (ctwaByName?.meta_form_id) {
+      const byName = await loadMetaFormAutomation(admin, ctwaByName.meta_form_id);
+      if (byName) return byName;
+    }
+  }
+
+  if (source === 'ctwa') {
+    const rows = await listMarketingCtwaCampaigns(admin, companyId, true);
+    const fallback = rows.find((r) => r.is_default) ?? (rows.length === 1 ? rows[0] : null);
+    if (fallback?.meta_form_id) {
+      const byDefault = await loadMetaFormAutomation(admin, fallback.meta_form_id);
+      if (byDefault) return byDefault;
+    }
+  }
+
+  return null;
+}
+
+/** Formulario Meta con audio de campaña para un lead (por meta_form_id, CTWA o nombre). */
 export async function resolveMetaFormForCampaignLead(
   admin: SupabaseClient,
   companyId: string,
   lead: {
     meta_form_id: string | null;
+    ctwa_campaign_id?: string | null;
     campaign?: string | null;
     form_name?: string | null;
     source?: string | null;
@@ -1269,6 +1326,10 @@ export async function resolveMetaFormForCampaignLead(
     const byId = await loadMetaFormAutomation(admin, lead.meta_form_id);
     if (byId) return byId;
   }
+
+  const viaCtwa = await resolveMetaFormViaCtwaCampaign(admin, companyId, lead);
+  if (viaCtwa) return viaCtwa;
+
   const campaign = lead.campaign?.trim();
   const formName = lead.form_name?.trim();
   const source = (lead.source ?? '').trim().toLowerCase();
@@ -1347,6 +1408,58 @@ export async function resolveMetaFormForCampaignLead(
   return null;
 }
 
+type CampaignAudioLead = {
+  id: string;
+  source?: string | null;
+  campaign?: string | null;
+  form_name?: string | null;
+  meta_form_id: string | null;
+  ctwa_campaign_id?: string | null;
+  phone?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+};
+
+const CAMPAIGN_AUDIO_LEAD_SELECT =
+  'id, phone, first_name, last_name, email, campaign, form_name, appointment_at, appointment_label, source, field_data, meta_form_id, ctwa_campaign_id, stripe_deposit_paid_at, customer_id';
+
+/**
+ * Para audio de campaña confiamos en el lead enlazado al chat aunque el teléfono
+ * no coincida (evita perder el formulario CTWA cuando el chat quedó mal vinculado).
+ */
+async function loadLeadForManualCampaignAudio(
+  admin: SupabaseClient,
+  companyId: string,
+  chatId: string,
+  opts: {
+    marketing_lead_id?: string | null;
+    customer_id?: string | null;
+    chat_display_name?: string | null;
+  },
+): Promise<CampaignAudioLead> {
+  const linkedId = opts.marketing_lead_id?.trim() || null;
+  if (linkedId) {
+    const { data } = await admin
+      .from('marketing_leads')
+      .select(CAMPAIGN_AUDIO_LEAD_SELECT)
+      .eq('id', linkedId)
+      .eq('company_id', companyId)
+      .maybeSingle();
+    if (data) return data as CampaignAudioLead;
+  }
+
+  const { resolveMarketingLeadForWhatsappChat } = await import('./stripeDeposit.ts');
+  const { lead } = await resolveMarketingLeadForWhatsappChat(
+    admin,
+    companyId,
+    chatId.trim(),
+    linkedId,
+    opts.chat_display_name ?? null,
+    opts.customer_id ?? null,
+  );
+  return lead as CampaignAudioLead;
+}
+
 /** Envío manual del audio de campaña desde el chat de WhatsApp. */
 export async function sendManualCampaignAudioForChat(
   admin: SupabaseClient,
@@ -1364,17 +1477,14 @@ export async function sendManualCampaignAudioForChat(
   sent_kind?: InitialWhatsappSendKind;
   error?: string;
 }> {
-  const { resolveMarketingLeadForWhatsappChat } = await import('./stripeDeposit.ts');
-  const { lead } = await resolveMarketingLeadForWhatsappChat(
-    admin,
-    companyId,
-    chatId.trim(),
-    opts.marketing_lead_id ?? null,
-    opts.chat_display_name ?? null,
-    opts.customer_id ?? null,
-  );
+  const lead = await loadLeadForManualCampaignAudio(admin, companyId, chatId.trim(), opts);
 
-  if (!isMetaSourceLead(lead.source) && !lead.meta_form_id && !lead.campaign?.trim()) {
+  if (
+    !isMetaSourceLead(lead.source) &&
+    !lead.meta_form_id &&
+    !lead.ctwa_campaign_id &&
+    !lead.campaign?.trim()
+  ) {
     return { ok: false, error: 'Este contacto no es un lead de Meta' };
   }
 
@@ -1383,7 +1493,7 @@ export async function sendManualCampaignAudioForChat(
     const label = lead.campaign?.trim() || lead.form_name?.trim() || 'esta campaña';
     return {
       ok: false,
-      error: `No hay audio configurado para «${label}». Súbelo en Configuración → WhatsApp → Audios campaña.`,
+      error: `No hay audio configurado para «${label}». Súbelo en Configuración → Marketing → Audios campaña (campaña WhatsApp o formulario Meta vinculado).`,
     };
   }
 

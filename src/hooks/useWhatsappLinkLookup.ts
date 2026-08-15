@@ -28,6 +28,13 @@ type LeadRow = {
   external_created_at: string | null;
   stripe_deposit_paid_at: string | null;
   meta_form_id: string | null;
+  ctwa_campaign_id: string | null;
+};
+
+type CtwaAudioRow = {
+  id: string;
+  name: string;
+  meta_form_id: string | null;
 };
 
 function normLabel(s: string): string {
@@ -37,6 +44,7 @@ function normLabel(s: string): string {
 function resolveFormAudioForLead(
   lead: LeadRow,
   forms: MetaFormAudioRow[],
+  ctwaCampaigns: CtwaAudioRow[],
 ): { hasAudio: boolean; filename: string | null; formId: string | null } {
   const withAudio = (f: MetaFormAudioRow | undefined) =>
     !!(
@@ -55,9 +63,35 @@ function resolveFormAudioForLead(
     }
   }
 
+  if (lead.ctwa_campaign_id) {
+    const ctwa = ctwaCampaigns.find((c) => c.id === lead.ctwa_campaign_id);
+    if (ctwa?.meta_form_id) {
+      const byCtwa = forms.find((f) => f.id === ctwa.meta_form_id);
+      if (byCtwa && withAudio(byCtwa)) {
+        return {
+          hasAudio: true,
+          filename: byCtwa.whatsapp_initial_audio_filename,
+          formId: byCtwa.id,
+        };
+      }
+    }
+  }
+
   const campaign = lead.campaign?.trim();
   if (campaign) {
     const c = normLabel(campaign);
+    const ctwaByName = ctwaCampaigns.find((row) => normLabel(row.name) === c);
+    if (ctwaByName?.meta_form_id) {
+      const byName = forms.find((f) => f.id === ctwaByName.meta_form_id);
+      if (byName && withAudio(byName)) {
+        return {
+          hasAudio: true,
+          filename: byName.whatsapp_initial_audio_filename,
+          formId: byName.id,
+        };
+      }
+    }
+
     const hit = forms.find((f) => {
       const fn = f.form_name?.trim();
       if (!fn) return false;
@@ -127,7 +161,7 @@ export const useWhatsappLinkLookup = (
       const { data, error } = await supabase
         .from('marketing_leads')
         .select(
-          'id, first_name, last_name, campaign, form_name, source, external_created_at, stripe_deposit_paid_at, meta_form_id',
+          'id, first_name, last_name, campaign, form_name, source, external_created_at, stripe_deposit_paid_at, meta_form_id, ctwa_campaign_id',
         )
         .in('id', leadIds);
       if (error) throw error;
@@ -150,6 +184,19 @@ export const useWhatsappLinkLookup = (
     },
   });
 
+  const ctwaQuery = useQuery({
+    queryKey: ['whatsapp-link-ctwa-audio', companyId],
+    enabled: !!companyId && leadIds.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('marketing_ctwa_campaigns')
+        .select('id, name, meta_form_id')
+        .eq('company_id', companyId!);
+      if (error) throw error;
+      return (data ?? []) as CtwaAudioRow[];
+    },
+  });
+
   return useMemo(() => {
     const customerNameById: Record<string, string> = {};
     for (const c of customersQuery.data ?? []) {
@@ -158,11 +205,12 @@ export const useWhatsappLinkLookup = (
     const leadNameById: Record<string, string> = {};
     const leadMetaById: Record<string, MetaLeadInfo> = {};
     const forms = formsQuery.data ?? [];
+    const ctwaCampaigns = ctwaQuery.data ?? [];
     for (const l of leadsQuery.data ?? []) {
       const full = [l.first_name, l.last_name].filter(Boolean).join(' ').trim();
       const name = full || 'Lead';
       leadNameById[l.id] = name;
-      const audio = resolveFormAudioForLead(l, forms);
+      const audio = resolveFormAudioForLead(l, forms, ctwaCampaigns);
       leadMetaById[l.id] = {
         name,
         campaign: l.campaign ?? null,
@@ -176,5 +224,5 @@ export const useWhatsappLinkLookup = (
       };
     }
     return { customerNameById, leadNameById, leadMetaById };
-  }, [customersQuery.data, leadsQuery.data, formsQuery.data]);
+  }, [customersQuery.data, leadsQuery.data, formsQuery.data, ctwaQuery.data]);
 };

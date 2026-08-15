@@ -105,6 +105,7 @@ async function getIntakeStageId(
 type LeadDepositRow = WhatsappTemplateContext & {
   id: string;
   meta_form_id: string | null;
+  ctwa_campaign_id?: string | null;
   stripe_deposit_paid_at: string | null;
   field_data?: unknown;
 };
@@ -164,7 +165,7 @@ export async function resolveMarketingLeadForWhatsappChat(
   options?: ResolveWhatsappMarketingLeadOptions,
 ): Promise<ResolveWhatsappMarketingLeadResult> {
   const leadSelect =
-    'id, phone, first_name, last_name, email, campaign, form_name, appointment_at, appointment_label, source, field_data, meta_form_id, stripe_deposit_paid_at, customer_id';
+    'id, phone, first_name, last_name, email, campaign, form_name, appointment_at, appointment_label, source, field_data, meta_form_id, ctwa_campaign_id, stripe_deposit_paid_at, customer_id';
 
   const settings = await loadAutomationSettings(admin, companyId);
   const isTestChat = isWhatsappTestChatId(chatId, settings);
@@ -415,7 +416,7 @@ export async function buildDepositRequestWhatsappMessage(
   const { data: lead } = await admin
     .from('marketing_leads')
     .select(
-      'id, phone, first_name, last_name, email, campaign, form_name, appointment_at, appointment_label, source, field_data, meta_form_id, stripe_deposit_paid_at',
+      'id, phone, first_name, last_name, email, campaign, form_name, appointment_at, appointment_label, source, field_data, meta_form_id, ctwa_campaign_id, stripe_deposit_paid_at',
     )
     .eq('id', leadId)
     .eq('company_id', companyId)
