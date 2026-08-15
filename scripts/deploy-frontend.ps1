@@ -83,8 +83,14 @@ if (-not $SkipUpload -and -not $DryRun) {
 if (-not $SkipBuild) {
   Test-EnvFile
   Write-Host "Compilando frontend (npm run build) ..." -ForegroundColor Green
+  # Vite escribe warnings a stderr; con $ErrorActionPreference=Stop PowerShell
+  # los trata como NativeCommandError aunque el build sea exit 0.
+  $prevEap = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
   npm run build
-  if ($LASTEXITCODE -ne 0) { throw "npm run build falló" }
+  $buildExit = $LASTEXITCODE
+  $ErrorActionPreference = $prevEap
+  if ($buildExit -ne 0) { throw "npm run build falló" }
 }
 
 $distDir = Join-Path $RepoRoot "dist"
