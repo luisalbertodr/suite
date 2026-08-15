@@ -195,29 +195,7 @@ export const Clientes: React.FC = () => {
 
   const getInitialSearchTerm = useCallback(() => searchTermRef.current, []);
 
-  const topBarActions = useMemo(
-    () => (
-      <div className="flex min-w-0 max-w-full flex-wrap items-center justify-center gap-1.5">
-        <ClientesTopBarSearchControls
-          listMode={listMode}
-          getInitialSearchTerm={getInitialSearchTerm}
-          onListModeChange={onListModeChange}
-          onSearchTermChange={onSearchTermChange}
-        />
-        {!isArchivedMode ? (
-          <Button
-            type="button"
-            onClick={openNewCustomerForm}
-            className="h-7 shrink-0 bg-sky-500 px-2 text-xs text-white hover:bg-sky-600"
-          >
-            <Plus className="mr-1 h-3.5 w-3.5" /> Nuevo Cliente
-          </Button>
-        ) : null}
-      </div>
-    ),
-    // Sin searchTerm: el input no se remonta al teclear; getInitialSearchTerm restaura al volver.
-    [listMode, isArchivedMode, getInitialSearchTerm, onListModeChange, onSearchTermChange, openNewCustomerForm],
-  );
+  const topBarActions = useMemo(() => null, []);
 
   useRegisterTopBarContent(
     {
@@ -284,11 +262,30 @@ export const Clientes: React.FC = () => {
   return (
     <div className="space-y-6">
       <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Users className="w-4 h-4" />
-            {isArchivedMode ? 'Clientes archivados' : 'Lista de Clientes'}
-          </CardTitle>
+        <CardHeader className="pb-3 space-y-3">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <CardTitle className="flex items-center gap-2 text-base shrink-0">
+              <Users className="w-4 h-4" />
+              {isArchivedMode ? 'Clientes archivados' : 'Lista de Clientes'}
+            </CardTitle>
+            <div className="flex min-w-0 w-full flex-wrap items-center gap-1.5 lg:w-auto lg:justify-end">
+              <ClientesTopBarSearchControls
+                listMode={listMode}
+                getInitialSearchTerm={getInitialSearchTerm}
+                onListModeChange={onListModeChange}
+                onSearchTermChange={onSearchTermChange}
+              />
+              {!isArchivedMode ? (
+                <Button
+                  type="button"
+                  onClick={openNewCustomerForm}
+                  className="h-7 shrink-0 bg-sky-500 px-2 text-xs text-white hover:bg-sky-600"
+                >
+                  <Plus className="mr-1 h-3.5 w-3.5" /> Nuevo Cliente
+                </Button>
+              ) : null}
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           {!searchHintReady ? (

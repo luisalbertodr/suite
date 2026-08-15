@@ -26,6 +26,7 @@ import {
   type MarketingCtwaCampaign,
 } from '@/hooks/useMarketingCtwaCampaigns';
 import { useMetaConfig } from '@/hooks/useMetaConfig';
+import { MARKETING_HOST_COMPANY_ID } from '@/lib/marketingScope';
 import { WHATSAPP_MESSAGE_TEMPLATE_VARS } from '@/lib/whatsappMessageTemplates';
 
 const NONE_FORM = '__none__';
@@ -206,8 +207,8 @@ function CampaignEditor({
 export const MarketingCtwaCampaignsConfig: React.FC = () => {
   const { toast } = useToast();
   const { campaigns, isLoading, createCampaign, updateCampaign, deleteCampaign } =
-    useMarketingCtwaCampaigns();
-  const { forms } = useMetaConfig();
+    useMarketingCtwaCampaigns(MARKETING_HOST_COMPANY_ID);
+  const { forms } = useMetaConfig(MARKETING_HOST_COMPANY_ID);
   const [newName, setNewName] = useState('');
 
   const handleCreate = async () => {

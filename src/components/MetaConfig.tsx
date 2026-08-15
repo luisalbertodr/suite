@@ -62,6 +62,7 @@ import {
 import { useMarketingStages } from '@/hooks/useMarketingStages';
 import { findMarketingIntakeStage } from '@/lib/marketingIntakeStage';
 import { findMarketingAppointmentStage } from '@/lib/marketingStageRoles';
+import { MARKETING_HOST_COMPANY_ID } from '@/lib/marketingScope';
 import { MarketingImportDialog } from './marketing/MarketingImportDialog';
 import { MarketingFieldsConfigDialog } from './marketing/MarketingFieldsConfigDialog';
 import { MarketingStagesManager } from './marketing/MarketingStagesManager';
@@ -145,8 +146,8 @@ export const MetaConfig: React.FC = () => {
     updateForm,
     deleteForm,
     syncNow,
-  } = useMetaConfig();
-  const { stages } = useMarketingStages();
+  } = useMetaConfig(MARKETING_HOST_COMPANY_ID);
+  const { stages } = useMarketingStages(MARKETING_HOST_COMPANY_ID);
 
   const [businessId, setBusinessId] = useState('');
   const [accessToken, setAccessToken] = useState('');

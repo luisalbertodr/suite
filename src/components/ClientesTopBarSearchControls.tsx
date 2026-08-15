@@ -35,7 +35,7 @@ export function ClientesTopBarSearchControls({
   );
 
   return (
-    <div className="flex max-w-full flex-wrap items-center justify-center gap-1.5">
+    <div className="flex max-w-full flex-wrap items-center gap-1.5">
       <div className="relative w-[min(100%,16rem)] min-w-[9rem] sm:w-52 md:w-64 shrink">
         <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input

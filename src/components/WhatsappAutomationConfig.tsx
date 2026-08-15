@@ -37,6 +37,7 @@ import {
   useWhatsappAutomationSettings,
 } from '@/hooks/useWhatsappAutomationSettings';
 import { useMetaConfig } from '@/hooks/useMetaConfig';
+import { MARKETING_HOST_COMPANY_ID } from '@/lib/marketingScope';
 import { MetaFormWhatsappAudioField } from '@/components/meta/MetaFormWhatsappAudioField';
 import {
   APPOINTMENT_REMINDER_CATEGORY_LABELS,
@@ -61,7 +62,7 @@ export const WhatsappAutomationConfig: React.FC = () => {
   const { toast } = useToast();
   const { data: settings, isLoading, save, sendTest } = useWhatsappAutomationSettings();
   const { data: log } = useWhatsappAutomationLog(15);
-  const { forms, isLoading: metaFormsLoading, updateForm } = useMetaConfig();
+  const { forms, isLoading: metaFormsLoading, updateForm } = useMetaConfig(MARKETING_HOST_COMPANY_ID);
 
   const [testMode, setTestMode] = useState(true);
   const [testPhone, setTestPhone] = useState('667435503');
