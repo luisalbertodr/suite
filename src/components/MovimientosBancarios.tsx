@@ -14,6 +14,7 @@ import {
   CONTRIBUTION_RETURN_CONCEPT,
   SL_INTERNAL_TRANSFER_CONCEPT,
   bankMovementKind,
+  fillMissingBankBalances,
   importBankMovements,
   listBankMovements,
   parseBankAmount,
@@ -210,7 +211,10 @@ export const MovimientosBancarios: React.FC = () => {
     });
   };
 
-  const rows = listQuery.data ?? [];
+  const rows = useMemo(
+    () => fillMissingBankBalances(listQuery.data ?? []),
+    [listQuery.data],
+  );
   const summary = summaryQuery.data;
   const hasActiveFilters = Boolean(
     applied.dateFrom ||
@@ -262,7 +266,8 @@ export const MovimientosBancarios: React.FC = () => {
               : canMedicina
                 ? ' (Medicina)'
                 : ' (Estética)'}
-            . Los negativos cuentan como gasto, excepto devoluciones de aportación («
+            . Se muestra el <strong>saldo</strong> de la cuenta tras cada movimiento (columna SALDO
+            del extracto). Los negativos cuentan como gasto, excepto devoluciones de aportación («
             {CONTRIBUTION_RETURN_CONCEPT}»), transferencias a la SL («{SL_INTERNAL_TRANSFER_CONCEPT}»)
             y conceptos «Traspaso…» a cuenta particular.
           </CardDescription>
@@ -450,6 +455,7 @@ export const MovimientosBancarios: React.FC = () => {
                 <th className="px-3 py-2 font-medium">Área</th>
                 <th className="px-3 py-2 font-medium">Concepto</th>
                 <th className="px-3 py-2 font-medium text-right">Importe</th>
+                <th className="px-3 py-2 font-medium text-right">Saldo</th>
                 <th className="px-3 py-2 font-medium">Tipo</th>
               </tr>
             </thead>
@@ -474,6 +480,9 @@ export const MovimientosBancarios: React.FC = () => {
                       }`}
                     >
                       {euro(row.amount)}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-muted-foreground">
+                      {row.balance != null ? euro(row.balance) : '—'}
                     </td>
                     <td className="px-3 py-2">{kindBadge(kind)}</td>
                   </tr>

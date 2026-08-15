@@ -87,30 +87,42 @@ function mapSuiteRowToAppointment(
 }
 
 export async function fetchSuiteAppointmentByLegacyIdPlan(
-  companyId: string,
+  companyId: string | null | undefined,
   idplan: string,
 ): Promise<AgendaAppointmentDayRow | null> {
   const key = String(idplan).trim();
   if (!key) return null;
   // Columnas legacy_* / client_name no siempre están en el tipado generado.
+  if (companyId) {
+    const { data, error } = await (supabase.from('agenda_appointments') as any)
+      .select(AGENDA_APPOINTMENT_DAY_SELECT)
+      .eq('company_id', companyId)
+      .eq('legacy_idplan', key)
+      .maybeSingle();
+    if (error) throw error;
+    if (data) return data as AgendaAppointmentDayRow;
+  }
+  // Fallback: idplan puede vivir en la empresa operativa del centro, no en la UI activa.
   const { data, error } = await (supabase.from('agenda_appointments') as any)
     .select(AGENDA_APPOINTMENT_DAY_SELECT)
-    .eq('company_id', companyId)
     .eq('legacy_idplan', key)
-    .maybeSingle();
+    .order('start_time', { ascending: false })
+    .limit(1);
   if (error) throw error;
-  return (data as AgendaAppointmentDayRow | null) ?? null;
+  const row = Array.isArray(data) ? data[0] : data;
+  return (row as AgendaAppointmentDayRow | null) ?? null;
 }
 
 export async function fetchSuiteAppointmentById(
-  companyId: string,
+  _companyId: string | null | undefined,
   appointmentId: string,
 ): Promise<AgendaAppointmentDayRow | null> {
   const key = String(appointmentId).trim();
   if (!key) return null;
+  // El id Suite es PK global: no filtrar por company_id de la UI (puede ser
+  // otra emisora del mismo centro laboral que la de la cita en Servicios).
   const { data, error } = await (supabase.from('agenda_appointments') as any)
     .select(AGENDA_APPOINTMENT_DAY_SELECT)
-    .eq('company_id', companyId)
     .eq('id', key)
     .maybeSingle();
   if (error) throw error;

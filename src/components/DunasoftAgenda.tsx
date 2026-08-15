@@ -377,6 +377,7 @@ export const DunasoftAgenda: React.FC = () => {
         let styleApt: Appointment | undefined;
 
         if (isUuid(targetId)) {
+          // Lookup por id Suite (PK); no depende de la empresa activa de la UI.
           suiteRow = await fetchSuiteAppointmentById(companyId, targetId);
           if (cancelled) return;
           if (!suiteRow) {

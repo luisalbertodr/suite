@@ -32,6 +32,8 @@ export type ParsedBankMovement = {
   movementDate: string;
   concept: string;
   amount: number;
+  /** Saldo de cuenta tras el movimiento (CSV SALDO), si viene en el extracto. */
+  balance: number | null;
   isExpense: boolean;
   isContributionReturn: boolean;
   isInternalTransfer: boolean;
@@ -54,6 +56,7 @@ export type BankMovementListRow = {
   movement_date: string;
   concept: string;
   amount: number;
+  balance: number | null;
   is_expense: boolean;
   is_contribution_return: boolean;
   source_filename: string | null;
@@ -293,6 +296,14 @@ function findAmountIndex(headers: string[]): number {
   return headers.findIndex((h) => h.startsWith('importe') || h === 'amount');
 }
 
+function findBalanceIndex(headers: string[]): number {
+  const exact = findHeaderIndex(headers, ['saldo', 'balance', 'saldo_eur', 'saldo_euros']);
+  if (exact >= 0) return exact;
+  return headers.findIndex(
+    (h) => h === 'saldo' || h.startsWith('saldo') || h.includes('saldo'),
+  );
+}
+
 function findDateIndex(headers: string[]): number {
   const exact = findHeaderIndex(headers, DATE_HEADERS_PRIORITY);
   if (exact >= 0) return exact;
@@ -329,6 +340,7 @@ function findMovementsHeaderRow(lines: string[]): {
   dateIdx: number;
   conceptIdx: number;
   amountIdx: number;
+  balanceIdx: number;
 } | null {
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i]!;
@@ -345,8 +357,17 @@ function findMovementsHeaderRow(lines: string[]): {
     const conceptIdx = findConceptIndex(headers);
     const amountIdx = findAmountIndex(headers);
     if (dateIdx < 0 || conceptIdx < 0 || amountIdx < 0) continue;
+    const balanceIdx = findBalanceIndex(headers);
 
-    return { headerIndex: i, delimiter, headers, dateIdx, conceptIdx, amountIdx };
+    return {
+      headerIndex: i,
+      delimiter,
+      headers,
+      dateIdx,
+      conceptIdx,
+      amountIdx,
+      balanceIdx,
+    };
   }
   return null;
 }
@@ -384,7 +405,7 @@ export function parseBankMovementsCsv(text: string): {
     };
   }
 
-  const { headerIndex, delimiter, dateIdx, conceptIdx, amountIdx } = header;
+  const { headerIndex, delimiter, dateIdx, conceptIdx, amountIdx, balanceIdx } = header;
   const rows: ParsedBankMovement[] = [];
   const errors: string[] = [];
   const seen = new Set<string>();
@@ -399,6 +420,8 @@ export function parseBankMovementsCsv(text: string): {
 
     const movementDate = parseBankDate(cols[dateIdx] ?? '');
     const amount = parseBankAmount(cols[amountIdx] ?? '');
+    const balance =
+      balanceIdx >= 0 ? parseBankAmount(cols[balanceIdx] ?? '') : null;
     const concept = String(cols[conceptIdx] ?? '').trim();
     if (!movementDate || amount == null) {
       // No bombardear con errores de filas vacías o basura residual
@@ -418,6 +441,7 @@ export function parseBankMovementsCsv(text: string): {
       movementDate,
       concept,
       amount,
+      balance,
       isExpense,
       isContributionReturn,
       isInternalTransfer,
@@ -450,6 +474,7 @@ export async function importBankMovements(params: {
       movement_date: row.movementDate,
       concept: row.concept,
       amount: row.amount,
+      balance: row.balance,
       is_expense: row.isExpense,
       is_contribution_return: row.isContributionReturn,
       fingerprint: row.fingerprint,
@@ -485,7 +510,7 @@ export async function listBankMovements(
   let query = supabase
     .from('bank_movements')
     .select(
-      'id, company_id, movement_date, concept, amount, is_expense, is_contribution_return, source_filename, created_at',
+      'id, company_id, movement_date, concept, amount, balance, is_expense, is_contribution_return, source_filename, created_at',
     )
     .order('movement_date', { ascending: false })
     .order('created_at', { ascending: false })
@@ -511,6 +536,75 @@ export async function listBankMovements(
   const { data, error } = await query;
   if (error) throw error;
   return (data ?? []) as BankMovementListRow[];
+}
+
+/**
+ * Completa saldos faltantes a partir de filas vecinas con saldo conocido
+ * (misma cuenta/empresa), usando el importe del movimiento.
+ * No inventa un saldo de apertura si no hay ningún ancla.
+ */
+export function fillMissingBankBalances<
+  T extends {
+    id: string;
+    company_id: string;
+    movement_date: string;
+    created_at: string;
+    amount: number;
+    balance: number | null;
+  },
+>(rows: T[]): Array<T & { balance: number | null }> {
+  if (rows.length === 0) return rows;
+
+  const byCompany = new Map<string, T[]>();
+  for (const row of rows) {
+    const list = byCompany.get(row.company_id) ?? [];
+    list.push(row);
+    byCompany.set(row.company_id, list);
+  }
+
+  const balanceById = new Map<string, number | null>();
+
+  for (const [, group] of byCompany) {
+    const chrono = [...group].sort((a, b) => {
+      const d = a.movement_date.localeCompare(b.movement_date);
+      if (d !== 0) return d;
+      return a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id);
+    });
+
+    const filled: Array<number | null> = chrono.map((r) =>
+      r.balance != null && Number.isFinite(Number(r.balance)) ? Number(r.balance) : null,
+    );
+
+    // Hacia adelante desde cada ancla conocida.
+    for (let i = 0; i < chrono.length; i += 1) {
+      if (filled[i] == null) continue;
+      for (let j = i + 1; j < chrono.length; j += 1) {
+        if (filled[j] != null) break;
+        const prev = filled[j - 1];
+        if (prev == null) break;
+        filled[j] = Math.round((prev + Number(chrono[j]!.amount)) * 100) / 100;
+      }
+    }
+    // Hacia atrás desde cada ancla conocida.
+    for (let i = chrono.length - 1; i >= 0; i -= 1) {
+      if (filled[i] == null) continue;
+      for (let j = i - 1; j >= 0; j -= 1) {
+        if (filled[j] != null) break;
+        const next = filled[j + 1];
+        if (next == null) break;
+        filled[j] = Math.round((next - Number(chrono[j + 1]!.amount)) * 100) / 100;
+      }
+    }
+
+    chrono.forEach((row, idx) => {
+      balanceById.set(row.id, filled[idx] ?? null);
+    });
+  }
+
+  return rows.map((row) => ({
+    ...row,
+    balance: balanceById.has(row.id) ? balanceById.get(row.id)! : row.balance,
+  }));
 }
 
 export async function summarizeBankExpenses(entity: BankEntity | 'all'): Promise<{
