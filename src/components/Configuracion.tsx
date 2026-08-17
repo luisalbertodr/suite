@@ -36,6 +36,7 @@ import { ServidoresMonitorPanel } from './ServidoresMonitorPanel';
 import { SmartPssEventsPanel } from './SmartPssEventsPanel';
 import { ConsentimientoPlantillasConfig } from './consentimiento/ConsentimientoPlantillasConfig';
 import { TabletUnlockConfig } from '@/components/tablet/TabletUnlockConfig';
+import { IncentiveAdminConfig } from '@/components/incentives/IncentiveAdminConfig';
 import { useWorkCenter } from '@/hooks/useWorkCenter';
 
 const VALID_TABS = [
@@ -67,6 +68,7 @@ const TAB_ALIASES: Record<string, { tab: ConfigTab; subtab: string }> = {
   redsys: { tab: 'pagos', subtab: 'redsys' },
   tpv: { tab: 'pagos', subtab: 'tpv' },
   empleados: { tab: 'usuarios', subtab: 'empleados' },
+  incentivos: { tab: 'usuarios', subtab: 'incentivos' },
   'usuarios-permisos': { tab: 'usuarios', subtab: 'permisos' },
   'centro-laboral': { tab: 'seguridad', subtab: 'centro-laboral' },
 };
@@ -362,12 +364,16 @@ export const Configuracion: React.FC = () => {
             <TabsList>
               <TabsTrigger value="permisos">Usuarios y permisos</TabsTrigger>
               <TabsTrigger value="empleados">Empleados</TabsTrigger>
+              <TabsTrigger value="incentivos">Incentivos</TabsTrigger>
             </TabsList>
             <TabsContent value="permisos" className="mt-4 space-y-4">
               <UserManagement />
             </TabsContent>
             <TabsContent value="empleados" className="mt-4 space-y-4">
               <EmployeesConfig />
+            </TabsContent>
+            <TabsContent value="incentivos" className="mt-4 space-y-4">
+              <IncentiveAdminConfig />
             </TabsContent>
           </Tabs>
         </TabsContent>

@@ -42,4 +42,16 @@ export const MENU_PERMISSIONS: MenuPermission[] = [
   { resource: 'statistics', action: 'read', label: 'Ver estadísticas', description: 'Ver cuadro de mandos, tarjetas y gráficos de Inicio' },
   { resource: 'companies', action: 'read', label: 'Empresas', description: 'Gestionar información de empresas' },
   { resource: 'settings', action: 'read', label: 'Configuración', description: 'Acceso a configuración del sistema' },
+  {
+    resource: 'incentives',
+    action: 'read',
+    label: 'Incentivos (bolsa de horas)',
+    description: 'Ver la bolsa de horas libres y solicitar tiempo',
+  },
+  {
+    resource: 'incentives',
+    action: 'manage',
+    label: 'Incentivos (administrar)',
+    description: 'Configurar reglas, imputar ventas y aprobar solicitudes',
+  },
 ];

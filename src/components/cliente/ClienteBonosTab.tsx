@@ -16,6 +16,8 @@ import { isBonoExpired as isBonoExpiredShared, isBonoUsable as isBonoUsableShare
 import { useCustomerPurchasedProducts } from '@/hooks/useCustomerPurchasedProducts';
 import { fetchBonoPurchaseAppointmentMap } from '@/lib/customerBonoAppointmentLinks';
 import { AppointmentCitaLink } from '@/components/cliente/AppointmentCitaLink';
+import { IncentiveSellerPicker } from '@/components/incentives/IncentiveSellerPicker';
+import { creditBonoSale, type IncentiveShare } from '@/lib/incentives';
 import type { PostgrestError } from '@supabase/supabase-js';
 
 interface Props {
@@ -210,10 +212,12 @@ export const ClienteBonosTab: React.FC<Props> = ({ customerId, onAppointmentClic
   const { companyId } = useCompanyFilter();
 
   const [form, setForm] = useState<BonoFormState>(emptyForm());
+  const [sellerShares, setSellerShares] = useState<IncentiveShare[]>([]);
 
   const resetForm = () => {
     setForm(emptyForm());
     setEditingId(null);
+    setSellerShares([]);
   };
 
   const openEdit = (bono: BonusRow) => {
@@ -443,9 +447,13 @@ export const ClienteBonosTab: React.FC<Props> = ({ customerId, onAppointmentClic
         };
         const query = editingId
           ? supabase.from('bonos').update(payload).eq('id', editingId)
-          : supabase.from('bonos').insert(payload);
+          : supabase.from('bonos').insert(payload).select('id').single();
         const res = await query;
         error = res.error;
+        if (!error && !editingId && sellerShares.length > 0) {
+          const newId = (res.data as { id?: string } | null)?.id;
+          if (newId) await creditBonoSale(newId, sellerShares);
+        }
       } else {
         const notes = JSON.stringify({
           descripcion: form.descripcion || null,
@@ -825,6 +833,9 @@ export const ClienteBonosTab: React.FC<Props> = ({ customerId, onAppointmentClic
         </Button>
       </div>
       )}
+      {isAssign ? (
+        <IncentiveSellerPicker value={sellerShares} onChange={setSellerShares} disabled={saveMutation.isPending} />
+      ) : null}
       <div className="flex gap-2">
         <Button
           onClick={() => {

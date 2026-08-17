@@ -4279,6 +4279,7 @@ export type Database = {
           dark_mode: boolean | null
           display_name: string | null
           email: string | null
+          employee_id: string | null
           id: string
           language: string | null
           phone: string | null
@@ -4293,6 +4294,7 @@ export type Database = {
           dark_mode?: boolean | null
           display_name?: string | null
           email?: string | null
+          employee_id?: string | null
           id?: string
           language?: string | null
           phone?: string | null
@@ -4307,6 +4309,7 @@ export type Database = {
           dark_mode?: boolean | null
           display_name?: string | null
           email?: string | null
+          employee_id?: string | null
           id?: string
           language?: string | null
           phone?: string | null
