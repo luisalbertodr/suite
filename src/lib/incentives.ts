@@ -16,6 +16,8 @@ export type IncentiveHistoryRow = {
   occurred_at: string;
   created_at: string;
   bono_id: string | null;
+  amount_eur?: number | null;
+  lead_id?: string | null;
 };
 
 export type IncentiveRequestRow = {
@@ -32,15 +34,31 @@ export type IncentiveRequestRow = {
   created_at?: string;
 };
 
+export type IncentiveTrack = 'cabina' | 'recepcion' | 'none';
+
 export type IncentiveMySummary = {
   ok: boolean;
   linked: boolean;
   employee_id?: string;
   balance_minutes: number;
   enabled: boolean;
+  track: IncentiveTrack;
+  model: string;
+  revenue_min_eur: number;
+  revenue_step_eur: number;
+  revenue_base_hours: number;
+  revenue_step_hours: number;
+  cash_per_hour: number;
+  lead_min_count: number;
+  lead_step_count: number;
+  month_amount_eur: number;
+  month_leads: number;
+  month_tier_hours: number;
+  month_awarded_minutes: number;
+  next_threshold: number | null;
+  /** @deprecated cupo por recuento; se mantiene por compat */
   baseline: number;
   month_eligible: number;
-  month_awarded_minutes: number;
   next_milestone: { count: number; extra_minutes: number } | null;
   history: IncentiveHistoryRow[];
   requests: IncentiveRequestRow[];
@@ -52,19 +70,49 @@ export type IncentiveAdminOverview = {
   balances: Array<{
     employee_id: string;
     employee_name: string;
+    track?: IncentiveTrack;
     balance_minutes: number;
-    month_eligible: number;
+    month_eligible?: number;
+    month_amount_eur?: number;
+    month_leads?: number;
+    month_tier_minutes?: number;
   }>;
+  settings?: {
+    revenue_min_eur: number;
+    revenue_step_eur: number;
+    revenue_base_hours: number;
+    revenue_step_hours: number;
+    cash_per_hour: number;
+    lead_min_count: number;
+    lead_step_count: number;
+  };
 };
 
 export type IncentiveSettings = {
   company_id: string;
   enabled: boolean;
-  monthly_baseline_count: number;
   min_eligible_amount: number;
-  type_a_minutes: number;
-  type_b_minutes: number;
-  type_a_min_amount: number;
+  revenue_min_eur: number;
+  revenue_step_eur: number;
+  revenue_base_hours: number;
+  revenue_step_hours: number;
+  cash_per_hour: number;
+  lead_min_count: number;
+  lead_step_count: number;
+  lead_base_hours: number;
+  lead_step_hours: number;
+  /** legacy fields kept optional for older rows */
+  monthly_baseline_count?: number;
+  type_a_minutes?: number;
+  type_b_minutes?: number;
+  type_a_min_amount?: number;
+};
+
+export type IncentiveEmployeeTrackRow = {
+  employee_id: string;
+  company_id: string;
+  track: IncentiveTrack;
+  active: boolean;
 };
 
 export type IncentiveBonusRule = {
@@ -99,27 +147,77 @@ export function formatMinutesAsHours(minutes: number): string {
   return `${sign}${h} h ${m} min`;
 }
 
+export function hoursFromRevenue(
+  amount: number,
+  minEur = 2000,
+  stepEur = 500,
+  baseHours = 4,
+  stepHours = 2,
+): number {
+  if (amount < minEur) return 0;
+  return baseHours + Math.floor((amount - minEur) / stepEur) * stepHours;
+}
+
+export function hoursFromLeads(
+  count: number,
+  minCount = 15,
+  stepCount = 5,
+  baseHours = 4,
+  stepHours = 2,
+): number {
+  if (count < minCount) return 0;
+  return baseHours + Math.floor((count - minCount) / stepCount) * stepHours;
+}
+
+export function incentiveRevenueProgress(amount: number, minEur: number, stepEur: number): {
+  pct: number;
+  label: string;
+  remainingToReward: number;
+} {
+  if (amount < minEur) {
+    return {
+      pct: Math.min(100, Math.round((amount / Math.max(minEur, 1)) * 100)),
+      label: `${amount.toFixed(0)} € / ${minEur.toFixed(0)} € para el primer tramo (4 h)`,
+      remainingToReward: Math.max(0, minEur - amount),
+    };
+  }
+  const hours = hoursFromRevenue(amount, minEur, stepEur);
+  const next = minEur + (Math.floor((amount - minEur) / stepEur) + 1) * stepEur;
+  return {
+    pct: 100,
+    label: `Tramo actual: ${hours} h · siguiente a ${next.toFixed(0)} €`,
+    remainingToReward: Math.max(0, next - amount),
+  };
+}
+
+export function incentiveLeadProgress(leads: number, minCount: number, stepCount: number): {
+  pct: number;
+  label: string;
+  remainingToReward: number;
+} {
+  if (leads < minCount) {
+    return {
+      pct: Math.min(100, Math.round((leads / Math.max(minCount, 1)) * 100)),
+      label: `${leads} / ${minCount} leads presentados para el primer tramo (4 h)`,
+      remainingToReward: Math.max(0, minCount - leads),
+    };
+  }
+  const hours = hoursFromLeads(leads, minCount, stepCount);
+  const next = minCount + (Math.floor((leads - minCount) / stepCount) + 1) * stepCount;
+  return {
+    pct: 100,
+    label: `Tramo actual: ${hours} h · siguiente a ${next} presentadas`,
+    remainingToReward: Math.max(0, next - leads),
+  };
+}
+
+/** @deprecated usar incentiveRevenueProgress */
 export function incentiveProgress(eligible: number, baseline: number): {
   pct: number;
   label: string;
   remainingToReward: number;
 } {
-  const base = Math.max(0, baseline);
-  if (base <= 0) {
-    return { pct: 100, label: 'Sin cupo: cada bono suma horas', remainingToReward: 0 };
-  }
-  if (eligible < base) {
-    return {
-      pct: Math.min(100, Math.round((eligible / base) * 100)),
-      label: `${eligible} / ${base} bonos del cupo (aún no suman horas)`,
-      remainingToReward: base - eligible,
-    };
-  }
-  return {
-    pct: 100,
-    label: `Cupo cubierto · ${eligible - base} bono(s) extra este mes`,
-    remainingToReward: 0,
-  };
+  return incentiveRevenueProgress(eligible, baseline, 500);
 }
 
 export async function fetchIncentiveMySummary(companyId: string): Promise<IncentiveMySummary> {
@@ -132,9 +230,22 @@ export async function fetchIncentiveMySummary(companyId: string): Promise<Incent
     employee_id: raw.employee_id ? String(raw.employee_id) : undefined,
     balance_minutes: Number(raw.balance_minutes ?? 0),
     enabled: raw.enabled !== false,
-    baseline: Number(raw.baseline ?? 4),
-    month_eligible: Number(raw.month_eligible ?? 0),
+    track: (raw.track as IncentiveTrack) || 'cabina',
+    model: String(raw.model ?? 'revenue_tiers'),
+    revenue_min_eur: Number(raw.revenue_min_eur ?? 2000),
+    revenue_step_eur: Number(raw.revenue_step_eur ?? 500),
+    revenue_base_hours: Number(raw.revenue_base_hours ?? 4),
+    revenue_step_hours: Number(raw.revenue_step_hours ?? 2),
+    cash_per_hour: Number(raw.cash_per_hour ?? 10),
+    lead_min_count: Number(raw.lead_min_count ?? 15),
+    lead_step_count: Number(raw.lead_step_count ?? 5),
+    month_amount_eur: Number(raw.month_amount_eur ?? 0),
+    month_leads: Number(raw.month_leads ?? 0),
+    month_tier_hours: Number(raw.month_tier_hours ?? 0),
     month_awarded_minutes: Number(raw.month_awarded_minutes ?? 0),
+    next_threshold: raw.next_threshold != null ? Number(raw.next_threshold) : null,
+    baseline: Number(raw.baseline ?? raw.revenue_min_eur ?? 2000),
+    month_eligible: Number(raw.month_eligible ?? 0),
     next_milestone: (raw.next_milestone as IncentiveMySummary['next_milestone']) ?? null,
     history: Array.isArray(raw.history) ? (raw.history as IncentiveHistoryRow[]) : [],
     requests: Array.isArray(raw.requests) ? (raw.requests as IncentiveRequestRow[]) : [],
@@ -151,6 +262,7 @@ export async function fetchIncentiveAdminOverview(companyId: string): Promise<In
     balances: Array.isArray(raw.balances)
       ? (raw.balances as IncentiveAdminOverview['balances'])
       : [],
+    settings: raw.settings as IncentiveAdminOverview['settings'],
   };
 }
 
@@ -200,11 +312,28 @@ export async function reviewIncentiveRequest(input: {
   if (error) throw error;
 }
 
+export async function cashIncentivePayout(input: {
+  companyId: string;
+  employeeId: string;
+  hours: number;
+  notes?: string;
+}): Promise<{ euros: number }> {
+  const { data, error } = await db.rpc('incentive_cash_payout', {
+    p_company_id: input.companyId,
+    p_employee_id: input.employeeId,
+    p_hours: input.hours,
+    p_notes: input.notes ?? null,
+  });
+  if (error) throw error;
+  const raw = (data ?? {}) as Record<string, unknown>;
+  return { euros: Number(raw.euros ?? 0) };
+}
+
 export async function fetchIncentiveSettings(companyId: string): Promise<IncentiveSettings | null> {
   const { data, error } = await db
     .from('incentive_settings')
     .select(
-      'company_id,enabled,monthly_baseline_count,min_eligible_amount,type_a_minutes,type_b_minutes,type_a_min_amount',
+      'company_id,enabled,min_eligible_amount,revenue_min_eur,revenue_step_eur,revenue_base_hours,revenue_step_hours,cash_per_hour,lead_min_count,lead_step_count,lead_base_hours,lead_step_hours,monthly_baseline_count,type_a_minutes,type_b_minutes,type_a_min_amount',
     )
     .eq('company_id', companyId)
     .maybeSingle();
@@ -214,8 +343,17 @@ export async function fetchIncentiveSettings(companyId: string): Promise<Incenti
   return {
     company_id: String(row.company_id),
     enabled: Boolean(row.enabled),
-    monthly_baseline_count: Number(row.monthly_baseline_count ?? 4),
     min_eligible_amount: Number(row.min_eligible_amount ?? 100),
+    revenue_min_eur: Number(row.revenue_min_eur ?? 2000),
+    revenue_step_eur: Number(row.revenue_step_eur ?? 500),
+    revenue_base_hours: Number(row.revenue_base_hours ?? 4),
+    revenue_step_hours: Number(row.revenue_step_hours ?? 2),
+    cash_per_hour: Number(row.cash_per_hour ?? 10),
+    lead_min_count: Number(row.lead_min_count ?? 15),
+    lead_step_count: Number(row.lead_step_count ?? 5),
+    lead_base_hours: Number(row.lead_base_hours ?? 4),
+    lead_step_hours: Number(row.lead_step_hours ?? 2),
+    monthly_baseline_count: Number(row.monthly_baseline_count ?? 4),
     type_a_minutes: Number(row.type_a_minutes ?? 60),
     type_b_minutes: Number(row.type_b_minutes ?? 30),
     type_a_min_amount: Number(row.type_a_min_amount ?? 450),
@@ -226,11 +364,39 @@ export async function upsertIncentiveSettings(settings: IncentiveSettings): Prom
   const { error } = await db.from('incentive_settings').upsert({
     company_id: settings.company_id,
     enabled: settings.enabled,
-    monthly_baseline_count: settings.monthly_baseline_count,
     min_eligible_amount: settings.min_eligible_amount,
-    type_a_minutes: settings.type_a_minutes,
-    type_b_minutes: settings.type_b_minutes,
-    type_a_min_amount: settings.type_a_min_amount,
+    revenue_min_eur: settings.revenue_min_eur,
+    revenue_step_eur: settings.revenue_step_eur,
+    revenue_base_hours: settings.revenue_base_hours,
+    revenue_step_hours: settings.revenue_step_hours,
+    cash_per_hour: settings.cash_per_hour,
+    lead_min_count: settings.lead_min_count,
+    lead_step_count: settings.lead_step_count,
+    lead_base_hours: settings.lead_base_hours,
+    lead_step_hours: settings.lead_step_hours,
+    model_version: 'revenue_tiers',
+    updated_at: new Date().toISOString(),
+  });
+  if (error) throw error;
+}
+
+export async function fetchIncentiveEmployeeTracks(
+  companyId: string,
+): Promise<IncentiveEmployeeTrackRow[]> {
+  const { data, error } = await db
+    .from('incentive_employee_tracks')
+    .select('employee_id,company_id,track,active')
+    .eq('company_id', companyId);
+  if (error) throw error;
+  return (data ?? []) as IncentiveEmployeeTrackRow[];
+}
+
+export async function upsertIncentiveEmployeeTrack(row: IncentiveEmployeeTrackRow): Promise<void> {
+  const { error } = await db.from('incentive_employee_tracks').upsert({
+    employee_id: row.employee_id,
+    company_id: row.company_id,
+    track: row.track,
+    active: row.active,
     updated_at: new Date().toISOString(),
   });
   if (error) throw error;

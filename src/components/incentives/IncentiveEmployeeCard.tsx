@@ -15,7 +15,11 @@ import {
 } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { useCreateIncentiveRequest, useIncentiveMySummary } from '@/hooks/useIncentives';
-import { formatMinutesAsHours, incentiveProgress } from '@/lib/incentives';
+import {
+  formatMinutesAsHours,
+  incentiveLeadProgress,
+  incentiveRevenueProgress,
+} from '@/lib/incentives';
 
 export const IncentiveEmployeeCard: React.FC = () => {
   const { toast } = useToast();
@@ -27,10 +31,18 @@ export const IncentiveEmployeeCard: React.FC = () => {
   const [end, setEnd] = useState('12:00');
   const [notes, setNotes] = useState('');
 
-  if (isLoading || error || !data?.linked || !data.enabled) return null;
+  if (isLoading || error || !data?.linked || !data.enabled || data.track === 'none') return null;
 
-  const progress = incentiveProgress(data.month_eligible, data.baseline);
-  const history = (data.history ?? []).filter((h) => h.source === 'sale').slice(0, 8);
+  const isReception = data.track === 'recepcion';
+  const progress = isReception
+    ? incentiveLeadProgress(data.month_leads, data.lead_min_count, data.lead_step_count)
+    : incentiveRevenueProgress(data.month_amount_eur, data.revenue_min_eur, data.revenue_step_eur);
+
+  const history = (data.history ?? [])
+    .filter((h) => (isReception ? h.source === 'lead' : h.source === 'sale'))
+    .slice(0, 8);
+
+  const cashValue = (data.balance_minutes / 60) * data.cash_per_hour;
 
   const submit = async () => {
     try {
@@ -54,21 +66,25 @@ export const IncentiveEmployeeCard: React.FC = () => {
 
   return (
     <>
-      <Card className="border-violet-200/80 shadow-lg">
+      <Card className="border-emerald-200/80 shadow-lg">
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
-            <Gift className="h-4 w-4 text-violet-600" />
+            <Gift className="h-4 w-4 text-emerald-700" />
             Bolsa de horas libres
           </CardTitle>
           <CardDescription>
-            Por ventas de bonos por encima de {data.baseline} al mes (los de menos de 100 € no cuentan).
+            {isReception
+              ? `Leads de marketing que acuden a la cita (Presentada). Desde ${data.lead_min_count}: 4 h; cada +${data.lead_step_count} → +2 h.`
+              : `Bonos desde ${data.revenue_min_eur.toFixed(0)} €/mes → 4 h; cada +${data.revenue_step_eur.toFixed(0)} € → +2 h. Alternativa: ${data.cash_per_hour} €/h.`}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <p className="text-3xl font-bold tabular-nums">{formatMinutesAsHours(data.balance_minutes)}</p>
-              <p className="text-xs text-muted-foreground">Saldo acumulado</p>
+              <p className="text-xs text-muted-foreground">
+                Saldo · equiv. {cashValue.toFixed(0)} € a {data.cash_per_hour} €/h
+              </p>
             </div>
             <Button size="sm" onClick={() => setOpen(true)} disabled={data.balance_minutes < 15}>
               <Clock className="mr-1.5 h-4 w-4" />
@@ -78,15 +94,16 @@ export const IncentiveEmployeeCard: React.FC = () => {
           <div className="space-y-1.5">
             <div className="flex justify-between text-xs text-muted-foreground">
               <span>{progress.label}</span>
-              {data.next_milestone ? (
-                <span>
-                  Hito {data.next_milestone.count}: +{formatMinutesAsHours(data.next_milestone.extra_minutes)}
-                </span>
-              ) : null}
+              <span className="tabular-nums">
+                {isReception
+                  ? `${data.month_leads} presentadas`
+                  : `${data.month_amount_eur.toFixed(0)} €`}
+              </span>
             </div>
             <Progress value={progress.pct} className="h-2" />
             <p className="text-xs text-muted-foreground tabular-nums">
-              Este mes: {formatMinutesAsHours(data.month_awarded_minutes)} acreditados
+              Tramo del mes: {data.month_tier_hours} h (
+              {formatMinutesAsHours(data.month_awarded_minutes)})
             </p>
           </div>
           {history.length > 0 ? (
@@ -94,17 +111,23 @@ export const IncentiveEmployeeCard: React.FC = () => {
               {history.map((row) => (
                 <li key={row.id} className="flex justify-between gap-2 tabular-nums">
                   <span className="truncate text-muted-foreground">
-                    {row.occurred_at} · {row.notes || 'Bono'}
-                    {row.share_pct < 100 ? ` (${row.share_pct}%)` : ''}
+                    {row.occurred_at} · {row.notes || (isReception ? 'Lead' : 'Bono')}
+                    {!isReception && row.share_pct < 100 ? ` (${row.share_pct}%)` : ''}
                   </span>
-                  <span className={Number(row.minutes) > 0 ? 'text-emerald-600' : 'text-muted-foreground'}>
-                    {Number(row.minutes) > 0 ? `+${formatMinutesAsHours(Number(row.minutes))}` : 'cupo'}
+                  <span className="text-muted-foreground">
+                    {isReception
+                      ? '+1'
+                      : `${Number(row.amount_eur ?? 0).toFixed(0)} €`}
                   </span>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="text-xs text-muted-foreground">Aún no hay ventas imputadas este periodo.</p>
+            <p className="text-xs text-muted-foreground">
+              {isReception
+                ? 'Aún no hay leads presentados imputados este mes.'
+                : 'Aún no hay ventas imputadas este periodo.'}
+            </p>
           )}
         </CardContent>
       </Card>
@@ -114,8 +137,9 @@ export const IncentiveEmployeeCard: React.FC = () => {
           <DialogHeader>
             <DialogTitle>Solicitar horas libres</DialogTitle>
             <DialogDescription>
-              Saldo disponible: {formatMinutesAsHours(data.balance_minutes)}. Tras la aprobación se bloquea
-              el tramo en la agenda.
+              Saldo disponible: {formatMinutesAsHours(data.balance_minutes)}. Tras la aprobación se
+              bloquea el tramo en la agenda. Si prefieres dinero, pide a gerencia el abono a{' '}
+              {data.cash_per_hour} €/h.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">

@@ -2,17 +2,21 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { usePermissions } from '@/hooks/usePermissions';
 import {
+  cashIncentivePayout,
   createIncentiveRequest,
   creditBonoSale,
   fetchIncentiveAdminOverview,
   fetchIncentiveBonusRules,
+  fetchIncentiveEmployeeTracks,
   fetchIncentiveMilestones,
   fetchIncentiveMySummary,
   fetchIncentiveSettings,
   reviewIncentiveRequest,
   updateIncentiveBonusRule,
   updateIncentiveMilestone,
+  upsertIncentiveEmployeeTrack,
   upsertIncentiveSettings,
+  type IncentiveEmployeeTrackRow,
   type IncentiveSettings,
   type IncentiveShare,
 } from '@/lib/incentives';
@@ -76,6 +80,41 @@ export function useIncentiveMilestones() {
     queryKey: ['incentive-milestones', companyId],
     queryFn: () => fetchIncentiveMilestones(companyId!),
     enabled: Boolean(companyId) && !loading && canManage,
+  });
+}
+
+export function useIncentiveEmployeeTracks() {
+  const { companyId } = useCompanyFilter();
+  const { hasPermission, loading } = usePermissions();
+  const canManage = hasPermission('incentives', 'manage');
+
+  return useQuery({
+    queryKey: ['incentive-employee-tracks', companyId],
+    queryFn: () => fetchIncentiveEmployeeTracks(companyId!),
+    enabled: Boolean(companyId) && !loading && canManage,
+  });
+}
+
+export function useUpsertIncentiveEmployeeTrack() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (row: IncentiveEmployeeTrackRow) => upsertIncentiveEmployeeTrack(row),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['incentive-employee-tracks'] });
+      queryClient.invalidateQueries({ queryKey: ['incentive-admin-overview'] });
+      queryClient.invalidateQueries({ queryKey: ['incentive-my-summary'] });
+    },
+  });
+}
+
+export function useCashIncentivePayout() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: cashIncentivePayout,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['incentive-my-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['incentive-admin-overview'] });
+    },
   });
 }
 
