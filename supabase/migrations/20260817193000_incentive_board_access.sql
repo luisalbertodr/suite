@@ -81,7 +81,7 @@ CREATE OR REPLACE FUNCTION public.incentive_employee_board_row(
 )
 RETURNS jsonb
 LANGUAGE plpgsql
-STABLE
+VOLATILE
 SECURITY DEFINER
 SET search_path = public
 AS $$
@@ -223,7 +223,7 @@ $$;
 CREATE OR REPLACE FUNCTION public.incentive_board_team(p_company_id uuid)
 RETURNS jsonb
 LANGUAGE plpgsql
-STABLE
+VOLATILE
 SECURITY DEFINER
 SET search_path = public
 AS $$

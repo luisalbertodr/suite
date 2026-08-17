@@ -552,7 +552,7 @@ $$;
 CREATE OR REPLACE FUNCTION public.incentive_my_summary(p_company_id uuid)
 RETURNS jsonb
 LANGUAGE plpgsql
-STABLE
+VOLATILE
 SECURITY DEFINER
 SET search_path = public
 AS $$
@@ -679,7 +679,7 @@ $$;
 CREATE OR REPLACE FUNCTION public.incentive_admin_overview(p_company_id uuid)
 RETURNS jsonb
 LANGUAGE plpgsql
-STABLE
+VOLATILE
 SECURITY DEFINER
 SET search_path = public
 AS $$

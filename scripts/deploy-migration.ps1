@@ -55,6 +55,7 @@ docker cp '$remoteTmp' ${DbContainer}:/tmp/migration.sql
 docker cp '$remoteMark' ${DbContainer}:/tmp/mark_migration.sql
 docker exec $DbContainer psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 -f /tmp/migration.sql
 docker exec $DbContainer psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 -f /tmp/mark_migration.sql
+docker exec $DbContainer psql -U supabase_admin -d postgres -c "NOTIFY pgrst, 'reload schema';"
 echo OK
 "@
 
