@@ -71,6 +71,8 @@ export type IncentiveBoardTeam = {
   cash_per_hour: number;
   lead_min_count: number;
   lead_step_count: number;
+  unassigned_month_amount_eur: number;
+  unassigned_monthly: IncentiveMonthlyRow[];
   employees: IncentiveTeamMember[];
 };
 
@@ -339,6 +341,8 @@ export async function fetchIncentiveBoardTeam(companyId: string): Promise<Incent
     cash_per_hour: Number(raw.cash_per_hour ?? 10),
     lead_min_count: Number(raw.lead_min_count ?? 10),
     lead_step_count: Number(raw.lead_step_count ?? 3),
+    unassigned_month_amount_eur: Number(raw.unassigned_month_amount_eur ?? 0),
+    unassigned_monthly: parseMonthly(raw.unassigned_monthly),
     employees,
   };
 }

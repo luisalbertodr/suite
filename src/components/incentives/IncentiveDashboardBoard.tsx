@@ -138,6 +138,12 @@ const IncentiveTeamBoard: React.FC = () => {
           </p>
         </div>
         <CardContent className="space-y-5 p-5">
+          {team.data.unassigned_month_amount_eur > 0 ? (
+            <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100">
+              {Math.round(team.data.unassigned_month_amount_eur).toLocaleString('es-ES')} € en bonos del mes
+              sin empleada en Style (codemp vacío). No suman a cabina hasta que se imputen.
+            </p>
+          ) : null}
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {employees.map((member) => (
               <button
@@ -160,7 +166,7 @@ const IncentiveTeamBoard: React.FC = () => {
                   <BarChart data={compareData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
                     <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                    <YAxis tick={{ fontSize: 11 }} width={40} />
+                    <YAxis tick={{ fontSize: 11 }} width={48} />
                     <Tooltip />
                     <Legend />
                     <Bar dataKey="valor" name="€ / presentadas" fill="hsl(160 84% 32%)" radius={[4, 4, 0, 0]} />
@@ -176,7 +182,7 @@ const IncentiveTeamBoard: React.FC = () => {
                   <BarChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
                     <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-                    <YAxis yAxisId="left" tick={{ fontSize: 11 }} width={40} />
+                    <YAxis yAxisId="left" tick={{ fontSize: 11 }} width={48} />
                     <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} width={28} />
                     <Tooltip />
                     <Bar yAxisId="left" dataKey="valor" radius={[4, 4, 0, 0]} maxBarSize={36}>
@@ -351,7 +357,7 @@ const IncentivePersonalBoard: React.FC = () => {
                   <BarChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
                     <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-                    <YAxis yAxisId="left" tick={{ fontSize: 11 }} width={40} />
+                    <YAxis yAxisId="left" tick={{ fontSize: 11 }} width={48} />
                     <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} width={28} />
                     <Tooltip
                       formatter={(value, name) => {
