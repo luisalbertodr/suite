@@ -6,6 +6,7 @@ import {
   createIncentiveRequest,
   creditBonoSale,
   fetchIncentiveAdminOverview,
+  fetchIncentiveBoardTeam,
   fetchIncentiveBonusRules,
   fetchIncentiveEmployeeTracks,
   fetchIncentiveMilestones,
@@ -32,6 +33,19 @@ export function useIncentiveMySummary(options?: { boardPermission?: boolean }) {
     queryKey: ['incentive-my-summary', companyId],
     queryFn: () => fetchIncentiveMySummary(companyId!),
     enabled: Boolean(companyId) && !loading && canRead,
+    staleTime: 30_000,
+  });
+}
+
+export function useIncentiveBoardTeam() {
+  const { companyId } = useCompanyFilter();
+  const { hasPermission, loading } = usePermissions();
+  const canManage = hasPermission('incentives', 'manage');
+
+  return useQuery({
+    queryKey: ['incentive-board-team', companyId],
+    queryFn: () => fetchIncentiveBoardTeam(companyId!),
+    enabled: Boolean(companyId) && !loading && canManage,
     staleTime: 30_000,
   });
 }

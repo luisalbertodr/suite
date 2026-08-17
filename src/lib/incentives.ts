@@ -47,6 +47,47 @@ export type IncentiveMonthlyRow = {
   is_current: boolean;
 };
 
+export type IncentiveTeamMember = {
+  employee_id: string;
+  employee_name: string;
+  track: IncentiveTrack;
+  balance_minutes: number;
+  month_amount_eur: number;
+  month_leads: number;
+  month_tier_hours: number;
+  next_threshold: number;
+  next_tier_hours: number;
+  remaining_to_next: number;
+  monthly: IncentiveMonthlyRow[];
+};
+
+export type IncentiveBoardTeam = {
+  ok: boolean;
+  enabled: boolean;
+  revenue_min_eur: number;
+  revenue_step_eur: number;
+  revenue_base_hours: number;
+  revenue_step_hours: number;
+  cash_per_hour: number;
+  lead_min_count: number;
+  lead_step_count: number;
+  employees: IncentiveTeamMember[];
+};
+
+function parseMonthly(raw: unknown): IncentiveMonthlyRow[] {
+  if (!Array.isArray(raw)) return [];
+  return (raw as Record<string, unknown>[]).map((row) => ({
+    month: String(row.month ?? row.label ?? ''),
+    label: String(row.label ?? ''),
+    amount_eur: Number(row.amount_eur ?? 0),
+    sales_count: Number(row.sales_count ?? 0),
+    leads: Number(row.leads ?? 0),
+    tier_minutes: Number(row.tier_minutes ?? 0),
+    tier_hours: Number(row.tier_hours ?? 0),
+    is_current: Boolean(row.is_current),
+  }));
+}
+
 export type IncentiveMySummary = {
   ok: boolean;
   linked: boolean;
@@ -265,18 +306,40 @@ export async function fetchIncentiveMySummary(companyId: string): Promise<Incent
     next_milestone: (raw.next_milestone as IncentiveMySummary['next_milestone']) ?? null,
     history: Array.isArray(raw.history) ? (raw.history as IncentiveHistoryRow[]) : [],
     requests: Array.isArray(raw.requests) ? (raw.requests as IncentiveRequestRow[]) : [],
-    monthly: Array.isArray(raw.monthly)
-      ? (raw.monthly as Record<string, unknown>[]).map((row) => ({
-          month: String(row.month ?? row.label ?? ''),
-          label: String(row.label ?? ''),
-          amount_eur: Number(row.amount_eur ?? 0),
-          sales_count: Number(row.sales_count ?? 0),
-          leads: Number(row.leads ?? 0),
-          tier_minutes: Number(row.tier_minutes ?? 0),
-          tier_hours: Number(row.tier_hours ?? 0),
-          is_current: Boolean(row.is_current),
-        }))
-      : [],
+    monthly: parseMonthly(raw.monthly),
+  };
+}
+
+export async function fetchIncentiveBoardTeam(companyId: string): Promise<IncentiveBoardTeam> {
+  const { data, error } = await db.rpc('incentive_board_team', { p_company_id: companyId });
+  if (error) throw error;
+  const raw = (data ?? {}) as Record<string, unknown>;
+  const employees = Array.isArray(raw.employees)
+    ? (raw.employees as Record<string, unknown>[]).map((row) => ({
+        employee_id: String(row.employee_id ?? ''),
+        employee_name: String(row.employee_name ?? ''),
+        track: (row.track as IncentiveTrack) || 'cabina',
+        balance_minutes: Number(row.balance_minutes ?? 0),
+        month_amount_eur: Number(row.month_amount_eur ?? 0),
+        month_leads: Number(row.month_leads ?? 0),
+        month_tier_hours: Number(row.month_tier_hours ?? 0),
+        next_threshold: Number(row.next_threshold ?? 0),
+        next_tier_hours: Number(row.next_tier_hours ?? 0),
+        remaining_to_next: Number(row.remaining_to_next ?? 0),
+        monthly: parseMonthly(row.monthly),
+      }))
+    : [];
+  return {
+    ok: Boolean(raw.ok),
+    enabled: raw.enabled !== false,
+    revenue_min_eur: Number(raw.revenue_min_eur ?? 2000),
+    revenue_step_eur: Number(raw.revenue_step_eur ?? 500),
+    revenue_base_hours: Number(raw.revenue_base_hours ?? 4),
+    revenue_step_hours: Number(raw.revenue_step_hours ?? 2),
+    cash_per_hour: Number(raw.cash_per_hour ?? 10),
+    lead_min_count: Number(raw.lead_min_count ?? 10),
+    lead_step_count: Number(raw.lead_step_count ?? 3),
+    employees,
   };
 }
 

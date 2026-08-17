@@ -52,7 +52,7 @@ export const MENU_PERMISSIONS: MenuPermission[] = [
     resource: 'incentives_board',
     action: 'read',
     label: 'Incentivos (tablero en Inicio)',
-    description: 'Ver en el Dashboard el progreso de incentivos y tramos',
+    description: 'Ver el tablero propio si el usuario está vinculado a una empleada. Los admins ven todas.',
   },
   {
     resource: 'incentives',

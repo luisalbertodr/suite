@@ -255,7 +255,10 @@ export const Dashboard: React.FC = () => {
   const canSeeReports = hasPermission('reports', 'read');
   const canSeeStatistics = hasPermission('statistics', 'read');
   const canSeeRecentActivity = hasPermission('recent_activity', 'read');
-  const canSeeIncentivesBoard = hasPermission('incentives_board', 'read') || hasPermission('incentives', 'read');
+  const canSeeIncentivesBoard =
+    hasPermission('incentives', 'manage') ||
+    hasPermission('incentives_board', 'read') ||
+    hasPermission('incentives', 'read');
   const canSeeResumen = canSeeStatistics || canSeeRecentActivity || canSeeIncentivesBoard;
   const dashboardTabs = useMemo(() => {
     const tabs: Array<'resumen' | 'reportes'> = [];
