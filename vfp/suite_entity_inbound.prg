@@ -418,6 +418,11 @@ FUNCTION SuiteEntityApplyBono
     IF SuiteEntityFieldExists("bonoscli", "obsoleto")
        REPLACE obsoleto WITH llObs
     ENDIF
+    IF SuiteEntityFieldExists("bonoscli", "codemp")
+       IF  .NOT. EMPTY(ALLTRIM(SuiteGetObj(toMsg, "codemp", "")))
+          REPLACE codemp WITH ALLTRIM(SuiteGetObj(toMsg, "codemp", ""))
+       ENDIF
+    ENDIF
     UNLOCK IN bonoscli
     llApplied = .T.
  ENDIF

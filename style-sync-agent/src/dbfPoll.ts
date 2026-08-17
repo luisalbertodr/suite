@@ -20,7 +20,7 @@ const FINGERPRINT_FIELDS: Record<string, string[]> = {
     "dircli", "codposcli", "pobcli", "procli", "pais", "percon", "obscli", "altura", "obsoleto",
   ],
   articulos: ["desart", "familia1", "pvpa", "coste", "stock", "ivaart", "tiempo", "obsoleto", "foto"],
-  bonoscli: ["codcli", "codbon", "desbon", "sesiones", "consumi", "importe", "obsoleto"],
+  bonoscli: ["codcli", "codbon", "desbon", "sesiones", "consumi", "importe", "codemp", "obsoleto"],
   albcab: ["serie", "seralb", "codcli", "fecha", "total", "totalalb"],
   faccab: ["serie", "serfac", "codcli", "fecha", "fecfac", "totfac", "totimpbas"],
   ciecab: ["feccie", "impcie", "horcie", "cerrado"],

@@ -247,6 +247,7 @@ const bonosHandler: EntityHandler = {
       p_fecaducidad: dbfDateIso(src, "fecven") || dbfDateIso(src, "fecadu") || dbfDateIso(src, "fecaducidad"),
       p_obsoleto: dbfBool(src, "obsoleto"),
       p_sync_version: syncVersionFrom(cola, src),
+      p_codemp: dbfStr(src, "codemp"),
     };
   },
   toInboundJson(row) {
@@ -260,6 +261,7 @@ const bonosHandler: EntityHandler = {
       sesiones: p["sesiones"] ?? 0,
       consumidas: p["consumidas"] ?? 0,
       obsoleto: p["obsoleto"] ?? "NO",
+      codemp: String(p["codemp"] ?? ""),
       sync_version: p["sync_version"] ?? 0,
     };
   },
