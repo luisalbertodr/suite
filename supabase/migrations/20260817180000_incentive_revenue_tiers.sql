@@ -17,9 +17,9 @@ ALTER TABLE public.incentive_settings
     CHECK (revenue_step_hours >= 0),
   ADD COLUMN IF NOT EXISTS cash_per_hour numeric(10, 2) NOT NULL DEFAULT 10
     CHECK (cash_per_hour >= 0),
-  ADD COLUMN IF NOT EXISTS lead_min_count integer NOT NULL DEFAULT 15
+  ADD COLUMN IF NOT EXISTS lead_min_count integer NOT NULL DEFAULT 10
     CHECK (lead_min_count >= 0),
-  ADD COLUMN IF NOT EXISTS lead_step_count integer NOT NULL DEFAULT 5
+  ADD COLUMN IF NOT EXISTS lead_step_count integer NOT NULL DEFAULT 3
     CHECK (lead_step_count > 0),
   ADD COLUMN IF NOT EXISTS lead_base_hours numeric(8, 2) NOT NULL DEFAULT 4
     CHECK (lead_base_hours >= 0),
@@ -116,10 +116,10 @@ LANGUAGE sql
 IMMUTABLE
 AS $$
   SELECT CASE
-    WHEN coalesce(p_count, 0) < coalesce(p_min_count, 15) THEN 0::numeric
+    WHEN coalesce(p_count, 0) < coalesce(p_min_count, 10) THEN 0::numeric
     ELSE coalesce(p_base_hours, 4)
-      + floor((coalesce(p_count, 0) - coalesce(p_min_count, 15))::numeric
-          / nullif(coalesce(p_step_count, 5), 0))
+      + floor((coalesce(p_count, 0) - coalesce(p_min_count, 10))::numeric
+          / nullif(coalesce(p_step_count, 3), 0))
         * coalesce(p_step_hours, 2)
   END;
 $$;
@@ -768,8 +768,8 @@ SET
   revenue_base_hours = 4,
   revenue_step_hours = 2,
   cash_per_hour = 10,
-  lead_min_count = 15,
-  lead_step_count = 5,
+  lead_min_count = 10,
+  lead_step_count = 3,
   lead_base_hours = 4,
   lead_step_hours = 2,
   min_eligible_amount = 100,
@@ -785,7 +785,7 @@ INSERT INTO public.incentive_settings (
 VALUES (
   '5d72535b-4e2c-4a5b-9900-e6c5a85f2ce4', 'revenue_tiers',
   2000, 500, 4, 2,
-  10, 15, 5, 4, 2,
+  10, 10, 3, 4, 2,
   100
 )
 ON CONFLICT (company_id) DO NOTHING;
@@ -837,4 +837,4 @@ COMMENT ON COLUMN public.incentive_settings.revenue_step_eur IS
 COMMENT ON COLUMN public.incentive_settings.cash_per_hour IS
   'Abono alternativo en metálico por hora no disfrutada.';
 COMMENT ON COLUMN public.incentive_settings.lead_min_count IS
-  'Mínimo de leads Presentada/mes (recepción) para 4h. Análisis jun–jul 2026 ≈ 9–17 presentadas.';
+  'Mínimo de leads Presentada/mes (recepción) para 4h: más de 9 → 10; cada +3 → +2h.';

@@ -41,8 +41,8 @@ function defaultSettings(companyId: string): IncentiveSettings {
     revenue_base_hours: 4,
     revenue_step_hours: 2,
     cash_per_hour: 10,
-    lead_min_count: 15,
-    lead_step_count: 5,
+    lead_min_count: 10,
+    lead_step_count: 3,
     lead_base_hours: 4,
     lead_step_hours: 2,
   };
@@ -223,7 +223,7 @@ export const IncentiveAdminConfig: React.FC = () => {
             cada +{form.revenue_step_eur.toFixed(0)} € → +{form.revenue_step_hours} h. Alternativa
             metálico: {form.cash_per_hour} €/h. Recepción (Gemma): leads Presentada ≥{' '}
             {form.lead_min_count} → {form.lead_base_hours} h; cada +{form.lead_step_count} → +
-            {form.lead_step_hours} h (base jun–jul ≈ 9–17 presentadas/mes).
+            {form.lead_step_hours} h (más de 9 presentadas).
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

@@ -160,8 +160,8 @@ export function hoursFromRevenue(
 
 export function hoursFromLeads(
   count: number,
-  minCount = 15,
-  stepCount = 5,
+  minCount = 10,
+  stepCount = 3,
   baseHours = 4,
   stepHours = 2,
 ): number {
@@ -237,8 +237,8 @@ export async function fetchIncentiveMySummary(companyId: string): Promise<Incent
     revenue_base_hours: Number(raw.revenue_base_hours ?? 4),
     revenue_step_hours: Number(raw.revenue_step_hours ?? 2),
     cash_per_hour: Number(raw.cash_per_hour ?? 10),
-    lead_min_count: Number(raw.lead_min_count ?? 15),
-    lead_step_count: Number(raw.lead_step_count ?? 5),
+    lead_min_count: Number(raw.lead_min_count ?? 10),
+    lead_step_count: Number(raw.lead_step_count ?? 3),
     month_amount_eur: Number(raw.month_amount_eur ?? 0),
     month_leads: Number(raw.month_leads ?? 0),
     month_tier_hours: Number(raw.month_tier_hours ?? 0),
@@ -349,8 +349,8 @@ export async function fetchIncentiveSettings(companyId: string): Promise<Incenti
     revenue_base_hours: Number(row.revenue_base_hours ?? 4),
     revenue_step_hours: Number(row.revenue_step_hours ?? 2),
     cash_per_hour: Number(row.cash_per_hour ?? 10),
-    lead_min_count: Number(row.lead_min_count ?? 15),
-    lead_step_count: Number(row.lead_step_count ?? 5),
+    lead_min_count: Number(row.lead_min_count ?? 10),
+    lead_step_count: Number(row.lead_step_count ?? 3),
     lead_base_hours: Number(row.lead_base_hours ?? 4),
     lead_step_hours: Number(row.lead_step_hours ?? 2),
     monthly_baseline_count: Number(row.monthly_baseline_count ?? 4),
