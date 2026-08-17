@@ -49,6 +49,12 @@ export const MENU_PERMISSIONS: MenuPermission[] = [
     description: 'Ver la bolsa de horas libres y solicitar tiempo',
   },
   {
+    resource: 'incentives_board',
+    action: 'read',
+    label: 'Incentivos (tablero en Inicio)',
+    description: 'Ver en el Dashboard el progreso de incentivos y tramos',
+  },
+  {
     resource: 'incentives',
     action: 'manage',
     label: 'Incentivos (administrar)',

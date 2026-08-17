@@ -69,7 +69,7 @@ import {
 import { usePermissions } from '@/hooks/usePermissions';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabase';
-import { IncentiveEmployeeCard } from '@/components/incentives/IncentiveEmployeeCard';
+import { IncentiveDashboardBoard } from '@/components/incentives/IncentiveDashboardBoard';
 
 function billingCompanyIdForView(view: BillingEntityView): string | null {
   if (view === 'medicina') return MEDICINA_COMPANY_ID;
@@ -255,8 +255,8 @@ export const Dashboard: React.FC = () => {
   const canSeeReports = hasPermission('reports', 'read');
   const canSeeStatistics = hasPermission('statistics', 'read');
   const canSeeRecentActivity = hasPermission('recent_activity', 'read');
-  const canSeeIncentives = hasPermission('incentives', 'read');
-  const canSeeResumen = canSeeStatistics || canSeeRecentActivity || canSeeIncentives;
+  const canSeeIncentivesBoard = hasPermission('incentives_board', 'read') || hasPermission('incentives', 'read');
+  const canSeeResumen = canSeeStatistics || canSeeRecentActivity || canSeeIncentivesBoard;
   const dashboardTabs = useMemo(() => {
     const tabs: Array<'resumen' | 'reportes'> = [];
     if (canSeeResumen) tabs.push('resumen');
@@ -511,10 +511,10 @@ export const Dashboard: React.FC = () => {
   }
 
   if (!stats) {
-    if (canSeeIncentives) {
+    if (canSeeIncentivesBoard) {
       return (
         <div className="space-y-4">
-          <IncentiveEmployeeCard />
+          <IncentiveDashboardBoard />
         </div>
       );
     }
@@ -609,7 +609,7 @@ export const Dashboard: React.FC = () => {
 
         {canSeeResumen ? (
         <TabsContent value="resumen" className="space-y-6 mt-0">
-          {canSeeIncentives ? <IncentiveEmployeeCard /> : null}
+          {canSeeIncentivesBoard ? <IncentiveDashboardBoard /> : null}
           {canSeeStatistics ? (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             {statsCards.map((stat, i) => {

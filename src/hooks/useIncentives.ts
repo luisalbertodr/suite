@@ -21,10 +21,12 @@ import {
   type IncentiveShare,
 } from '@/lib/incentives';
 
-export function useIncentiveMySummary() {
+export function useIncentiveMySummary(options?: { boardPermission?: boolean }) {
   const { companyId } = useCompanyFilter();
   const { hasPermission, loading } = usePermissions();
-  const canRead = hasPermission('incentives', 'read');
+  const canRead =
+    hasPermission('incentives', 'read') ||
+    (options?.boardPermission !== false && hasPermission('incentives_board', 'read'));
 
   return useQuery({
     queryKey: ['incentive-my-summary', companyId],

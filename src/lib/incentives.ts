@@ -36,6 +36,17 @@ export type IncentiveRequestRow = {
 
 export type IncentiveTrack = 'cabina' | 'recepcion' | 'none';
 
+export type IncentiveMonthlyRow = {
+  month: string;
+  label: string;
+  amount_eur: number;
+  sales_count: number;
+  leads: number;
+  tier_minutes: number;
+  tier_hours: number;
+  is_current: boolean;
+};
+
 export type IncentiveMySummary = {
   ok: boolean;
   linked: boolean;
@@ -56,12 +67,15 @@ export type IncentiveMySummary = {
   month_tier_hours: number;
   month_awarded_minutes: number;
   next_threshold: number | null;
+  next_tier_hours: number;
+  remaining_to_next: number;
   /** @deprecated cupo por recuento; se mantiene por compat */
   baseline: number;
   month_eligible: number;
   next_milestone: { count: number; extra_minutes: number } | null;
   history: IncentiveHistoryRow[];
   requests: IncentiveRequestRow[];
+  monthly: IncentiveMonthlyRow[];
 };
 
 export type IncentiveAdminOverview = {
@@ -244,11 +258,25 @@ export async function fetchIncentiveMySummary(companyId: string): Promise<Incent
     month_tier_hours: Number(raw.month_tier_hours ?? 0),
     month_awarded_minutes: Number(raw.month_awarded_minutes ?? 0),
     next_threshold: raw.next_threshold != null ? Number(raw.next_threshold) : null,
+    next_tier_hours: Number(raw.next_tier_hours ?? 0),
+    remaining_to_next: Number(raw.remaining_to_next ?? 0),
     baseline: Number(raw.baseline ?? raw.revenue_min_eur ?? 2000),
     month_eligible: Number(raw.month_eligible ?? 0),
     next_milestone: (raw.next_milestone as IncentiveMySummary['next_milestone']) ?? null,
     history: Array.isArray(raw.history) ? (raw.history as IncentiveHistoryRow[]) : [],
     requests: Array.isArray(raw.requests) ? (raw.requests as IncentiveRequestRow[]) : [],
+    monthly: Array.isArray(raw.monthly)
+      ? (raw.monthly as Record<string, unknown>[]).map((row) => ({
+          month: String(row.month ?? row.label ?? ''),
+          label: String(row.label ?? ''),
+          amount_eur: Number(row.amount_eur ?? 0),
+          sales_count: Number(row.sales_count ?? 0),
+          leads: Number(row.leads ?? 0),
+          tier_minutes: Number(row.tier_minutes ?? 0),
+          tier_hours: Number(row.tier_hours ?? 0),
+          is_current: Boolean(row.is_current),
+        }))
+      : [],
   };
 }
 
