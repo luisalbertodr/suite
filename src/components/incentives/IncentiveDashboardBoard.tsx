@@ -29,8 +29,8 @@ import {
   useCreateIncentiveRequest,
   useIncentiveBoardTeam,
   useIncentiveMySummary,
+  useIsIncentiveAdmin,
 } from '@/hooks/useIncentives';
-import { usePermissions } from '@/hooks/usePermissions';
 import { formatMinutesAsHours, type IncentiveTeamMember } from '@/lib/incentives';
 
 function monthShortLabel(label: string): string {
@@ -77,9 +77,8 @@ const TeamMemberCard: React.FC<{ member: IncentiveTeamMember }> = ({ member }) =
 };
 
 export const IncentiveDashboardBoard: React.FC = () => {
-  const { hasPermission } = usePermissions();
-  const canManage = hasPermission('incentives', 'manage');
-  if (canManage) return <IncentiveTeamBoard />;
+  const isAdmin = useIsIncentiveAdmin();
+  if (isAdmin) return <IncentiveTeamBoard />;
   return <IncentivePersonalBoard />;
 };
 
@@ -87,9 +86,30 @@ const IncentiveTeamBoard: React.FC = () => {
   const team = useIncentiveBoardTeam();
   const [focusId, setFocusId] = useState<string | null>(null);
 
-  if (team.isLoading || team.error || !team.data?.enabled) return null;
+  if (team.isLoading) {
+    return (
+      <Card className="border-emerald-200/70 p-6 text-sm text-muted-foreground">
+        Cargando tablero de incentivos…
+      </Card>
+    );
+  }
+  if (team.error) {
+    return (
+      <Card className="border-destructive/40 p-6 text-sm text-destructive">
+        No se pudo cargar el tablero de incentivos:{' '}
+        {team.error instanceof Error ? team.error.message : 'error'}
+      </Card>
+    );
+  }
+  if (!team.data?.enabled) return null;
   const employees = team.data.employees ?? [];
-  if (employees.length === 0) return null;
+  if (employees.length === 0) {
+    return (
+      <Card className="border-emerald-200/70 p-6 text-sm text-muted-foreground">
+        No hay empleadas en pista de incentivos (cabina/recepción).
+      </Card>
+    );
+  }
   const focused = employees.find((e) => e.employee_id === focusId) ?? employees[0];
   const isReceptionFocus = focused.track === 'recepcion';
   const chartData = (focused.monthly ?? []).map((row) => ({

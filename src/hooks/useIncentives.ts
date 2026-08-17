@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useAuth } from '@/hooks/useAuth';
+import { supabase } from '@/lib/supabase';
 import {
   cashIncentivePayout,
   createIncentiveRequest,
@@ -21,9 +23,18 @@ import {
   type IncentiveSettings,
   type IncentiveShare,
 } from '@/lib/incentives';
+import { ESTETICA_COMPANY_ID } from '@/lib/workCenterBilling';
+
+function useIncentiveBoardCompanyId(): string | null {
+  const { companyId, accessibleCompanies } = useCompanyFilter();
+  if (accessibleCompanies.some((c) => c.id === ESTETICA_COMPANY_ID)) {
+    return ESTETICA_COMPANY_ID;
+  }
+  return companyId;
+}
 
 export function useIncentiveMySummary(options?: { boardPermission?: boolean }) {
-  const { companyId } = useCompanyFilter();
+  const companyId = useIncentiveBoardCompanyId();
   const { hasPermission, loading } = usePermissions();
   const canRead =
     hasPermission('incentives', 'read') ||
@@ -37,15 +48,28 @@ export function useIncentiveMySummary(options?: { boardPermission?: boolean }) {
   });
 }
 
+export function useIsIncentiveAdmin(): boolean {
+  const { isSuperuser } = useAuth();
+  const { data: isAdmin = false } = useQuery({
+    queryKey: ['incentive-is-admin'],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('is_admin');
+      if (error) return false;
+      return data === true;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+  return Boolean(isSuperuser || isAdmin);
+}
+
 export function useIncentiveBoardTeam() {
-  const { companyId } = useCompanyFilter();
-  const { hasPermission, loading } = usePermissions();
-  const canManage = hasPermission('incentives', 'manage');
+  const companyId = useIncentiveBoardCompanyId();
+  const isAdmin = useIsIncentiveAdmin();
 
   return useQuery({
     queryKey: ['incentive-board-team', companyId],
     queryFn: () => fetchIncentiveBoardTeam(companyId!),
-    enabled: Boolean(companyId) && !loading && canManage,
+    enabled: Boolean(companyId) && isAdmin,
     staleTime: 30_000,
   });
 }

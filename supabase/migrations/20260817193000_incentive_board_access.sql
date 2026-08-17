@@ -1,5 +1,40 @@
 -- Tablero incentivos: solo usuario con empleada vinculada; admins ven el equipo.
 
+CREATE OR REPLACE FUNCTION public.user_is_incentive_admin(p_company_id uuid)
+RETURNS boolean
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RETURN false;
+  END IF;
+  IF to_regprocedure('public.current_user_is_superuser()') IS NOT NULL
+     AND public.current_user_is_superuser() THEN
+    RETURN true;
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM public.user_company_roles ucr
+    JOIN public.roles r ON r.id = ucr.role_id
+    WHERE ucr.user_id = auth.uid()
+      AND lower(r.name) IN ('admin', 'superadmin', 'superuser')
+      AND (
+        ucr.company_id = p_company_id
+        OR public.user_can_access_company(p_company_id)
+      )
+  ) THEN
+    RETURN true;
+  END IF;
+  IF to_regprocedure('public.is_admin()') IS NOT NULL AND public.is_admin() THEN
+    RETURN true;
+  END IF;
+  RETURN false;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION public.user_can_view_incentive_board(p_company_id uuid)
 RETURNS boolean
 LANGUAGE plpgsql
@@ -24,7 +59,7 @@ BEGIN
   ) THEN
     RETURN false;
   END IF;
-  IF public.user_can_manage_incentives(p_company_id) THEN
+  IF public.user_is_incentive_admin(p_company_id) THEN
     RETURN true;
   END IF;
   IF NOT EXISTS (
@@ -196,7 +231,7 @@ DECLARE
   v_set public.incentive_settings;
   v_rows jsonb;
 BEGIN
-  IF NOT public.user_can_manage_incentives(p_company_id) THEN
+  IF NOT public.user_is_incentive_admin(p_company_id) THEN
     RAISE EXCEPTION 'Sin permiso para ver el equipo de incentivos';
   END IF;
   v_set := public.incentive_ensure_settings(p_company_id);
@@ -225,10 +260,26 @@ BEGIN
 END;
 $$;
 
+GRANT EXECUTE ON FUNCTION public.user_is_incentive_admin(uuid) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.user_can_view_incentive_board(uuid) TO authenticated, service_role;
 REVOKE ALL ON FUNCTION public.incentive_employee_board_row(uuid, uuid) FROM PUBLIC, authenticated;
 GRANT EXECUTE ON FUNCTION public.incentive_employee_board_row(uuid, uuid) TO service_role;
 GRANT EXECUTE ON FUNCTION public.incentive_board_team(uuid) TO authenticated, service_role;
 
+INSERT INTO public.role_permissions (role_id, permission_id)
+SELECT r.id, p.id
+FROM public.roles r
+CROSS JOIN public.permissions p
+WHERE lower(r.name) = 'recepcion'
+  AND p.resource = 'incentives'
+  AND p.action = 'read'
+ON CONFLICT DO NOTHING;
+
+UPDATE public.incentive_employee_tracks t
+SET track = 'none', updated_at = now()
+FROM public.agenda_employees ae
+WHERE t.employee_id = ae.id
+  AND ae.name ILIKE '%delgado%';
+
 COMMENT ON FUNCTION public.user_can_view_incentive_board(uuid) IS
-  'Tablero propio: usuario con empleada vinculada. Admins (incentives.manage / superuser) ven el equipo.';
+  'Tablero propio: usuario con empleada vinculada. Solo rol admin/superuser ve el equipo.';

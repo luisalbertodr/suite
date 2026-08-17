@@ -503,12 +503,17 @@ export const Dashboard: React.FC = () => {
 
   if (isInitialLoading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[400px] space-y-4">
-        <Loader2 className="w-12 h-12 animate-spin text-primary" />
-        <div className="text-center">
-          <h3 className="text-lg font-semibold text-foreground">Cargando Dashboard</h3>
-          <p className="text-muted-foreground mt-1">Obteniendo datos...</p>
-        </div>
+      <div className="space-y-4">
+        {canSeeIncentivesBoard ? <IncentiveDashboardBoard /> : null}
+        {canSeeStatistics ? (
+          <div className="flex flex-col items-center justify-center min-h-[280px] space-y-4">
+            <Loader2 className="w-12 h-12 animate-spin text-primary" />
+            <div className="text-center">
+              <h3 className="text-lg font-semibold text-foreground">Cargando Dashboard</h3>
+              <p className="text-muted-foreground mt-1">Obteniendo datos...</p>
+            </div>
+          </div>
+        ) : null}
       </div>
     );
   }
