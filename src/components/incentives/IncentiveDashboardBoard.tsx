@@ -78,7 +78,14 @@ const TeamMemberCard: React.FC<{ member: IncentiveTeamMember }> = ({ member }) =
 
 export const IncentiveDashboardBoard: React.FC = () => {
   const isAdmin = useIsIncentiveAdmin();
-  if (isAdmin) return <IncentiveTeamBoard />;
+  if (isAdmin) {
+    return (
+      <div className="space-y-4">
+        <IncentivePersonalBoard />
+        <IncentiveTeamBoard />
+      </div>
+    );
+  }
   return <IncentivePersonalBoard />;
 };
 
@@ -102,7 +109,10 @@ const IncentiveTeamBoard: React.FC = () => {
     );
   }
   if (!team.data?.enabled) return null;
-  const employees = team.data.employees ?? [];
+  const employees = [...(team.data.employees ?? [])].sort((a, b) => {
+    if (a.track !== b.track) return a.track === 'recepcion' ? -1 : 1;
+    return a.employee_name.localeCompare(b.employee_name, 'es');
+  });
   if (employees.length === 0) {
     return (
       <Card className="border-emerald-200/70 p-6 text-sm text-muted-foreground">
@@ -110,7 +120,9 @@ const IncentiveTeamBoard: React.FC = () => {
       </Card>
     );
   }
-  const focused = employees.find((e) => e.employee_id === focusId) ?? employees[0];
+  const defaultFocus =
+    employees.find((e) => e.track === 'recepcion')?.employee_id ?? employees[0]?.employee_id ?? null;
+  const focused = employees.find((e) => e.employee_id === (focusId ?? defaultFocus)) ?? employees[0];
   const isReceptionFocus = focused.track === 'recepcion';
   const chartData = (focused.monthly ?? []).map((row) => ({
     key: row.label,
@@ -119,9 +131,16 @@ const IncentiveTeamBoard: React.FC = () => {
     horas: Number(row.tier_hours) || 0,
     isCurrent: row.is_current,
   }));
-  const compareData = employees.map((e) => ({
+  const receptionEmployees = employees.filter((e) => e.track === 'recepcion');
+  const cabinEmployees = employees.filter((e) => e.track !== 'recepcion');
+  const receptionCompare = receptionEmployees.map((e) => ({
     name: e.employee_name,
-    valor: e.track === 'recepcion' ? e.month_leads : Math.round(e.month_amount_eur),
+    valor: e.month_leads,
+    horas: e.month_tier_hours,
+  }));
+  const cabinCompare = cabinEmployees.map((e) => ({
+    name: e.employee_name,
+    valor: Math.round(e.month_amount_eur),
     horas: e.month_tier_hours,
   }));
 
@@ -159,24 +178,59 @@ const IncentiveTeamBoard: React.FC = () => {
             ))}
           </div>
           <div className="grid gap-4 lg:grid-cols-2">
-            <div className="rounded-lg border border-border/60 p-3">
-              <p className="mb-2 text-sm font-medium">Parcial del mes · comparación</p>
-              <div className="h-52">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={compareData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
-                    <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                    <YAxis tick={{ fontSize: 11 }} width={48} />
-                    <Tooltip />
-                    <Legend />
-                    <Bar dataKey="valor" name="€ / presentadas" fill="hsl(160 84% 32%)" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="horas" name="Horas" fill="hsl(199 70% 42%)" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+            {receptionCompare.length > 0 ? (
+              <div className="rounded-lg border border-border/60 p-3">
+                <p className="mb-2 text-sm font-medium">Recepción · presentadas del mes</p>
+                <div className="h-52">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={receptionCompare} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
+                      <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                      <YAxis tick={{ fontSize: 11 }} width={48} allowDecimals={false} />
+                      <Tooltip
+                        formatter={(value, name) => {
+                          const n = Number(value ?? 0);
+                          return name === 'valor' ? [`${n} presentadas`, 'Leads'] : [`${n} h`, 'Horas'];
+                        }}
+                      />
+                      <Legend />
+                      <Bar dataKey="valor" name="Presentadas" fill="hsl(160 84% 32%)" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="horas" name="Horas" fill="hsl(199 70% 42%)" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
-            </div>
-            <div className="rounded-lg border border-border/60 p-3">
-              <p className="mb-2 text-sm font-medium">Histórico · {focused.employee_name}</p>
+            ) : null}
+            {cabinCompare.length > 0 ? (
+              <div className="rounded-lg border border-border/60 p-3">
+                <p className="mb-2 text-sm font-medium">Cabina · importe del mes</p>
+                <div className="h-52">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={cabinCompare} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
+                      <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                      <YAxis tick={{ fontSize: 11 }} width={48} />
+                      <Tooltip
+                        formatter={(value, name) => {
+                          const n = Number(value ?? 0);
+                          return name === 'valor'
+                            ? [`${n.toLocaleString('es-ES')} €`, 'Importe']
+                            : [`${n} h`, 'Horas'];
+                        }}
+                      />
+                      <Legend />
+                      <Bar dataKey="valor" name="Importe €" fill="hsl(160 84% 32%)" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="horas" name="Horas" fill="hsl(199 70% 42%)" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            ) : null}
+            <div className={`rounded-lg border border-border/60 p-3 ${receptionCompare.length && cabinCompare.length ? 'lg:col-span-2' : ''}`}>
+              <p className="mb-2 text-sm font-medium">
+                Histórico · {focused.employee_name}
+                {isReceptionFocus ? ' · presentadas' : ' · €'}
+              </p>
               <div className="h-52">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
@@ -184,7 +238,18 @@ const IncentiveTeamBoard: React.FC = () => {
                     <XAxis dataKey="label" tick={{ fontSize: 11 }} />
                     <YAxis yAxisId="left" tick={{ fontSize: 11 }} width={48} />
                     <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} width={28} />
-                    <Tooltip />
+                    <Tooltip
+                      formatter={(value, name) => {
+                        const n = Number(value ?? 0);
+                        if (name === 'valor' || name === 'Presentadas' || name === 'Importe') {
+                          return [
+                            isReceptionFocus ? `${n} presentadas` : `${n.toLocaleString('es-ES')} €`,
+                            isReceptionFocus ? 'Leads' : 'Importe',
+                          ];
+                        }
+                        return [`${n} h`, 'Horas'];
+                      }}
+                    />
                     <Bar yAxisId="left" dataKey="valor" radius={[4, 4, 0, 0]} maxBarSize={36}>
                       {chartData.map((entry) => (
                         <Cell
@@ -226,7 +291,29 @@ const IncentivePersonalBoard: React.FC = () => {
     }));
   }, [data?.monthly, isReception]);
 
-  if (isLoading || error || !data?.linked || !data.enabled || data.track === 'none') return null;
+  if (isLoading) {
+    return (
+      <Card className="border-emerald-200/70 p-6 text-sm text-muted-foreground">
+        Cargando tus incentivos…
+      </Card>
+    );
+  }
+  if (error) {
+    return (
+      <Card className="border-destructive/40 p-6 text-sm text-destructive">
+        No se pudo cargar tu gráfico de incentivos:{' '}
+        {error instanceof Error ? error.message : 'error'}
+      </Card>
+    );
+  }
+  if (!data?.linked) {
+    return (
+      <Card className="border-amber-200 bg-amber-50 p-6 text-sm text-amber-900">
+        Tu usuario no está vinculado a una empleada. Sin ese enlace no se pueden mostrar las gráficas.
+      </Card>
+    );
+  }
+  if (!data.enabled || data.track === 'none') return null;
 
   const currentValue = isReception ? data.month_leads : data.month_amount_eur;
   const unit = isReception ? 'presentadas' : '€';
@@ -357,7 +444,7 @@ const IncentivePersonalBoard: React.FC = () => {
                   <BarChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
                     <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-                    <YAxis yAxisId="left" tick={{ fontSize: 11 }} width={48} />
+                    <YAxis yAxisId="left" tick={{ fontSize: 11 }} width={48} allowDecimals={!isReception} />
                     <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} width={28} />
                     <Tooltip
                       formatter={(value, name) => {
