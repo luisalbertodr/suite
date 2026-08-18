@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { Building2, Home, LayoutDashboard, Users, ShoppingBag, Settings, FileText, BarChart2, Truck, Receipt, Package, Calendar, FolderOpen, Grid3X3, LogOut } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { usePermissions } from '@/hooks/usePermissions';
+import { canAccessDashboard } from '@/lib/menuPermissions';
 import { useSidebar } from '@/components/ui/sidebar';
 import { useUserAppearance } from '@/hooks/useUserAppearance';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
@@ -61,7 +62,8 @@ export const AppSidebar: React.FC = () => {
       label: 'Dashboard',
       path: '/',
       icon: LayoutDashboard,
-      permission: { resource: 'dashboard', action: 'read' }
+      permission: { resource: 'dashboard', action: 'read' },
+      dashboardAccess: true,
     },
     {
       label: 'Clientes',
@@ -155,8 +157,10 @@ export const AppSidebar: React.FC = () => {
     }
   ];
 
-  const visibleMenuItems = menuItems.filter(item => 
-    hasPermission(item.permission.resource, item.permission.action)
+  const visibleMenuItems = menuItems.filter((item) =>
+    'dashboardAccess' in item && item.dashboardAccess
+      ? canAccessDashboard(hasPermission)
+      : hasPermission(item.permission.resource, item.permission.action),
   );
 
   const isCollapsed = state === 'collapsed';

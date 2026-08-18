@@ -46,13 +46,13 @@ export const MENU_PERMISSIONS: MenuPermission[] = [
     resource: 'incentives',
     action: 'read',
     label: 'Incentivos (bolsa de horas)',
-    description: 'Ver la bolsa de horas libres y solicitar tiempo',
+    description: 'Ver la bolsa de horas libres y solicitar tiempo. También abre la pestaña Dashboard con ese contenido.',
   },
   {
     resource: 'incentives_board',
     action: 'read',
     label: 'Incentivos (tablero en Inicio)',
-    description: 'Ver el tablero propio si el usuario está vinculado a una empleada. Los admins ven todas.',
+    description: 'Ver el tablero propio si el usuario está vinculado a una empleada. Los admins ven todas. También abre la pestaña Dashboard.',
   },
   {
     resource: 'incentives',
@@ -61,3 +61,27 @@ export const MENU_PERMISSIONS: MenuPermission[] = [
     description: 'Configurar reglas, imputar ventas y aprobar solicitudes',
   },
 ];
+
+/** Permisos que abren Inicio/Dashboard (pestaña + página), no solo dashboard.read. */
+export const DASHBOARD_ACCESS_PERMISSIONS: Array<{ resource: string; action: string }> = [
+  { resource: 'dashboard', action: 'read' },
+  { resource: 'incentives', action: 'read' },
+  { resource: 'incentives_board', action: 'read' },
+  { resource: 'incentives', action: 'manage' },
+];
+
+export function canAccessDashboard(
+  hasPermission: (resource: string, action: string) => boolean,
+): boolean {
+  return DASHBOARD_ACCESS_PERMISSIONS.some((p) => hasPermission(p.resource, p.action));
+}
+
+export function canSeeIncentiveDashboard(
+  hasPermission: (resource: string, action: string) => boolean,
+): boolean {
+  return (
+    hasPermission('incentives', 'read') ||
+    hasPermission('incentives_board', 'read') ||
+    hasPermission('incentives', 'manage')
+  );
+}

@@ -5,6 +5,7 @@ import { X, Building2 } from 'lucide-react';
 import { Home, LayoutDashboard, Users, ShoppingBag, Settings, FileText, BarChart2, Truck, Receipt, Package, Calendar, FolderOpen, Grid3X3 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { usePermissions } from '@/hooks/usePermissions';
+import { canAccessDashboard } from '@/lib/menuPermissions';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -21,7 +22,8 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
       label: 'Dashboard',
       path: '/inicio',
       icon: LayoutDashboard,
-      permission: { resource: 'dashboard', action: 'read' }
+      permission: { resource: 'dashboard', action: 'read' },
+      dashboardAccess: true,
     },
     {
       label: 'Clientes',
@@ -109,8 +111,10 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
     }
   ];
 
-  const visibleMenuItems = menuItems.filter(item => 
-    hasPermission(item.permission.resource, item.permission.action)
+  const visibleMenuItems = menuItems.filter((item) =>
+    'dashboardAccess' in item && item.dashboardAccess
+      ? canAccessDashboard(hasPermission)
+      : hasPermission(item.permission.resource, item.permission.action),
   );
 
   return (

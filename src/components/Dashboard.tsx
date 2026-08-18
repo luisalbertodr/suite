@@ -70,6 +70,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabase';
 import { IncentiveDashboardBoard } from '@/components/incentives/IncentiveDashboardBoard';
+import { canSeeIncentiveDashboard } from '@/lib/menuPermissions';
 
 function billingCompanyIdForView(view: BillingEntityView): string | null {
   if (view === 'medicina') return MEDICINA_COMPANY_ID;
@@ -255,10 +256,7 @@ export const Dashboard: React.FC = () => {
   const canSeeReports = hasPermission('reports', 'read');
   const canSeeStatistics = hasPermission('statistics', 'read');
   const canSeeRecentActivity = hasPermission('recent_activity', 'read');
-  const canSeeIncentivesBoard =
-    hasPermission('incentives', 'manage') ||
-    hasPermission('incentives_board', 'read') ||
-    hasPermission('incentives', 'read');
+  const canSeeIncentivesBoard = canSeeIncentiveDashboard(hasPermission);
   const canSeeResumen = canSeeStatistics || canSeeRecentActivity || canSeeIncentivesBoard;
   const dashboardTabs = useMemo(() => {
     const tabs: Array<'resumen' | 'reportes'> = [];
@@ -899,7 +897,7 @@ export const Dashboard: React.FC = () => {
 
         {!permissionsLoading && dashboardTabs.length === 0 ? (
           <div className="rounded-xl border bg-card p-8 text-center text-sm text-muted-foreground">
-            No tienes permisos para ver reportes, estadísticas ni actividad reciente.
+            No tienes permisos para ver reportes, estadísticas, actividad reciente ni incentivos.
           </div>
         ) : null}
       </Tabs>

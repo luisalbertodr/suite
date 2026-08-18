@@ -7,6 +7,7 @@ import { useWhatsappUnread } from '@/hooks/useWhatsappUnread';
 import { useMarketingUnread } from '@/hooks/useMarketingUnread';
 import { usePhoneMissedCalls } from '@/hooks/usePhoneMissedCalls';
 import { canAccessPhone } from '@/lib/phonePermissions';
+import { canAccessDashboard } from '@/lib/menuPermissions';
 import { useNotificationSoundOnIncrease } from '@/hooks/useNotificationSoundOnIncrease';
 import { usePrefetchDockPanel } from '@/contexts/DockKeepAliveContext';
 import { matchDockRoute } from '@/lib/dockRoutes';
@@ -21,6 +22,7 @@ type DockItem = {
   color: string;
   permission?: { resource: string; action: string };
   phoneAccess?: boolean;
+  dashboardAccess?: boolean;
 };
 
 const dockItems: DockItem[] = [
@@ -38,7 +40,7 @@ const dockItems: DockItem[] = [
   },
   { label: 'Marketing', path: '/marketing', icon: Megaphone, color: 'text-rose-500', permission: { resource: 'marketing', action: 'read' } },
   { label: 'WhatsApp', path: '/whatsapp', icon: MessageCircle, color: 'text-emerald-600', permission: { resource: 'whatsapp', action: 'read' } },
-  { label: 'Dashboard', path: '/inicio', icon: LayoutDashboard, color: 'text-indigo-500', permission: { resource: 'dashboard', action: 'read' } },
+  { label: 'Dashboard', path: '/inicio', icon: LayoutDashboard, color: 'text-indigo-500', dashboardAccess: true },
 ];
 
 const FACTURACION_PATHS = [
@@ -78,6 +80,7 @@ export const DockBar: React.FC = () => {
     }
     if (item.path === '/marketing') return canSeeMarketing;
     if (item.phoneAccess) return canAccessPhone(hasPermission);
+    if (item.dashboardAccess) return canAccessDashboard(hasPermission);
     if (item.permission) {
       return hasPermission(item.permission.resource, item.permission.action);
     }
