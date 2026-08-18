@@ -19,6 +19,7 @@ import {
   formatMinutesAsHours,
   incentiveLeadProgress,
   incentiveRevenueProgress,
+  orientationHoursFromMonthly,
 } from '@/lib/incentives';
 
 export const IncentiveEmployeeCard: React.FC = () => {
@@ -83,8 +84,13 @@ export const IncentiveEmployeeCard: React.FC = () => {
             <div>
               <p className="text-3xl font-bold tabular-nums">{formatMinutesAsHours(data.balance_minutes)}</p>
               <p className="text-xs text-muted-foreground">
-                Saldo · equiv. {cashValue.toFixed(0)} € a {data.cash_per_hour} €/h
+                Saldo efectivo desde septiembre · equiv. {cashValue.toFixed(0)} € a {data.cash_per_hour} €/h
               </p>
+              {orientationHoursFromMonthly(data.monthly) > 0 ? (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Orientación hasta 31 ago: {orientationHoursFromMonthly(data.monthly).toLocaleString('es-ES')} h · consumidas
+                </p>
+              ) : null}
             </div>
             <Button size="sm" onClick={() => setOpen(true)} disabled={data.balance_minutes < 15}>
               <Clock className="mr-1.5 h-4 w-4" />

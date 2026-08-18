@@ -47,6 +47,22 @@ export type IncentiveMonthlyRow = {
   is_current: boolean;
 };
 
+export const INCENTIVE_EFFECTIVE_START = '2026-09-01';
+export const INCENTIVE_ORIENTATION_END = '2026-08-31';
+
+export function monthIsOrientation(monthOrLabel: string): boolean {
+  const raw = String(monthOrLabel || '').slice(0, 7);
+  return raw !== '' && raw < INCENTIVE_EFFECTIVE_START.slice(0, 7);
+}
+
+export function orientationHoursFromMonthly(rows: IncentiveMonthlyRow[] | undefined): number {
+  if (!rows?.length) return 0;
+  return rows.reduce((sum, row) => {
+    if (!monthIsOrientation(row.month || row.label)) return sum;
+    return sum + (Number(row.tier_hours) || 0);
+  }, 0);
+}
+
 export type IncentiveTeamMember = {
   employee_id: string;
   employee_name: string;
@@ -129,6 +145,7 @@ export type IncentiveAdminOverview = {
     employee_name: string;
     track?: IncentiveTrack;
     balance_minutes: number;
+    orientation_minutes?: number;
     month_eligible?: number;
     month_amount_eur?: number;
     month_leads?: number;

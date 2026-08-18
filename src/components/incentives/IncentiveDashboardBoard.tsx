@@ -31,7 +31,7 @@ import {
   useIncentiveMySummary,
   useIsIncentiveAdmin,
 } from '@/hooks/useIncentives';
-import { formatMinutesAsHours, type IncentiveTeamMember } from '@/lib/incentives';
+import { formatMinutesAsHours, monthIsOrientation, orientationHoursFromMonthly, type IncentiveTeamMember } from '@/lib/incentives';
 
 function monthShortLabel(label: string): string {
   const raw = String(label || '');
@@ -50,6 +50,7 @@ const TeamMemberCard: React.FC<{ member: IncentiveTeamMember }> = ({ member }) =
   const isReception = member.track === 'recepcion';
   const current = isReception ? member.month_leads : member.month_amount_eur;
   const pct = progressPct(current, member.next_threshold);
+  const orientationHours = orientationHoursFromMonthly(member.monthly);
   return (
     <div className="rounded-lg border border-border/60 p-3">
       <div className="flex items-start justify-between gap-2">
@@ -61,6 +62,11 @@ const TeamMemberCard: React.FC<{ member: IncentiveTeamMember }> = ({ member }) =
         </div>
         <span className="text-sm font-semibold tabular-nums">{member.month_tier_hours} h</span>
       </div>
+      {orientationHours > 0 ? (
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          Orientación hasta 31 ago: {orientationHours.toLocaleString('es-ES')} h · consumidas
+        </p>
+      ) : null}
       <p className="mt-2 text-xl font-bold tabular-nums">
         {isReception ? `${member.month_leads}` : `${Math.round(member.month_amount_eur).toLocaleString('es-ES')} €`}
       </p>
@@ -130,6 +136,7 @@ const IncentiveTeamBoard: React.FC = () => {
     valor: isReceptionFocus ? row.leads : Math.round(row.amount_eur),
     horas: Number(row.tier_hours) || 0,
     isCurrent: row.is_current,
+    orientation: monthIsOrientation(row.month || row.label),
   }));
   const receptionEmployees = employees.filter((e) => e.track === 'recepcion');
   const cabinEmployees = employees.filter((e) => e.track !== 'recepcion');
@@ -154,6 +161,7 @@ const IncentiveTeamBoard: React.FC = () => {
           <h3 className="mt-1 text-xl font-semibold tracking-tight">Estadísticas de todas las empleadas</h3>
           <p className="mt-0.5 text-sm text-emerald-50/85">
             Cabina ≥{team.data.revenue_min_eur.toFixed(0)} € · Recepción más de {Math.max(0, team.data.lead_min_count - 1)} presentadas
+            {' · '}horas hasta 31 ago = orientación (consumidas); efectivas desde septiembre
           </p>
         </div>
         <CardContent className="space-y-5 p-5">
@@ -258,7 +266,14 @@ const IncentiveTeamBoard: React.FC = () => {
                         />
                       ))}
                     </Bar>
-                    <Bar yAxisId="right" dataKey="horas" fill="hsl(199 70% 42%)" radius={[4, 4, 0, 0]} maxBarSize={18} />
+                    <Bar yAxisId="right" dataKey="horas" radius={[4, 4, 0, 0]} maxBarSize={18}>
+                      {chartData.map((entry) => (
+                        <Cell
+                          key={`h-${entry.key}`}
+                          fill={entry.orientation ? 'hsl(30 12% 62%)' : 'hsl(199 70% 42%)'}
+                        />
+                      ))}
+                    </Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -288,6 +303,7 @@ const IncentivePersonalBoard: React.FC = () => {
       valor: isReception ? row.leads : Math.round(row.amount_eur),
       horas: Number(row.tier_hours) || 0,
       isCurrent: row.is_current,
+      orientation: monthIsOrientation(row.month || row.label),
     }));
   }, [data?.monthly, isReception]);
 
@@ -364,7 +380,15 @@ const IncentivePersonalBoard: React.FC = () => {
             </div>
             <div className="text-right">
               <p className="text-3xl font-bold tabular-nums">{formatMinutesAsHours(data.balance_minutes)}</p>
-              <p className="text-xs text-emerald-100/80">Saldo · ~{cashValue.toFixed(0)} € a {data.cash_per_hour} €/h</p>
+              <p className="text-xs text-emerald-100/80">
+                Saldo efectivo desde septiembre · ~{cashValue.toFixed(0)} € a {data.cash_per_hour} €/h
+              </p>
+              {orientationHoursFromMonthly(data.monthly) > 0 ? (
+                <p className="mt-1 text-[11px] text-emerald-100/75">
+                  Orientación hasta 31 ago: {orientationHoursFromMonthly(data.monthly).toLocaleString('es-ES')} h
+                  {' '}· consumidas
+                </p>
+              ) : null}
             </div>
           </div>
         </div>
@@ -436,7 +460,7 @@ const IncentivePersonalBoard: React.FC = () => {
               <div className="mb-2 flex items-center justify-between gap-2">
                 <p className="text-sm font-medium">Totales por mes</p>
                 <p className="text-[11px] text-muted-foreground">
-                  {isReception ? 'Presentadas · horas de tramo' : 'Importe € · horas de tramo'}
+                  {isReception ? 'Presentadas · horas de tramo (hasta ago = orientación)' : 'Importe € · horas de tramo (hasta ago = orientación)'}
                 </p>
               </div>
               <div className="h-52 w-full">
@@ -455,7 +479,7 @@ const IncentivePersonalBoard: React.FC = () => {
                             isReception ? 'Leads' : 'Importe',
                           ];
                         }
-                        return [`${n} h`, 'Horas'];
+                        return [`${n} h`, 'Horas (hasta ago = orientación)'];
                       }}
                       labelFormatter={(label) => String(label).toUpperCase()}
                     />
@@ -470,11 +494,17 @@ const IncentivePersonalBoard: React.FC = () => {
                     <Bar
                       yAxisId="right"
                       dataKey="horas"
-                      fill="hsl(199 70% 42%)"
                       radius={[4, 4, 0, 0]}
                       maxBarSize={18}
                       opacity={0.85}
-                    />
+                    >
+                      {chartData.map((entry) => (
+                        <Cell
+                          key={`h-${entry.key}`}
+                          fill={entry.orientation ? 'hsl(30 12% 62%)' : 'hsl(199 70% 42%)'}
+                        />
+                      ))}
+                    </Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </div>

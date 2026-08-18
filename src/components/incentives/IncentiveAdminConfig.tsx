@@ -425,7 +425,9 @@ export const IncentiveAdminConfig: React.FC = () => {
         <CardHeader>
           <CardTitle>Saldos y abono metálico</CardTitle>
           <CardDescription>
-            Puedes convertir horas en dinero a {form.cash_per_hour} €/h (se descuenta del saldo).
+            El saldo efectivo empieza el 1 de septiembre. Las horas hasta el 31 de agosto son de
+            orientación y quedan consumidas. Puedes convertir horas efectivas en dinero a{' '}
+            {form.cash_per_hour} €/h.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -437,7 +439,8 @@ export const IncentiveAdminConfig: React.FC = () => {
                   <th className="py-1 pr-3">Pista</th>
                   <th className="py-1 pr-3 text-right">Mes</th>
                   <th className="py-1 pr-3 text-right">Tramo</th>
-                  <th className="py-1 pr-3 text-right">Saldo</th>
+                  <th className="py-1 pr-3 text-right">Saldo efectivo</th>
+                  <th className="py-1 pr-3 text-right">Orientación</th>
                   <th className="py-1">Abono €</th>
                 </tr>
               </thead>
@@ -456,6 +459,11 @@ export const IncentiveAdminConfig: React.FC = () => {
                     </td>
                     <td className="py-1.5 pr-3 text-right tabular-nums">
                       {formatMinutesAsHours(Number(row.balance_minutes))}
+                    </td>
+                    <td className="py-1.5 pr-3 text-right tabular-nums text-muted-foreground">
+                      {Number(row.orientation_minutes ?? 0) > 0
+                        ? `${formatMinutesAsHours(Number(row.orientation_minutes))} · consumidas`
+                        : '—'}
                     </td>
                     <td className="py-1.5">
                       {(row.track === 'cabina' || row.track === 'recepcion') && Number(row.balance_minutes) > 0 ? (
