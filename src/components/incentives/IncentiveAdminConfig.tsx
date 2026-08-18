@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast';
 import { useAgendaEmployees } from '@/hooks/useAgendaEmployees';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
+import { useWorkCenter } from '@/hooks/useWorkCenter';
 import {
   useCashIncentivePayout,
   useIncentiveAdminOverview,
@@ -20,6 +21,7 @@ import {
 import {
   formatMinutesAsHours,
   hoursFromRevenue,
+  INCENTIVE_TRACK_LABELS,
   type IncentiveSettings,
   type IncentiveTrack,
 } from '@/lib/incentives';
@@ -51,6 +53,8 @@ function defaultSettings(companyId: string): IncentiveSettings {
 export const IncentiveAdminConfig: React.FC = () => {
   const { toast } = useToast();
   const { companyId } = useCompanyFilter();
+  const { operationalCompanyId } = useWorkCenter();
+  const scopeCompanyId = operationalCompanyId ?? companyId;
   const { data: settingsRow } = useIncentiveSettings();
   const { data: overview } = useIncentiveAdminOverview();
   const { data: tracks = [] } = useIncentiveEmployeeTracks();
@@ -61,6 +65,7 @@ export const IncentiveAdminConfig: React.FC = () => {
   const review = useReviewIncentiveRequest();
   const [form, setForm] = useState<IncentiveSettings | null>(null);
   const [cashHours, setCashHours] = useState<Record<string, string>>({});
+  const [localTracks, setLocalTracks] = useState<Record<string, IncentiveTrack>>({});
 
   useEffect(() => {
     if (settingsRow) setForm(settingsRow);
@@ -68,10 +73,15 @@ export const IncentiveAdminConfig: React.FC = () => {
   }, [settingsRow, companyId]);
 
   const employeeById = useMemo(() => new Map(employees.map((e) => [e.id, e])), [employees]);
-  const trackByEmployee = useMemo(
-    () => new Map(tracks.map((t) => [t.employee_id, t.track])),
-    [tracks],
-  );
+  const trackByEmployee = useMemo(() => {
+    const map = new Map<string, IncentiveTrack>();
+    for (const row of overview?.balances ?? []) {
+      if (row.track) map.set(row.employee_id, row.track);
+    }
+    for (const t of tracks) map.set(t.employee_id, t.track);
+    for (const [id, track] of Object.entries(localTracks)) map.set(id, track);
+    return map;
+  }, [overview?.balances, tracks, localTracks]);
 
   const tierPreview = useMemo(() => {
     if (!form) return [];
@@ -106,16 +116,22 @@ export const IncentiveAdminConfig: React.FC = () => {
   };
 
   const setTrack = async (employeeId: string, track: IncentiveTrack) => {
-    if (!companyId) return;
+    if (!scopeCompanyId) return;
+    setLocalTracks((prev) => ({ ...prev, [employeeId]: track }));
     try {
       await upsertTrack.mutateAsync({
         employee_id: employeeId,
-        company_id: companyId,
+        company_id: scopeCompanyId,
         track,
         active: true,
       });
-      toast({ title: 'Pista actualizada' });
+      toast({ title: 'Pista actualizada', description: INCENTIVE_TRACK_LABELS[track] });
     } catch (e) {
+      setLocalTracks((prev) => {
+        const next = { ...prev };
+        delete next[employeeId];
+        return next;
+      });
       toast({
         title: 'No se pudo cambiar la pista',
         description: e instanceof Error ? e.message : 'Error',
@@ -360,16 +376,21 @@ export const IncentiveAdminConfig: React.FC = () => {
         </CardHeader>
         <CardContent className="space-y-2">
           {employees
-            .filter((e) => e.is_active !== false && String(e.dunasoft_codemp ?? '') !== '9999999')
-            .map((emp) => (
+            .filter((e) => e.active !== false && String(e.dunasoft_codemp ?? '') !== '9999999')
+            .map((emp) => {
+              const track = trackByEmployee.get(emp.id) ?? 'none';
+              return (
               <div key={emp.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2">
-                <span className="text-sm">{emp.name}</span>
+                <div className="min-w-0">
+                  <span className="text-sm">{emp.name}</span>
+                  <p className="text-[11px] text-muted-foreground">{INCENTIVE_TRACK_LABELS[track]}</p>
+                </div>
                 <Select
-                  value={trackByEmployee.get(emp.id) ?? 'none'}
+                  value={track}
                   onValueChange={(v) => setTrack(emp.id, v as IncentiveTrack)}
                 >
                   <SelectTrigger className="h-8 w-36">
-                    <SelectValue />
+                    <SelectValue placeholder="Ninguna" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="cabina">Cabina</SelectItem>
@@ -378,7 +399,8 @@ export const IncentiveAdminConfig: React.FC = () => {
                   </SelectContent>
                 </Select>
               </div>
-            ))}
+              );
+            })}
         </CardContent>
       </Card>
 
@@ -445,7 +467,9 @@ export const IncentiveAdminConfig: React.FC = () => {
                 {(overview?.balances ?? []).map((row) => (
                   <tr key={row.employee_id} className="border-t">
                     <td className="py-1.5 pr-3">{row.employee_name}</td>
-                    <td className="py-1.5 pr-3 text-xs text-muted-foreground">{row.track ?? '—'}</td>
+                    <td className="py-1.5 pr-3 text-xs text-muted-foreground">
+                      {row.track ? INCENTIVE_TRACK_LABELS[row.track] : '—'}
+                    </td>
                     <td className="py-1.5 pr-3 text-right tabular-nums">
                       {row.track === 'recepcion'
                         ? `${row.month_leads ?? 0} leads`

@@ -349,7 +349,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
   // Show loading if initializing
   if (isInitializing) {
     return (
-      <div className="fixed inset-x-0 top-0 bottom-[6.5rem] z-50 bg-black/50 flex items-center justify-center p-4">
+      <div className="fixed inset-x-0 top-0 suite-dock-clearance-bottom z-50 bg-black/50 flex items-center justify-center p-4">
         <div className="bg-white rounded-xl shadow-xl p-8">
           <div className="flex items-center justify-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
@@ -363,7 +363,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
   // Show error if initialization failed
   if (initError) {
     return (
-      <div className="fixed inset-x-0 top-0 bottom-[6.5rem] z-50 bg-black/50 flex items-center justify-center p-4">
+      <div className="fixed inset-x-0 top-0 suite-dock-clearance-bottom z-50 bg-black/50 flex items-center justify-center p-4">
         <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-red-600">Error de Inicialización</h3>
@@ -421,7 +421,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ article, onClose, onSa
   });
 
   return (
-    <div className="fixed inset-x-0 top-0 bottom-[6.5rem] z-50 bg-black/50 flex items-center justify-center p-4">
+    <div className="fixed inset-x-0 top-0 suite-dock-clearance-bottom z-50 bg-black/50 flex items-center justify-center p-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-7xl h-[90vh] flex flex-col">
         <ArticleFormHeader
           isEditMode={isEditMode}

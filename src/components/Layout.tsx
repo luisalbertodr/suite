@@ -34,7 +34,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           <div className="suite-app-shell min-h-screen bg-background">
             <Screensaver />
             <TopBar />
-            <main className="suite-app-main pt-[var(--suite-topbar-h,3rem)] pb-24 px-4 sm:px-6">
+            <main className="suite-app-main pt-[var(--suite-topbar-h,3rem)] pb-2 px-4 sm:px-6">
               {children}
             </main>
             <DockBar />

@@ -1029,7 +1029,7 @@ export const TPV: React.FC = () => {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-background">
+    <div className="flex flex-col bg-background pb-28">
       {appointmentChargeContext && (
         <div className="mx-4 mt-2 rounded-md border border-sky-200 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/40 px-3 py-2 text-sm text-sky-900 dark:text-sky-100 flex flex-wrap items-center gap-2">
           <span>
@@ -1157,7 +1157,7 @@ export const TPV: React.FC = () => {
       )}
 
       {showVariations && (
-        <div className="fixed inset-x-0 top-0 bottom-[6.5rem] z-50 bg-black/50 flex items-center justify-center p-4">
+        <div className="fixed inset-x-0 top-0 suite-dock-clearance-bottom z-50 bg-black/50 flex items-center justify-center p-4">
           <div className="bg-card rounded-lg p-6 max-w-2xl w-full m-4 max-h-96 overflow-y-auto border border-border">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-semibold">Seleccionar Variación</h3>
@@ -1338,8 +1338,8 @@ export const TPV: React.FC = () => {
         </div>
       </div>
 
-      {/* Elevado sobre el dock fijo (bottom-4, z-50) sin modificar DockBar */}
-      <div className="fixed bottom-28 left-0 right-0 bg-card border-t border-border shadow-lg p-4 z-40">
+      {/* Barra de cobro al borde inferior; el dock expandido se superpone encima. */}
+      <div className="fixed bottom-0 left-0 right-0 bg-card border-t border-border shadow-lg p-4 z-40">
         <div className="flex items-center justify-between max-w-7xl mx-auto">
           <div className="flex items-center space-x-4">
             <div className="flex space-x-2">

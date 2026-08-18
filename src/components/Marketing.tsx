@@ -646,7 +646,7 @@ export const Marketing: React.FC = () => {
         ) : (
           <div
             className={[
-              'w-full min-w-0 overflow-x-scroll overflow-y-hidden scrollbar-kanban h-[calc(100vh-128px)] -mb-24',
+              'w-full min-w-0 overflow-x-scroll overflow-y-hidden scrollbar-kanban suite-h-marketing-kanban',
               draggedLeadId ? '[&_*]:!transition-none' : '',
             ].join(' ')}
           >
