@@ -101,6 +101,12 @@
   :root {
     /* Viewport estable: vh primero (navegadores antiguos); dvh si existe. */
     --suite-vh: 100vh;
+    /* Diálogos dejan este hueco cuando el dock está expandido (overlay). Las pestañas no lo reservan. */
+    --suite-dock-clearance: 6.5rem;
+  }
+
+  html.suite-dock-collapsed {
+    --suite-dock-clearance: 0px;
   }
 
   @supports (height: 100dvh) {
@@ -156,13 +162,19 @@
   .suite-max-h-dialog-xl {
     max-height: min(90vh, calc(var(--suite-vh) - 12rem));
   }
+  .suite-dock-clearance-bottom {
+    bottom: var(--suite-dock-clearance, 6.5rem);
+  }
   .suite-h-whatsapp {
-    height: calc(var(--suite-vh) - 9.5rem);
+    height: calc(var(--suite-vh) - var(--suite-topbar-h, 3rem));
   }
   .suite-h-agenda-viewport {
-    /* TopBar (--suite-topbar-h) + banda dock (~6rem), usando --suite-vh (visualViewport). */
-    height: calc(var(--suite-vh) - var(--suite-topbar-h, 3rem) - 6rem);
-    max-height: calc(var(--suite-vh) - var(--suite-topbar-h, 3rem) - 6rem);
+    /* Solo TopBar: el dock flota encima y no reserva altura. */
+    height: calc(var(--suite-vh) - var(--suite-topbar-h, 3rem));
+    max-height: calc(var(--suite-vh) - var(--suite-topbar-h, 3rem));
+  }
+  .suite-h-marketing-kanban {
+    height: calc(var(--suite-vh) - var(--suite-topbar-h, 3rem) - 4.5rem);
   }
 
   /* Vista agenda: sin scroll del documento. Altura = viewport visible (no 100vh inflado iOS). */

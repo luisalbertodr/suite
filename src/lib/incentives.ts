@@ -503,14 +503,30 @@ export async function fetchIncentiveEmployeeTracks(
   return (data ?? []) as IncentiveEmployeeTrackRow[];
 }
 
+export const INCENTIVE_TRACK_LABELS: Record<IncentiveTrack, string> = {
+  cabina: 'Cabina',
+  recepcion: 'Recepción',
+  none: 'Ninguna',
+};
+
 export async function upsertIncentiveEmployeeTrack(row: IncentiveEmployeeTrackRow): Promise<void> {
-  const { error } = await db.from('incentive_employee_tracks').upsert({
-    employee_id: row.employee_id,
-    company_id: row.company_id,
-    track: row.track,
-    active: row.active,
-    updated_at: new Date().toISOString(),
+  const { error: rpcError } = await db.rpc('incentive_set_employee_track', {
+    p_company_id: row.company_id,
+    p_employee_id: row.employee_id,
+    p_track: row.track,
   });
+  if (!rpcError) return;
+
+  const { error } = await db.from('incentive_employee_tracks').upsert(
+    {
+      employee_id: row.employee_id,
+      company_id: row.company_id,
+      track: row.track,
+      active: row.active,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'employee_id' },
+  );
   if (error) throw error;
 }
 

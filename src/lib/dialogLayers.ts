@@ -13,8 +13,8 @@ export const ABOVE_DIALOG_PORTAL_Z = 'z-[295]';
 /** z-index del DockBar: por encima de modales y popovers para poder cambiar de pestaña. */
 export const DOCK_BAR_Z = 'z-[300]';
 
-/** Franja inferior libre (dock fijo bottom-4 + altura ~4.5rem). */
-export const DOCK_CLEARANCE_BOTTOM = 'bottom-[6.5rem]';
+/** Franja inferior libre para diálogos cuando el dock está expandido (CSS `--suite-dock-clearance`). */
+export const DOCK_CLEARANCE_BOTTOM = 'suite-dock-clearance-bottom';
 
 /** TopBar fija: deja el popup por debajo (`--suite-topbar-h` = 3rem o 6rem). */
 export const TOP_BAR_CLEARANCE = 'top-[var(--suite-topbar-h,3rem)]';
@@ -24,14 +24,14 @@ export const TOP_BAR_CLEARANCE = 'top-[var(--suite-topbar-h,3rem)]';
  * Usar en Dialog/AlertDialog y en modales custom `fixed inset-0`.
  */
 export const DOCK_SAFE_MODAL_SHELL =
-  'fixed inset-x-0 top-0 bottom-[6.5rem] flex items-center justify-center p-3 sm:p-4';
+  'fixed inset-x-0 top-0 suite-dock-clearance-bottom flex items-center justify-center p-3 sm:p-4';
 
 /**
  * Shell para modales de agenda (nueva/editar cita): libre de TopBar + dock,
  * anclado arriba para que el encabezado nunca quede fuera de pantalla.
  */
 export const AGENDA_MODAL_SHELL =
-  'fixed inset-x-0 top-[var(--suite-topbar-h,3rem)] bottom-[6.5rem] flex items-start justify-center overflow-y-auto p-3 sm:p-4';
+  'fixed inset-x-0 top-[var(--suite-topbar-h,3rem)] suite-dock-clearance-bottom flex items-start justify-center overflow-y-auto p-3 sm:p-4';
 
 /** z-index de diálogos estándar (por debajo del dock). */
 export const ABOVE_DOCK_DIALOG_Z = 'z-[125]';

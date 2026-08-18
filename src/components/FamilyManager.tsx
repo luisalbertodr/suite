@@ -161,7 +161,7 @@ export const FamilyManager: React.FC<FamilyManagerProps> = ({ onClose }) => {
 
   if (error) {
     return (
-      <div className="fixed inset-x-0 top-0 bottom-[6.5rem] z-50 bg-black/50 flex items-center justify-center p-4">
+      <div className="fixed inset-x-0 top-0 suite-dock-clearance-bottom z-50 bg-black/50 flex items-center justify-center p-4">
         <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[80vh] overflow-y-auto">
           <div className="p-6 border-b border-gray-200">
             <div className="flex items-center justify-between">
@@ -185,7 +185,7 @@ export const FamilyManager: React.FC<FamilyManagerProps> = ({ onClose }) => {
   }
 
   return (
-    <div className="fixed inset-x-0 top-0 bottom-[6.5rem] z-50 bg-black/50 flex items-center justify-center p-4">
+    <div className="fixed inset-x-0 top-0 suite-dock-clearance-bottom z-50 bg-black/50 flex items-center justify-center p-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[80vh] overflow-y-auto">
         <div className="p-6 border-b border-gray-200">
           <div className="flex items-center justify-between">

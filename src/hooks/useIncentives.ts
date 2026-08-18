@@ -24,6 +24,7 @@ import {
   type IncentiveShare,
 } from '@/lib/incentives';
 import { ESTETICA_COMPANY_ID } from '@/lib/workCenterBilling';
+import { useWorkCenter } from '@/hooks/useWorkCenter';
 
 function useIncentiveBoardCompanyId(): string | null {
   const { companyId, accessibleCompanies } = useCompanyFilter();
@@ -31,6 +32,18 @@ function useIncentiveBoardCompanyId(): string | null {
     return ESTETICA_COMPANY_ID;
   }
   return companyId;
+}
+
+function useIncentiveAdminCompanyId(): string | null {
+  const { companyId } = useCompanyFilter();
+  const { operationalCompanyId } = useWorkCenter();
+  return operationalCompanyId ?? companyId;
+}
+
+function useCanManageIncentives(): { allowed: boolean; loading: boolean } {
+  const { hasPermission, loading } = usePermissions();
+  const isAdmin = useIsIncentiveAdmin();
+  return { allowed: hasPermission('incentives', 'manage') || isAdmin, loading };
 }
 
 export function useIncentiveMySummary(options?: { boardPermission?: boolean }) {
@@ -75,63 +88,58 @@ export function useIncentiveBoardTeam() {
 }
 
 export function useIncentiveAdminOverview() {
-  const { companyId } = useCompanyFilter();
-  const { hasPermission, loading } = usePermissions();
-  const canManage = hasPermission('incentives', 'manage');
+  const companyId = useIncentiveAdminCompanyId();
+  const { allowed, loading } = useCanManageIncentives();
 
   return useQuery({
     queryKey: ['incentive-admin-overview', companyId],
     queryFn: () => fetchIncentiveAdminOverview(companyId!),
-    enabled: Boolean(companyId) && !loading && canManage,
+    enabled: Boolean(companyId) && !loading && allowed,
     staleTime: 15_000,
   });
 }
 
 export function useIncentiveSettings() {
-  const { companyId } = useCompanyFilter();
-  const { hasPermission, loading } = usePermissions();
-  const canManage = hasPermission('incentives', 'manage');
+  const companyId = useIncentiveAdminCompanyId();
+  const { allowed, loading } = useCanManageIncentives();
 
   return useQuery({
     queryKey: ['incentive-settings', companyId],
     queryFn: () => fetchIncentiveSettings(companyId!),
-    enabled: Boolean(companyId) && !loading && canManage,
+    enabled: Boolean(companyId) && !loading && allowed,
   });
 }
 
 export function useIncentiveBonusRules() {
-  const { companyId } = useCompanyFilter();
-  const { hasPermission, loading } = usePermissions();
-  const canManage = hasPermission('incentives', 'manage');
+  const companyId = useIncentiveAdminCompanyId();
+  const { allowed, loading } = useCanManageIncentives();
 
   return useQuery({
     queryKey: ['incentive-bonus-rules', companyId],
     queryFn: () => fetchIncentiveBonusRules(companyId!),
-    enabled: Boolean(companyId) && !loading && canManage,
+    enabled: Boolean(companyId) && !loading && allowed,
   });
 }
 
 export function useIncentiveMilestones() {
-  const { companyId } = useCompanyFilter();
-  const { hasPermission, loading } = usePermissions();
-  const canManage = hasPermission('incentives', 'manage');
+  const companyId = useIncentiveAdminCompanyId();
+  const { allowed, loading } = useCanManageIncentives();
 
   return useQuery({
     queryKey: ['incentive-milestones', companyId],
     queryFn: () => fetchIncentiveMilestones(companyId!),
-    enabled: Boolean(companyId) && !loading && canManage,
+    enabled: Boolean(companyId) && !loading && allowed,
   });
 }
 
 export function useIncentiveEmployeeTracks() {
-  const { companyId } = useCompanyFilter();
-  const { hasPermission, loading } = usePermissions();
-  const canManage = hasPermission('incentives', 'manage');
+  const companyId = useIncentiveAdminCompanyId();
+  const { allowed, loading } = useCanManageIncentives();
 
   return useQuery({
     queryKey: ['incentive-employee-tracks', companyId],
     queryFn: () => fetchIncentiveEmployeeTracks(companyId!),
-    enabled: Boolean(companyId) && !loading && canManage,
+    enabled: Boolean(companyId) && !loading && allowed,
   });
 }
 
@@ -143,6 +151,7 @@ export function useUpsertIncentiveEmployeeTrack() {
       queryClient.invalidateQueries({ queryKey: ['incentive-employee-tracks'] });
       queryClient.invalidateQueries({ queryKey: ['incentive-admin-overview'] });
       queryClient.invalidateQueries({ queryKey: ['incentive-my-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['incentive-board-team'] });
     },
   });
 }

@@ -191,7 +191,7 @@ export const BonusDefinitionsManager: React.FC<Props> = ({ onClose }) => {
   };
 
   return (
-    <div className="fixed inset-x-0 top-0 bottom-[6.5rem] z-50 bg-black/50 flex items-center justify-center p-4">
+    <div className="fixed inset-x-0 top-0 suite-dock-clearance-bottom z-50 bg-black/50 flex items-center justify-center p-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-6xl h-[85vh] overflow-hidden">
         <div className="p-4 border-b flex items-center justify-between">
           <h3 className="text-lg font-semibold">Plantillas globales de bonos</h3>

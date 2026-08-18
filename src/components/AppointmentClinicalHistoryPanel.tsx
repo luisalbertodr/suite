@@ -162,7 +162,7 @@ export const AppointmentClinicalHistoryPanel: React.FC<Props> = ({
     <PanelAwareBodyPortal open={open}>
     <div
       className={cn(
-        `fixed inset-x-0 top-0 ${DOCK_CLEARANCE_BOTTOM} flex items-start sm:items-center justify-center px-3 pt-3 pb-24 sm:p-4`,
+        `fixed inset-x-0 top-0 ${DOCK_CLEARANCE_BOTTOM} flex items-start sm:items-center justify-center px-3 pt-3 pb-3 sm:p-4`,
         AGENDA_CLINICAL_HISTORY_OVERLAY_Z,
       )}
       role="dialog"

@@ -85,7 +85,7 @@ export const PlanillaForm: React.FC<PlanillaFormProps> = ({
 
   if (companyLoading) {
     return (
-      <div className="fixed inset-x-0 top-0 bottom-[6.5rem] z-50 bg-black/50 flex items-center justify-center p-4">
+      <div className="fixed inset-x-0 top-0 suite-dock-clearance-bottom z-50 bg-black/50 flex items-center justify-center p-4">
         <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
           <div className="flex items-center justify-center">
             <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
@@ -98,7 +98,7 @@ export const PlanillaForm: React.FC<PlanillaFormProps> = ({
 
   if (!companyId) {
     return (
-      <div className="fixed inset-x-0 top-0 bottom-[6.5rem] z-50 bg-black/50 flex items-center justify-center p-4">
+      <div className="fixed inset-x-0 top-0 suite-dock-clearance-bottom z-50 bg-black/50 flex items-center justify-center p-4">
         <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
           <div className="text-center">
             <h2 className="text-xl font-semibold text-red-600 mb-2">Error</h2>
@@ -117,7 +117,7 @@ export const PlanillaForm: React.FC<PlanillaFormProps> = ({
   }
 
   return (
-    <div className="fixed inset-x-0 top-0 bottom-[6.5rem] z-50 bg-black/50 flex items-center justify-center p-4">
+    <div className="fixed inset-x-0 top-0 suite-dock-clearance-bottom z-50 bg-black/50 flex items-center justify-center p-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
           <h2 className="text-xl font-semibold text-gray-900">
