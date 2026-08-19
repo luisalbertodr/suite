@@ -560,7 +560,8 @@ export class RenphoMsc04Adapter
       bleLog.info(`Renpho R-MSC04: replaying ${queued.length} early body-comp frame(s)`);
       for (const frame of queued) {
         const r = this.decodeBodyCompFrame(frame);
-        if (r && this.isComplete(r)) {
+        // Nunca entregar un histórico almacenado como si fuera la lectura actual.
+        if (r && !r.timestamp && this.isComplete(r)) {
           this.postHandshakeReading = r;
           break;
         }
@@ -866,7 +867,9 @@ export class RenphoMsc04Adapter
     const fresh =
       cmd === CMD_BODY_LIVE ||
       ageS < FRESH_AGE_S ||
-      (matchesExpect && ageS < MATCH_AGE_S);
+      // Un histórico que solo trae peso no debe ganar solo por coincidir el kg;
+      // esperar al frame actual evita reutilizar composiciones viejas/huérfanas.
+      (!weightOnlyComp && matchesExpect && ageS < MATCH_AGE_S);
 
     bleLog.info(
       `Renpho R-MSC04: body-comp 0x${cmd.toString(16)} age=${ageS}s ` +
