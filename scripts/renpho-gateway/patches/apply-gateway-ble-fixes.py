@@ -213,9 +213,11 @@ def patch_discovery() -> None:
     text = DISCOVERY.read_text(encoding="utf-8")
     # Si el discovery.ts ya estaba parcheado con una ruta antigua (subiendo 3 niveles),
     # corrige siempre para apuntar a src/suite-pending.ts.
-    text = text.replace(
-        "from '../../../suite-pending.js';",
-        "from '../../suite-pending.js';",
+    # Robustez: admite comillas simples/dobles y espacios.
+    text = re.sub(
+        r"from\s+['\"]\.\./\.\./\.\./suite-pending\.js['\"]",
+        "from '../../suite-pending.js'",
+        text,
     )
     # discovery.ts vive en src/ble/handler-node-ble/, así que para llegar a src/suite-pending.ts
     # hay que subir 2 niveles: ../../suite-pending.js (subir 3 lleva fuera de /src).
