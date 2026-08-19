@@ -37,6 +37,7 @@ function isIdleFailure(err: unknown): boolean {
   if (bleFailureKind(err) === 'idle') return true;
   const msg = errMsg(err).toLowerCase();
   return (
+    msg.includes('no pending weigh request') ||
     msg.includes('timed out') ||
     msg.includes('device not found') ||
     msg.includes('no device') ||

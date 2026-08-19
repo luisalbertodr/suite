@@ -67,6 +67,11 @@ export async function autoDiscover(
   const deadline = Date.now() + DISCOVERY_TIMEOUT_MS;
   let heartbeat = 0;
   const allow = allowedScaleMacs();
+  const pending = await fetchPendingWeigh(true);
+  if (!pending.pending || !pending.ready) {
+    bleLog.debug('Auto-discovery idle: no pending weigh request');
+    throw new Error('No pending weigh request');
+  }
   const targetMac = getTargetScaleMac();
   const pollMs = allow || targetMac ? ALLOWLIST_POLL_MS : DISCOVERY_POLL_MS;
   const renphoFallback =
@@ -206,8 +211,8 @@ def patch_loop() -> None:
 
 def patch_discovery() -> None:
     text = DISCOVERY.read_text(encoding="utf-8")
-    import_line = "import { getTargetScaleMac } from '../../../suite-pending.js';\n"
-    if "getTargetScaleMac" not in text:
+    import_line = "import { fetchPendingWeigh, getTargetScaleMac } from '../../../suite-pending.js';\n"
+    if "fetchPendingWeigh" not in text:
         anchor = "import { resolveAdapter } from '../../scales/resolve.js';\n"
         if anchor not in text:
             raise SystemExit("discovery.ts: resolveAdapter import not found")
