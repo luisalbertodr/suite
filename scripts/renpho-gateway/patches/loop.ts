@@ -3,10 +3,11 @@ import { abortableSleep } from '../ble/types.js';
 import { bleFailureKind } from '../ble/failure-kind.js';
 import { createLogger } from '../logger.js';
 import { errMsg } from '../utils/error.js';
+import { waitUntilWeighPending } from '../suite-pending.js';
 
 const log = createLogger('Sync');
 
-/** MorphoScan only advertises while in use — keep scanning nearly always on idle. */
+/** Reintento rápido cuando hay petición «Pesar» abierta pero la báscula no anuncia aún. */
 const IDLE_RETRY_MS = 500;
 /** Short backoff after GATT/disconnect storms (avoids BlueZ "In Progress"). */
 const CONN_BACKOFF_INITIAL_MS = 2_000;
@@ -78,6 +79,10 @@ export async function runContinuousLoop(deps: RuntimeLoopDeps): Promise<void> {
     while (!signal.aborted) {
       try {
         touchHeartbeat();
+
+        // Sin petición «Pesar» abierta: no escanear BLE (modo idle).
+        await waitUntilWeighPending(signal);
+        if (signal.aborted) break;
 
         // Start hook is idempotent in every concrete source: ReadingWatcher
         // (mqtt-proxy, esphome-proxy) early-returns when `this.started === true`,

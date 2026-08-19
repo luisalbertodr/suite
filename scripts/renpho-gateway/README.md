@@ -4,29 +4,23 @@
 #
 # Instalar / actualizar continuo:
 #   .\scripts\renpho-gateway\install-continuous.ps1
+#   .\scripts\renpho-gateway\install-continuous.ps1 -SshTarget suite-web
 #
 # El servicio systemd `ble-scale-sync` corre siempre (CONTINUOUS_MODE).
-# Suite solo asigna cliente con «Pesar ahora»; no arranca el bridge.
+# Suite asigna cliente y báscula con «Pesar» / «Pesar+»; el bridge solo escanea BLE
+# mientras haya petición abierta (modo idle/active, TTL 5 min).
 #
 # Requisitos: no usar la app Renpho Health a la vez en esa báscula.
 # Tras instalar, `npm run validate` debe mostrar ≥1 exporter(s).
 #
-# Parche R-MSC04 (MorphoScan Nova) — body fat real + perfil «Pesar ahora»:
-#   scripts/renpho-gateway/patches/renpho-msc04.ts
-# Handshake + acks + frames 0x25/0x26. Si hay petición abierta en Suite,
-# GET scale-ingest?pending=1 aporta altura/edad/sexo del paciente.
-# Copiar a: /root/renpho-gateway/ble-scale-sync/src/scales/renpho-msc04.ts
-# y reiniciar: systemctl restart ble-scale-sync
+# Parches (install-continuous.ps1 los sube y aplica con apply-gateway-ble-fixes.py):
+#   suite-pending.ts   — poll ?pending=1 + target_scale_mac
+#   renpho-msc04.ts    — handshake BIA con perfil del paciente
+#   loop.ts (parche)   — idle sin escaneo BLE hasta «Pesar»
+#   discovery.ts       — conecta solo la MAC elegida (Pesar / Pesar+)
 #
-# Escaneo BLE casi continuo (parche loop.ts):
-#   - Idle / timeout: reintenta en ~0.5s (no pausa de 60s)
-#   - Error de conexión: backoff corto 2–5s (protege BlueZ)
-#   - Tras un pesaje OK: cooldown 5s (mín. ~25s grace post-disconnect)
+# Botones Suite:
+#   «Pesar»   → 60:30:F2:74:26:E2 (Morpho, referencia)
+#   «Pesar+»  → 60:30:F2:74:22:B6 (Morpho+3, ~+100–300 g en pesajes simultáneos)
 #
-# Varias MorphoScan (mismo centro):
-#   - No fijar ble.scale_mac → auto-discovery
-#   - .env SCALE_MACS=MAC1,MAC2  (allowlist)
-#   - Actual: 60:30:F2:74:26:E2 (Morpho) + 60:30:F2:74:22:B6 (Morpho+3, ~+0,3 kg)
-#   - Una sola cola «Pesar ahora» por company_id: la primera báscula que mida vincula
-#   - El JSON lleva external_user_id=scale-<MAC> para distinguir unidades
-#   - Suite etiqueta el selector: Morpho vs Morpho+3 según MAC
+# .env SCALE_MACS=MAC1,MAC2 (allowlist; ambas deben estar listadas)

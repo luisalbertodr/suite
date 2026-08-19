@@ -1,17 +1,25 @@
 """
 Patch ble-scale-sync on the MorphoScan gateway:
-  - autoDiscover: prefer allowlisted peers with live RSSI (strongest wins)
+  - suite-pending.ts + renpho-msc04.ts (Pesar / Pesar+ con MAC fija)
+  - loop.ts: idle hasta petición «Pesar» abierta
+  - autoDiscover: MAC objetivo de Suite + allowlist RSSI
   - shared.ts: flush early body-comp reading after onConnected
 """
 from __future__ import annotations
 
 import pathlib
 import re
-import sys
+import shutil
 
 ROOT = pathlib.Path("/root/renpho-gateway/ble-scale-sync")
+PATCHES = pathlib.Path(__file__).resolve().parent
 DISCOVERY = ROOT / "src/ble/handler-node-ble/discovery.ts"
 SHARED = ROOT / "src/ble/shared.ts"
+LOOP_CANDIDATES = [
+    ROOT / "src/runtime/loop.ts",
+    ROOT / "src/sync/loop.ts",
+    ROOT / "src/loop.ts",
+]
 
 AUTO_DISCOVER_FN = r'''
 function normalizeMac(mac: string): string {
@@ -59,12 +67,16 @@ export async function autoDiscover(
   const deadline = Date.now() + DISCOVERY_TIMEOUT_MS;
   let heartbeat = 0;
   const allow = allowedScaleMacs();
-  const pollMs = allow ? ALLOWLIST_POLL_MS : DISCOVERY_POLL_MS;
+  const targetMac = getTargetScaleMac();
+  const pollMs = allow || targetMac ? ALLOWLIST_POLL_MS : DISCOVERY_POLL_MS;
   const renphoFallback =
     adapters.find((a) => /r-msc04/i.test(a.name)) ??
     adapters.find((a) => /renpho/i.test(a.name)) ??
     null;
-  if (allow) {
+  if (targetMac) {
+    const label = targetMac.match(/.{1,2}/g)?.join(':') ?? targetMac;
+    bleLog.info(`Auto-discovery target scale: ${label} (poll ${pollMs}ms)`);
+  } else if (allow) {
     bleLog.info(
       `Auto-discovery allowlist: ${[...allow].map((m) => m.match(/.{1,2}/g)?.join(':') ?? m).join(', ')} ` +
         `(poll ${pollMs}ms)`,
@@ -79,30 +91,12 @@ export async function autoDiscover(
     const fresh: DiscoverCandidate[] = [];
     const staleAllowlisted: string[] = [];
 
-    // Drop LE noise so MorphoScan public MACs are not starved on CSR dongles.
-    if (allow && heartbeat > 0 && heartbeat % 20 === 0) {
-      let pruned = 0;
-      for (const addr of addresses) {
-        const mac = normalizeMac(addr);
-        if (allow.has(mac)) continue;
-        if (pruned >= 25) break;
-        try {
-          await removeDevice(btAdapter, addr);
-          pruned += 1;
-        } catch {
-          /* ignore */
-        }
-      }
-      if (pruned > 0) {
-        bleLog.info(`Auto-discovery: pruned ${pruned} non-allowlisted BLE device(s)`);
-      }
-    }
-
     for (const addr of addresses) {
       try {
         const mac = normalizeMac(addr);
         // Filter BEFORE getDevice — otherwise node-ble attaches PropertiesChanged
         // listeners to every nearby phone/watch and trips MaxListenersExceeded.
+        if (targetMac && mac !== targetMac) continue;
         if (allow && !allow.has(mac)) {
           continue;
         }
@@ -116,13 +110,11 @@ export async function autoDiscover(
           matched = resolveAdapter(info, adapters);
         }
         // MorphoScan often appears MAC-only (empty Name) for the first ads.
-        if (!matched && allow?.has(mac) && renphoFallback) {
+        if (!matched && (allow?.has(mac) || mac === targetMac) && renphoFallback) {
           matched = renphoFallback;
         }
         if (!matched) continue;
 
-        // Idle MorphoScan siblings stay in BlueZ cache without a live RSSI.
-        // Only connect to peers that are advertising now (person on the scale).
         const rssi = await readDeviceRssi(dev);
         if (rssi === undefined || rssi === RSSI_UNAVAILABLE) {
           staleAllowlisted.push(`${name || matched.name}[${addr}]`);
@@ -136,10 +128,10 @@ export async function autoDiscover(
     }
 
     if (fresh.length > 0) {
-      fresh.sort((a, b) => b.rssi - a.rssi);
+      if (!targetMac) fresh.sort((a, b) => b.rssi - a.rssi);
       const best = fresh[0];
       const also =
-        fresh.length > 1
+        !targetMac && fresh.length > 1
           ? ` (also ${fresh
               .slice(1)
               .map((c) => `${c.addr} rssi=${c.rssi}`)
@@ -169,14 +161,63 @@ export async function autoDiscover(
 '''
 
 
+def copy_static_patches() -> None:
+    shutil.copy2(PATCHES / "suite-pending.ts", ROOT / "src/suite-pending.ts")
+    shutil.copy2(PATCHES / "renpho-msc04.ts", ROOT / "src/scales/renpho-msc04.ts")
+    print("suite-pending.ts + renpho-msc04.ts copied")
+
+
+def find_loop_file() -> pathlib.Path:
+    for path in LOOP_CANDIDATES:
+        if path.is_file():
+            return path
+    raise SystemExit(f"loop.ts not found under {ROOT}")
+
+
+def patch_loop() -> None:
+    loop_path = find_loop_file()
+    text = loop_path.read_text(encoding="utf-8")
+    if "waitUntilWeighPending" in text:
+        print(f"{loop_path.name}: already has idle gate")
+        return
+
+    import_line = "import { waitUntilWeighPending } from '../suite-pending.js';\n"
+    anchor = "import { errMsg } from '../utils/error.js';\n"
+    if anchor not in text:
+        raise SystemExit(f"{loop_path}: errMsg import not found")
+    text = text.replace(anchor, anchor + import_line, 1)
+
+    idle_block = (
+        "        // Sin petición «Pesar» abierta: no escanear BLE (modo idle).\n"
+        "        await waitUntilWeighPending(signal);\n"
+        "        if (signal.aborted) break;\n\n"
+    )
+    text, n = re.subn(
+        r"(        touchHeartbeat\(\);\n)(\n        // Start hook is idempotent)",
+        r"\1\n" + idle_block + r"\2",
+        text,
+        count=1,
+    )
+    if n != 1:
+        raise SystemExit(f"{loop_path}: could not inject idle gate")
+    loop_path.write_text(text, encoding="utf-8")
+    print(f"{loop_path.relative_to(ROOT)}: idle gate patched")
+
+
 def patch_discovery() -> None:
     text = DISCOVERY.read_text(encoding="utf-8")
+    import_line = "import { getTargetScaleMac } from '../../../suite-pending.js';\n"
+    if "getTargetScaleMac" not in text:
+        anchor = "import { resolveAdapter } from '../../scales/resolve.js';\n"
+        if anchor not in text:
+            raise SystemExit("discovery.ts: resolveAdapter import not found")
+        text = text.replace(anchor, anchor + import_line, 1)
+
     if "RSSI_UNAVAILABLE" not in text.split("autoDiscover")[0]:
         text = text.replace(
             "  POST_DISCOVERY_QUIESCE_MS,\n} from '../types.js';",
             "  POST_DISCOVERY_QUIESCE_MS,\n  RSSI_UNAVAILABLE,\n} from '../types.js';",
         )
-    # Always rewrite autoDiscover so allowlist is checked BEFORE getDevice.
     pattern = re.compile(
         r"\nfunction normalizeMac\(mac: string\): string \{.*?"
         r"throw new Error\(`No recognized scale found within \$\{DISCOVERY_TIMEOUT_MS / 1000\}s`\);\n\}\n",
@@ -186,7 +227,7 @@ def patch_discovery() -> None:
     if n != 1:
         raise SystemExit(f"discovery.ts: failed to replace autoDiscover (n={n})")
     DISCOVERY.write_text(new_text, encoding="utf-8")
-    print("discovery.ts: patched autoDiscover (RSSI + allowlist-before-getDevice)")
+    print("discovery.ts: patched autoDiscover (target MAC + allowlist-before-getDevice)")
 
 
 def patch_shared() -> None:
@@ -221,6 +262,8 @@ def patch_shared() -> None:
 def main() -> None:
     if not ROOT.is_dir():
         raise SystemExit(f"missing {ROOT}")
+    copy_static_patches()
+    patch_loop()
     patch_discovery()
     patch_shared()
     print("OK")
