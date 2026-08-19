@@ -121,12 +121,12 @@ export function scaleDeviceFromMeasurement(m: Pick<InbodyMeasurement, 'device' |
 
 /**
  * MAC allowlist del gateway (mail):
- * - 60:30:F2:74:22:B6 → pesa ~+0,3 kg respecto a la otra → «Morpho+3»
- * - 60:30:F2:74:26:E2 → «Morpho»
+ * - 60:30:F2:74:26:E2 → operativamente «Pesar+»
+ * - 60:30:F2:74:22:B6 → operativamente «Pesar»
  * Comparativas emparejadas (mismo paciente <15 min): Gemma +0,30 / Marta +0,30 / Luis +0,15.
  */
-export const MORPHO_SCALE_PLUS3_MAC = '6030F27422B6';
-export const MORPHO_SCALE_BASE_MAC = '6030F27426E2';
+export const MORPHO_SCALE_PLUS3_MAC = '6030F27426E2';
+export const MORPHO_SCALE_BASE_MAC = '6030F27422B6';
 
 export type MorphoWeighTarget = 'base' | 'plus3';
 
