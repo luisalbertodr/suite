@@ -211,7 +211,9 @@ def patch_loop() -> None:
 
 def patch_discovery() -> None:
     text = DISCOVERY.read_text(encoding="utf-8")
-    import_line = "import { fetchPendingWeigh, getTargetScaleMac } from '../../../suite-pending.js';\n"
+    # discovery.ts vive en src/ble/handler-node-ble/, así que para llegar a src/suite-pending.ts
+    # hay que subir 2 niveles: ../../suite-pending.js (subir 3 lleva fuera de /src).
+    import_line = "import { fetchPendingWeigh, getTargetScaleMac } from '../../suite-pending.js';\n"
     if "fetchPendingWeigh" not in text:
         anchor = "import { resolveAdapter } from '../../scales/resolve.js';\n"
         if anchor not in text:
