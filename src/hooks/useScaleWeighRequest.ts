@@ -17,6 +17,7 @@ export type ScaleWeighRequest = {
   fulfilled_at: string | null;
   measurement_id: string | null;
   matched_weight_kg: number | null;
+  target_scale_mac?: string | null;
   height_cm?: number | null;
   age_years?: number | null;
   sex?: string | null;
@@ -54,7 +55,7 @@ export function useActiveScaleWeighRequest(
       const { data, error } = await (supabase as any)
         .from('scale_weigh_requests')
         .select(
-          'id, company_id, customer_id, status, created_at, expires_at, fulfilled_at, measurement_id, matched_weight_kg, height_cm, age_years, sex, profile_name',
+          'id, company_id, customer_id, status, created_at, expires_at, fulfilled_at, measurement_id, matched_weight_kg, target_scale_mac, height_cm, age_years, sex, profile_name',
         )
         .eq('company_id', companyId)
         .eq('customer_id', customerId)
@@ -99,6 +100,7 @@ export function useStartScaleWeighRequest() {
       ageYears: number;
       sex: 'M' | 'F';
       profileName?: string | null;
+      targetScaleMac: string;
     }) => {
       const {
         data: { user },
@@ -126,9 +128,10 @@ export function useStartScaleWeighRequest() {
           age_years: input.ageYears,
           sex: input.sex,
           profile_name: (input.profileName || 'Suite').trim().slice(0, 8) || 'Suite',
+          target_scale_mac: input.targetScaleMac,
         })
         .select(
-          'id, company_id, customer_id, status, created_at, expires_at, fulfilled_at, measurement_id, matched_weight_kg, height_cm, age_years, sex, profile_name',
+          'id, company_id, customer_id, status, created_at, expires_at, fulfilled_at, measurement_id, matched_weight_kg, target_scale_mac, height_cm, age_years, sex, profile_name',
         )
         .single();
 

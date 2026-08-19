@@ -337,6 +337,25 @@ function authorize(req: Request): boolean {
   return false;
 }
 
+function normalizeMac(value: string | null | undefined): string {
+  return (value || '').replace(/[^a-fA-F0-9]/g, '').toUpperCase();
+}
+
+function macFromScaleIdentity(value: string | null | undefined): string | null {
+  const s = asString(value);
+  if (!s) return null;
+  const scaleMatch = s.match(/^scale[-:]?([0-9A-Fa-f]{12})$/i);
+  if (scaleMatch) return normalizeMac(scaleMatch[1]);
+  const embedded = s.match(/([0-9A-Fa-f]{12})/);
+  return embedded ? normalizeMac(embedded[1]) : null;
+}
+
+function macFromRequest(req: Request, body: ScaleIngestBody): string | null {
+  const fromHeader = req.headers.get('x-suite-scale-id')?.trim();
+  const fromBody = asString(body.external_user_id) || asString(body.inbody_user_id);
+  return macFromScaleIdentity(fromHeader) || macFromScaleIdentity(fromBody);
+}
+
 async function findOpenWeighRequest(
   admin: SupabaseClient,
   companyId: string,
@@ -347,6 +366,7 @@ async function findOpenWeighRequest(
   age_years: number | null;
   sex: string | null;
   profile_name: string | null;
+  target_scale_mac: string | null;
 } | null> {
   const nowIso = new Date().toISOString();
 
@@ -360,7 +380,7 @@ async function findOpenWeighRequest(
 
   const { data } = await admin
     .from('scale_weigh_requests')
-    .select('id, customer_id, expires_at, height_cm, age_years, sex, profile_name')
+    .select('id, customer_id, expires_at, height_cm, age_years, sex, profile_name, target_scale_mac')
     .eq('company_id', companyId)
     .eq('status', 'open')
     .gt('expires_at', nowIso)
@@ -376,6 +396,7 @@ async function findOpenWeighRequest(
     age_years: asNumber(data.age_years) != null ? Math.trunc(asNumber(data.age_years)!) : null,
     sex: asString(data.sex),
     profile_name: asString(data.profile_name),
+    target_scale_mac: normalizeMac(asString(data.target_scale_mac)) || null,
   };
 }
 
@@ -443,6 +464,7 @@ async function pendingWeighProfile(req: Request): Promise<Response> {
     age_years: ageYears,
     sex: gender === 'male' ? 'M' : gender === 'female' ? 'F' : null,
     gender,
+    target_scale_mac: normalizeMac(asString(weigh.target_scale_mac)) || null,
   });
 }
 
@@ -1061,9 +1083,25 @@ serve(async (req) => {
   }
 
   if (weighRequest && link.matchedBy === 'weigh_request' && upserted?.id) {
-    await fulfillWeighRequest(admin, weighRequest.id, upserted.id, weightKg);
+    const expectedMac = normalizeMac(weighRequest.target_scale_mac);
+    const actualMac = macFromRequest(req, body);
+    if (expectedMac && actualMac && expectedMac !== actualMac) {
+      console.warn(
+        `scale-ingest: measurement from ${actualMac} ignored for weigh request (expected ${expectedMac})`,
+      );
+    } else {
+      await fulfillWeighRequest(admin, weighRequest.id, upserted.id, weightKg);
+    }
   } else if (weighRequest && link.customerId === weighRequest.customer_id && upserted?.id) {
-    await fulfillWeighRequest(admin, weighRequest.id, upserted.id, weightKg);
+    const expectedMac = normalizeMac(weighRequest.target_scale_mac);
+    const actualMac = macFromRequest(req, body);
+    if (expectedMac && actualMac && expectedMac !== actualMac) {
+      console.warn(
+        `scale-ingest: measurement from ${actualMac} ignored for weigh request (expected ${expectedMac})`,
+      );
+    } else {
+      await fulfillWeighRequest(admin, weighRequest.id, upserted.id, weightKg);
+    }
   }
 
   return json({

@@ -18,6 +18,7 @@ import type { BleDeviceInfo, ScaleAdapter } from '../../interfaces/scale-adapter
 import { resolveAdapter } from '../../scales/resolve.js';
 import { bleLog } from '../types.js';
 import { DISCOVERY_TIMEOUT_MS, DISCOVERY_POLL_MS, sleep, RSSI_UNAVAILABLE } from './constants.js';
+import { getTargetScaleMac } from '../../../suite-pending.js';
 
 function normalizeMac(mac: string): string {
   return mac.replace(/[^a-fA-F0-9]/g, '').toUpperCase();
@@ -102,12 +103,17 @@ export async function autoDiscover(
   const deadline = Date.now() + DISCOVERY_TIMEOUT_MS;
   let heartbeat = 0;
   const allow = allowedScaleMacs();
-  const pollMs = allow ? ALLOWLIST_POLL_MS : DISCOVERY_POLL_MS;
+  const targetMac = getTargetScaleMac();
+  const pollMs = allow || targetMac ? ALLOWLIST_POLL_MS : DISCOVERY_POLL_MS;
   const renphoFallback =
     adapters.find((a) => /r-msc04/i.test(a.name)) ??
     adapters.find((a) => /renpho/i.test(a.name)) ??
     null;
-  if (allow) {
+  if (targetMac) {
+    bleLog.info(
+      `Auto-discovery target scale: ${formatMacColons(targetMac)} (poll ${pollMs}ms)`,
+    );
+  } else if (allow) {
     bleLog.info(
       `Auto-discovery allowlist: ${[...allow].map((m) => formatMacColons(m)).join(', ')} ` +
         `(poll ${pollMs}ms)`,
@@ -127,6 +133,7 @@ export async function autoDiscover(
         const mac = normalizeMac(addr);
         // Filter BEFORE getDevice — otherwise node-ble attaches PropertiesChanged
         // listeners to every nearby phone/watch and trips MaxListenersExceeded.
+        if (targetMac && mac !== targetMac) continue;
         if (allow && !allow.has(mac)) continue;
 
         if (inFailCooldown(mac)) {
@@ -170,10 +177,11 @@ export async function autoDiscover(
     }
 
     if (fresh.length > 0) {
-      fresh.sort((a, b) => b.rssi - a.rssi);
+      // Con MAC objetivo solo hay un candidato; sin objetivo, RSSI más fuerte gana.
+      if (!targetMac) fresh.sort((a, b) => b.rssi - a.rssi);
       const best = fresh[0];
       const others =
-        fresh.length > 1
+        !targetMac && fresh.length > 1
           ? ` (also ${fresh
               .slice(1)
               .map((c) => `${c.addr} rssi=${c.rssi}`)

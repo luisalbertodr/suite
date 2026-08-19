@@ -19,6 +19,11 @@ import {
 } from './body-comp-helpers.js';
 import { matchesDescriptor, type MatchDescriptor } from './match-descriptor.js';
 import { bleLog } from '../ble/types.js';
+import {
+  fetchPendingWeigh,
+  startPendingPrefetch,
+  type PendingScaleProfile,
+} from '../suite-pending.js';
 
 // ─── Renpho R-MSC04 / MorphoScan Nova (55AA framed, vendor service 0x1A10) ───
 
@@ -51,10 +56,6 @@ const WEIGHT_ONLY_AFTER_SESSIONS = 3;
 const FRESH_AGE_S = 60;
 const MATCH_AGE_S = 1800;
 const MATCH_WEIGHT_KG = 0.8;
-/** Cache positive Suite pending profile to avoid delaying the BLE handshake. */
-const PENDING_CACHE_MS = 45_000;
-/** Brief TTL for «no pending» so a null fetch does not block the next «Pesar ahora». */
-const PENDING_NEGATIVE_CACHE_MS = 1_500;
 /**
  * Max wait for pending profile before handshake (ms).
  * 350ms was too short for cold edge starts → fell back to config male/26/170
@@ -182,95 +183,9 @@ function buildNameB7(name: string, seq = 0x02): number[] {
   return buildFrame(0xb7, payload);
 }
 
-type PendingScaleProfile = {
-  height: number;
-  age: number;
-  gender: 'male' | 'female';
-  name: string;
-};
-
-let pendingCache: { at: number; profile: PendingScaleProfile | null } | null = null;
-
-/**
- * Fetch open «Pesar ahora» profile from Suite scale-ingest (?pending=1).
- * Falls back to null so the adapter uses config.yaml users[0].
- */
-function pendingCacheTtlMs(profile: PendingScaleProfile | null): number {
-  return profile ? PENDING_CACHE_MS : PENDING_NEGATIVE_CACHE_MS;
-}
-
 async function fetchPendingScaleProfile(): Promise<PendingScaleProfile | null> {
-  const now = Date.now();
-  if (pendingCache && now - pendingCache.at < pendingCacheTtlMs(pendingCache.profile)) {
-    return pendingCache.profile;
-  }
-
-  const secret = (process.env.SCALE_INGEST_SECRET || '').trim().replace(/\r/g, '');
-  const companyId = (process.env.SUITE_COMPANY_ID || '').trim().replace(/\r/g, '');
-  if (!secret || !companyId) {
-    bleLog.info('Renpho R-MSC04: pending profile skipped (missing SCALE_INGEST_SECRET / SUITE_COMPANY_ID)');
-    return null;
-  }
-
-  const base =
-    (process.env.SCALE_INGEST_URL || 'https://supabase.lipoout.com/functions/v1/scale-ingest')
-      .trim()
-      .replace(/\r/g, '')
-      .replace(/\/$/, '');
-  const url = `${base}?pending=1`;
-
-  try {
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'X-Scale-Ingest-Secret': secret,
-        'X-Suite-Company-Id': companyId,
-      },
-      signal: AbortSignal.timeout(4500),
-    });
-    if (!res.ok) {
-      bleLog.info(`Renpho R-MSC04: pending profile HTTP ${res.status}`);
-      return pendingCache?.profile ?? null;
-    }
-    const body = (await res.json()) as {
-      pending?: boolean;
-      ready?: boolean;
-      height_cm?: number;
-      age_years?: number;
-      gender?: string;
-      name?: string;
-    };
-    if (!body.pending || !body.ready) {
-      pendingCache = { at: Date.now(), profile: null };
-      return null;
-    }
-    const height = Number(body.height_cm);
-    const age = Number(body.age_years);
-    const gender = body.gender === 'female' ? 'female' : body.gender === 'male' ? 'male' : null;
-    if (!(height > 0) || !(age > 0) || !gender) {
-      pendingCache = { at: Date.now(), profile: null };
-      bleLog.info(
-        `Renpho R-MSC04: pending profile incomplete (h=${body.height_cm} age=${body.age_years} gender=${body.gender})`,
-      );
-      return null;
-    }
-    const profile: PendingScaleProfile = {
-      height,
-      age,
-      gender,
-      name: (body.name || 'Suite').slice(0, 8),
-    };
-    pendingCache = { at: Date.now(), profile };
-    bleLog.info(
-      `Renpho R-MSC04: pending profile ready ${profile.gender}/${profile.age}y/${profile.height}cm (${profile.name})`,
-    );
-    return profile;
-  } catch (e) {
-    bleLog.info(
-      `Renpho R-MSC04: pending profile fetch failed: ${e instanceof Error ? e.message : String(e)}`,
-    );
-    return pendingCache?.profile ?? null;
-  }
+  const state = await fetchPendingWeigh();
+  return state.profile;
 }
 
 /**
@@ -278,13 +193,14 @@ async function fetchPendingScaleProfile(): Promise<PendingScaleProfile | null> {
  * (that used to skip Suite for 45s and send config male/26/170 instead).
  */
 async function resolvePendingForHandshake(): Promise<PendingScaleProfile | null> {
-  if (pendingCache?.profile && Date.now() - pendingCache.at < PENDING_CACHE_MS) {
-    void fetchPendingScaleProfile();
-    return pendingCache.profile;
+  const warm = await fetchPendingWeigh();
+  if (warm.profile) {
+    void fetchPendingWeigh(true);
+    return warm.profile;
   }
   return await Promise.race([
-    fetchPendingScaleProfile(),
-    sleep(PENDING_HANDSHAKE_WAIT_MS).then(() => pendingCache?.profile ?? null),
+    fetchPendingWeigh(true).then((s) => s.profile),
+    sleep(PENDING_HANDSHAKE_WAIT_MS).then(async () => (await fetchPendingWeigh()).profile),
   ]);
 }
 
@@ -1167,7 +1083,4 @@ export class RenphoMsc04Adapter
 }
 
 /** Keep pending profile warm so handshake rarely falls back to config defaults. */
-const PENDING_PREFETCH_MS = 4_000;
-setInterval(() => {
-  void fetchPendingScaleProfile();
-}, PENDING_PREFETCH_MS).unref?.();
+startPendingPrefetch(4_000);

@@ -42,6 +42,22 @@ if ($LASTEXITCODE -ne 0) { throw "scp config.yaml falló" }
 & scp @SshArgs $serviceSrc "${SshTarget}:/etc/systemd/system/ble-scale-sync.service"
 if ($LASTEXITCODE -ne 0) { throw "scp unit falló" }
 
+Write-Host "Subiendo parches gateway (suite-pending, renpho-msc04, loop, discovery) ..." -ForegroundColor Green
+Invoke-SuiteSsh "mkdir -p '$RemoteDir/patches'"
+$patchesDir = Join-Path $LocalDir "patches"
+$patches = @(
+  "suite-pending.ts",
+  "renpho-msc04.ts",
+  "apply-gateway-ble-fixes.py"
+)
+foreach ($p in $patches) {
+  $src = Join-Path $patchesDir $p
+  if (-not (Test-Path $src)) { throw "Falta parche $src" }
+  & scp @SshArgs $src "${SshTarget}:${RemoteDir}/patches/$p"
+  if ($LASTEXITCODE -ne 0) { throw "scp $p falló" }
+}
+Invoke-SuiteSsh "python3 '$RemoteDir/patches/apply-gateway-ble-fixes.py'"
+
 # .env con secretos (no versionar valores reales en git si se regenera)
 # Conserva SCALE_MACS si ya existe en remoto; si no, usa ambas MorphoScan por defecto.
 $defaultMacs = "60:30:F2:74:26:E2,60:30:F2:74:22:B6"
@@ -68,4 +84,4 @@ Invoke-SuiteSsh "journalctl -u ble-scale-sync.service -n 30 --no-pager"
 
 Write-Host ""
 Write-Host "OK: bridge continuo en $SshTarget" -ForegroundColor Green
-Write-Host "Prueba: Suite → Pesar ahora → subir a la báscula → buscar 'Webhook delivered' en journalctl -u ble-scale-sync -f" -ForegroundColor DarkGray
+Write-Host "Prueba: Suite → Pesar / Pesar+ → subir a la báscula elegida → journalctl -u ble-scale-sync -f" -ForegroundColor DarkGray
