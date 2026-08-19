@@ -154,11 +154,12 @@ export function morphoWeighLabelFromMac(mac: string | null | undefined): 'Pesar'
 }
 
 /** Detecta la unidad Morpho por MAC en inbody_user_id (SCALE…, scale-…, …-22b6). */
-export function morphoScaleUnitLabel(userId: string | null | undefined): 'Morpho+3' | 'Morpho' | null {
+export function morphoScaleUnitLabel(userId: string | null | undefined): 'Morpho+1' | 'Morpho' | null {
   const s = String(userId ?? '').toUpperCase().replace(/[^0-9A-Z]/g, '');
   if (!s) return null;
-  if (s.includes(MORPHO_SCALE_PLUS3_MAC) || s.endsWith('22B6')) return 'Morpho+3';
-  if (s.includes(MORPHO_SCALE_BASE_MAC) || s.endsWith('26E2')) return 'Morpho';
+  // La etiqueta “+1” (antes “+3”) depende del MAC “Pesar+”, sin heurísticas por sufijo.
+  if (s.includes(MORPHO_SCALE_PLUS3_MAC)) return 'Morpho+1';
+  if (s.includes(MORPHO_SCALE_BASE_MAC)) return 'Morpho';
   return null;
 }
 
@@ -166,7 +167,7 @@ export function scaleDeviceLabel(device: ScaleDevice): string {
   return device === 'morphoscan' ? 'MorphoScan' : 'InBody';
 }
 
-/** Etiqueta para selector de sesión: InBody | Morpho | Morpho+3. */
+/** Etiqueta para selector de sesión: InBody | Morpho | Morpho+1. */
 export function measurementSessionDeviceLabel(
   m: Pick<InbodyMeasurement, 'device' | 'source' | 'inbody_user_id'>,
 ): string {

@@ -471,7 +471,7 @@ function ScaleWeighNowControls({
             onClick={() => onClickWeighNow(target)}
             title={
               target === 'plus3'
-                ? 'Báscula Morpho+3 (~100–300 g más que la otra)'
+                ? 'Báscula Morpho+1 (~100–300 g más que la otra)'
                 : 'Báscula Morpho (referencia)'
             }
           >
