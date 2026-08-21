@@ -2,19 +2,9 @@
 """
 Agente local ACR122U (PC/SC) → Suite nfc-auth.
 
-Funciona en Debian/Ubuntu y macOS con el lector USB enchufado en la máquina
-donde corre este proceso (thin client con Chrome local, o host RDP con USB
-redirigido).
-
 Dependencias:
-  Debian:  sudo apt install pcscd pcsc-tools libpcsclite-dev python3-pyscard
+  Debian:  sudo apt install pcscd pcsc-tools libpcsclite1 python3-pyscard
   macOS:   brew install pcsc-lite && pip3 install pyscard
-
-Uso:
-  export NFC_AGENT_SECRET='...'
-  export NFC_STATION_ID='station-recepcion'   # mismo id que en el navegador (localStorage)
-  export NFC_AUTH_URL='https://supabase.lipoout.com/functions/v1/nfc-auth'
-  python3 acr122_agent.py
 """
 from __future__ import annotations
 
@@ -27,7 +17,6 @@ import urllib.request
 
 try:
     from smartcard.System import readers
-    from smartcard.util import toHexString
     from smartcard.Exceptions import CardConnectionException, NoCardException
 except ImportError:
     print("Falta pyscard. Instala: pip3 install pyscard  (y pcscd en el sistema)", file=sys.stderr)
@@ -37,11 +26,12 @@ except ImportError:
 NFC_AUTH_URL = os.environ.get("NFC_AUTH_URL", "https://supabase.lipoout.com/functions/v1/nfc-auth").rstrip("/")
 NFC_AGENT_SECRET = os.environ.get("NFC_AGENT_SECRET", "").strip()
 NFC_STATION_ID = os.environ.get("NFC_STATION_ID", "default").strip() or "default"
-POLL_EMPTY_S = float(os.environ.get("NFC_POLL_EMPTY_S", "0.4"))
+POLL_EMPTY_S = float(os.environ.get("NFC_POLL_EMPTY_S", "0.35"))
 DEBOUNCE_S = float(os.environ.get("NFC_DEBOUNCE_S", "2.5"))
 
-# GET UID (ACR122U / PN532 compatible)
+# GET UID (PC/SC Get Data)
 GET_UID = [0xFF, 0xCA, 0x00, 0x00, 0x00]
+GET_UID_7 = [0xFF, 0xCA, 0x00, 0x00, 0x07]
 
 
 def post_tag(uid: str) -> dict:
@@ -60,14 +50,68 @@ def post_tag(uid: str) -> dict:
         return json.loads(raw) if raw else {}
 
 
-def read_uid(connection) -> str | None:
+def is_plausible_uid(uid: str) -> bool:
+    if not uid:
+        return False
+    # UIDs ISO14443: 4 / 7 / 10 bytes
+    if len(uid) not in (8, 14, 20):
+        return False
+    if set(uid) <= {"0"}:
+        return False
+    # Lecturas corruptas típicas del ACR122U
+    if uid.startswith("0000"):
+        return False
+    if uid.count("F") >= max(4, len(uid) // 2):
+        return False
+    if "FFFFFFFF" in uid:
+        return False
+    return True
+
+
+def transmit_uid(connection, apdu: list[int]) -> str | None:
     try:
-        data, sw1, sw2 = connection.transmit(GET_UID)
+        data, sw1, sw2 = connection.transmit(apdu)
     except CardConnectionException:
         return None
-    if (sw1, sw2) != (0x90, 0x00):
+    if (sw1, sw2) != (0x90, 0x00) or not data:
         return None
     return "".join(f"{b:02X}" for b in data)
+
+
+def read_uid_once(connection) -> str | None:
+    uid = transmit_uid(connection, GET_UID)
+    if is_plausible_uid(uid or ""):
+        return uid
+    uid7 = transmit_uid(connection, GET_UID_7)
+    if is_plausible_uid(uid7 or ""):
+        return uid7
+    return None
+
+
+def read_uid_stable(reader) -> str | None:
+    """Lee 2–3 veces y solo acepta si coincide (evita basura del ACR122U)."""
+    samples: list[str] = []
+    for _ in range(3):
+        connection = reader.createConnection()
+        try:
+            connection.connect()
+        except (NoCardException, CardConnectionException):
+            return None
+        try:
+            uid = read_uid_once(connection)
+        finally:
+            try:
+                connection.disconnect()
+            except Exception:
+                pass
+        if not uid:
+            time.sleep(0.08)
+            continue
+        samples.append(uid)
+        if len(samples) >= 2 and samples[-1] == samples[-2]:
+            return samples[-1]
+        time.sleep(0.08)
+    return None
 
 
 def main() -> int:
@@ -88,24 +132,8 @@ def main() -> int:
                 continue
 
             reader = rs[0]
-            connection = reader.createConnection()
-            try:
-                connection.connect()
-            except (NoCardException, CardConnectionException):
-                time.sleep(POLL_EMPTY_S)
-                continue
-
-            uid = read_uid(connection)
-            try:
-                connection.disconnect()
-            except Exception:
-                pass
-
+            uid = read_uid_stable(reader)
             if not uid:
-                time.sleep(POLL_EMPTY_S)
-                continue
-            # Ignorar lecturas fantasma del ACR122U
-            if set(uid) <= {"0"} or uid.endswith("000000000001") or uid == "00000000000001":
                 time.sleep(POLL_EMPTY_S)
                 continue
 

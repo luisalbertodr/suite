@@ -51,10 +51,12 @@ function normalizeUid(raw: string | null | undefined): string {
 }
 
 function isBogusUid(uid: string): boolean {
-  if (uid.length < 6 || uid.length > 32) return true;
-  // Lecturas fantasma del ACR122U / sin tarjeta real
+  if (![8, 14, 20].includes(uid.length)) return true;
   if (/^0+$/.test(uid)) return true;
-  if (/^0+1$/.test(uid) && uid.length >= 12) return true;
+  if (uid.startsWith('0000')) return true;
+  const fCount = (uid.match(/F/g) ?? []).length;
+  if (fCount >= Math.max(4, Math.floor(uid.length / 2))) return true;
+  if (uid.includes('FFFFFFFF')) return true;
   return false;
 }
 
