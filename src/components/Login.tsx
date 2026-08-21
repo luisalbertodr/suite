@@ -5,6 +5,15 @@ import { supabase } from '@/lib/supabase';
 import { callNfcAuth, getNfcStationId, normalizeNfcUid } from '@/lib/nfcAuth';
 import { checkNetworkAccess, NETWORK_ACCESS_DENIED_MESSAGE } from '@/lib/networkAccess';
 
+function isTypingInLoginForm(el: EventTarget | null): boolean {
+  if (!(el instanceof HTMLElement)) return false;
+  if (el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable) return true;
+  if (el.tagName !== 'INPUT') return false;
+  const input = el as HTMLInputElement;
+  // Solo bloquear captura NFC si escribe en email/password (no en el wedge oculto)
+  return input.id === 'email' || input.id === 'password' || input.name === 'email' || input.name === 'password';
+}
+
 export const Login: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -13,10 +22,11 @@ export const Login: React.FC = () => {
   const [error, setError] = useState('');
   const [nfcStatus, setNfcStatus] = useState<'idle' | 'waiting' | 'working'>('idle');
   const [nfcHint, setNfcHint] = useState('Acerca tu tarjeta al lector ACR122U');
-  const wedgeRef = useRef<HTMLInputElement>(null);
   const wedgeBuffer = useRef('');
+  const wedgeLastKeyAt = useRef(0);
   const challengeRef = useRef<{ id: string; poll: string } | null>(null);
   const pollTimer = useRef<number | null>(null);
+  const submittingWedge = useRef(false);
   const { signIn } = useAuth();
 
   useEffect(() => {
@@ -79,11 +89,9 @@ export const Login: React.FC = () => {
               clearPoll();
               setNfcStatus('idle');
               setError(String(polled.error_message ?? 'Lectura NFC caducada o fallida'));
-              // auto-restart
               window.setTimeout(() => void startNfcChallenge(), 800);
             }
           } catch (e) {
-            // soft fail while polling
             console.warn('nfc poll', e);
           }
         })();
@@ -94,60 +102,84 @@ export const Login: React.FC = () => {
     }
   }, [applySessionTokens]);
 
+  const submitWedgeUid = useCallback(
+    async (raw: string) => {
+      const uid = normalizeNfcUid(raw);
+      const ch = challengeRef.current;
+      if (!ch || uid.length < 6 || submittingWedge.current) return;
+      submittingWedge.current = true;
+      setNfcStatus('working');
+      setError('');
+      try {
+        await callNfcAuth({
+          action: 'challenge.wedge',
+          challenge_id: ch.id,
+          poll_token: ch.poll,
+          uid,
+        });
+        const polled = await callNfcAuth({
+          action: 'challenge.poll',
+          challenge_id: ch.id,
+          poll_token: ch.poll,
+        });
+        if (String(polled.status) === 'completed') {
+          clearPoll();
+          await applySessionTokens(
+            String(polled.access_token ?? ''),
+            String(polled.refresh_token ?? ''),
+          );
+        } else {
+          throw new Error(String(polled.error_message ?? 'Tarjeta no reconocida'));
+        }
+      } catch (e) {
+        setNfcStatus('waiting');
+        setError(e instanceof Error ? e.message : 'Error NFC');
+        void startNfcChallenge();
+      } finally {
+        wedgeBuffer.current = '';
+        submittingWedge.current = false;
+      }
+    },
+    [applySessionTokens, startNfcChallenge],
+  );
+
+  // NFC por agente PC/SC (sin robar teclado) + fallback wedge solo si NO se escribe en el form.
   useEffect(() => {
     void startNfcChallenge();
-    const focusWedge = () => {
-      const ae = document.activeElement as HTMLElement | null;
-      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'BUTTON')) {
-        if (ae !== wedgeRef.current) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (isTypingInLoginForm(e.target) || isTypingInLoginForm(document.activeElement)) {
+        wedgeBuffer.current = '';
+        return;
       }
-      wedgeRef.current?.focus();
+
+      const now = Date.now();
+      // Lectores wedge escriben muy rápido; si pasa mucho, reinicia buffer.
+      if (now - wedgeLastKeyAt.current > 800) wedgeBuffer.current = '';
+      wedgeLastKeyAt.current = now;
+
+      if (e.key === 'Enter') {
+        if (wedgeBuffer.current.length >= 6) {
+          e.preventDefault();
+          e.stopPropagation();
+          void submitWedgeUid(wedgeBuffer.current);
+        }
+        return;
+      }
+
+      if (e.key.length === 1 && /[0-9a-fA-F]/.test(e.key)) {
+        wedgeBuffer.current += e.key;
+        // No preventDefault: si no hay foco en form, no molesta; si el usuario
+        // empieza a escribir en body, igual se acumula solo hex.
+      }
     };
-    focusWedge();
-    const t = window.setInterval(focusWedge, 2500);
+
+    window.addEventListener('keydown', onKeyDown, true);
     return () => {
       clearPoll();
-      window.clearInterval(t);
+      window.removeEventListener('keydown', onKeyDown, true);
     };
-  }, [startNfcChallenge]);
-
-  const submitWedgeUid = async (raw: string) => {
-    const uid = normalizeNfcUid(raw);
-    const ch = challengeRef.current;
-    if (!ch || uid.length < 6) return;
-    setNfcStatus('working');
-    setError('');
-    try {
-      await callNfcAuth({
-        action: 'challenge.wedge',
-        challenge_id: ch.id,
-        poll_token: ch.poll,
-        uid,
-      });
-      // poll will pick completed; force one poll
-      const polled = await callNfcAuth({
-        action: 'challenge.poll',
-        challenge_id: ch.id,
-        poll_token: ch.poll,
-      });
-      if (String(polled.status) === 'completed') {
-        clearPoll();
-        await applySessionTokens(
-          String(polled.access_token ?? ''),
-          String(polled.refresh_token ?? ''),
-        );
-      } else {
-        throw new Error(String(polled.error_message ?? 'Tarjeta no reconocida'));
-      }
-    } catch (e) {
-      setNfcStatus('waiting');
-      setError(e instanceof Error ? e.message : 'Error NFC');
-      void startNfcChallenge();
-    } finally {
-      wedgeBuffer.current = '';
-      if (wedgeRef.current) wedgeRef.current.value = '';
-    }
-  };
+  }, [startNfcChallenge, submitWedgeUid]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -202,25 +234,11 @@ export const Login: React.FC = () => {
               <div>
                 <p className="font-medium text-sm">Login con tarjeta NFC</p>
                 <p className="text-xs text-emerald-100/80">{nfcHint}</p>
+                <p className="text-[11px] text-emerald-100/60 mt-1">
+                  También puedes entrar con email y contraseña abajo.
+                </p>
               </div>
             </div>
-            {/* Captura teclado wedge del ACR122U (modo teclado) */}
-            <input
-              ref={wedgeRef}
-              aria-label="Lector NFC"
-              autoComplete="off"
-              className="sr-only"
-              onBlur={() => window.setTimeout(() => wedgeRef.current?.focus(), 50)}
-              onChange={(e) => {
-                wedgeBuffer.current = e.target.value;
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  void submitWedgeUid(wedgeBuffer.current || (e.target as HTMLInputElement).value);
-                }
-              }}
-            />
           </div>
 
           <div className="relative mb-4">
@@ -245,6 +263,7 @@ export const Login: React.FC = () => {
                   id="email"
                   name="email"
                   type="email"
+                  autoComplete="username"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -266,6 +285,7 @@ export const Login: React.FC = () => {
                   id="password"
                   name="password"
                   type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
