@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { User, Lock, Eye, EyeOff, CreditCard } from 'lucide-react';
+import { User, Lock, Eye, EyeOff } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabase';
@@ -34,8 +34,7 @@ export const Login: React.FC = () => {
   const [showTextLogin, setShowTextLogin] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [nfcStatus, setNfcStatus] = useState<'idle' | 'waiting' | 'working'>('idle');
-  const [nfcHint, setNfcHint] = useState('Acerca tu tarjeta al lector ACR122U');
+  const [now, setNow] = useState(() => new Date());
   const wedgeBuffer = useRef('');
   const wedgeLastKeyAt = useRef(0);
   const challengeRef = useRef<{ id: string; poll: string } | null>(null);
@@ -53,6 +52,11 @@ export const Login: React.FC = () => {
   useEffect(() => {
     const lastEmail = localStorage.getItem('last_login_email');
     if (lastEmail) setEmail(lastEmail);
+  }, []);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(id);
   }, []);
 
   const isDark = (resolvedTheme ?? theme) === 'dark';
@@ -88,8 +92,6 @@ export const Login: React.FC = () => {
   const startNfcChallenge = useCallback(async () => {
     clearPoll();
     setError('');
-    setNfcStatus('waiting');
-    setNfcHint('Acerca tu tarjeta al lector ACR122U');
     try {
       const station_id = getNfcStationId();
       const started = await callNfcAuth({ action: 'challenge.start', station_id });
@@ -97,7 +99,6 @@ export const Login: React.FC = () => {
       const poll_token = String(started.poll_token ?? '');
       if (!challenge_id || !poll_token) throw new Error('No se pudo iniciar lectura NFC');
       challengeRef.current = { id: challenge_id, poll: poll_token };
-      setNfcHint(`Esperando tarjeta… estación ${station_id}`);
 
       pollTimer.current = window.setInterval(() => {
         void (async () => {
@@ -112,14 +113,12 @@ export const Login: React.FC = () => {
             const status = String(polled.status ?? '');
             if (status === 'completed') {
               clearPoll();
-              setNfcStatus('working');
               await applySessionTokens(
                 String(polled.access_token ?? ''),
                 String(polled.refresh_token ?? ''),
               );
             } else if (status === 'failed' || status === 'expired') {
               clearPoll();
-              setNfcStatus('idle');
               setError(String(polled.error_message ?? 'Lectura NFC caducada o fallida'));
               window.setTimeout(() => void startNfcChallenge(), 800);
             }
@@ -129,7 +128,6 @@ export const Login: React.FC = () => {
         })();
       }, 900);
     } catch (e) {
-      setNfcStatus('idle');
       setError(e instanceof Error ? e.message : 'No se pudo iniciar NFC');
     }
   }, [applySessionTokens]);
@@ -140,7 +138,6 @@ export const Login: React.FC = () => {
       const ch = challengeRef.current;
       if (!ch || uid.length < 6 || submittingWedge.current) return;
       submittingWedge.current = true;
-      setNfcStatus('working');
       setError('');
       try {
         await callNfcAuth({
@@ -164,7 +161,6 @@ export const Login: React.FC = () => {
           throw new Error(String(polled.error_message ?? 'Tarjeta no reconocida'));
         }
       } catch (e) {
-        setNfcStatus('waiting');
         setError(e instanceof Error ? e.message : 'Error NFC');
         void startNfcChallenge();
       } finally {
@@ -184,9 +180,9 @@ export const Login: React.FC = () => {
         return;
       }
 
-      const now = Date.now();
-      if (now - wedgeLastKeyAt.current > 800) wedgeBuffer.current = '';
-      wedgeLastKeyAt.current = now;
+      const nowKey = Date.now();
+      if (nowKey - wedgeLastKeyAt.current > 800) wedgeBuffer.current = '';
+      wedgeLastKeyAt.current = nowKey;
 
       if (e.key === 'Enter') {
         if (wedgeBuffer.current.length >= 6) {
@@ -232,19 +228,17 @@ export const Login: React.FC = () => {
   };
 
   const shellClass = isDark
-    ? 'min-h-screen relative flex flex-col items-center justify-center bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 p-4'
-    : 'min-h-screen relative flex flex-col items-center justify-center bg-gradient-to-br from-slate-100 via-blue-50 to-slate-100 p-4';
+    ? 'min-h-screen relative flex flex-col items-center justify-center bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 p-6'
+    : 'min-h-screen relative flex flex-col items-center justify-center bg-gradient-to-br from-slate-100 via-blue-50 to-slate-100 p-6';
 
-  const panelClass = isDark
-    ? 'w-full bg-white/10 backdrop-blur-lg rounded-xl shadow-2xl p-8 border border-white/20'
-    : 'w-full bg-white/90 backdrop-blur-lg rounded-xl shadow-xl p-8 border border-slate-200';
+  const dateClass = isDark
+    ? 'text-lg sm:text-xl text-white/55 font-light capitalize tracking-wide'
+    : 'text-lg sm:text-xl text-slate-500 font-light capitalize tracking-wide';
+  const timeClass = isDark
+    ? 'text-7xl sm:text-8xl md:text-9xl font-extralight text-white tracking-wider tabular-nums leading-none'
+    : 'text-7xl sm:text-8xl md:text-9xl font-extralight text-slate-800 tracking-wider tabular-nums leading-none';
+  const footerClass = isDark ? 'text-emerald-50/70' : 'text-slate-500';
 
-  const nfcBoxClass = isDark
-    ? 'rounded-lg border border-emerald-400/30 bg-emerald-500/10 p-5'
-    : 'rounded-lg border border-emerald-600/25 bg-emerald-50 p-5';
-
-  const nfcTextClass = isDark ? 'text-emerald-100' : 'text-emerald-900';
-  const nfcHintClass = isDark ? 'text-xs text-emerald-100/80 mt-0.5' : 'text-xs text-emerald-800/80 mt-0.5';
   const labelClass = isDark
     ? 'block text-sm font-medium text-gray-200 mb-2'
     : 'block text-sm font-medium text-slate-700 mb-2';
@@ -254,127 +248,120 @@ export const Login: React.FC = () => {
   const passwordInputClass = isDark
     ? 'w-full pl-10 pr-12 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent backdrop-blur-sm'
     : 'w-full pl-10 pr-12 py-3 bg-white border border-slate-300 rounded-lg text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';
-  const dividerLabelClass = isDark ? 'bg-transparent px-2 text-gray-300' : 'bg-transparent px-2 text-slate-500';
-  const footerClass = isDark ? 'text-emerald-50/70' : 'text-slate-500';
+  const panelClass = isDark
+    ? 'w-full max-w-md mt-8 bg-white/10 backdrop-blur-lg rounded-xl shadow-2xl p-8 border border-white/20'
+    : 'w-full max-w-md mt-8 bg-white/90 backdrop-blur-lg rounded-xl shadow-xl p-8 border border-slate-200';
+
+  const dateLabel = now.toLocaleDateString('es-ES', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  });
+  const timeLabel = now.toLocaleTimeString('es-ES', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 
   return (
     <div className={shellClass}>
-      <div className="flex flex-col items-center w-full max-w-md gap-8">
+      <div className="flex flex-col items-center w-full max-w-3xl gap-6 text-center">
         {themeReady && (
           <img
             key={logoSrc}
             src={logoSrc}
             alt="Lipoout"
-            className="h-40 w-40 sm:h-48 sm:w-48 object-contain drop-shadow-2xl select-none"
+            className="h-28 sm:h-36 md:h-44 w-auto max-w-[min(90vw,42rem)] object-contain drop-shadow-2xl select-none"
             draggable={false}
             onError={() => setLogoFailed(true)}
           />
         )}
 
-        <div className={panelClass}>
-          {error && (
-            <div className="mb-4 p-3 bg-red-500/20 border border-red-500/50 rounded-lg text-red-700 dark:text-red-200 text-sm">
-              {error}
-            </div>
-          )}
-
-          <div className={nfcBoxClass}>
-            <div className={`flex items-center gap-3 ${nfcTextClass}`}>
-              <CreditCard
-                className={`h-7 w-7 shrink-0 ${nfcStatus === 'waiting' ? 'animate-pulse' : ''}`}
-              />
-              <div>
-                <p className="font-medium text-sm">Acerca tu tarjeta NFC</p>
-                <p className={nfcHintClass}>{nfcHint}</p>
-              </div>
-            </div>
-          </div>
-
-          {showTextLogin && (
-            <>
-              <div className="relative my-5">
-                <div className="absolute inset-0 flex items-center">
-                  <div className={`w-full border-t ${isDark ? 'border-white/20' : 'border-slate-200'}`} />
-                </div>
-                <div className="relative flex justify-center text-xs">
-                  <span className={dividerLabelClass}>acceso con email</span>
-                </div>
-              </div>
-
-              <form className="space-y-6" onSubmit={handleSubmit}>
-                <div>
-                  <label htmlFor="email" className={labelClass}>
-                    Email
-                  </label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <User className="h-5 w-5 text-gray-400" />
-                    </div>
-                    <input
-                      id="email"
-                      name="email"
-                      type="email"
-                      autoComplete="username"
-                      required
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className={inputClass}
-                      placeholder="Ingrese su email"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label htmlFor="password" className={labelClass}>
-                    Contraseña
-                  </label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <Lock className="h-5 w-5 text-gray-400" />
-                    </div>
-                    <input
-                      id="password"
-                      name="password"
-                      type={showPassword ? 'text' : 'password'}
-                      autoComplete="current-password"
-                      required
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className={passwordInputClass}
-                      placeholder="Ingrese su contraseña"
-                    />
-                    <button
-                      type="button"
-                      className="absolute inset-y-0 right-0 pr-3 flex items-center"
-                      onClick={() => setShowPassword(!showPassword)}
-                    >
-                      {showPassword ? (
-                        <EyeOff className="h-5 w-5 text-gray-400 hover:text-gray-300" />
-                      ) : (
-                        <Eye className="h-5 w-5 text-gray-400 hover:text-gray-300" />
-                      )}
-                    </button>
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={isLoading}
-                  className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg hover:shadow-xl"
-                >
-                  {isLoading ? (
-                    <div className="flex items-center">
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
-                      Iniciando sesión...
-                    </div>
-                  ) : (
-                    'Iniciar Sesión'
-                  )}
-                </button>
-              </form>
-            </>
-          )}
+        <div className="space-y-3">
+          <p className={dateClass}>{dateLabel}</p>
+          <p className={timeClass}>{timeLabel}</p>
         </div>
+
+        {showTextLogin && (
+          <div className={panelClass}>
+            {error && (
+              <div className="mb-4 p-3 bg-red-500/20 border border-red-500/50 rounded-lg text-red-700 dark:text-red-200 text-sm text-left">
+                {error}
+              </div>
+            )}
+
+            <form className="space-y-6 text-left" onSubmit={handleSubmit}>
+              <div>
+                <label htmlFor="email" className={labelClass}>
+                  Email
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <User className="h-5 w-5 text-gray-400" />
+                  </div>
+                  <input
+                    id="email"
+                    name="email"
+                    type="email"
+                    autoComplete="username"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className={inputClass}
+                    placeholder="Ingrese su email"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="password" className={labelClass}>
+                  Contraseña
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Lock className="h-5 w-5 text-gray-400" />
+                  </div>
+                  <input
+                    id="password"
+                    name="password"
+                    type={showPassword ? 'text' : 'password'}
+                    autoComplete="current-password"
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className={passwordInputClass}
+                    placeholder="Ingrese su contraseña"
+                  />
+                  <button
+                    type="button"
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                    onClick={() => setShowPassword(!showPassword)}
+                  >
+                    {showPassword ? (
+                      <EyeOff className="h-5 w-5 text-gray-400 hover:text-gray-300" />
+                    ) : (
+                      <Eye className="h-5 w-5 text-gray-400 hover:text-gray-300" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg hover:shadow-xl"
+              >
+                {isLoading ? (
+                  <div className="flex items-center">
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
+                    Iniciando sesión...
+                  </div>
+                ) : (
+                  'Iniciar Sesión'
+                )}
+              </button>
+            </form>
+          </div>
+        )}
       </div>
 
       <p className={`absolute bottom-3 right-4 text-[11px] leading-none select-none ${footerClass}`}>
