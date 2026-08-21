@@ -120,7 +120,7 @@ serve(async (req) => {
         try {
           const { data: profile } = await supabaseAdmin
             .from('user_profiles')
-            .select('company_id, employee_id, companies:company_id(name)')
+            .select('company_id, employee_id, nfc_uid, companies:company_id(name)')
             .eq('user_id', user.id)
             .maybeSingle()
 

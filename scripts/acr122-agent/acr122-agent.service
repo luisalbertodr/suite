@@ -1,0 +1,16 @@
+[Unit]
+Description=Suite ACR122U NFC login agent
+After=network-online.target pcscd.service
+Wants=network-online.target pcscd.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/suite-acr122-agent
+EnvironmentFile=-/etc/suite-acr122-agent.env
+ExecStart=/usr/bin/python3 /opt/suite-acr122-agent/acr122_agent.py
+Restart=always
+RestartSec=3
+User=root
+
+[Install]
+WantedBy=multi-user.target
