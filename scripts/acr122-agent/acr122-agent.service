@@ -7,6 +7,7 @@ Wants=network-online.target pcscd.service
 Type=simple
 WorkingDirectory=/opt/suite-acr122-agent
 EnvironmentFile=-/etc/suite-acr122-agent.env
+Environment=PYTHONUNBUFFERED=1
 ExecStart=/usr/bin/python3 /opt/suite-acr122-agent/acr122_agent.py
 Restart=always
 RestartSec=3
