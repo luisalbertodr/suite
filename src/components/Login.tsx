@@ -5,8 +5,6 @@ import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabase';
 import { callNfcAuth, getNfcStationId, normalizeNfcUid } from '@/lib/nfcAuth';
 import { checkNetworkAccess, NETWORK_ACCESS_DENIED_MESSAGE } from '@/lib/networkAccess';
-import { getCachedBrandingLogo } from '@/lib/brandingLogoCache';
-import { useWorkCenterBranding } from '@/hooks/useWorkCenterBranding';
 
 function isTypingInLoginForm(el: EventTarget | null): boolean {
   if (!(el instanceof HTMLElement)) return false;
@@ -14,6 +12,19 @@ function isTypingInLoginForm(el: EventTarget | null): boolean {
   if (el.tagName !== 'INPUT') return false;
   const input = el as HTMLInputElement;
   return input.id === 'email' || input.id === 'password' || input.name === 'email' || input.name === 'password';
+}
+
+function buildPublicBrandingLogoUrl(variant: 'light' | 'dark'): string | null {
+  const base = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.replace(/\/+$/, '');
+  const anon =
+    (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ||
+    (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined);
+  if (!base || !anon) return null;
+  const qs = new URLSearchParams({
+    variant,
+    apikey: anon,
+  });
+  return `${base}/functions/v1/public-branding?${qs.toString()}`;
 }
 
 export const Login: React.FC = () => {
@@ -32,8 +43,8 @@ export const Login: React.FC = () => {
   const submittingWedge = useRef(false);
   const { signIn } = useAuth();
   const { theme, resolvedTheme } = useTheme();
-  const { logoUrlLight, logoUrlDark } = useWorkCenterBranding();
   const [themeReady, setThemeReady] = useState(false);
+  const [logoFailed, setLogoFailed] = useState(false);
 
   useEffect(() => {
     setThemeReady(true);
@@ -46,13 +57,14 @@ export const Login: React.FC = () => {
 
   const isDark = (resolvedTheme ?? theme) === 'dark';
   const logoSrc = useMemo(() => {
-    const cachedLight = getCachedBrandingLogo('light');
-    const cachedDark = getCachedBrandingLogo('dark');
-    if (isDark) {
-      return logoUrlDark || cachedDark || logoUrlLight || cachedLight || '/lipoout-logo-dark.png';
-    }
-    return logoUrlLight || cachedLight || logoUrlDark || cachedDark || '/lipoout-logo-light.png';
-  }, [isDark, logoUrlDark, logoUrlLight]);
+    const fallback = isDark ? '/lipoout-logo-dark.png' : '/lipoout-logo-light.png';
+    if (logoFailed) return fallback;
+    return buildPublicBrandingLogoUrl(isDark ? 'dark' : 'light') ?? fallback;
+  }, [isDark, logoFailed]);
+
+  useEffect(() => {
+    setLogoFailed(false);
+  }, [isDark]);
 
   const clearPoll = () => {
     if (pollTimer.current != null) {
@@ -250,10 +262,12 @@ export const Login: React.FC = () => {
       <div className="flex flex-col items-center w-full max-w-md gap-8">
         {themeReady && (
           <img
+            key={logoSrc}
             src={logoSrc}
             alt="Lipoout"
             className="h-40 w-40 sm:h-48 sm:w-48 object-contain drop-shadow-2xl select-none"
             draggable={false}
+            onError={() => setLogoFailed(true)}
           />
         )}
 
