@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Building2, User, Lock, Eye, EyeOff, CreditCard } from 'lucide-react';
+import { User, Lock, Eye, EyeOff, CreditCard } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabase';
 import { callNfcAuth, getNfcStationId, normalizeNfcUid } from '@/lib/nfcAuth';
@@ -10,14 +10,18 @@ function isTypingInLoginForm(el: EventTarget | null): boolean {
   if (el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable) return true;
   if (el.tagName !== 'INPUT') return false;
   const input = el as HTMLInputElement;
-  // Solo bloquear captura NFC si escribe en email/password (no en el wedge oculto)
   return input.id === 'email' || input.id === 'password' || input.name === 'email' || input.name === 'password';
 }
+
+const LIPOOUT_LETTERS = ['L', 'I', 'P', 'O', 'O', 'U', 'T'] as const;
+/** Segunda O de LIPOOUT (índice 0-based = 4). */
+const SECOND_O_INDEX = 4;
 
 export const Login: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [showTextLogin, setShowTextLogin] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [nfcStatus, setNfcStatus] = useState<'idle' | 'waiting' | 'working'>('idle');
@@ -143,7 +147,6 @@ export const Login: React.FC = () => {
     [applySessionTokens, startNfcChallenge],
   );
 
-  // NFC por agente PC/SC (sin robar teclado) + fallback wedge solo si NO se escribe en el form.
   useEffect(() => {
     void startNfcChallenge();
 
@@ -154,7 +157,6 @@ export const Login: React.FC = () => {
       }
 
       const now = Date.now();
-      // Lectores wedge escriben muy rápido; si pasa mucho, reinicia buffer.
       if (now - wedgeLastKeyAt.current > 800) wedgeBuffer.current = '';
       wedgeLastKeyAt.current = now;
 
@@ -169,8 +171,6 @@ export const Login: React.FC = () => {
 
       if (e.key.length === 1 && /[0-9a-fA-F]/.test(e.key)) {
         wedgeBuffer.current += e.key;
-        // No preventDefault: si no hay foco en form, no molesta; si el usuario
-        // empieza a escribir en body, igual se acumula solo hex.
       }
     };
 
@@ -207,16 +207,40 @@ export const Login: React.FC = () => {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 p-4">
       <div className="max-w-md w-full space-y-8">
         <div className="text-center">
-          <div className="flex justify-center mb-6">
-            <div className="w-20 h-20 bg-gradient-to-r from-blue-500 to-green-500 rounded-2xl flex items-center justify-center shadow-2xl">
-              <Building2 className="w-10 h-10 text-white" />
+          <div className="flex flex-col items-center gap-3 mb-2">
+            <img
+              src="/lipoout-logo.svg"
+              alt=""
+              className="h-20 w-20 object-contain drop-shadow-lg"
+              aria-hidden
+            />
+            {/* Wordmark: la 2ª O revela/oculta login por email */}
+            <div
+              className="flex items-end justify-center gap-[0.08em] select-none"
+              aria-label="Lipoout"
+            >
+              {LIPOOUT_LETTERS.map((letter, index) =>
+                index === SECOND_O_INDEX ? (
+                  <button
+                    key={`o2-${index}`}
+                    type="button"
+                    title="Acceso con email"
+                    onClick={() => setShowTextLogin((v) => !v)}
+                    className="font-bold tracking-[0.12em] text-4xl sm:text-5xl text-emerald-200/95 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 rounded-sm px-0.5 transition-colors cursor-pointer"
+                  >
+                    {letter}
+                  </button>
+                ) : (
+                  <span
+                    key={`${letter}-${index}`}
+                    className="font-bold tracking-[0.12em] text-4xl sm:text-5xl text-emerald-50/95"
+                  >
+                    {letter}
+                  </span>
+                ),
+              )}
             </div>
           </div>
-          <h2 className="text-4xl font-bold text-white mb-2">
-            <span className="bg-gradient-to-r from-blue-400 to-green-400 bg-clip-text text-transparent">
-              Lipoout
-            </span>
-          </h2>
         </div>
 
         <div className="bg-white/10 backdrop-blur-lg rounded-xl shadow-2xl p-8 border border-white/20">
@@ -226,109 +250,102 @@ export const Login: React.FC = () => {
             </div>
           )}
 
-          <div className="mb-6 rounded-lg border border-emerald-400/30 bg-emerald-500/10 p-4">
+          <div className="rounded-lg border border-emerald-400/30 bg-emerald-500/10 p-5">
             <div className="flex items-center gap-3 text-emerald-100">
               <CreditCard
-                className={`h-6 w-6 ${nfcStatus === 'waiting' ? 'animate-pulse' : ''}`}
+                className={`h-7 w-7 shrink-0 ${nfcStatus === 'waiting' ? 'animate-pulse' : ''}`}
               />
               <div>
-                <p className="font-medium text-sm">Login con tarjeta NFC</p>
-                <p className="text-xs text-emerald-100/80">{nfcHint}</p>
-                <p className="text-[11px] text-emerald-100/60 mt-1">
-                  También puedes entrar con email y contraseña abajo.
-                </p>
+                <p className="font-medium text-sm">Acerca tu tarjeta NFC</p>
+                <p className="text-xs text-emerald-100/80 mt-0.5">{nfcHint}</p>
               </div>
             </div>
           </div>
 
-          <div className="relative mb-4">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-white/20" />
-            </div>
-            <div className="relative flex justify-center text-xs">
-              <span className="bg-transparent px-2 text-gray-300">o con email</span>
-            </div>
-          </div>
-
-          <form className="space-y-6" onSubmit={handleSubmit}>
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-200 mb-2">
-                Email
-              </label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <User className="h-5 w-5 text-gray-400" />
+          {showTextLogin && (
+            <>
+              <div className="relative my-5">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-white/20" />
                 </div>
-                <input
-                  id="email"
-                  name="email"
-                  type="email"
-                  autoComplete="username"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full pl-10 pr-3 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent backdrop-blur-sm"
-                  placeholder="Ingrese su email"
-                />
+                <div className="relative flex justify-center text-xs">
+                  <span className="bg-transparent px-2 text-gray-300">acceso con email</span>
+                </div>
               </div>
-            </div>
 
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-200 mb-2">
-                Contraseña
-              </label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Lock className="h-5 w-5 text-gray-400" />
+              <form className="space-y-6" onSubmit={handleSubmit}>
+                <div>
+                  <label htmlFor="email" className="block text-sm font-medium text-gray-200 mb-2">
+                    Email
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <User className="h-5 w-5 text-gray-400" />
+                    </div>
+                    <input
+                      id="email"
+                      name="email"
+                      type="email"
+                      autoComplete="username"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="w-full pl-10 pr-3 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent backdrop-blur-sm"
+                      placeholder="Ingrese su email"
+                    />
+                  </div>
                 </div>
-                <input
-                  id="password"
-                  name="password"
-                  type={showPassword ? 'text' : 'password'}
-                  autoComplete="current-password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-10 pr-12 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent backdrop-blur-sm"
-                  placeholder="Ingrese su contraseña"
-                />
+
+                <div>
+                  <label htmlFor="password" className="block text-sm font-medium text-gray-200 mb-2">
+                    Contraseña
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <Lock className="h-5 w-5 text-gray-400" />
+                    </div>
+                    <input
+                      id="password"
+                      name="password"
+                      type={showPassword ? 'text' : 'password'}
+                      autoComplete="current-password"
+                      required
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="w-full pl-10 pr-12 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent backdrop-blur-sm"
+                      placeholder="Ingrese su contraseña"
+                    />
+                    <button
+                      type="button"
+                      className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                      onClick={() => setShowPassword(!showPassword)}
+                    >
+                      {showPassword ? (
+                        <EyeOff className="h-5 w-5 text-gray-400 hover:text-gray-300" />
+                      ) : (
+                        <Eye className="h-5 w-5 text-gray-400 hover:text-gray-300" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+
                 <button
-                  type="button"
-                  className="absolute inset-y-0 right-0 pr-3 flex items-center"
-                  onClick={() => setShowPassword(!showPassword)}
+                  type="submit"
+                  disabled={isLoading}
+                  className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg hover:shadow-xl"
                 >
-                  {showPassword ? (
-                    <EyeOff className="h-5 w-5 text-gray-400 hover:text-gray-300" />
+                  {isLoading ? (
+                    <div className="flex items-center">
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
+                      Iniciando sesión...
+                    </div>
                   ) : (
-                    <Eye className="h-5 w-5 text-gray-400 hover:text-gray-300" />
+                    'Iniciar Sesión'
                   )}
                 </button>
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg hover:shadow-xl"
-            >
-              {isLoading ? (
-                <div className="flex items-center">
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
-                  Iniciando sesión...
-                </div>
-              ) : (
-                'Iniciar Sesión'
-              )}
-            </button>
-          </form>
-
-          <div className="mt-6 text-center">
-            <p className="text-xs text-gray-400">By Lipoout</p>
-          </div>
-        </div>
-
-        <div className="text-center">
-          <p className="text-sm text-gray-400">© 2025 Lipoout</p>
+              </form>
+            </>
+          )}
         </div>
       </div>
     </div>
