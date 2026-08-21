@@ -104,6 +104,10 @@ def main() -> int:
             if not uid:
                 time.sleep(POLL_EMPTY_S)
                 continue
+            # Ignorar lecturas fantasma del ACR122U
+            if set(uid) <= {"0"} or uid.endswith("000000000001") or uid == "00000000000001":
+                time.sleep(POLL_EMPTY_S)
+                continue
 
             now = time.time()
             if uid == last_uid and (now - last_ts) < DEBOUNCE_S:

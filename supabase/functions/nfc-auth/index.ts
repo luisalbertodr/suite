@@ -50,6 +50,14 @@ function normalizeUid(raw: string | null | undefined): string {
     .replace(/[^0-9A-F]/g, '');
 }
 
+function isBogusUid(uid: string): boolean {
+  if (uid.length < 6 || uid.length > 32) return true;
+  // Lecturas fantasma del ACR122U / sin tarjeta real
+  if (/^0+$/.test(uid)) return true;
+  if (/^0+1$/.test(uid) && uid.length >= 12) return true;
+  return false;
+}
+
 function randomToken(bytes = 24): string {
   const arr = new Uint8Array(bytes);
   crypto.getRandomValues(arr);
@@ -313,7 +321,7 @@ serve(async (req) => {
       const token = String(body.poll_token ?? '');
       const uid = normalizeUid(body.uid);
       if (!id || !token) return json({ error: 'Faltan challenge_id/poll_token' }, 400);
-      if (uid.length < 6 || uid.length > 32) return json({ error: 'UID inválido' }, 400);
+      if (isBogusUid(uid)) return json({ error: 'UID inválido' }, 400);
 
       const { data: ch, error } = await admin
         .from('nfc_login_challenges')
@@ -331,7 +339,7 @@ serve(async (req) => {
     if (action === 'agent.tag') {
       if (!agentSecretOk(req)) return json({ error: 'Agente no autorizado' }, 401);
       const uid = normalizeUid(body.uid);
-      if (uid.length < 6 || uid.length > 32) return json({ error: 'UID inválido' }, 400);
+      if (isBogusUid(uid)) return json({ error: 'UID inválido' }, 400);
       const stationId = String(body.station_id ?? '').trim() || 'default';
 
       const { data: waiting, error } = await admin
@@ -371,7 +379,7 @@ serve(async (req) => {
       }
 
       const uid = normalizeUid(body.uid);
-      if (uid.length < 6 || uid.length > 32) return json({ error: 'UID inválido' }, 400);
+      if (isBogusUid(uid)) return json({ error: 'UID inválido' }, 400);
 
       const { data: taken } = await admin
         .from('user_profiles')
@@ -381,12 +389,30 @@ serve(async (req) => {
         .maybeSingle();
       if (taken?.user_id) return json({ error: 'Esa tarjeta ya está asociada a otro usuario' }, 409);
 
+      // Multi-empresa: un user_id tiene N filas en user_profiles y nfc_uid es UNIQUE.
+      // Primero limpiamos todas y luego asignamos el UID a UNA sola fila.
+      const { error: clearErr } = await admin
+        .from('user_profiles')
+        .update({ nfc_uid: null })
+        .eq('user_id', userId);
+      if (clearErr) return json({ error: clearErr.message }, 500);
+
+      const { data: profiles, error: listErr } = await admin
+        .from('user_profiles')
+        .select('id')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: true })
+        .limit(1);
+      if (listErr) return json({ error: listErr.message }, 500);
+      const profileId = profiles?.[0]?.id;
+      if (!profileId) return json({ error: 'Usuario sin perfil de empresa' }, 400);
+
       const { error } = await admin
         .from('user_profiles')
         .update({ nfc_uid: uid })
-        .eq('user_id', userId);
+        .eq('id', profileId);
       if (error) return json({ error: error.message }, 500);
-      return json({ ok: true, nfc_uid: uid });
+      return json({ ok: true, nfc_uid: uid, profile_id: profileId });
     }
 
     if (action === 'enroll.next_tag') {

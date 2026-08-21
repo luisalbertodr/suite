@@ -118,11 +118,16 @@ serve(async (req) => {
     const users = await Promise.all(
       (authData?.users || []).map(async (user) => {
         try {
-          const { data: profile } = await supabaseAdmin
+          const { data: profiles } = await supabaseAdmin
             .from('user_profiles')
             .select('company_id, employee_id, nfc_uid, companies:company_id(name)')
             .eq('user_id', user.id)
-            .maybeSingle()
+
+          // Perfil “principal”: el que tenga nfc_uid, o el primero.
+          const profile =
+            (profiles || []).find((p: { nfc_uid?: string | null }) => !!p.nfc_uid) ||
+            (profiles || [])[0] ||
+            null
 
           let employeeName: string | null = null
           if (profile?.employee_id) {
