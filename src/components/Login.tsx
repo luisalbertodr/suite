@@ -1,9 +1,12 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { User, Lock, Eye, EyeOff, CreditCard } from 'lucide-react';
+import { useTheme } from 'next-themes';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabase';
 import { callNfcAuth, getNfcStationId, normalizeNfcUid } from '@/lib/nfcAuth';
 import { checkNetworkAccess, NETWORK_ACCESS_DENIED_MESSAGE } from '@/lib/networkAccess';
+import { getCachedBrandingLogo } from '@/lib/brandingLogoCache';
+import { useWorkCenterBranding } from '@/hooks/useWorkCenterBranding';
 
 function isTypingInLoginForm(el: EventTarget | null): boolean {
   if (!(el instanceof HTMLElement)) return false;
@@ -28,11 +31,28 @@ export const Login: React.FC = () => {
   const pollTimer = useRef<number | null>(null);
   const submittingWedge = useRef(false);
   const { signIn } = useAuth();
+  const { theme, resolvedTheme } = useTheme();
+  const { logoUrlLight, logoUrlDark } = useWorkCenterBranding();
+  const [themeReady, setThemeReady] = useState(false);
+
+  useEffect(() => {
+    setThemeReady(true);
+  }, []);
 
   useEffect(() => {
     const lastEmail = localStorage.getItem('last_login_email');
     if (lastEmail) setEmail(lastEmail);
   }, []);
+
+  const isDark = (resolvedTheme ?? theme) === 'dark';
+  const logoSrc = useMemo(() => {
+    const cachedLight = getCachedBrandingLogo('light');
+    const cachedDark = getCachedBrandingLogo('dark');
+    if (isDark) {
+      return logoUrlDark || cachedDark || logoUrlLight || cachedLight || '/lipoout-logo-dark.png';
+    }
+    return logoUrlLight || cachedLight || logoUrlDark || cachedDark || '/lipoout-logo-light.png';
+  }, [isDark, logoUrlDark, logoUrlLight]);
 
   const clearPoll = () => {
     if (pollTimer.current != null) {
@@ -199,41 +219,59 @@ export const Login: React.FC = () => {
     }
   };
 
+  const shellClass = isDark
+    ? 'min-h-screen relative flex flex-col items-center justify-center bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 p-4'
+    : 'min-h-screen relative flex flex-col items-center justify-center bg-gradient-to-br from-slate-100 via-blue-50 to-slate-100 p-4';
+
+  const panelClass = isDark
+    ? 'w-full bg-white/10 backdrop-blur-lg rounded-xl shadow-2xl p-8 border border-white/20'
+    : 'w-full bg-white/90 backdrop-blur-lg rounded-xl shadow-xl p-8 border border-slate-200';
+
+  const nfcBoxClass = isDark
+    ? 'rounded-lg border border-emerald-400/30 bg-emerald-500/10 p-5'
+    : 'rounded-lg border border-emerald-600/25 bg-emerald-50 p-5';
+
+  const nfcTextClass = isDark ? 'text-emerald-100' : 'text-emerald-900';
+  const nfcHintClass = isDark ? 'text-xs text-emerald-100/80 mt-0.5' : 'text-xs text-emerald-800/80 mt-0.5';
+  const labelClass = isDark
+    ? 'block text-sm font-medium text-gray-200 mb-2'
+    : 'block text-sm font-medium text-slate-700 mb-2';
+  const inputClass = isDark
+    ? 'w-full pl-10 pr-3 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent backdrop-blur-sm'
+    : 'w-full pl-10 pr-3 py-3 bg-white border border-slate-300 rounded-lg text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';
+  const passwordInputClass = isDark
+    ? 'w-full pl-10 pr-12 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent backdrop-blur-sm'
+    : 'w-full pl-10 pr-12 py-3 bg-white border border-slate-300 rounded-lg text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';
+  const dividerLabelClass = isDark ? 'bg-transparent px-2 text-gray-300' : 'bg-transparent px-2 text-slate-500';
+  const footerClass = isDark ? 'text-emerald-50/70' : 'text-slate-500';
+
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 p-4">
+    <div className={shellClass}>
       <div className="flex flex-col items-center w-full max-w-md gap-8">
-        {/* Logo PNG centrado: todo el logo abre/cierra login por email */}
-        <button
-          type="button"
-          title={showTextLogin ? 'Ocultar acceso con email' : 'Acceso con email'}
-          aria-label={showTextLogin ? 'Ocultar acceso con email' : 'Mostrar acceso con email'}
-          aria-pressed={showTextLogin}
-          onClick={() => setShowTextLogin((v) => !v)}
-          className="group relative flex items-center justify-center rounded-full focus:outline-none focus-visible:ring-4 focus-visible:ring-emerald-400/70 transition-transform hover:scale-[1.03] active:scale-[0.98] cursor-pointer"
-        >
+        {themeReady && (
           <img
-            src="/lipoout-logo.png"
+            src={logoSrc}
             alt="Lipoout"
-            className="h-40 w-40 sm:h-48 sm:w-48 object-contain drop-shadow-2xl pointer-events-none select-none"
+            className="h-40 w-40 sm:h-48 sm:w-48 object-contain drop-shadow-2xl select-none"
             draggable={false}
           />
-        </button>
+        )}
 
-        <div className="w-full bg-white/10 backdrop-blur-lg rounded-xl shadow-2xl p-8 border border-white/20">
+        <div className={panelClass}>
           {error && (
-            <div className="mb-4 p-3 bg-red-500/20 border border-red-500/50 rounded-lg text-red-200 text-sm">
+            <div className="mb-4 p-3 bg-red-500/20 border border-red-500/50 rounded-lg text-red-700 dark:text-red-200 text-sm">
               {error}
             </div>
           )}
 
-          <div className="rounded-lg border border-emerald-400/30 bg-emerald-500/10 p-5">
-            <div className="flex items-center gap-3 text-emerald-100">
+          <div className={nfcBoxClass}>
+            <div className={`flex items-center gap-3 ${nfcTextClass}`}>
               <CreditCard
                 className={`h-7 w-7 shrink-0 ${nfcStatus === 'waiting' ? 'animate-pulse' : ''}`}
               />
               <div>
                 <p className="font-medium text-sm">Acerca tu tarjeta NFC</p>
-                <p className="text-xs text-emerald-100/80 mt-0.5">{nfcHint}</p>
+                <p className={nfcHintClass}>{nfcHint}</p>
               </div>
             </div>
           </div>
@@ -242,16 +280,16 @@ export const Login: React.FC = () => {
             <>
               <div className="relative my-5">
                 <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-white/20" />
+                  <div className={`w-full border-t ${isDark ? 'border-white/20' : 'border-slate-200'}`} />
                 </div>
                 <div className="relative flex justify-center text-xs">
-                  <span className="bg-transparent px-2 text-gray-300">acceso con email</span>
+                  <span className={dividerLabelClass}>acceso con email</span>
                 </div>
               </div>
 
               <form className="space-y-6" onSubmit={handleSubmit}>
                 <div>
-                  <label htmlFor="email" className="block text-sm font-medium text-gray-200 mb-2">
+                  <label htmlFor="email" className={labelClass}>
                     Email
                   </label>
                   <div className="relative">
@@ -266,14 +304,14 @@ export const Login: React.FC = () => {
                       required
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      className="w-full pl-10 pr-3 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent backdrop-blur-sm"
+                      className={inputClass}
                       placeholder="Ingrese su email"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label htmlFor="password" className="block text-sm font-medium text-gray-200 mb-2">
+                  <label htmlFor="password" className={labelClass}>
                     Contraseña
                   </label>
                   <div className="relative">
@@ -288,7 +326,7 @@ export const Login: React.FC = () => {
                       required
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="w-full pl-10 pr-12 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent backdrop-blur-sm"
+                      className={passwordInputClass}
                       placeholder="Ingrese su contraseña"
                     />
                     <button
@@ -324,6 +362,20 @@ export const Login: React.FC = () => {
           )}
         </div>
       </div>
+
+      <p className={`absolute bottom-3 right-4 text-[11px] leading-none select-none ${footerClass}`}>
+        Lipoout{' '}
+        <button
+          type="button"
+          onClick={() => setShowTextLogin((v) => !v)}
+          className="inline p-0 m-0 border-0 bg-transparent appearance-none font-inherit text-inherit leading-none cursor-default focus:outline-none"
+          aria-label={showTextLogin ? 'Ocultar acceso con email' : 'Mostrar acceso con email'}
+          aria-pressed={showTextLogin}
+        >
+          ©
+        </button>{' '}
+        2026
+      </p>
     </div>
   );
 };
