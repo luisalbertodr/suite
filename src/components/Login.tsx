@@ -13,10 +13,6 @@ function isTypingInLoginForm(el: EventTarget | null): boolean {
   return input.id === 'email' || input.id === 'password' || input.name === 'email' || input.name === 'password';
 }
 
-const LIPOOUT_LETTERS = ['L', 'I', 'P', 'O', 'O', 'U', 'T'] as const;
-/** Segunda O de LIPOOUT (índice 0-based = 4). */
-const SECOND_O_INDEX = 4;
-
 export const Login: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -204,46 +200,26 @@ export const Login: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 p-4">
-      <div className="max-w-md w-full space-y-8">
-        <div className="text-center">
-          <div className="flex flex-col items-center gap-3 mb-2">
-            <img
-              src="/lipoout-logo.svg"
-              alt=""
-              className="h-20 w-20 object-contain drop-shadow-lg"
-              aria-hidden
-            />
-            {/* Wordmark: la 2ª O revela/oculta login por email */}
-            <div
-              className="flex items-end justify-center gap-[0.08em] select-none"
-              aria-label="Lipoout"
-            >
-              {LIPOOUT_LETTERS.map((letter, index) =>
-                index === SECOND_O_INDEX ? (
-                  <button
-                    key={`o2-${index}`}
-                    type="button"
-                    title="Acceso con email"
-                    onClick={() => setShowTextLogin((v) => !v)}
-                    className="font-bold tracking-[0.12em] text-4xl sm:text-5xl text-emerald-200/95 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 rounded-sm px-0.5 transition-colors cursor-pointer"
-                  >
-                    {letter}
-                  </button>
-                ) : (
-                  <span
-                    key={`${letter}-${index}`}
-                    className="font-bold tracking-[0.12em] text-4xl sm:text-5xl text-emerald-50/95"
-                  >
-                    {letter}
-                  </span>
-                ),
-              )}
-            </div>
-          </div>
-        </div>
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 p-4">
+      <div className="flex flex-col items-center w-full max-w-md gap-8">
+        {/* Logo PNG centrado: todo el logo abre/cierra login por email */}
+        <button
+          type="button"
+          title={showTextLogin ? 'Ocultar acceso con email' : 'Acceso con email'}
+          aria-label={showTextLogin ? 'Ocultar acceso con email' : 'Mostrar acceso con email'}
+          aria-pressed={showTextLogin}
+          onClick={() => setShowTextLogin((v) => !v)}
+          className="group relative flex items-center justify-center rounded-full focus:outline-none focus-visible:ring-4 focus-visible:ring-emerald-400/70 transition-transform hover:scale-[1.03] active:scale-[0.98] cursor-pointer"
+        >
+          <img
+            src="/lipoout-logo.png"
+            alt="Lipoout"
+            className="h-40 w-40 sm:h-48 sm:w-48 object-contain drop-shadow-2xl pointer-events-none select-none"
+            draggable={false}
+          />
+        </button>
 
-        <div className="bg-white/10 backdrop-blur-lg rounded-xl shadow-2xl p-8 border border-white/20">
+        <div className="w-full bg-white/10 backdrop-blur-lg rounded-xl shadow-2xl p-8 border border-white/20">
           {error && (
             <div className="mb-4 p-3 bg-red-500/20 border border-red-500/50 rounded-lg text-red-200 text-sm">
               {error}

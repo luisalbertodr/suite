@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Lock } from 'lucide-react';
 import { useWorkCenterBranding } from '@/hooks/useWorkCenterBranding';
+import { getIdleLoginEnabled } from '@/lib/idleLoginPrefs';
 
 const INACTIVITY_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 
@@ -19,6 +20,11 @@ export const Screensaver: React.FC = () => {
 
     const startTimer = () => {
       clearTimeout(timeout);
+      // Si el login por inactividad (30s) está activo, no mostrar screensaver.
+      if (getIdleLoginEnabled()) {
+        setIsActive(false);
+        return;
+      }
       timeout = setTimeout(() => setIsActive(true), INACTIVITY_TIMEOUT);
     };
 
@@ -29,11 +35,14 @@ export const Screensaver: React.FC = () => {
 
     const events = ['mousedown', 'mousemove', 'keydown', 'touchstart', 'scroll'];
     events.forEach(e => window.addEventListener(e, handleActivity, { passive: true }));
+    const onPref = () => startTimer();
+    window.addEventListener('suite:idle-login-pref', onPref);
     startTimer();
 
     return () => {
       clearTimeout(timeout);
       events.forEach(e => window.removeEventListener(e, handleActivity));
+      window.removeEventListener('suite:idle-login-pref', onPref);
     };
   }, [isActive]);
 
