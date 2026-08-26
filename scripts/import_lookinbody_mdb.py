@@ -133,6 +133,22 @@ def to_float(value: object) -> float | None:
         return None
 
 
+def ordered_range_min(a: float | None, b: float | None) -> float | None:
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return min(a, b)
+
+
+def ordered_range_max(a: float | None, b: float | None) -> float | None:
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return max(a, b)
+
+
 def parse_measured_at(raw: object) -> datetime | None:
     s = str(raw or "").strip()
     if len(s) != 14 or not s.isdigit():
@@ -411,8 +427,15 @@ def build_rows(
                 "whr_min": to_float(mfa_row.get("WHR_MIN")),
                 "whr_max": to_float(mfa_row.get("WHR_MAX")),
                 "bmr_kcal": to_float(wc_row.get("BMR")),
-                "bmr_min_kcal": to_float(wc_row.get("BMR_MIN")),
-                "bmr_max_kcal": to_float(wc_row.get("BMR_MAX")),
+                # LookInBody Access: BMR_MIN/BMR_MAX vienen invertidos respecto al rango real.
+                "bmr_min_kcal": ordered_range_min(
+                    to_float(wc_row.get("BMR_MIN")),
+                    to_float(wc_row.get("BMR_MAX")),
+                ),
+                "bmr_max_kcal": ordered_range_max(
+                    to_float(wc_row.get("BMR_MIN")),
+                    to_float(wc_row.get("BMR_MAX")),
+                ),
                 "fat_control_kg": to_float(wc_row.get("FC")),
                 "muscle_control_kg": to_float(wc_row.get("MC")),
                 "segmental_lean": segmental_lean(lb_row),

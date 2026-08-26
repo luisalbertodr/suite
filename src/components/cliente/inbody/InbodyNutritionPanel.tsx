@@ -98,7 +98,7 @@ export const InbodyNutritionPanel: React.FC<Props> = ({ measurement, compact }) 
             <p className="text-xs text-muted-foreground">
               MB del InBody: {formatInbodyNumber(measurement.bmr_kcal, 0, ' kcal')}
               {measurement.bmr_min_kcal != null && measurement.bmr_max_kcal != null
-                ? ` (rango ${formatInbodyNumber(measurement.bmr_min_kcal, 0)}–${formatInbodyNumber(measurement.bmr_max_kcal, 0)})`
+                ? ` (rango ${formatInbodyNumber(Math.min(measurement.bmr_min_kcal, measurement.bmr_max_kcal), 0)}–${formatInbodyNumber(Math.max(measurement.bmr_min_kcal, measurement.bmr_max_kcal), 0)})`
                 : ''}
             </p>
           )}

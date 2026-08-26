@@ -154,7 +154,9 @@ function fmt(value: number | null | undefined, decimals = 1, suffix = ''): strin
 
 function fmtRange(min: number | null | undefined, max: number | null | undefined, decimals = 1): string {
   if (min == null || max == null) return '';
-  return `${min.toFixed(decimals).replace('.', ',')} ~ ${max.toFixed(decimals).replace('.', ',')}`;
+  const lo = Math.min(min, max);
+  const hi = Math.max(min, max);
+  return `${lo.toFixed(decimals).replace('.', ',')} ~ ${hi.toFixed(decimals).replace('.', ',')}`;
 }
 
 function segmentPoint(rect: RefRect, xRef: number, rowPct: number) {

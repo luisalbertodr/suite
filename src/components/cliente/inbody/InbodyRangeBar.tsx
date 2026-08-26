@@ -7,6 +7,7 @@ import {
   inbodyRangeStatus,
   inbodyStatusClass,
   inbodyStatusLabel,
+  normalizeOrderedRange,
   type InbodyRangeStatus,
 } from '@/lib/inbodyMeasurements';
 import { InbodyMetricHelp } from './InbodyMetricHelp';
@@ -93,9 +94,10 @@ export const InbodyMetricRow: React.FC<MetricRowProps> = ({
   decimals = 1,
 }) => {
   const status = inbodyRangeStatus(value, min ?? null, max ?? null);
+  const ordered = normalizeOrderedRange(min ?? null, max ?? null);
   const range =
-    min != null && max != null
-      ? `${formatInbodyNumber(min, decimals)} ~ ${formatInbodyNumber(max, decimals)}${unit ? ` ${unit}` : ''}`
+    ordered.min != null && ordered.max != null
+      ? `${formatInbodyNumber(ordered.min, decimals)} ~ ${formatInbodyNumber(ordered.max, decimals)}${unit ? ` ${unit}` : ''}`
       : '—';
 
   return (
