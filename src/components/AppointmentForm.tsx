@@ -33,7 +33,7 @@ import {
 } from '@/lib/billingCompany';
 import { useFamilies } from '@/hooks/useFamilies';
 import { useNavigate } from 'react-router-dom';
-import { openSuiteWhatsappChat } from '@/lib/openSuiteWhatsappChat';
+import { openSuiteWhatsappChat, normalizeWhatsappPhoneParam } from '@/lib/openSuiteWhatsappChat';
 import { useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
 import { usePermissions } from '@/hooks/usePermissions';
 
@@ -336,7 +336,14 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
                           selectedCustomer.name ?? undefined,
                         );
                       }
-                    : undefined
+                    : stylePhone
+                      ? () => {
+                          const digits = normalizeWhatsappPhoneParam(stylePhone);
+                          if (digits) {
+                            window.open(`https://wa.me/${digits}`, '_blank', 'noopener,noreferrer');
+                          }
+                        }
+                      : undefined
                 }
                 whatsappPhoneFallback={stylePhone}
                 activeVouchersCount={activeVouchersCount}

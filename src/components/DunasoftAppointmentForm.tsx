@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { X, Save, Plus, Trash2 } from 'lucide-react';
+import { X, Save, Plus, Trash2, MessageCircle } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import type { DunasoftPlanArtInput } from '@/lib/dunasoftDualWrite';
 import type { Employee } from '@/types/agenda';
 import { calcEndFromStart } from '@/lib/agendaAppointmentItems';
@@ -23,6 +24,9 @@ import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { useWorkCenter } from '@/hooks/useWorkCenter';
 import { supabase } from '@/lib/supabase';
 import { DEFAULT_APPOINTMENT_SERVICE_MINUTES } from '@/lib/appointmentArticleKind';
+import { openSuiteWhatsappChat, normalizeWhatsappPhoneParam } from '@/lib/openSuiteWhatsappChat';
+import { useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
+import { usePermissions } from '@/hooks/usePermissions';
 
 export type DunasoftAppointmentFormValues = {
   codemp: string;
@@ -81,8 +85,12 @@ export const DunasoftAppointmentForm: React.FC<Props> = ({
   onCancel,
 }) => {
   const employee = employees.find((e) => e.id === employeeId);
+  const navigate = useNavigate();
   const { companyId } = useCompanyFilter();
   const { catalogHostCompanyId } = useWorkCenter();
+  const { companyId: whatsappCompanyId } = useWhatsappCompanyId();
+  const { hasPermission } = usePermissions();
+  const canUseWhatsapp = hasPermission('whatsapp', 'read');
   const catalogCompanyId = catalogHostCompanyId ?? companyId;
 
   const [clientPick, setClientPick] = useState<AppointmentClientPick | null>(() => {
@@ -156,6 +164,38 @@ export const DunasoftAppointmentForm: React.FC<Props> = ({
     setTel1cli(String(clientPick.phone ?? '').trim());
     setCustomerId(clientPick.customerId);
   }, [clientPick]);
+
+  /** Si Style no trae teléfono, rellenar desde ficha Suite (codcli / customer). */
+  useEffect(() => {
+    if (tel1cli.trim() || !catalogCompanyId) return;
+    const legacy = codcli.trim();
+    let cancelled = false;
+    void (async () => {
+      let q = supabase
+        .from('customers')
+        .select('phone,phone_mobile,phone_home')
+        .eq('company_id', catalogCompanyId)
+        .is('archived_at', null)
+        .limit(1);
+      if (customerId) {
+        q = q.eq('id', customerId);
+      } else if (legacy) {
+        q = q.eq('legacy_codcli', legacy);
+      } else {
+        return;
+      }
+      const { data } = await q.maybeSingle();
+      if (cancelled || !data) return;
+      const phone =
+        String(data.phone_mobile ?? '').trim() ||
+        String(data.phone ?? '').trim() ||
+        String(data.phone_home ?? '').trim();
+      if (phone) setTel1cli(phone);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [catalogCompanyId, codcli, customerId, tel1cli]);
 
   const applyArticleAt = (index: number, article: AppointmentArticleOption) => {
     setArticleCache((prev) => {
@@ -244,7 +284,40 @@ export const DunasoftAppointmentForm: React.FC<Props> = ({
               </div>
               <div className="sm:col-span-2">
                 <Label htmlFor="ds-tel">Teléfono</Label>
-                <Input id="ds-tel" value={tel1cli} onChange={(e) => setTel1cli(e.target.value)} />
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    id="ds-tel"
+                    value={tel1cli}
+                    onChange={(e) => setTel1cli(e.target.value)}
+                    className="min-w-0 flex-1"
+                  />
+                  {tel1cli.trim() ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-9 shrink-0 border-emerald-200 px-2 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-950"
+                      title="Abrir conversación de WhatsApp"
+                      aria-label="Abrir conversación de WhatsApp"
+                      onClick={() => {
+                        const phone = tel1cli.trim();
+                        if (canUseWhatsapp) {
+                          void openSuiteWhatsappChat(
+                            navigate,
+                            whatsappCompanyId ?? companyId,
+                            phone,
+                            nomcli.trim() || null,
+                          );
+                          return;
+                        }
+                        const digits = normalizeWhatsappPhoneParam(phone);
+                        if (digits) window.open(`https://wa.me/${digits}`, '_blank', 'noopener,noreferrer');
+                      }}
+                    >
+                      <MessageCircle className="h-4 w-4" />
+                    </Button>
+                  ) : null}
+                </div>
               </div>
             </div>
 
