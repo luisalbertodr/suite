@@ -33,6 +33,9 @@ import {
 } from '@/lib/billingCompany';
 import { useFamilies } from '@/hooks/useFamilies';
 import { useNavigate } from 'react-router-dom';
+import { openSuiteWhatsappChat } from '@/lib/openSuiteWhatsappChat';
+import { useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
+import { usePermissions } from '@/hooks/usePermissions';
 
 interface Employee {
   id: string;
@@ -81,6 +84,9 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
 }) => {
   const navigate = useNavigate();
   const { companyId } = useCompanyFilter();
+  const { companyId: whatsappCompanyId } = useWhatsappCompanyId();
+  const { hasPermission } = usePermissions();
+  const canUseWhatsapp = hasPermission('whatsapp', 'read');
   const { families: familyRecords } = useFamilies({ scope: 'all' });
   const familyBillingMap = useMemo(
     () => buildFamilyBillingMap(familyRecords.map((f) => ({ name: f.name, billing_company_id: f.billing_company_id }))),
@@ -320,6 +326,19 @@ export const AppointmentForm: React.FC<AppointmentFormProps> = ({
                 status={formData.status}
                 onStatusChange={(status) => setFormData({ ...formData, status })}
                 onOpenFicha={() => { setCustomerHistoryTab('ficha'); setShowCustomerHistory(true); }}
+                onOpenWhatsapp={
+                  canUseWhatsapp && stylePhone
+                    ? () => {
+                        void openSuiteWhatsappChat(
+                          navigate,
+                          whatsappCompanyId ?? companyId,
+                          stylePhone,
+                          selectedCustomer.name ?? undefined,
+                        );
+                      }
+                    : undefined
+                }
+                whatsappPhoneFallback={stylePhone}
                 activeVouchersCount={activeVouchersCount}
                 pendingDebt={pendingDebt}
                 chargeableTotal={chargeableTotal}

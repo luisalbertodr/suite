@@ -2,7 +2,8 @@
  * Búsqueda rápida de clientes en TopBar (Agenda, TPV, etc.).
  * Al elegir un resultado navega a la ficha en /clientes.
  */
-import React, { startTransition, useEffect, useId, useRef, useState } from 'react';
+import React, { startTransition, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { Loader2, Search, UserRound } from 'lucide-react';
 import { Input } from '@/components/ui/input';
@@ -25,11 +26,16 @@ export function TopBarCustomerLookup({ className }: Props) {
   const [text, setText] = useState('');
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number; width: number } | null>(null);
   const { companyId } = useCompanyFilter();
   const { operationalCompanyId } = useWorkCenter();
   const catalogCompanyId = operationalCompanyId ?? companyId;
 
-  const { customers, isFetching, isReady } = useCustomerSearch(catalogCompanyId, query, 'active');
+  const { customers, isFetching, isReady, isError, error } = useCustomerSearch(
+    catalogCompanyId,
+    query,
+    'active',
+  );
 
   useEffect(() => {
     if (!isCustomerSearchQueryReady(query)) {
@@ -41,13 +47,39 @@ export function TopBarCustomerLookup({ className }: Props) {
 
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+      if (!rootRef.current?.contains(e.target as Node)) {
+        const panel = document.getElementById(listId);
+        if (panel?.contains(e.target as Node)) return;
+        setOpen(false);
+      }
     };
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
-  }, []);
+  }, [listId]);
 
   const showPanel = open && isCustomerSearchQueryReady(query);
+
+  useLayoutEffect(() => {
+    if (!showPanel || !rootRef.current) {
+      setMenuPos(null);
+      return;
+    }
+    const update = () => {
+      const rect = rootRef.current!.getBoundingClientRect();
+      setMenuPos({
+        top: rect.bottom + 4,
+        left: rect.left,
+        width: Math.max(rect.width, 220),
+      });
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [showPanel, text, customers.length]);
 
   const goToCustomer = (customerId: string) => {
     setOpen(false);
@@ -55,6 +87,61 @@ export function TopBarCustomerLookup({ className }: Props) {
     startTransition(() => setQuery(''));
     navigate(buildCustomerProfileUrl(customerId, 'timeline'));
   };
+
+  const panel =
+    showPanel && menuPos
+      ? createPortal(
+          <div
+            id={listId}
+            role="listbox"
+            style={{
+              position: 'fixed',
+              top: menuPos.top,
+              left: menuPos.left,
+              width: menuPos.width,
+            }}
+            className="z-[80] max-h-72 overflow-auto rounded-md border bg-popover text-popover-foreground shadow-md"
+          >
+            {isFetching && !customers.length ? (
+              <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Buscando…
+              </div>
+            ) : isError ? (
+              <div className="px-3 py-2 text-xs text-destructive">
+                Error al buscar{error instanceof Error && error.message ? `: ${error.message}` : ''}
+              </div>
+            ) : !catalogCompanyId ? (
+              <div className="px-3 py-2 text-xs text-muted-foreground">Sin empresa activa</div>
+            ) : !isReady || customers.length === 0 ? (
+              <div className="px-3 py-2 text-xs text-muted-foreground">Sin resultados</div>
+            ) : (
+              customers.slice(0, 12).map((c) => {
+                const phones = formatCustomerPhoneLabels(c);
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    role="option"
+                    className="flex w-full items-start gap-2 px-2.5 py-1.5 text-left hover:bg-accent"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => goToCustomer(c.id)}
+                  >
+                    <UserRound className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-xs font-medium">{c.name}</span>
+                      <span className="block truncate text-[10px] text-muted-foreground">
+                        {[c.tax_id, phones[0] || c.phone].filter(Boolean).join(' · ') || 'Sin DNI/teléfono'}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>,
+          document.body,
+        )
+      : null;
 
   return (
     <div ref={rootRef} className={cn('relative w-[11rem] sm:w-48 md:w-56 shrink-0', className)}>
@@ -89,44 +176,7 @@ export function TopBarCustomerLookup({ className }: Props) {
         autoComplete="off"
         spellCheck={false}
       />
-      {showPanel ? (
-        <div
-          id={listId}
-          role="listbox"
-          className="absolute left-0 right-0 top-[calc(100%+4px)] z-[60] max-h-72 overflow-auto rounded-md border bg-popover text-popover-foreground shadow-md"
-        >
-          {isFetching && !customers.length ? (
-            <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              Buscando…
-            </div>
-          ) : !isReady || customers.length === 0 ? (
-            <div className="px-3 py-2 text-xs text-muted-foreground">Sin resultados</div>
-          ) : (
-            customers.slice(0, 12).map((c) => {
-              const phones = formatCustomerPhoneLabels(c);
-              return (
-                <button
-                  key={c.id}
-                  type="button"
-                  role="option"
-                  className="flex w-full items-start gap-2 px-2.5 py-1.5 text-left hover:bg-accent"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => goToCustomer(c.id)}
-                >
-                  <UserRound className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-xs font-medium">{c.name}</span>
-                    <span className="block truncate text-[10px] text-muted-foreground">
-                      {[c.tax_id, phones[0] || c.phone].filter(Boolean).join(' · ') || 'Sin DNI/teléfono'}
-                    </span>
-                  </span>
-                </button>
-              );
-            })
-          )}
-        </div>
-      ) : null}
+      {panel}
     </div>
   );
 }

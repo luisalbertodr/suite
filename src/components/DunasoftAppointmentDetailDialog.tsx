@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Dialog,
   DialogContent,
@@ -10,9 +11,16 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import type { Appointment, Employee } from '@/types/agenda';
 import { AppointmentItemTimeline } from '@/components/AppointmentItemTimeline';
-import { ClipboardList, FolderOpen, Pencil, Trash2 } from 'lucide-react';
+import { ClipboardList, FolderOpen, MessageCircle, Pencil, Trash2 } from 'lucide-react';
 import { AppointmentDocumentationDialog } from '@/components/clinical/AppointmentDocumentationDialog';
 import { resolveAppointmentCustomerFromDb } from '@/lib/appointmentCustomerResolve';
+import { openSuiteWhatsappChat } from '@/lib/openSuiteWhatsappChat';
+import { useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
+import { usePermissions } from '@/hooks/usePermissions';
+import { primaryCustomerPhone } from '@/lib/legacyCustomerPhones';
+import { APPOINTMENT_CUSTOMER_SUMMARY_FIELDS } from '@/lib/appointmentCustomerSummary';
+import { supabase } from '@/lib/supabase';
+import { useQuery } from '@tanstack/react-query';
 
 type Props = {
   appointment: Appointment | null;
@@ -49,6 +57,10 @@ export function DunasoftAppointmentDetailDialog({
   onOpenFreeConsent,
   companyId,
 }: Props) {
+  const navigate = useNavigate();
+  const { companyId: whatsappCompanyId } = useWhatsappCompanyId();
+  const { hasPermission } = usePermissions();
+  const canUseWhatsapp = hasPermission('whatsapp', 'read');
   const [docPickerOpen, setDocPickerOpen] = useState(false);
   const [resolvedCustomerId, setResolvedCustomerId] = useState<string | null>(null);
   const [linkPending, setLinkPending] = useState(false);
@@ -79,6 +91,25 @@ export function DunasoftAppointmentDetailDialog({
   }, [open, appointment, companyId]);
 
   const effectiveCustomerId = resolvedCustomerId;
+
+  const { data: customerPhones } = useQuery({
+    queryKey: ['appointment-detail-customer-phone', effectiveCustomerId],
+    enabled: !!effectiveCustomerId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('customers')
+        .select(APPOINTMENT_CUSTOMER_SUMMARY_FIELDS)
+        .eq('id', effectiveCustomerId!)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const whatsappPhone =
+    primaryCustomerPhone(customerPhones ?? {}) ||
+    String(appointment?.clientPhone ?? '').trim() ||
+    null;
 
   const appointmentWithCustomer = useMemo(() => {
     if (!appointment || !effectiveCustomerId) return appointment;
@@ -174,8 +205,26 @@ export function DunasoftAppointmentDetailDialog({
           ) : null}
         </div>
 
-        {(canEdit || canDelete || hasDocActions) ? (
+        {(canEdit || canDelete || hasDocActions || (canUseWhatsapp && whatsappPhone)) ? (
           <DialogFooter className="gap-2 sm:gap-0 flex-wrap">
+            {canUseWhatsapp && whatsappPhone ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="border-emerald-200 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-300"
+                onClick={() => {
+                  void openSuiteWhatsappChat(
+                    navigate,
+                    whatsappCompanyId ?? companyId,
+                    whatsappPhone,
+                    appointment.clientName,
+                  );
+                }}
+              >
+                <MessageCircle className="w-4 h-4 mr-1" /> WhatsApp
+              </Button>
+            ) : null}
             {hasDocActions && appointmentWithCustomer ? (
               <>
                 {onOpenQuestionnaire ? (

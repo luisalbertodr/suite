@@ -54,7 +54,7 @@ export const useWhatsappChats = () => {
         .eq('company_id', companyId)
         .eq('archived', false)
         .order('last_message_at', { ascending: false, nullsFirst: false })
-        .limit(120);
+        .limit(300);
       if (error) throw error;
       return (data ?? []).filter((c) => !isSystemChatJid(c.chat_id));
     },

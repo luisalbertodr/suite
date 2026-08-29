@@ -1,4 +1,5 @@
 import React from 'react';
+import { MessageCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { AppointmentSelectContent } from '@/components/AppointmentSelectContent';
 import { Select, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -7,12 +8,17 @@ import {
   formatCustomerContactLine,
   type AppointmentCustomerSummary,
 } from '@/lib/appointmentCustomerSummary';
+import { primaryCustomerPhone } from '@/lib/legacyCustomerPhones';
 
 type Props = {
   customer: AppointmentCustomerSummary;
   status: 'confirmed' | 'pending' | 'cancelled';
   onStatusChange: (status: 'confirmed' | 'pending' | 'cancelled') => void;
   onOpenFicha: () => void;
+  /** Abre la conversación en la pestaña WhatsApp de Suite. */
+  onOpenWhatsapp?: () => void;
+  /** Teléfono de respaldo (p. ej. plan2009.tel1cli) si la ficha no tiene móvil. */
+  whatsappPhoneFallback?: string | null;
   activeVouchersCount: number;
   pendingDebt: number;
   chargeableTotal: number;
@@ -37,6 +43,8 @@ export const AppointmentCustomerSummaryBar: React.FC<Props> = ({
   status,
   onStatusChange,
   onOpenFicha,
+  onOpenWhatsapp,
+  whatsappPhoneFallback,
   activeVouchersCount,
   pendingDebt,
   chargeableTotal,
@@ -60,6 +68,9 @@ export const AppointmentCustomerSummaryBar: React.FC<Props> = ({
   const isCancelled = status === 'cancelled';
   const isCharged = chargedTotal > 0 && Boolean(saleTicket);
   const pendingCharge = Math.max(0, chargeableTotal - chargedTotal);
+  const whatsappPhone =
+    primaryCustomerPhone(customer) || String(whatsappPhoneFallback ?? '').trim() || null;
+  const canOpenWhatsapp = Boolean(onOpenWhatsapp && whatsappPhone);
 
   return (
     <div className="rounded-md border bg-muted/30 px-2.5 py-1.5 text-xs">
@@ -90,6 +101,19 @@ export const AppointmentCustomerSummaryBar: React.FC<Props> = ({
           <Button type="button" variant="outline" size="sm" className="h-6 text-[11px] px-2" onClick={onOpenFicha}>
             Ficha
           </Button>
+          {canOpenWhatsapp ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-6 px-1.5 border-emerald-200 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-950"
+              onClick={onOpenWhatsapp}
+              title={`Abrir WhatsApp · ${whatsappPhone}`}
+              aria-label="Abrir conversación de WhatsApp"
+            >
+              <MessageCircle className="h-3.5 w-3.5" />
+            </Button>
+          ) : null}
           {onOpenClinicalHistory && (
             <Button
               type="button"

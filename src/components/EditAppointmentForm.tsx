@@ -50,6 +50,8 @@ import type { TrackingFamily } from '@/lib/treatmentTracking';
 import { createQuestionnaire, openQuestionnaireKiosk } from '@/lib/questionnaireApi';
 import { useToast } from '@/hooks/use-toast';
 import type { ClienteDetailTab } from '@/types/clienteDetail';
+import { openSuiteWhatsappChat } from '@/lib/openSuiteWhatsappChat';
+import { useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
 
 interface Employee { id: string; name: string; color: string; billing_company_id?: string | null; }
 interface Appointment {
@@ -163,6 +165,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
 }) => {
   const navigate = useNavigate();
   const { companyId } = useCompanyFilter();
+  const { companyId: whatsappCompanyId } = useWhatsappCompanyId();
   const { families: familyRecords } = useFamilies({ scope: 'all' });
   const familyBillingMap = useMemo(
     () => buildFamilyBillingMap(familyRecords.map((f) => ({ name: f.name, billing_company_id: f.billing_company_id }))),
@@ -172,6 +175,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
   const { requireOrToast: requirePermissionOrToast } = usePermissionGuard();
   const { hasPermission } = usePermissions();
   const canSeeClinicalHistory = hasPermission('clinical_history', 'read');
+  const canUseWhatsapp = hasPermission('whatsapp', 'read');
   const openClinicalHistoryTab = () => {
     setCustomerHistoryTab('historial');
     setShowCustomerHistory(true);
@@ -509,6 +513,19 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                 status={formData.status}
                 onStatusChange={(status) => setFormData({ ...formData, status })}
                 onOpenFicha={() => { setCustomerHistoryTab('ficha'); setShowCustomerHistory(true); }}
+                onOpenWhatsapp={
+                  canUseWhatsapp && stylePhone
+                    ? () => {
+                        void openSuiteWhatsappChat(
+                          navigate,
+                          whatsappCompanyId ?? companyId,
+                          stylePhone,
+                          summaryCustomer.name ?? appointment.clientName,
+                        );
+                      }
+                    : undefined
+                }
+                whatsappPhoneFallback={appointment.clientPhone}
                 activeVouchersCount={activeVouchersCount}
                 pendingDebt={pendingDebt}
                 chargeableTotal={chargeableTotal}
