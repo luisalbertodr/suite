@@ -57,6 +57,7 @@ export type WhatsappProxyAction = {
     }
   | { action: 'messages.forward'; chat_id: string; message_id: string }
   | { action: 'messages.delete'; chat_id: string; message_id: string }
+  | { action: 'messages.edit'; chat_id: string; message_id: string; text: string }
   | { action: 'chat.mark_read'; chat_id: string }
   | { action: 'chat.ensure'; chat_id: string; name?: string | null }
   | {

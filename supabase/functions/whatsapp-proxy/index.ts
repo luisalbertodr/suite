@@ -166,6 +166,13 @@ type DeleteMessageBody = {
   message_id: string;
 };
 
+type EditMessageBody = {
+  action: 'messages.edit';
+  chat_id: string;
+  message_id: string;
+  text: string;
+};
+
 type ActionBody = {
   company_id?: string;
 } & (
@@ -201,6 +208,7 @@ type ActionBody = {
   | SendBody
   | ForwardBody
   | DeleteMessageBody
+  | EditMessageBody
   | { action: 'media.download'; url?: string; chat_id?: string; message_id?: string; alt_chat_ids?: string[] }
   | { action: 'messages.prefetch_media'; chat_id: string; limit?: number; alt_chat_ids?: string[] }
   | { action: 'chat.mark_read'; chat_id: string }
@@ -3515,6 +3523,78 @@ serve(async (req) => {
             .from('whatsapp_chats')
             .update({
               last_message_preview: revokedPreview,
+              last_message_from_me: true,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('company_id', companyId)
+            .eq('chat_id', chatId);
+        }
+
+        return json({ ok: true, chat_id: chatId, waha_message_id: wahaMessageId });
+      }
+
+      case 'messages.edit': {
+        const editBody = body as EditMessageBody;
+        if (!editBody.chat_id) return err('Falta chat_id');
+        const wahaMessageId = editBody.message_id?.trim();
+        if (!wahaMessageId) return err('Falta message_id');
+        const newText = String(editBody.text ?? '').trim();
+        if (!newText) return err('El texto no puede estar vacío');
+
+        const chatId = normalizeChatId(
+          editBody.chat_id,
+          cfg.default_country_code,
+        );
+        const editPath =
+          `/api/${encodeURIComponent(sessionName)}/chats/${encodeURIComponent(
+            chatId,
+          )}/messages/${encodeURIComponent(wahaMessageId)}`;
+
+        await wahaJson(cfg, editPath, {
+          method: 'PUT',
+          body: JSON.stringify({ text: newText }),
+        });
+
+        const { data: existing } = await admin
+          .from('whatsapp_messages')
+          .select('id, type, body, caption')
+          .eq('company_id', companyId)
+          .eq('waha_message_id', wahaMessageId)
+          .maybeSingle();
+
+        const isMediaCaption =
+          existing &&
+          existing.type &&
+          !['text', 'chat', 'revoked'].includes(String(existing.type));
+
+        const updateRow = isMediaCaption
+          ? { caption: newText, updated_at: new Date().toISOString() }
+          : { body: newText, updated_at: new Date().toISOString() };
+
+        const { error: markErr } = await admin
+          .from('whatsapp_messages')
+          .update(updateRow)
+          .eq('company_id', companyId)
+          .eq('waha_message_id', wahaMessageId);
+
+        if (markErr) {
+          console.warn('messages.edit mark failed:', markErr.message);
+        }
+
+        const { data: lastMsg } = await admin
+          .from('whatsapp_messages')
+          .select('waha_message_id')
+          .eq('company_id', companyId)
+          .eq('chat_id', chatId)
+          .order('timestamp', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (lastMsg?.waha_message_id === wahaMessageId) {
+          await admin
+            .from('whatsapp_chats')
+            .update({
+              last_message_preview: newText.slice(0, 200),
               last_message_from_me: true,
               updated_at: new Date().toISOString(),
             })

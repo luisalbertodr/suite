@@ -501,6 +501,24 @@ export const useWhatsappMessages = (
     },
   });
 
+  const editMessage = useMutation({
+    mutationFn: async (input: { chat_id: string; message_id: string; text: string }) => {
+      if (!companyId) throw new Error('Sin empresa activa');
+      return invokeWhatsappProxy<{
+        ok: boolean;
+        waha_message_id?: string;
+        chat_id?: string;
+      }>({
+        action: 'messages.edit',
+        ...input,
+        company_id: companyId,
+      });
+    },
+    onSuccess: () => {
+      invalidate();
+    },
+  });
+
   return {
     messages: messagesQuery.data ?? [],
     isLoading: messagesQuery.isLoading,
@@ -515,5 +533,6 @@ export const useWhatsappMessages = (
     sendMessage,
     forwardMessage,
     deleteMessage,
+    editMessage,
   };
 };
