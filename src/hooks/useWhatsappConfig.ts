@@ -59,6 +59,7 @@ export type WhatsappProxyAction = {
     }
   | { action: 'messages.forward'; chat_id: string; message_id: string }
   | { action: 'messages.delete'; chat_id: string; message_id: string }
+  | { action: 'messages.edit'; chat_id: string; message_id: string; text: string }
   | { action: 'chat.mark_read'; chat_id: string }
   | { action: 'chat.ensure'; chat_id: string; name?: string | null }
   | {
@@ -86,6 +87,18 @@ export type WhatsappProxyAction = {
   | { action: 'chat.search_link'; q: string; limit?: number }
   | { action: 'pictures.sync_batch'; chat_ids?: string[]; limit?: number }
   | { action: 'groups.sync_name'; chat_id: string }
+  | { action: 'groups.join_requests.list'; chat_id: string }
+  | {
+      action: 'groups.join_requests.approve' | 'groups.join_requests.reject';
+      chat_id: string;
+      participant_ids: string[];
+    }
+  | { action: 'groups.membership_approval.get'; chat_id: string }
+  | {
+      action: 'groups.membership_approval.set';
+      chat_id: string;
+      new_members_approval_required: boolean;
+    }
   | { action: 'media.download'; url?: string; chat_id?: string; message_id?: string; alt_chat_ids?: string[] }
   | { action: 'messages.prefetch_media'; chat_id: string; limit?: number; alt_chat_ids?: string[] }
   | { action: 'data.purge'; logout_waha?: boolean }
