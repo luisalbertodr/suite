@@ -22,14 +22,6 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Textarea } from '@/components/ui/textarea';
-import {
   useWhatsappMessages,
   type WhatsappMessageRow,
   type SendMessageInput,
@@ -47,7 +39,6 @@ import {
   displayNameForChat,
   findMessageByWahaId,
   buildGroupSenderDirectory,
-  extractBodyFromWahaMessageRaw,
   isGroupJid,
   isLidJid,
   isSystemChatJid,
@@ -66,7 +57,8 @@ import { useWhatsappTheme } from './WhatsappThemeContext';
 import { WhatsappChatProvider } from './WhatsappChatContext';
 import type { WhatsappChatRow } from '@/hooks/useWhatsappChats';
 import { useWhatsappMediaPrefetch } from '@/hooks/useWhatsappMediaPrefetch';
-import { useRoutePanelActive } from '@/contexts/RoutePanelContext';
+import { useWhatsappSessionLimits } from '@/hooks/useWhatsappConfig';
+import { WhatsappSessionLimitsAlert } from '@/components/whatsapp/WhatsappSessionLimitsAlert';
 
 interface Props {
   chats: WhatsappChatRow[];
@@ -102,6 +94,7 @@ export const WhatsappChatView: React.FC<Props> = ({
 }) => {
   const theme = useWhatsappTheme();
   const { toast } = useToast();
+  const sessionLimitsQuery = useWhatsappSessionLimits(true);
   const { companyId, loading: companyLoading } = useWhatsappCompanyId();
   const { data: waAutomationSettings } = useWhatsappAutomationSettings();
   const { createMarketingLead } = useWhatsappChatLink();
@@ -132,7 +125,6 @@ export const WhatsappChatView: React.FC<Props> = ({
     sendMessage,
     forwardMessage,
     deleteMessage,
-    editMessage,
   } = useWhatsappMessages(chat.chat_id, relatedChatIds, {
     historySyncedAt: chat.history_synced_at,
     lastMessageAt: chat.last_message_at,
@@ -145,16 +137,12 @@ export const WhatsappChatView: React.FC<Props> = ({
   const [forwardMessageRow, setForwardMessageRow] = useState<WhatsappMessageRow | null>(null);
   const [forwardOpen, setForwardOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<WhatsappMessageRow | null>(null);
-  const [editTarget, setEditTarget] = useState<WhatsappMessageRow | null>(null);
-  const [editText, setEditText] = useState('');
 
   useEffect(() => {
     setReplyTo(null);
     setForwardMessageRow(null);
     setForwardOpen(false);
     setDeleteTarget(null);
-    setEditTarget(null);
-    setEditText('');
     setSessionUnreadCount(chat.unread_count ?? 0);
   }, [chat.chat_id]);
 
@@ -219,42 +207,6 @@ export const WhatsappChatView: React.FC<Props> = ({
       setDeleteTarget(null);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'No se pudo eliminar el mensaje';
-      toast({ title: 'Error', description: msg, variant: 'destructive' });
-    }
-  };
-
-  const openEditMessage = (msg: WhatsappMessageRow) => {
-    const initial =
-      msg.body?.trim() ||
-      msg.caption?.trim() ||
-      extractBodyFromWahaMessageRaw(msg.raw) ||
-      '';
-    setEditTarget(msg);
-    setEditText(initial);
-  };
-
-  const handleSaveEdit = async () => {
-    if (!editTarget?.waha_message_id) return;
-    const text = editText.trim();
-    if (!text) {
-      toast({
-        title: 'Texto vacío',
-        description: 'Escribe el nuevo contenido del mensaje.',
-        variant: 'destructive',
-      });
-      return;
-    }
-    try {
-      await editMessage.mutateAsync({
-        chat_id: chat.chat_id,
-        message_id: editTarget.waha_message_id,
-        text,
-      });
-      toast({ title: 'Mensaje editado' });
-      setEditTarget(null);
-      setEditText('');
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'No se pudo editar el mensaje';
       toast({ title: 'Error', description: msg, variant: 'destructive' });
     }
   };
@@ -587,6 +539,12 @@ export const WhatsappChatView: React.FC<Props> = ({
         </div>
       </div>
 
+      <WhatsappSessionLimitsAlert
+        limits={sessionLimitsQuery.data ?? null}
+        compact
+        className="shrink-0 px-3 pt-2"
+      />
+
       <div
         ref={scrollRef}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y [-webkit-overflow-scrolling:touch]"
@@ -669,7 +627,6 @@ export const WhatsappChatView: React.FC<Props> = ({
                           setForwardMessageRow(msg);
                           setForwardOpen(true);
                         }}
-                        onEdit={openEditMessage}
                         onDeleteForEveryone={(msg) => setDeleteTarget(msg)}
                       />
                     </React.Fragment>
@@ -730,57 +687,6 @@ export const WhatsappChatView: React.FC<Props> = ({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      <Dialog
-        open={!!editTarget}
-        onOpenChange={(open) => {
-          if (!open) {
-            setEditTarget(null);
-            setEditText('');
-          }
-        }}
-      >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Editar mensaje</DialogTitle>
-          </DialogHeader>
-          <Textarea
-            value={editText}
-            onChange={(e) => setEditText(e.target.value)}
-            rows={5}
-            className="text-sm"
-            placeholder="Nuevo texto del mensaje…"
-            autoFocus
-          />
-          <DialogFooter className="gap-2">
-            <Button
-              type="button"
-              variant="ghost"
-              disabled={editMessage.isPending}
-              onClick={() => {
-                setEditTarget(null);
-                setEditText('');
-              }}
-            >
-              Cancelar
-            </Button>
-            <Button
-              type="button"
-              disabled={editMessage.isPending || !editText.trim()}
-              onClick={() => void handleSaveEdit()}
-            >
-              {editMessage.isPending ? (
-                <>
-                  <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-                  Guardando…
-                </>
-              ) : (
-                'Guardar'
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
     </WhatsappChatProvider>
   );

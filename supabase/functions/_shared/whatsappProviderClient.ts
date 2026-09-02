@@ -367,6 +367,36 @@ export async function providerSendMedia(
   };
 }
 
+/** WAHA 2026.8+: POST /api/sendSticker (WebP por URL o base64). */
+export async function providerSendSticker(
+  cfg: WhatsappProviderConfig,
+  chatId: string,
+  media: { base64: string; mime?: string; url?: string },
+): Promise<WhatsappSendResult> {
+  const provider = normalizeWhatsappProvider(cfg.provider);
+  if (provider !== 'waha') {
+    throw new Error('El envío de stickers solo está disponible con WAHA');
+  }
+  const sessionName = cfg.session_name || 'default';
+  const base64 = stripBase64Prefix(media.base64);
+  const file: Record<string, unknown> = { mimetype: 'image/webp' };
+  if (media.url) {
+    file.url = media.url;
+  } else {
+    file.data = base64;
+  }
+  const payload = { session: sessionName, chatId, file };
+  const res = await providerJson<Record<string, unknown>>(cfg, '/api/sendSticker', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return {
+    messageId: resolveOutgoingMessageId(provider, res, chatId),
+    timestamp: typeof res.timestamp === 'number' ? res.timestamp : undefined,
+    raw: res,
+  };
+}
+
 export async function providerPing(cfg: WhatsappProviderConfig): Promise<{ ok: boolean; status?: number }> {
   const provider = normalizeWhatsappProvider(cfg.provider);
   if (provider === 'meta') {

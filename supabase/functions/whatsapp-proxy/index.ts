@@ -42,6 +42,7 @@ import {
   providerListSessions,
   providerPing,
   providerSendMedia,
+  providerSendSticker,
   providerSendText,
   resolveOutgoingMessageId,
   WhatsappProviderError,
@@ -145,13 +146,27 @@ function proxyToProviderCfg(cfg: WhatsappConfig): WhatsappProviderConfig {
 type SendBody = {
   action: 'messages.send';
   chat_id: string;
-  type: 'text' | 'image' | 'video' | 'audio' | 'document' | 'voice';
+  type: 'text' | 'image' | 'video' | 'audio' | 'document' | 'voice' | 'sticker';
   text?: string;
   caption?: string;
   media_base64?: string;
   mime_type?: string;
   filename?: string;
   reply_to_message_id?: string;
+};
+
+type WahaMessageCapping = {
+  cappingStatus?: string;
+  totalQuota?: number;
+  usedQuota?: number;
+  cycleStart?: number;
+  cycleEnd?: number;
+};
+
+type WahaReachoutTimelock = {
+  enforcementType?: string;
+  isActive?: boolean;
+  timeEnforcementEnds?: number | null;
 };
 
 type ForwardBody = {
@@ -166,17 +181,10 @@ type DeleteMessageBody = {
   message_id: string;
 };
 
-type EditMessageBody = {
-  action: 'messages.edit';
-  chat_id: string;
-  message_id: string;
-  text: string;
-};
-
 type ActionBody = {
   company_id?: string;
 } & (
-  | { action: 'session.status' | 'session.start' | 'session.stop' | 'session.logout' | 'session.qr' }
+  | { action: 'session.status' | 'session.limits' | 'session.start' | 'session.stop' | 'session.logout' | 'session.qr' }
   | { action: 'session.configure_webhook'; webhook_url?: string }
   | { action: 'meta.validate' }
   | { action: 'meta.configure_webhook' }
@@ -208,7 +216,6 @@ type ActionBody = {
   | SendBody
   | ForwardBody
   | DeleteMessageBody
-  | EditMessageBody
   | { action: 'media.download'; url?: string; chat_id?: string; message_id?: string; alt_chat_ids?: string[] }
   | { action: 'messages.prefetch_media'; chat_id: string; limit?: number; alt_chat_ids?: string[] }
   | { action: 'chat.mark_read'; chat_id: string }
@@ -1782,6 +1789,42 @@ async function syncFullChatHistoryFromProvider(
   return { count: total, offset, has_more: hasMore, synced };
 }
 
+/** WAHA 2026.8+: cuota de contactos nuevos y reachout timelock (463/475). */
+async function fetchWahaSessionLimits(
+  cfg: WhatsappConfig,
+  sessionName: string,
+): Promise<{
+  capping: WahaMessageCapping | null;
+  timelock: WahaReachoutTimelock | null;
+  supported: boolean;
+}> {
+  let capping: WahaMessageCapping | null = null;
+  let timelock: WahaReachoutTimelock | null = null;
+  let supported = true;
+
+  try {
+    capping = await wahaJson<WahaMessageCapping>(
+      cfg,
+      `/api/sessions/${encodeURIComponent(sessionName)}/capping`,
+    );
+  } catch (e) {
+    if (e instanceof WahaError && (e.status === 404 || e.status === 501)) {
+      supported = false;
+    }
+  }
+
+  try {
+    timelock = await wahaJson<WahaReachoutTimelock>(
+      cfg,
+      `/api/sessions/${encodeURIComponent(sessionName)}/timelock`,
+    );
+  } catch {
+    // Endpoint ausente en versiones antiguas; no marcar unsupported.
+  }
+
+  return { capping, timelock, supported };
+}
+
 const WEBHOOK_EVENTS = [
   'message',
   'message.any',
@@ -2337,12 +2380,20 @@ serve(async (req) => {
             me_jid: data.me?.id ?? null,
             me_pushname: data.me?.pushName ?? null,
           });
+          const limits = await fetchWahaSessionLimits(cfg, sessionName).catch(() => ({
+            capping: null,
+            timelock: null,
+            supported: false,
+          }));
           return json({
             ok: true,
             status: data.status,
             me: data.me ?? null,
             webhooks_configured: health.webhooksConfigured,
             noweb_store_enabled: health.nowebStoreEnabled,
+            capping: limits.capping,
+            timelock: limits.timelock,
+            limits_supported: limits.supported,
           });
         } catch (e) {
           const msg = e instanceof Error ? e.message : 'Error consultando sesión';
@@ -2353,6 +2404,24 @@ serve(async (req) => {
           });
           return json({ ok: false, status: 'UNKNOWN', error: msg });
         }
+      }
+
+      case 'session.limits': {
+        if (provider === 'meta' || provider === 'openwa') {
+          return json({
+            ok: true,
+            capping: null,
+            timelock: null,
+            supported: false,
+            provider,
+          });
+        }
+        const limits = await fetchWahaSessionLimits(cfg, sessionName);
+        return json({
+          ok: true,
+          ...limits,
+          provider: 'waha',
+        });
       }
 
       case 'session.start': {
@@ -2493,7 +2562,7 @@ serve(async (req) => {
         try {
           await wahaJson(cfg, `/api/sessions/${encodeURIComponent(sessionName)}/logout`, {
             method: 'POST',
-            body: JSON.stringify({}),
+            body: JSON.stringify({ apps: { purge: true } }),
           });
         } catch (e) {
           const msg = e instanceof Error ? e.message : 'Error en logout';
@@ -3253,6 +3322,22 @@ serve(async (req) => {
             mediaType,
             mediaInput,
           );
+        } else if (type === 'sticker') {
+          if (!sendBody.media_base64) return err('Falta `media_base64`');
+          const mime = (sendBody.mime_type ?? 'image/webp').toLowerCase();
+          if (!mime.includes('webp')) {
+            return err('Los stickers deben estar en formato WebP (.webp)');
+          }
+          outgoingMime = 'image/webp';
+          const mediaInput = {
+            base64: sendBody.media_base64,
+            mime: outgoingMime,
+            filename: sendBody.filename ?? 'sticker.webp',
+          };
+          if (provider !== 'waha') {
+            return err('El envío de stickers solo está disponible con WAHA');
+          }
+          sendResult = await providerSendSticker(providerCfg, sendChatId, mediaInput);
         } else {
           return err(`Tipo no soportado: ${type}`);
         }
@@ -3523,78 +3608,6 @@ serve(async (req) => {
             .from('whatsapp_chats')
             .update({
               last_message_preview: revokedPreview,
-              last_message_from_me: true,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('company_id', companyId)
-            .eq('chat_id', chatId);
-        }
-
-        return json({ ok: true, chat_id: chatId, waha_message_id: wahaMessageId });
-      }
-
-      case 'messages.edit': {
-        const editBody = body as EditMessageBody;
-        if (!editBody.chat_id) return err('Falta chat_id');
-        const wahaMessageId = editBody.message_id?.trim();
-        if (!wahaMessageId) return err('Falta message_id');
-        const newText = String(editBody.text ?? '').trim();
-        if (!newText) return err('El texto no puede estar vacío');
-
-        const chatId = normalizeChatId(
-          editBody.chat_id,
-          cfg.default_country_code,
-        );
-        const editPath =
-          `/api/${encodeURIComponent(sessionName)}/chats/${encodeURIComponent(
-            chatId,
-          )}/messages/${encodeURIComponent(wahaMessageId)}`;
-
-        await wahaJson(cfg, editPath, {
-          method: 'PUT',
-          body: JSON.stringify({ text: newText }),
-        });
-
-        const { data: existing } = await admin
-          .from('whatsapp_messages')
-          .select('id, type, body, caption')
-          .eq('company_id', companyId)
-          .eq('waha_message_id', wahaMessageId)
-          .maybeSingle();
-
-        const isMediaCaption =
-          existing &&
-          existing.type &&
-          !['text', 'chat', 'revoked'].includes(String(existing.type));
-
-        const updateRow = isMediaCaption
-          ? { caption: newText, updated_at: new Date().toISOString() }
-          : { body: newText, updated_at: new Date().toISOString() };
-
-        const { error: markErr } = await admin
-          .from('whatsapp_messages')
-          .update(updateRow)
-          .eq('company_id', companyId)
-          .eq('waha_message_id', wahaMessageId);
-
-        if (markErr) {
-          console.warn('messages.edit mark failed:', markErr.message);
-        }
-
-        const { data: lastMsg } = await admin
-          .from('whatsapp_messages')
-          .select('waha_message_id')
-          .eq('company_id', companyId)
-          .eq('chat_id', chatId)
-          .order('timestamp', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (lastMsg?.waha_message_id === wahaMessageId) {
-          await admin
-            .from('whatsapp_chats')
-            .update({
-              last_message_preview: newText.slice(0, 200),
               last_message_from_me: true,
               updated_at: new Date().toISOString(),
             })
