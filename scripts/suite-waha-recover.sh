@@ -5,7 +5,7 @@
 set -euo pipefail
 
 CONTAINER="${WAHA_CONTAINER:-waha-worker-1}"
-IMAGE="${WAHA_IMAGE:-devlikeapro/waha:2026.8.1}"
+IMAGE="${WAHA_IMAGE:-devlikeapro/waha:latest-2026.8.2}"
 HOST_PORT="${WAHA_HOST_PORT:-3333}"
 VOLUME="${WAHA_VOLUME:-waha_waha-data-worker-1:/app/.sessions}"
 NETWORK="${WAHA_NETWORK:-waha_default}"
