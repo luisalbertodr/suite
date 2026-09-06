@@ -69,14 +69,14 @@ export const UserAllowedNetworksPanel: React.FC<UserAllowedNetworksPanelProps> =
         <p>
           Si no hay redes, el usuario puede entrar desde cualquier IP. Si añades redes, solo
           podrá acceder cuando la IP vista por <strong>supabase.lipoout.com</strong> esté en
-          alguna de ellas. La restricción aplica también a superusers.
+          alguna de ellas.
         </p>
         <p>
-          En la clínica el proxy suele ver <code className="text-[10px]">10.10.10.x</code> (la
-          más habitual) o <code className="text-[10px]">192.168.99.x</code> /
-          <code className="text-[10px]">192.168.1.x</code>. Sin redes asignadas = acceso libre
-          (por eso otros usuarios de la misma ubicación sí entran). Para acceso remoto usa
-          «Cualquier IP» o la IP pública fija.
+          Hoy casi todo el tráfico web llega como <code className="text-[10px]">10.10.10.1</code>{' '}
+          (firewall). El preset «Clínica (proxy)» permite sede — y también internet si el
+          firewall no reenvía la IP pública real. Las redes <code className="text-[10px]">192.168.x</code>{' '}
+          solo aplican si el servidor ve esa IP (LAN/VPN), no la IP privada de un PC en casa.
+          «Cualquier IP» anula el resto.
         </p>
       </div>
 
