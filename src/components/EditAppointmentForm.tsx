@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
-import { X, Save, Trash2, ArrowLeft } from 'lucide-react';
+import { X, Save, Trash2, ArrowLeft, MessageCircle } from 'lucide-react';
 import { AppointmentItemsEditor } from '@/components/AppointmentItemsEditor';
 import { AppointmentAttachmentsPanel } from '@/components/AppointmentAttachmentsPanel';
 import { AppointmentCustomerSummaryBar } from '@/components/AppointmentCustomerSummaryBar';
@@ -50,6 +50,8 @@ import type { TrackingFamily } from '@/lib/treatmentTracking';
 import { createQuestionnaire, openQuestionnaireKiosk } from '@/lib/questionnaireApi';
 import { useToast } from '@/hooks/use-toast';
 import type { ClienteDetailTab } from '@/types/clienteDetail';
+import { openSuiteWhatsappChat, normalizeWhatsappPhoneParam } from '@/lib/openSuiteWhatsappChat';
+import { useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
 
 interface Employee { id: string; name: string; color: string; billing_company_id?: string | null; }
 interface Appointment {
@@ -163,6 +165,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
 }) => {
   const navigate = useNavigate();
   const { companyId } = useCompanyFilter();
+  const { companyId: whatsappCompanyId } = useWhatsappCompanyId();
   const { families: familyRecords } = useFamilies({ scope: 'all' });
   const familyBillingMap = useMemo(
     () => buildFamilyBillingMap(familyRecords.map((f) => ({ name: f.name, billing_company_id: f.billing_company_id }))),
@@ -172,6 +175,7 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
   const { requireOrToast: requirePermissionOrToast } = usePermissionGuard();
   const { hasPermission } = usePermissions();
   const canSeeClinicalHistory = hasPermission('clinical_history', 'read');
+  const canUseWhatsapp = hasPermission('whatsapp', 'read');
   const openClinicalHistoryTab = () => {
     setCustomerHistoryTab('historial');
     setShowCustomerHistory(true);
@@ -503,12 +507,32 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
         </CardHeader>
         <CardContent className="min-h-0 flex-1 overflow-y-auto px-4 pb-3 pt-0">
           <form onSubmit={handleSubmit} className="space-y-2.5">
-            {summaryCustomer && (
+            {summaryCustomer ? (
               <AppointmentCustomerSummaryBar
                 customer={summaryCustomer}
                 status={formData.status}
                 onStatusChange={(status) => setFormData({ ...formData, status })}
                 onOpenFicha={() => { setCustomerHistoryTab('ficha'); setShowCustomerHistory(true); }}
+                onOpenWhatsapp={
+                  stylePhone
+                    ? () => {
+                        if (canUseWhatsapp) {
+                          void openSuiteWhatsappChat(
+                            navigate,
+                            whatsappCompanyId ?? companyId,
+                            stylePhone,
+                            summaryCustomer.name ?? appointment.clientName,
+                          );
+                          return;
+                        }
+                        const digits = normalizeWhatsappPhoneParam(stylePhone);
+                        if (digits) {
+                          window.open(`https://wa.me/${digits}`, '_blank', 'noopener,noreferrer');
+                        }
+                      }
+                    : undefined
+                }
+                whatsappPhoneFallback={appointment.clientPhone}
                 activeVouchersCount={activeVouchersCount}
                 pendingDebt={pendingDebt}
                 chargeableTotal={chargeableTotal}
@@ -537,7 +561,39 @@ export const EditAppointmentForm: React.FC<EditAppointmentFormProps> = ({
                   ? () => onCharge({ ...appointment, ...formData }, items)
                   : undefined}
               />
-            )}
+            ) : stylePhone ? (
+              <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 px-2.5 py-1.5 text-xs">
+                <div className="min-w-0 flex-1 leading-snug">
+                  <div className="font-medium text-foreground truncate">{appointment.clientName}</div>
+                  <div className="text-muted-foreground truncate">{stylePhone}</div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-6 shrink-0 border-emerald-200 px-1.5 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-300"
+                  title={`Abrir WhatsApp · ${stylePhone}`}
+                  aria-label="Abrir conversación de WhatsApp"
+                  onClick={() => {
+                    if (canUseWhatsapp) {
+                      void openSuiteWhatsappChat(
+                        navigate,
+                        whatsappCompanyId ?? companyId,
+                        stylePhone,
+                        appointment.clientName,
+                      );
+                      return;
+                    }
+                    const digits = normalizeWhatsappPhoneParam(stylePhone);
+                    if (digits) {
+                      window.open(`https://wa.me/${digits}`, '_blank', 'noopener,noreferrer');
+                    }
+                  }}
+                >
+                  <MessageCircle className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ) : null}
             {!itemsLoading && loadedItems !== undefined && loadedItems.length === 0 && appointment.id && (
               <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
                 No se han podido cargar los servicios de esta cita. Recarga la página; si persiste,

@@ -176,8 +176,11 @@ if ($Backup) {
 }
 
 Write-Host "Limpiando $RemoteRoot ..." -ForegroundColor Green
-ssh @SshOpts $SshTarget "mkdir -p '$remoteRootEscaped' && find '$remoteRootEscaped' -mindepth 1 ! -name '.user.ini' -delete"
-if ($LASTEXITCODE -ne 0) { throw "No se pudo limpiar el directorio remoto" }
+# Ignorar errores en morphoscan u otros ficheros protegidos; no abortar el deploy.
+ssh @SshOpts $SshTarget "mkdir -p '$remoteRootEscaped' && find '$remoteRootEscaped' -mindepth 1 ! -name '.user.ini' ! -path '*/morphoscan*' -delete; true"
+if ($LASTEXITCODE -ne 0) {
+  Write-Host "Aviso: limpieza remota parcial; se continúa con la subida." -ForegroundColor Yellow
+}
 
 Write-Host "Subiendo dist/ -> ${SshTarget}:${RemoteRoot}/ ..." -ForegroundColor Green
 & scp @SshOpts -r "$distDir/." "${SshTarget}:${RemoteRoot}/"
@@ -185,7 +188,8 @@ if ($LASTEXITCODE -ne 0) { throw "scp falló" }
 
 Write-Host "Verificando permisos ..." -ForegroundColor Green
 # aaPanel crea .user.ini con chattr +i; chmod -R falla ahí aunque el resto esté bien.
-ssh @SshOpts $SshTarget "find '$remoteRootEscaped' ! -name '.user.ini' -exec chmod a+rX {} +"
+# Tras scp como root, sin chown/chmod nginx (www) devolvía 403 en /assets/*.
+ssh @SshOpts $SshTarget "chown -R www:www '$remoteRootEscaped' 2>/dev/null; find '$remoteRootEscaped' ! -name '.user.ini' -exec chmod a+rX {} +"
 if ($LASTEXITCODE -ne 0) {
   Write-Host "Aviso: chmod parcial (normal si existe .user.ini de aaPanel)." -ForegroundColor Yellow
 }

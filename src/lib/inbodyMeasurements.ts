@@ -121,12 +121,12 @@ export function scaleDeviceFromMeasurement(m: Pick<InbodyMeasurement, 'device' |
 
 /**
  * MAC allowlist del gateway (mail):
- * - 60:30:F2:74:22:B6 → pesa ~+0,3 kg respecto a la otra → «Morpho+3»
- * - 60:30:F2:74:26:E2 → «Morpho»
+ * - 60:30:F2:74:26:E2 → operativamente «Pesar+»
+ * - 60:30:F2:74:22:B6 → operativamente «Pesar»
  * Comparativas emparejadas (mismo paciente <15 min): Gemma +0,30 / Marta +0,30 / Luis +0,15.
  */
-export const MORPHO_SCALE_PLUS3_MAC = '6030F27422B6';
-export const MORPHO_SCALE_BASE_MAC = '6030F27426E2';
+export const MORPHO_SCALE_PLUS3_MAC = '6030F27426E2';
+export const MORPHO_SCALE_BASE_MAC = '6030F27422B6';
 
 export type MorphoWeighTarget = 'base' | 'plus3';
 
@@ -154,11 +154,12 @@ export function morphoWeighLabelFromMac(mac: string | null | undefined): 'Pesar'
 }
 
 /** Detecta la unidad Morpho por MAC en inbody_user_id (SCALE…, scale-…, …-22b6). */
-export function morphoScaleUnitLabel(userId: string | null | undefined): 'Morpho+3' | 'Morpho' | null {
+export function morphoScaleUnitLabel(userId: string | null | undefined): 'Morpho+1' | 'Morpho' | null {
   const s = String(userId ?? '').toUpperCase().replace(/[^0-9A-Z]/g, '');
   if (!s) return null;
-  if (s.includes(MORPHO_SCALE_PLUS3_MAC) || s.endsWith('22B6')) return 'Morpho+3';
-  if (s.includes(MORPHO_SCALE_BASE_MAC) || s.endsWith('26E2')) return 'Morpho';
+  // La etiqueta “+1” (antes “+3”) depende del MAC “Pesar+”, sin heurísticas por sufijo.
+  if (s.includes(MORPHO_SCALE_PLUS3_MAC)) return 'Morpho+1';
+  if (s.includes(MORPHO_SCALE_BASE_MAC)) return 'Morpho';
   return null;
 }
 
@@ -166,7 +167,7 @@ export function scaleDeviceLabel(device: ScaleDevice): string {
   return device === 'morphoscan' ? 'MorphoScan' : 'InBody';
 }
 
-/** Etiqueta para selector de sesión: InBody | Morpho | Morpho+3. */
+/** Etiqueta para selector de sesión: InBody | Morpho | Morpho+1. */
 export function measurementSessionDeviceLabel(
   m: Pick<InbodyMeasurement, 'device' | 'source' | 'inbody_user_id'>,
 ): string {
@@ -295,14 +296,28 @@ export function formatInbodyNumber(
   return `${value.toFixed(decimals)}${suffix}`;
 }
 
+/** Ordena un intervalo [a,b] para que lo ≤ hi (LookInBody MDB invierte BMR_MIN/MAX). */
+export function normalizeOrderedRange(
+  min: number | null | undefined,
+  max: number | null | undefined,
+): { min: number | null; max: number | null } {
+  if (min == null && max == null) return { min: null, max: null };
+  if (min == null) return { min: null, max: max ?? null };
+  if (max == null) return { min, max: null };
+  if (min > max) return { min: max, max: min };
+  return { min, max };
+}
+
 export function inbodyRangeStatus(
   value: number | null | undefined,
   min: number | null | undefined,
   max: number | null | undefined,
 ): InbodyRangeStatus {
   if (value == null || min == null || max == null) return 'unknown';
-  if (value < min) return 'low';
-  if (value > max) return 'high';
+  const ordered = normalizeOrderedRange(min, max);
+  if (ordered.min == null || ordered.max == null) return 'unknown';
+  if (value < ordered.min) return 'low';
+  if (value > ordered.max) return 'high';
   return 'normal';
 }
 
@@ -398,13 +413,16 @@ export function inbodyBarScale(
   min: number,
   max: number,
 ): { start: number; end: number; markerPct: number; normalStartPct: number; normalEndPct: number } {
-  const span = Math.max(max - min, 0.001);
-  const start = min - span * 0.45;
-  const end = max + span * 0.45;
+  const ordered = normalizeOrderedRange(min, max);
+  const lo = ordered.min ?? min;
+  const hi = ordered.max ?? max;
+  const span = Math.max(hi - lo, 0.001);
+  const start = lo - span * 0.45;
+  const end = hi + span * 0.45;
   const total = end - start;
   const markerPct = Math.min(100, Math.max(0, ((value - start) / total) * 100));
-  const normalStartPct = ((min - start) / total) * 100;
-  const normalEndPct = ((max - start) / total) * 100;
+  const normalStartPct = ((lo - start) / total) * 100;
+  const normalEndPct = ((hi - start) / total) * 100;
   return { start, end, markerPct, normalStartPct, normalEndPct };
 }
 
@@ -493,6 +511,27 @@ export function normalizeInbodyMeasurement(raw: InbodyMeasurement): InbodyMeasur
   const bfmRange = resolveBodyFatMassRangeKg(out);
   out.body_fat_min_kg = bfmRange.min;
   out.body_fat_max_kg = bfmRange.max;
+
+  // LookInBody MDB suele traer BMR_MIN/BMR_MAX invertidos; normalizar todos los intervalos.
+  const rangePairs: Array<[keyof InbodyMeasurement, keyof InbodyMeasurement]> = [
+    ['weight_min_kg', 'weight_max_kg'],
+    ['smm_min_kg', 'smm_max_kg'],
+    ['body_fat_min_kg', 'body_fat_max_kg'],
+    ['tbw_min_kg', 'tbw_max_kg'],
+    ['ffm_min_kg', 'ffm_max_kg'],
+    ['bmi_min', 'bmi_max'],
+    ['pbf_min_pct', 'pbf_max_pct'],
+    ['whr_min', 'whr_max'],
+    ['bmr_min_kcal', 'bmr_max_kcal'],
+  ];
+  for (const [minKey, maxKey] of rangePairs) {
+    const ordered = normalizeOrderedRange(
+      out[minKey] as number | null | undefined,
+      out[maxKey] as number | null | undefined,
+    );
+    (out as Record<string, unknown>)[minKey] = ordered.min;
+    (out as Record<string, unknown>)[maxKey] = ordered.max;
+  }
 
   // MorphoScan: impedance Ω sí; lean/fat kg segmentales no vienen por BLE → derivar.
   return enrichMorphoScanSegmentals(out);

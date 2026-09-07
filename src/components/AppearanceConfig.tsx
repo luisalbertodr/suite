@@ -6,15 +6,18 @@ import { Badge } from '@/components/ui/badge';
 import { Palette, Check, Upload, X, Image, Moon, Sun, Volume2 } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Slider } from '@/components/ui/slider';
 import {
   getNotificationSoundPrefs,
   setNotificationSoundPrefs,
   playNotificationSound,
 } from '@/lib/notificationSounds';
+import { getIdleLoginEnabled, setIdleLoginEnabled } from '@/lib/idleLoginPrefs';
 import { useUserAppearance } from '@/hooks/useUserAppearance';
 import { useWorkCenterBranding } from '@/hooks/useWorkCenterBranding';
 import { useTheme } from 'next-themes';
+import { useToast } from '@/hooks/use-toast';
 
 const colorOptions = [
   { name: 'blue', label: 'Azul', bgClass: 'bg-blue-600' },
@@ -29,6 +32,7 @@ const colorOptions = [
 
 export const AppearanceConfig: React.FC = () => {
   const { theme, setTheme } = useTheme();
+  const { toast } = useToast();
   const { sidebarColor, updateSidebarColor, loading } = useUserAppearance();
   const {
     displayName,
@@ -41,6 +45,7 @@ export const AppearanceConfig: React.FC = () => {
   } = useWorkCenterBranding();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const darkFileInputRef = useRef<HTMLInputElement>(null);
+  const [idleLogin30s, setIdleLogin30s] = useState(() => getIdleLoginEnabled());
 
   const handleColorChange = (color: string) => {
     updateSidebarColor(color);
@@ -110,6 +115,34 @@ export const AppearanceConfig: React.FC = () => {
               </>
             )}
           </Button>
+        </div>
+
+        <div>
+          <h3 className="text-lg font-medium mb-2">Pantalla de login por inactividad</h3>
+          <p className="text-sm text-muted-foreground mb-3">
+            En esta estación, tras 30 segundos sin actividad se cierra la sesión y se vuelve a la
+            pantalla de login (útil en recepción / kiosco).
+          </p>
+          <div className="flex items-start gap-3 rounded-lg border border-border p-3">
+            <Checkbox
+              id="idle-login-30s"
+              checked={idleLogin30s}
+              onCheckedChange={(checked) => {
+                const enabled = checked === true;
+                setIdleLogin30s(enabled);
+                setIdleLoginEnabled(enabled);
+                toast({
+                  title: enabled ? 'Login por inactividad activado' : 'Login por inactividad desactivado',
+                  description: enabled
+                    ? 'Tras 30 s sin actividad se mostrará de nuevo el login.'
+                    : 'La sesión ya no se cerrará automáticamente por inactividad.',
+                });
+              }}
+            />
+            <Label htmlFor="idle-login-30s" className="text-sm font-medium leading-snug cursor-pointer">
+              Habilitar pantalla de login cada 30 segundos de inactividad
+            </Label>
+          </div>
         </div>
 
         <div>

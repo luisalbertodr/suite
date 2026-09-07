@@ -2,7 +2,7 @@
  * Estado compartido de «Pesar ahora» desde scale-ingest ?pending=1.
  * Usado por loop (idle/active), autoDiscover (MAC fija) y renpho-msc04 (handshake).
  */
-import { bleLog, abortableSleep } from '../ble/types.js';
+import { bleLog, abortableSleep } from './ble/types.js';
 
 export type PendingScaleProfile = {
   height: number;

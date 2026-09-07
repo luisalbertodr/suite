@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Search, RefreshCw, MessageSquarePlus, Users, Megaphone, UserPlus } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { WhatsappAvatar } from './WhatsappAvatar';
@@ -10,6 +11,7 @@ import {
   isGroupJid,
   isMetaMarketingLead,
   isRecentMetaLead,
+  isSystemChatJid,
   jidToDisplay,
   displayNameForChat,
   resolvePhoneLabelForChat,
@@ -19,6 +21,71 @@ import {
 import { useWhatsappTheme } from './WhatsappThemeContext';
 import { Check, CheckCheck } from 'lucide-react';
 import type { WhatsappChatRow } from '@/hooks/useWhatsappChats';
+import { WHATSAPP_CHAT_LIST_COLUMNS } from '@/hooks/useWhatsappChats';
+import { useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
+import { supabase } from '@/lib/supabase';
+
+function normalizeSearchText(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function chatMatchesSearch(
+  c: WhatsappChatRow,
+  qNorm: string,
+  qDigits: string,
+  opts: {
+    customerNameById?: Record<string, string>;
+    customerIdByChatId?: Record<string, string>;
+    customerNameByChatId?: Record<string, string>;
+    phoneLabelByChatId?: Record<string, string>;
+    leadNameById?: Record<string, string>;
+  },
+): boolean {
+  const linkedCustomerId = c.customer_id ?? opts.customerIdByChatId?.[c.chat_id] ?? null;
+  const customerName = linkedCustomerId
+    ? opts.customerNameById?.[linkedCustomerId] ?? opts.customerNameByChatId?.[c.chat_id]
+    : opts.customerNameByChatId?.[c.chat_id];
+  const leadName = c.marketing_lead_id ? opts.leadNameById?.[c.marketing_lead_id] : undefined;
+  const phoneLabel =
+    (!isGroupJid(c.chat_id) &&
+      (resolvePhoneLabelForChat(c.chat_id) || opts.phoneLabelByChatId?.[c.chat_id] || '')) ||
+    '';
+  const displayName = displayNameForChat(
+    c.chat_id,
+    customerName || c.name || leadName,
+    leadName,
+  );
+  const haystack = normalizeSearchText(
+    [
+      displayName,
+      customerName ?? '',
+      leadName ?? '',
+      c.name ?? '',
+      jidToDisplay(c.chat_id),
+      phoneLabel,
+      c.chat_id,
+      c.last_message_preview ?? '',
+    ].join(' '),
+  );
+  if (qNorm && haystack.includes(qNorm)) return true;
+  if (qDigits.length >= 3) {
+    const digitHay = [
+      c.chat_id,
+      phoneLabel,
+      jidToDisplay(c.chat_id),
+      c.last_message_preview ?? '',
+    ]
+      .join('')
+      .replace(/\D/g, '');
+    if (digitHay.includes(qDigits)) return true;
+  }
+  return false;
+}
 
 interface Props {
   chats: WhatsappChatRow[];
@@ -69,25 +136,154 @@ export const WhatsappChatList: React.FC<Props> = ({
   onCreateCustomer,
 }) => {
   const theme = useWhatsappTheme();
+  const { companyId } = useWhatsappCompanyId();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<ChatFilter>('all');
 
+  const searchTrim = search.trim();
+  const searchReady = searchTrim.length >= 2;
+
+  /** Búsqueda en BD: la lista local solo trae los ~N más recientes. */
+  const remoteSearchQuery = useQuery({
+    queryKey: ['whatsapp-chats-search', companyId, searchTrim],
+    enabled: !!companyId && searchReady,
+    staleTime: 15_000,
+    queryFn: async (): Promise<WhatsappChatRow[]> => {
+      if (!companyId) return [];
+      const q = searchTrim;
+      const digits = q.replace(/\D/g, '');
+      const safe = q.replace(/[%_,."'\\]/g, '');
+      if (!safe && digits.length < 3) return [];
+      const pattern = safe ? `%${safe}%` : `%${digits}%`;
+      const quoted = `"${pattern}"`;
+
+      const { data: byChat, error: chatErr } = await supabase
+        .from('whatsapp_chats')
+        .select(WHATSAPP_CHAT_LIST_COLUMNS)
+        .eq('company_id', companyId)
+        .eq('archived', false)
+        .or(`name.ilike.${quoted},chat_id.ilike.${quoted},last_message_preview.ilike.${quoted}`)
+        .order('last_message_at', { ascending: false, nullsFirst: false })
+        .limit(80);
+      if (chatErr) throw chatErr;
+
+      const byCustomerIds = new Set<string>();
+      // Clientes pueden estar en el catálogo (otra company_id); buscar por nombre/tel y luego por customer_id en chats.
+      const customerOr = [
+        `name.ilike.${quoted}`,
+        digits.length >= 3
+          ? `phone.ilike."%${digits}%",phone_mobile.ilike."%${digits}%",phone_home.ilike."%${digits}%"`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(',');
+      const { data: customers } = await supabase
+        .from('customers')
+        .select('id')
+        .is('archived_at', null)
+        .or(customerOr)
+        .limit(40);
+      for (const row of customers ?? []) byCustomerIds.add(row.id);
+
+      const leadOr = [
+        `first_name.ilike.${quoted}`,
+        `last_name.ilike.${quoted}`,
+        digits.length >= 3 ? `phone.ilike."%${digits}%"` : null,
+      ]
+        .filter(Boolean)
+        .join(',');
+      const { data: leads } = await supabase
+        .from('marketing_leads')
+        .select('id')
+        .eq('company_id', companyId)
+        .or(leadOr)
+        .limit(40);
+
+      const leadIds = (leads ?? []).map((l) => l.id);
+      const extra: WhatsappChatRow[] = [];
+
+      if (byCustomerIds.size > 0) {
+        const { data } = await supabase
+          .from('whatsapp_chats')
+          .select(WHATSAPP_CHAT_LIST_COLUMNS)
+          .eq('company_id', companyId)
+          .eq('archived', false)
+          .in('customer_id', [...byCustomerIds])
+          .order('last_message_at', { ascending: false, nullsFirst: false })
+          .limit(80);
+        extra.push(...((data ?? []) as WhatsappChatRow[]));
+      }
+      if (leadIds.length > 0) {
+        const { data } = await supabase
+          .from('whatsapp_chats')
+          .select(WHATSAPP_CHAT_LIST_COLUMNS)
+          .eq('company_id', companyId)
+          .eq('archived', false)
+          .in('marketing_lead_id', leadIds)
+          .order('last_message_at', { ascending: false, nullsFirst: false })
+          .limit(80);
+        extra.push(...((data ?? []) as WhatsappChatRow[]));
+      }
+
+      const map = new Map<string, WhatsappChatRow>();
+      for (const row of [...(byChat ?? []), ...extra] as WhatsappChatRow[]) {
+        if (isSystemChatJid(row.chat_id)) continue;
+        map.set(row.chat_id, row);
+      }
+      return [...map.values()];
+    },
+  });
+
   const filtered = useMemo(() => {
-    let list = chats;
+    const remote = remoteSearchQuery.data ?? [];
+    const byId = new Map<string, WhatsappChatRow>();
+    for (const c of chats) byId.set(c.chat_id, c);
+    for (const c of remote) {
+      if (!byId.has(c.chat_id)) byId.set(c.chat_id, c);
+    }
+    let list = [...byId.values()];
+
     if (filter === 'unread') {
       list = list.filter((c) => (c.unread_count ?? 0) > 0);
     } else if (filter === 'groups') {
       list = list.filter((c) => c.is_group || isGroupJid(c.chat_id));
     }
-    const q = search.trim().toLowerCase();
-    if (!q) return list;
-    return list.filter((c) => {
-      const haystack = [c.name ?? '', jidToDisplay(c.chat_id), c.last_message_preview ?? '']
-        .join(' ')
-        .toLowerCase();
-      return haystack.includes(q);
-    });
-  }, [chats, search, filter]);
+
+    const qNorm = normalizeSearchText(searchTrim);
+    const qDigits = searchTrim.replace(/\D/g, '');
+    if (!qNorm && qDigits.length < 3) {
+      return list.sort((a, b) => {
+        const ta = a.last_message_at ? Date.parse(a.last_message_at) : 0;
+        const tb = b.last_message_at ? Date.parse(b.last_message_at) : 0;
+        return tb - ta;
+      });
+    }
+
+    const lookup = {
+      customerNameById,
+      customerIdByChatId,
+      customerNameByChatId,
+      phoneLabelByChatId,
+      leadNameById,
+    };
+    return list
+      .filter((c) => chatMatchesSearch(c, qNorm, qDigits, lookup))
+      .sort((a, b) => {
+        const ta = a.last_message_at ? Date.parse(a.last_message_at) : 0;
+        const tb = b.last_message_at ? Date.parse(b.last_message_at) : 0;
+        return tb - ta;
+      });
+  }, [
+    chats,
+    remoteSearchQuery.data,
+    searchTrim,
+    filter,
+    customerNameById,
+    customerIdByChatId,
+    customerNameByChatId,
+    phoneLabelByChatId,
+    leadNameById,
+  ]);
 
   const clinicLabel = sessionPushName?.trim() || 'WhatsApp clínica';
   const clinicPhone = sessionPhone?.trim() || '';
@@ -177,9 +373,11 @@ export const WhatsappChatList: React.FC<Props> = ({
         <ul className="divide-y divide-[#f0f2f5] dark:divide-zinc-800">
           {filtered.length === 0 ? (
             <li className={`px-4 py-10 text-center text-xs ${theme.textMuted}`}>
-              {chats.length === 0
-                ? 'No hay chats todavía. Pulsa el botón de sincronizar para traerlos desde WhatsApp.'
-                : 'No hay resultados.'}
+              {remoteSearchQuery.isFetching && searchReady
+                ? 'Buscando…'
+                : chats.length === 0
+                  ? 'No hay chats todavía. Pulsa el botón de sincronizar para traerlos desde WhatsApp.'
+                  : 'No hay resultados.'}
             </li>
           ) : (
             filtered.map((c) => {

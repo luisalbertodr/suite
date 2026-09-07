@@ -10,6 +10,7 @@ import {
   Forward,
   Trash2,
   ChevronDown,
+  Pencil,
 } from 'lucide-react';
 import type { WhatsappMessageRow } from '@/hooks/useWhatsappMessages';
 import {
@@ -69,6 +70,7 @@ interface Props {
   isUnread?: boolean;
   onReply?: (message: WhatsappMessageRow) => void;
   onForward?: (message: WhatsappMessageRow) => void;
+  onEdit?: (message: WhatsappMessageRow) => void;
   onDeleteForEveryone?: (message: WhatsappMessageRow) => void;
 }
 
@@ -98,21 +100,25 @@ function QuoteBlock({ preview, isOut }: { preview: string; isOut: boolean }) {
 function MessageActions({
   message,
   canForward,
+  canEdit,
   canDeleteForEveryone,
   onReply,
   onForward,
+  onEdit,
   onDeleteForEveryone,
   className,
 }: {
   message: WhatsappMessageRow;
   canForward: boolean;
+  canEdit: boolean;
   canDeleteForEveryone: boolean;
   onReply?: (message: WhatsappMessageRow) => void;
   onForward?: (message: WhatsappMessageRow) => void;
+  onEdit?: (message: WhatsappMessageRow) => void;
   onDeleteForEveryone?: (message: WhatsappMessageRow) => void;
   className?: string;
 }) {
-  if (!onReply && !onForward && !onDeleteForEveryone) return null;
+  if (!onReply && !onForward && !onEdit && !onDeleteForEveryone) return null;
   return (
     <div className={`flex items-center gap-0.5 ${className ?? ''}`}>
       {onReply ? (
@@ -125,6 +131,19 @@ function MessageActions({
           onClick={() => onReply(message)}
         >
           <Reply className="h-3.5 w-3.5" />
+        </Button>
+      ) : null}
+      {onEdit ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 rounded-full text-[#54656f] hover:bg-black/5 disabled:opacity-40 dark:text-zinc-300"
+          title="Editar"
+          disabled={!canEdit}
+          onClick={() => onEdit(message)}
+        >
+          <Pencil className="h-3.5 w-3.5" />
         </Button>
       ) : null}
       {onForward ? (
@@ -528,6 +547,7 @@ export const WhatsappMessageBubble: React.FC<Props> = ({
   isUnread = false,
   onReply,
   onForward,
+  onEdit,
   onDeleteForEveryone,
 }) => {
   const theme = useWhatsappTheme();
@@ -547,9 +567,14 @@ export const WhatsappMessageBubble: React.FC<Props> = ({
     : null;
   const quoteText = resolveQuotedPreview(message, quotedMessage, quotedPreview);
   const canForward = !!message.waha_message_id;
+  const canEdit =
+    isOut &&
+    !!message.waha_message_id &&
+    !revoked &&
+    Boolean(textLine.trim());
   const canDeleteForEveryone =
     isOut && !!message.waha_message_id && !revoked;
-  const hasActions = !!(onReply || onForward || onDeleteForEveryone);
+  const hasActions = !!(onReply || onForward || onEdit || onDeleteForEveryone);
 
   const bubble = (
     <div
@@ -569,9 +594,11 @@ export const WhatsappMessageBubble: React.FC<Props> = ({
           <MessageActions
             message={message}
             canForward={canForward}
+            canEdit={canEdit}
             canDeleteForEveryone={canDeleteForEveryone}
             onReply={onReply}
             onForward={onForward}
+            onEdit={onEdit}
             onDeleteForEveryone={onDeleteForEveryone}
             className={`absolute top-1 flex md:hidden ${
               isOut ? 'left-0 -translate-x-full pr-1' : 'right-0 translate-x-full pl-1'
@@ -580,9 +607,11 @@ export const WhatsappMessageBubble: React.FC<Props> = ({
           <MessageActions
             message={message}
             canForward={canForward}
+            canEdit={canEdit}
             canDeleteForEveryone={canDeleteForEveryone}
             onReply={onReply}
             onForward={onForward}
+            onEdit={onEdit}
             onDeleteForEveryone={onDeleteForEveryone}
             className={`absolute top-1 hidden group-hover/bubble:md:flex ${
               isOut ? 'left-0 -translate-x-full pr-1' : 'right-0 translate-x-full pl-1'
@@ -607,6 +636,15 @@ export const WhatsappMessageBubble: React.FC<Props> = ({
                 <DropdownMenuItem onSelect={() => onReply(message)}>
                   <Reply className="mr-2 h-4 w-4" />
                   Responder
+                </DropdownMenuItem>
+              ) : null}
+              {onEdit ? (
+                <DropdownMenuItem
+                  disabled={!canEdit}
+                  onSelect={() => onEdit(message)}
+                >
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Editar
                 </DropdownMenuItem>
               ) : null}
               {onForward ? (
@@ -705,6 +743,15 @@ export const WhatsappMessageBubble: React.FC<Props> = ({
             <ContextMenuItem onSelect={() => onReply(message)}>
               <Reply className="mr-2 h-4 w-4" />
               Responder
+            </ContextMenuItem>
+          ) : null}
+          {onEdit ? (
+            <ContextMenuItem
+              disabled={!canEdit}
+              onSelect={() => onEdit(message)}
+            >
+              <Pencil className="mr-2 h-4 w-4" />
+              Editar
             </ContextMenuItem>
           ) : null}
           {onForward ? (

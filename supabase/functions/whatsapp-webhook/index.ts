@@ -1536,7 +1536,8 @@ serve(async (req) => {
     } else if (
       event === 'group.v2.update' ||
       event === 'group.update' ||
-      event === 'group.v2.join'
+      event === 'group.v2.join' ||
+      event === 'group.v2.participants'
     ) {
       const p = asRecord(envelope.payload);
       const group = asRecord(p?.group) ?? p;
@@ -1549,16 +1550,74 @@ serve(async (req) => {
           break;
         }
       }
-      if (groupId && subject && isGroupJid(groupId)) {
+      if (groupId && isGroupJid(groupId)) {
+        const patch: Record<string, unknown> = {
+          is_group: true,
+          updated_at: new Date().toISOString(),
+        };
+        if (subject) patch.name = subject;
         await admin
           .from('whatsapp_chats')
-          .update({
-            name: subject,
-            is_group: true,
-            updated_at: new Date().toISOString(),
-          })
+          .update(patch)
           .eq('company_id', companyId)
           .eq('chat_id', groupId);
+      }
+    } else if (event === 'group.v2.participants.join-request') {
+      const p = asRecord(envelope.payload);
+      const group = asRecord(p?.group);
+      const groupId = String(group?.id ?? p?.groupId ?? '');
+      const action = String(p?.action ?? 'created').toLowerCase();
+      const requesterPn = String(p?.requesterPn ?? '');
+      const requesterId = String(p?.requesterId ?? '');
+      if (groupId && isGroupJid(groupId)) {
+        const { data: existing } = await admin
+          .from('whatsapp_chats')
+          .select('id, unread_count, raw')
+          .eq('company_id', companyId)
+          .eq('chat_id', groupId)
+          .maybeSingle();
+
+        const rawPrev =
+          existing?.raw && typeof existing.raw === 'object' && !Array.isArray(existing.raw)
+            ? (existing.raw as Record<string, unknown>)
+            : {};
+        const label = requesterPn || requesterId || 'alguien';
+        const preview =
+          action === 'created'
+            ? `Solicitud de entrada: ${label}`
+            : action === 'rejected'
+              ? `Solicitud rechazada: ${label}`
+              : `Solicitud (${action}): ${label}`;
+
+        const nextUnread =
+          action === 'created'
+            ? Math.max(0, Number(existing?.unread_count ?? 0)) + 1
+            : Number(existing?.unread_count ?? 0);
+
+        await admin.from('whatsapp_chats').upsert(
+          {
+            company_id: companyId,
+            chat_id: groupId,
+            is_group: true,
+            last_message_preview: preview.slice(0, 200),
+            last_message_at: new Date().toISOString(),
+            last_message_from_me: false,
+            unread_count: nextUnread,
+            updated_at: new Date().toISOString(),
+            raw: {
+              ...rawPrev,
+              suite_join_request: {
+                action,
+                requesterId: requesterId || null,
+                requesterPn: requesterPn || null,
+                requestMethod: p?.requestMethod ?? null,
+                timestamp: p?.timestamp ?? null,
+                received_at: new Date().toISOString(),
+              },
+            },
+          },
+          { onConflict: 'company_id,chat_id', ignoreDuplicates: false },
+        );
       }
     }
 

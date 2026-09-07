@@ -13,6 +13,7 @@ interface UserWithDetails {
   profiles?: {
     company_id: string;
     employee_id?: string | null;
+    nfc_uid?: string | null;
     companies?: {
       name: string;
     };

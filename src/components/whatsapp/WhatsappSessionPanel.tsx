@@ -1,7 +1,8 @@
 import React, { useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Loader2, RefreshCw, Power, LogOut, QrCode, Smartphone, AlertTriangle } from 'lucide-react';
-import { useWhatsappConfig, type WhatsappConfigRow } from '@/hooks/useWhatsappConfig';
+import { useWhatsappConfig, useWhatsappSessionLimits, type WhatsappConfigRow } from '@/hooks/useWhatsappConfig';
+import { WhatsappSessionLimitsAlert } from '@/components/whatsapp/WhatsappSessionLimitsAlert';
 import { useToast } from '@/hooks/use-toast';
 import { useWhatsappTheme } from './WhatsappThemeContext';
 
@@ -40,6 +41,9 @@ export const WhatsappSessionPanel: React.FC<Props> = ({ config, onConnected }) =
     sessionLogout,
     fetchQr,
   } = useWhatsappConfig();
+  const sessionLimitsQuery = useWhatsappSessionLimits(
+    (config.last_status ?? '').toUpperCase() === 'WORKING',
+  );
 
   const connectedNotifiedRef = useRef(false);
   const autoRenewBusyRef = useRef(false);
@@ -176,9 +180,12 @@ export const WhatsappSessionPanel: React.FC<Props> = ({ config, onConnected }) =
             </p>
           </div>
         ) : isWorking ? (
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300">
-            Sesión activa
-            {config.me_pushname ? ` · ${config.me_pushname}` : ''}.
+          <div className="space-y-2">
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300">
+              Sesión activa
+              {config.me_pushname ? ` · ${config.me_pushname}` : ''}.
+            </div>
+            <WhatsappSessionLimitsAlert limits={sessionLimitsQuery.data ?? null} compact />
           </div>
         ) : isStarting ? (
           <div className="flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm">

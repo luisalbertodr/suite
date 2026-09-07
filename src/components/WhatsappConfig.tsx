@@ -30,7 +30,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { useWhatsappConfig, type WhatsappConfigRow } from '@/hooks/useWhatsappConfig';
+import { useWhatsappConfig, useWhatsappSessionLimits, type WhatsappConfigRow } from '@/hooks/useWhatsappConfig';
+import { WhatsappSessionLimitsAlert } from '@/components/whatsapp/WhatsappSessionLimitsAlert';
 
 type WhatsappProviderId = 'waha' | 'openwa' | 'meta';
 
@@ -169,6 +170,7 @@ export const WhatsappConfig: React.FC = () => {
   const activeProvider: WhatsappProviderId =
     config?.provider === 'openwa' ? 'openwa' : config?.provider === 'meta' ? 'meta' : 'waha';
   const needsSaveToActivate = provider !== activeProvider;
+  const sessionLimitsQuery = useWhatsappSessionLimits(activeProvider === 'waha');
 
   useEffect(() => {
     if (!config) return;
@@ -521,6 +523,9 @@ export const WhatsappConfig: React.FC = () => {
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
+          {activeProvider === 'waha' ? (
+            <WhatsappSessionLimitsAlert limits={sessionLimitsQuery.data ?? null} />
+          ) : null}
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2 md:col-span-2">
               <Label>Motor de mensajería</Label>
@@ -1088,6 +1093,9 @@ export const WhatsappConfig: React.FC = () => {
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
+          {activeProvider === 'waha' ? (
+            <WhatsappSessionLimitsAlert limits={sessionLimitsQuery.data ?? null} />
+          ) : null}
           <div className="rounded-lg border bg-muted/40 px-3 py-2 text-sm">
             <p className="font-medium">
               Estado: {config?.last_status ?? 'Sin iniciar'}

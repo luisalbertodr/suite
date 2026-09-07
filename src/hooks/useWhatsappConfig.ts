@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { getSupabaseAccessToken } from '@/lib/supabaseSession';
 import { getStoredWhatsappCompanyId, useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
+import type { WahaSessionLimits } from '@/lib/wahaSessionLimits';
 import type { Database } from '@/integrations/supabase/types';
 
 export type WhatsappConfigRow = Database['public']['Tables']['whatsapp_config']['Row'];
@@ -12,6 +13,7 @@ export type WhatsappProxyAction = {
   company_id?: string;
 } & (
   | { action: 'session.status' }
+  | { action: 'session.limits' }
   | { action: 'session.start' }
   | { action: 'session.stop' }
   | { action: 'session.logout' }
@@ -47,7 +49,7 @@ export type WhatsappProxyAction = {
   | {
       action: 'messages.send';
       chat_id: string;
-      type: 'text' | 'image' | 'video' | 'audio' | 'document' | 'voice';
+      type: 'text' | 'image' | 'video' | 'audio' | 'document' | 'voice' | 'sticker';
       text?: string;
       caption?: string;
       media_base64?: string;
@@ -57,6 +59,7 @@ export type WhatsappProxyAction = {
     }
   | { action: 'messages.forward'; chat_id: string; message_id: string }
   | { action: 'messages.delete'; chat_id: string; message_id: string }
+  | { action: 'messages.edit'; chat_id: string; message_id: string; text: string }
   | { action: 'chat.mark_read'; chat_id: string }
   | { action: 'chat.ensure'; chat_id: string; name?: string | null }
   | {
@@ -84,6 +87,18 @@ export type WhatsappProxyAction = {
   | { action: 'chat.search_link'; q: string; limit?: number }
   | { action: 'pictures.sync_batch'; chat_ids?: string[]; limit?: number }
   | { action: 'groups.sync_name'; chat_id: string }
+  | { action: 'groups.join_requests.list'; chat_id: string }
+  | {
+      action: 'groups.join_requests.approve' | 'groups.join_requests.reject';
+      chat_id: string;
+      participant_ids: string[];
+    }
+  | { action: 'groups.membership_approval.get'; chat_id: string }
+  | {
+      action: 'groups.membership_approval.set';
+      chat_id: string;
+      new_members_approval_required: boolean;
+    }
   | { action: 'media.download'; url?: string; chat_id?: string; message_id?: string; alt_chat_ids?: string[] }
   | { action: 'messages.prefetch_media'; chat_id: string; limit?: number; alt_chat_ids?: string[] }
   | { action: 'data.purge'; logout_waha?: boolean }
@@ -312,10 +327,20 @@ export const useWhatsappConfig = () => {
         error?: string;
         webhooks_configured?: boolean;
         noweb_store_enabled?: boolean;
+        capping?: WahaSessionLimits['capping'];
+        timelock?: WahaSessionLimits['timelock'];
+        limits_supported?: boolean;
       }>({
         action: 'session.status',
       }),
     onSuccess: invalidate,
+  });
+
+  const sessionLimits = useMutation({
+    mutationFn: async () =>
+      invokeWhatsappProxy<WahaSessionLimits>({
+        action: 'session.limits',
+      }),
   });
 
   const sessionStart = useMutation({
@@ -443,6 +468,7 @@ export const useWhatsappConfig = () => {
     refetch: configQuery.refetch,
     upsertConfig,
     sessionStatus,
+    sessionLimits,
     sessionStart,
     sessionStop,
     sessionLogout,
@@ -455,3 +481,18 @@ export const useWhatsappConfig = () => {
     purgeOpenwaHistory,
   };
 };
+
+/** Cuota WAHA (capping/timelock) — solo motor WAHA con sesión WORKING. */
+export function useWhatsappSessionLimits(enabled = true) {
+  const { config } = useWhatsappConfig();
+  const isWaha = config?.provider !== 'openwa' && config?.provider !== 'meta';
+  const isWorking = (config?.last_status ?? '').toUpperCase() === 'WORKING';
+
+  return useQuery({
+    queryKey: ['whatsapp-session-limits', config?.company_id],
+    enabled: enabled && !!config?.company_id && isWaha && isWorking,
+    staleTime: 120_000,
+    refetchInterval: 300_000,
+    queryFn: () => invokeWhatsappProxy<WahaSessionLimits>({ action: 'session.limits' }),
+  });
+}

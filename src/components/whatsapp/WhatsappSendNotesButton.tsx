@@ -23,6 +23,7 @@ import {
   WHATSAPP_QUICK_NOTE_VARS,
   applyWhatsappQuickNoteVars,
   loadWhatsappQuickNoteAppointmentVars,
+  quickNoteMissingScheduleVars,
 } from '@/lib/whatsappQuickNoteVars';
 
 type Props = {
@@ -145,14 +146,36 @@ export const WhatsappSendNotesButton: React.FC<Props> = ({
   const handleSend = async (note: WhatsappQuickNote) => {
     setSendingId(note.id);
     try {
+      if (!customerId) {
+        toast({
+          title: 'Cliente no vinculado',
+          description:
+            'Vincula este chat a un cliente para rellenar fecha y hora de la cita automáticamente.',
+          variant: 'destructive',
+        });
+      }
       const appointmentVars = await loadWhatsappQuickNoteAppointmentVars(customerId);
+      const missing = quickNoteMissingScheduleVars(note.body, appointmentVars);
+      if (missing.length > 0) {
+        const ok = window.confirm(
+          `No se encontró próxima cita con ${missing.join(' y ')}. ` +
+            'Se enviará la nota con esos campos vacíos. ¿Continuar?',
+        );
+        if (!ok) return;
+      }
       const text = applyWhatsappQuickNoteVars(note.body, {
         nombre: chatDisplayName,
         nombre_completo: chatDisplayName,
         ...appointmentVars,
       });
       await onSendText(text);
-      toast({ title: 'Nota enviada', description: note.title });
+      toast({
+        title: 'Nota enviada',
+        description:
+          missing.length > 0
+            ? `${note.title} (sin ${missing.join('/')})`
+            : note.title,
+      });
       setOpen(false);
     } catch (e) {
       toast({

@@ -61,6 +61,8 @@ export function useCustomerSearch(
     isLoading: queryReady && query.isLoading,
     isFetching: queryReady && query.isFetching,
     isReady: queryReady,
+    isError: queryReady && query.isError,
+    error: query.error,
     debouncedQuery,
   };
 }

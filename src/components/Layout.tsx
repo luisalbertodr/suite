@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { TopBar } from './TopBar';
 import { DockBar } from './DockBar';
 import { Screensaver } from './Screensaver';
+import { IdleLoginWatcher } from './IdleLoginWatcher';
 import { Toaster } from '@/components/ui/toaster';
 import { useWhatsappIncomingNotifier } from '@/hooks/useWhatsappIncomingNotifier';
 import { useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
@@ -32,6 +33,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
       <SuiteTopBannerProvider>
         <TopBarContentProvider>
           <div className="suite-app-shell min-h-screen bg-background">
+            <IdleLoginWatcher />
             <Screensaver />
             <TopBar />
             <main className="suite-app-main pt-[var(--suite-topbar-h,3rem)] pb-2 px-4 sm:px-6">

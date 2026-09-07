@@ -601,10 +601,25 @@ async function fetchNormalizedCalls(
     ? { ...body, from: body.from ?? yesterdayDateString(), direction: undefined, limit: body.limit ?? 500 }
     : body;
 
-  const response = await fetch(buildIssabelUrl(cdrUrl, effectiveBody as Body), {
-    headers,
-    signal: AbortSignal.timeout(25_000),
-  });
+  const target = buildIssabelUrl(cdrUrl, effectiveBody as Body);
+  // Timeout corto: si Issabel está caído, evitar wall-clock del edge runtime (502 opaco).
+  let response: Response;
+  try {
+    response = await fetch(target, {
+      headers,
+      signal: AbortSignal.timeout(8_000),
+    });
+  } catch (e) {
+    const name = e instanceof Error ? e.name : '';
+    if (name === 'TimeoutError' || name === 'AbortError') {
+      throw new Error(
+        `Issabel no responde (timeout 8s). Comprueba que ${cdrUrl} esté accesible desde suite-supabase.`,
+      );
+    }
+    throw new Error(
+      `No se pudo conectar con Issabel (${cdrUrl}): ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
   if (!response.ok) {
     const details = await response.text();
     throw new Error(`Issabel respondió HTTP ${response.status}: ${details.slice(0, 300)}`);
@@ -1047,7 +1062,7 @@ serve(async (req) => {
         internalPattern,
       );
     } catch (e) {
-      return err(e instanceof Error ? e.message : 'Error Issabel', 502);
+      return err(e instanceof Error ? e.message : 'Error Issabel', 503);
     }
 
     const missedRaw = calls.filter(isCustomerFacingCall).filter((call) => {
@@ -1091,7 +1106,7 @@ serve(async (req) => {
           return err('Solo puede escuchar mensajes del buzón de voz', 403);
         }
       } catch (e) {
-        return err(e instanceof Error ? e.message : 'Error al validar la llamada', 502);
+        return err(e instanceof Error ? e.message : 'Error al validar la llamada', 503);
       }
     }
 
@@ -1139,7 +1154,7 @@ serve(async (req) => {
       : listBody;
     calls = await fetchNormalizedCalls(fetchBody, internalPattern);
   } catch (e) {
-    return err(e instanceof Error ? e.message : 'Error Issabel', 502);
+    return err(e instanceof Error ? e.message : 'Error Issabel', 503);
   }
 
   let filtered = calls.filter(isCustomerFacingCall);

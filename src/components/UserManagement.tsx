@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { UserPlus, Shield, RefreshCw, Eye, EyeOff, KeyRound, Network } from 'lucide-react';
+import { UserPlus, Shield, RefreshCw, Eye, EyeOff, KeyRound, Network, CreditCard } from 'lucide-react';
 import { toast } from 'sonner';
 import { UserListTable } from '@/components/UserListTable';
 import { useAgendaEmployees } from '@/hooks/useAgendaEmployees';
@@ -22,6 +22,8 @@ import { UserAllowedNetworksPanel } from '@/components/UserAllowedNetworksPanel'
 import { useWorkCenter } from '@/hooks/useWorkCenter';
 import { RECEPTION_ROLE_NAME } from '@/lib/receptionUserAccess';
 import { applyInternalNetworksToUsers } from '@/hooks/useUserAllowedNetworks';
+import { callNfcAuth, normalizeNfcUid } from '@/lib/nfcAuth';
+import { useAuth } from '@/hooks/useAuth';
 
 export const UserManagement = () => {
   const { roles, permissions, loading: rolesLoading } = useRoles();
@@ -29,6 +31,7 @@ export const UserManagement = () => {
   const { companyId, loading: companyLoading } = useCompanyFilter();
   const { isMultiEntity, billingCompanies } = useWorkCenter();
   const { users, loading: usersLoading, fetchUsers, deleteUser, createUser, updateUser } = useUsers();
+  const { session } = useAuth();
   const { employees: agendaEmployees, isLoading: employeesLoading } = useAgendaEmployees({ agendaOnly: false });
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [creatingUser, setCreatingUser] = useState(false);
@@ -41,6 +44,8 @@ export const UserManagement = () => {
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editRoleId, setEditRoleId] = useState('');
   const [editEmployeeId, setEditEmployeeId] = useState<string>('none');
+  const [editNfcUid, setEditNfcUid] = useState('');
+  const [savingNfc, setSavingNfc] = useState(false);
   const [editPermissionIds, setEditPermissionIds] = useState<string[]>([]);
   const [editPermissionsTouched, setEditPermissionsTouched] = useState(false);
   const [updatingUser, setUpdatingUser] = useState(false);
@@ -163,6 +168,7 @@ export const UserManagement = () => {
     const roleId = resolveUserRoleId(user, initialPermCompany);
     setEditRoleId(roleId);
     setEditEmployeeId(user?.profiles?.employee_id || 'none');
+    setEditNfcUid(user?.profiles?.nfc_uid || '');
     setEditNewPassword('');
     setEditNewPasswordConfirm('');
     setShowEditPassword(false);
@@ -563,6 +569,97 @@ export const UserManagement = () => {
                   <p className="text-[11px] text-muted-foreground">
                     Vincular un usuario con un empleado de agenda permite que reciba notificaciones
                     personales y aparezca como recurso en sus citas.
+                  </p>
+                </div>
+              )}
+              {canChangePasswords && (
+                <div className="space-y-1.5 rounded-md border p-3">
+                  <Label className="flex items-center gap-2">
+                    <CreditCard className="h-4 w-4" />
+                    Tarjeta NFC (ACR122U)
+                  </Label>
+                  <Input
+                    value={editNfcUid}
+                    onChange={(e) => setEditNfcUid(normalizeNfcUid(e.target.value))}
+                    placeholder="UID hex (o pasa la tarjeta en modo teclado y pégalo)"
+                    className="font-mono text-sm"
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={savingNfc || !editingUser?.id}
+                      onClick={() => {
+                        void (async () => {
+                          const uid = normalizeNfcUid(editNfcUid);
+                          if (uid.length < 6) {
+                            toast.error('UID demasiado corto');
+                            return;
+                          }
+                          setSavingNfc(true);
+                          try {
+                            await callNfcAuth(
+                              { action: 'enroll.set', user_id: editingUser.id, uid },
+                              { accessToken: session?.access_token },
+                            );
+                            toast.success('Tarjeta NFC asociada');
+                            setEditingUser((prev: any) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    profiles: { ...(prev.profiles || {}), nfc_uid: uid },
+                                  }
+                                : prev,
+                            );
+                            void fetchUsers();
+                          } catch (e) {
+                            toast.error(e instanceof Error ? e.message : 'Error asociando NFC');
+                          } finally {
+                            setSavingNfc(false);
+                          }
+                        })();
+                      }}
+                    >
+                      Guardar NFC
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={savingNfc || !editingUser?.id || !editNfcUid}
+                      onClick={() => {
+                        void (async () => {
+                          setSavingNfc(true);
+                          try {
+                            await callNfcAuth(
+                              { action: 'enroll.clear', user_id: editingUser.id },
+                              { accessToken: session?.access_token },
+                            );
+                            setEditNfcUid('');
+                            toast.success('Tarjeta NFC desasociada');
+                            setEditingUser((prev: any) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    profiles: { ...(prev.profiles || {}), nfc_uid: null },
+                                  }
+                                : prev,
+                            );
+                            void fetchUsers();
+                          } catch (e) {
+                            toast.error(e instanceof Error ? e.message : 'Error quitando NFC');
+                          } finally {
+                            setSavingNfc(false);
+                          }
+                        })();
+                      }}
+                    >
+                      Quitar NFC
+                    </Button>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    El UID lo muestra el agente ACR122U al pasar la tarjeta, o el lector en modo
+                    teclado.
                   </p>
                 </div>
               )}

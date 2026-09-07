@@ -18,7 +18,7 @@ import type { BleDeviceInfo, ScaleAdapter } from '../../interfaces/scale-adapter
 import { resolveAdapter } from '../../scales/resolve.js';
 import { bleLog } from '../types.js';
 import { DISCOVERY_TIMEOUT_MS, DISCOVERY_POLL_MS, sleep, RSSI_UNAVAILABLE } from './constants.js';
-import { getTargetScaleMac } from '../../../suite-pending.js';
+import { fetchPendingWeigh, getTargetScaleMac } from '../../../suite-pending.js';
 
 function normalizeMac(mac: string): string {
   return mac.replace(/[^a-fA-F0-9]/g, '').toUpperCase();
@@ -124,6 +124,13 @@ export async function autoDiscover(
     if (abortSignal?.aborted) {
       throw abortSignal.reason ?? new DOMException('Aborted', 'AbortError');
     }
+
+    const pending = await fetchPendingWeigh(true);
+    if (!pending.pending || !pending.ready) {
+      bleLog.debug('Auto-discovery idle: no pending weigh request');
+      throw new Error('No pending weigh request');
+    }
+
     const addresses: string[] = await btAdapter.devices();
     const fresh: Candidate[] = [];
     const staleAllowlisted: string[] = [];

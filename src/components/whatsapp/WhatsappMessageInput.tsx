@@ -9,6 +9,7 @@ import {
   Mic,
   X,
   Music,
+  Sticker,
 } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
@@ -66,6 +67,7 @@ export const WhatsappMessageInput: React.FC<Props> = ({
   const imageInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
+  const stickerInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
@@ -130,7 +132,7 @@ export const WhatsappMessageInput: React.FC<Props> = ({
     });
   };
 
-  const handleFile = async (file: File | undefined) => {
+  const handleFile = async (file: File | undefined, forceSticker = false) => {
     if (!file) return;
     if (file.size > MAX_FILE_BYTES) {
       toast({
@@ -142,6 +144,27 @@ export const WhatsappMessageInput: React.FC<Props> = ({
     }
     try {
       const mime = resolveWhatsappFileMime(file.name, file.type);
+      if (forceSticker) {
+        if (!mime.includes('webp') && !/\.webp$/i.test(file.name)) {
+          toast({
+            title: 'Formato no válido',
+            description: 'Los stickers deben ser archivos WebP (.webp).',
+            variant: 'destructive',
+          });
+          return;
+        }
+        const base64 = await fileToBase64(file);
+        await onSend(
+          buildSendPayload({
+            type: 'sticker',
+            media_base64: base64,
+            mime_type: 'image/webp',
+            filename: file.name.endsWith('.webp') ? file.name : 'sticker.webp',
+          }),
+        );
+        onClearReply?.();
+        return;
+      }
       const oggVoice = isWhatsappOggAttachment(file.name, mime);
       if (oggVoice) {
         await assertWhatsappVoiceNoteFile(file);
@@ -363,6 +386,19 @@ export const WhatsappMessageInput: React.FC<Props> = ({
             if (e.target) e.target.value = '';
           }}
         />
+        <input
+          ref={stickerInputRef}
+          type="file"
+          accept=".webp,image/webp"
+          aria-label="Seleccionar sticker WebP"
+          title="Seleccionar sticker (.webp)"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            handleFile(f ?? undefined, true);
+            if (e.target) e.target.value = '';
+          }}
+        />
 
         {isRecording ? (
           <div className="flex flex-1 items-center gap-3">
@@ -420,6 +456,9 @@ export const WhatsappMessageInput: React.FC<Props> = ({
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => audioInputRef.current?.click()}>
                   <Music className="mr-2 h-4 w-4" /> Audio / nota de voz (.ogg)
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => stickerInputRef.current?.click()}>
+                  <Sticker className="mr-2 h-4 w-4" /> Sticker (.webp)
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

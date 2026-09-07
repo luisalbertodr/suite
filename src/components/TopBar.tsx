@@ -275,7 +275,7 @@ export const TopBar: React.FC = () => {
   const actionsNode = hasCenterActions ? (
     <div
       ref={actionsRef}
-      className="flex min-w-0 max-w-full flex-nowrap items-center justify-center gap-1.5"
+      className="relative z-[50] flex min-w-0 max-w-full flex-nowrap items-center justify-center gap-1.5 overflow-visible"
     >
       {showCustomerLookup ? <TopBarCustomerLookup /> : null}
       {content.actions}
@@ -310,7 +310,7 @@ export const TopBar: React.FC = () => {
             {titleBlock}
           </div>
 
-          <div className="flex min-w-0 max-w-full items-center justify-center overflow-hidden">
+          <div className="flex min-w-0 max-w-full items-center justify-center overflow-visible">
             {actionsNode}
           </div>
 

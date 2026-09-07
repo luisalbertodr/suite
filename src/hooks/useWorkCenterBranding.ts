@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
 import { useWorkCenter } from '@/hooks/useWorkCenter';
+import { cacheBrandingLogos } from '@/lib/brandingLogoCache';
 import type { PostgrestError } from '@supabase/supabase-js';
 
 export type WorkCenterBranding = {
@@ -120,6 +122,11 @@ export function useWorkCenterBranding() {
     queryClient.invalidateQueries({ queryKey: ['work-center', workCenterId] });
     queryClient.invalidateQueries({ queryKey: ['company', companyId, 'topbar-brand'] });
   };
+
+  useEffect(() => {
+    if (!brandingQuery.data) return;
+    cacheBrandingLogos(brandingQuery.data.logoUrlLight, brandingQuery.data.logoUrlDark);
+  }, [brandingQuery.data]);
 
   const updateLogo = useMutation({
     mutationFn: async (payload: { file: File; variant?: 'light' | 'dark' }) => {
