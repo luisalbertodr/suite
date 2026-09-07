@@ -1,8 +1,9 @@
 /**
- * Mapeo teléfonos legacy CLIENTES (Dunasoft):
- * - tel1cli → phone_home: fijo, o móvil si el cliente no desea SMS/campañas al móvil.
- * - tel2cli → phone_mobile: móvil principal (línea destino SMS).
- * - phone: COALESCE(tel2, tel1) — contacto principal para llamadas/WhatsApp.
+ * Mapeo teléfonos legacy CLIENTES (Dunasoft / Style):
+ * - tel2cli → phone_mobile: móvil (destino SMS/publicidad).
+ * - tel1cli → phone_home: fijo; o móvil SOLO si tel2 vacío (cliente no quiere SMS).
+ * - Si tel1 y tel2 son el mismo número, tel1 es duplicado erróneo → no mapear a phone_home.
+ * - phone: COALESCE(tel2, tel1) — contacto principal llamadas/WhatsApp.
  */
 export type LegacyClientePhones = {
   tel1cli?: string | null;
@@ -15,16 +16,24 @@ export type CustomerPhoneFields = {
   phone_home?: string | null;
 };
 
+function phoneLast9(value: string | null | undefined): string {
+  const d = String(value ?? '').replace(/\D/g, '');
+  return d.length >= 9 ? d.slice(-9) : d;
+}
+
 export function mapLegacyClientePhonesToCustomerFields(row: LegacyClientePhones): {
   phone_home: string | null;
   phone_mobile: string | null;
   phone: string | null;
 } {
-  const t1 = (row.tel1cli ?? '').trim();
-  const t2 = (row.tel2cli ?? '').trim();
-  const phone_home = t1 || null;
-  const phone_mobile = t2 || null;
-  const phone = t2 || t1 || null;
+  const t1 = (row.tel1cli ?? '').trim() || null;
+  const t2 = (row.tel2cli ?? '').trim() || null;
+  const phone_mobile = t2;
+  const n1 = phoneLast9(t1);
+  const n2 = phoneLast9(t2);
+  // Mismo número en ambos campos → no guardar como "fijo" (evita reescritura Suite→Style)
+  const phone_home = t1 && n1 && n2 && n1 === n2 ? null : t1;
+  const phone = phone_mobile || phone_home || null;
   return { phone_home, phone_mobile, phone };
 }
 

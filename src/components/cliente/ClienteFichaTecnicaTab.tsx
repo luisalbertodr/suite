@@ -152,19 +152,21 @@ export const ClienteFichaTecnicaTab: React.FC<Props> = ({ customer, isLoading, o
           />
         </div>
         <div>
-          <Label className={fieldLabel}>Móvil (SMS)</Label>
+          <Label className={fieldLabel}>Móvil (SMS / publicidad)</Label>
           <Input
             value={customer.phone_mobile || ''}
             onChange={(e) => onUpdate('phone_mobile', e.target.value || null)}
             className={fieldInput}
+            placeholder="Vacío = no SMS (como Style tel. 2)"
           />
         </div>
         <div>
-          <Label className={fieldLabel}>Tel. fijo / alt.</Label>
+          <Label className={fieldLabel}>Tel. fijo / alt. (sin SMS)</Label>
           <Input
             value={customer.phone_home || ''}
             onChange={(e) => onUpdate('phone_home', e.target.value || null)}
             className={fieldInput}
+            placeholder="Fijo, o móvil si no quiere SMS"
           />
         </div>
         <div>

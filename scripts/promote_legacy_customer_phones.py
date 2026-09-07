@@ -1,20 +1,18 @@
 """
-Actualiza public.customers.phone_home, phone_mobile y phone desde legacy.clientes.
+Rellena teléfonos vacíos en public.customers desde legacy.clientes (solo-vacíos).
 
-Convención Dunasoft (igual que suite/src/lib/legacyCustomerPhones.ts):
-  tel1cli → phone_home   Fijo, o móvil si el cliente no desea SMS/campañas al móvil.
-  tel2cli → phone_mobile Móvil principal (línea destino SMS).
-  phone   → COALESCE(tel2, tel1) — contacto principal.
+Convención Style/Dunasoft:
+  tel2cli → phone_mobile  (móvil / SMS)
+  tel1cli → phone_home    (fijo; o móvil si tel2 vacío = no SMS)
+  Si tel1 y tel2 son el mismo número → phone_home = NULL (duplicado erróneo)
+  phone   → COALESCE(tel2, tel1)
 
-phone_norm se recalcula solo (columna generada; prioriza móvil).
-
-Match: customers.legacy_codcli = trim(legacy.clientes.codcli)
-
-Requisitos: SUPABASE_DB_URL (en .env o entorno)
+No pisa fichas que ya tienen teléfono.
+Permite phone_norm compartido entre clientes (familias).
 
 Uso:
-  python scripts/promote_legacy_customer_phones.py
   python scripts/promote_legacy_customer_phones.py --dry-run
+  python scripts/promote_legacy_customer_phones.py
 """
 from __future__ import annotations
 
@@ -76,169 +74,76 @@ def main() -> None:
             'Ejemplo: postgresql://postgres:TU_CLAVE@host:5432/postgres?sslmode=require'
         )
 
-    new_phone_expr = """
-      COALESCE(
-        NULLIF(btrim(l.tel2cli), ''),
-        NULLIF(btrim(l.tel1cli), ''),
-        c.phone
-      )
-    """
-    new_mobile_expr = "NULLIF(btrim(l.tel2cli), '')"
-    new_home_expr = "NULLIF(btrim(l.tel1cli), '')"
-
-    sql = f"""
-    WITH candidates AS (
+    # Solo fichas sin ningún teléfono; no pisa existentes; permite compartir phone_norm
+    fill_sql = """
+    WITH mapped AS (
       SELECT
         c.id,
-        c.company_id,
-        c.created_at,
-        {new_home_expr} AS new_home,
-        {new_mobile_expr} AS new_mobile,
-        {new_phone_expr} AS new_phone
+        CASE
+          WHEN nullif(btrim(l.tel1cli), '') IS NOT NULL
+           AND nullif(btrim(l.tel2cli), '') IS NOT NULL
+           AND right(regexp_replace(l.tel1cli, '\\D', '', 'g'), 9)
+             = right(regexp_replace(l.tel2cli, '\\D', '', 'g'), 9)
+            THEN NULL
+          ELSE nullif(btrim(l.tel1cli), '')
+        END AS new_home,
+        nullif(btrim(l.tel2cli), '') AS new_mobile,
+        coalesce(nullif(btrim(l.tel2cli), ''), nullif(btrim(l.tel1cli), '')) AS new_phone
       FROM public.customers c
       INNER JOIN legacy.clientes l
         ON NULLIF(btrim(c.legacy_codcli), '') = NULLIF(btrim(l.codcli), '')
-      WHERE NULLIF(btrim(l.codcli), '') <> ''
-        AND c.company_id = %s::uuid
+      WHERE c.company_id = %s::uuid
+        AND c.archived_at IS NULL
+        AND nullif(btrim(c.phone), '') IS NULL
+        AND nullif(btrim(c.phone_mobile), '') IS NULL
+        AND nullif(btrim(c.phone_home), '') IS NULL
         AND (
-          NULLIF(btrim(l.tel1cli), '') IS NOT NULL
-          OR NULLIF(btrim(l.tel2cli), '') IS NOT NULL
+          nullif(btrim(l.tel1cli), '') IS NOT NULL
+          OR nullif(btrim(l.tel2cli), '') IS NOT NULL
         )
-    ),
-    with_norm AS (
-      SELECT
-        *,
-        public.customer_primary_phone_last9(new_phone, new_mobile, new_home) AS new_norm
-      FROM candidates
-    ),
-    ranked AS (
-      SELECT
-        *,
-        row_number() OVER (
-          PARTITION BY company_id, new_norm
-          ORDER BY created_at ASC NULLS LAST, id ASC
-        ) AS dup_rn
-      FROM with_norm
     )
     UPDATE public.customers c
     SET
-      phone_home = r.new_home,
-      phone_mobile = r.new_mobile,
-      phone = r.new_phone
-    FROM ranked r
-    WHERE c.id = r.id
-      AND (r.new_norm IS NULL OR r.dup_rn = 1)
-      AND NOT EXISTS (
-        SELECT 1
-        FROM public.customers other
-        WHERE other.company_id = r.company_id
-          AND other.id <> r.id
-          AND other.phone_norm IS NOT NULL
-          AND other.phone_norm = r.new_norm
-      )
+      phone_home = m.new_home,
+      phone_mobile = m.new_mobile,
+      phone = m.new_phone,
+      updated_at = now()
+    FROM mapped m
+    WHERE c.id = m.id
     """
-    params: list[str] = [args.company_id]
 
     count_sql = """
     SELECT count(*)::bigint
     FROM public.customers c
     INNER JOIN legacy.clientes l
       ON NULLIF(btrim(c.legacy_codcli), '') = NULLIF(btrim(l.codcli), '')
-    WHERE NULLIF(btrim(l.codcli), '') <> ''
-      AND c.company_id = %s::uuid
+    WHERE c.company_id = %s::uuid
+      AND c.archived_at IS NULL
+      AND nullif(btrim(c.phone), '') IS NULL
+      AND nullif(btrim(c.phone_mobile), '') IS NULL
+      AND nullif(btrim(c.phone_home), '') IS NULL
       AND (
-        NULLIF(btrim(l.tel1cli), '') IS NOT NULL
-        OR NULLIF(btrim(l.tel2cli), '') IS NOT NULL
+        nullif(btrim(l.tel1cli), '') IS NOT NULL
+        OR nullif(btrim(l.tel2cli), '') IS NOT NULL
       )
     """
 
-    skip_sql = f"""
-    WITH candidates AS (
-      SELECT
-        c.id,
-        c.company_id,
-        c.created_at,
-        {new_home_expr} AS new_home,
-        {new_mobile_expr} AS new_mobile,
-        {new_phone_expr} AS new_phone
-      FROM public.customers c
-      INNER JOIN legacy.clientes l
-        ON NULLIF(btrim(c.legacy_codcli), '') = NULLIF(btrim(l.codcli), '')
-      WHERE NULLIF(btrim(l.codcli), '') <> ''
-        AND c.company_id = %s::uuid
-        AND (
-          NULLIF(btrim(l.tel1cli), '') IS NOT NULL
-          OR NULLIF(btrim(l.tel2cli), '') IS NOT NULL
-        )
-    ),
-    with_norm AS (
-      SELECT
-        *,
-        public.customer_primary_phone_last9(new_phone, new_mobile, new_home) AS new_norm
-      FROM candidates
-    ),
-    ranked AS (
-      SELECT
-        id,
-        company_id,
-        new_norm,
-        dup_rn
-      FROM (
-        SELECT
-          id,
-          company_id,
-          new_norm,
-          row_number() OVER (
-            PARTITION BY company_id, new_norm
-            ORDER BY created_at ASC NULLS LAST, id ASC
-          ) AS dup_rn
-        FROM with_norm
-      ) x
-    )
-    SELECT count(*)::bigint
-    FROM ranked r
-    WHERE r.new_norm IS NOT NULL
-      AND (
-        r.dup_rn > 1
-        OR EXISTS (
-          SELECT 1
-          FROM public.customers other
-          WHERE other.company_id = r.company_id
-            AND other.id <> r.id
-            AND other.phone_norm IS NOT NULL
-            AND other.phone_norm = r.new_norm
-        )
-      )
-    """
-
-    if args.dry_run:
-        print("company_id:", args.company_id)
-        conn = psycopg2.connect(url)
-        conn.autocommit = True
-        cur = conn.cursor()
-        cur.execute(count_sql, params)
-        eligible = cur.fetchone()[0]
-        cur.execute(skip_sql, params)
-        skipped = cur.fetchone()[0]
-        cur.close()
-        conn.close()
-        print(f"Clientes elegibles (con teléfono en legacy): {eligible}")
-        print(f"Se omitirían por teléfono duplicado: {skipped}")
-        print(f"Se actualizarían: {eligible - skipped}")
-        return
-
+    params: list[str] = [args.company_id]
+    print("company_id:", args.company_id)
     conn = psycopg2.connect(url)
     conn.autocommit = True
     cur = conn.cursor()
     cur.execute(count_sql, params)
     eligible = cur.fetchone()[0]
-    cur.execute(skip_sql, params)
-    skipped = cur.fetchone()[0]
-    cur.execute(sql, params)
+    print(f"Fichas vacías con teléfono en legacy: {eligible}")
+    if args.dry_run:
+        print("Dry-run: no se actualiza.")
+        cur.close()
+        conn.close()
+        return
+    cur.execute(fill_sql, params)
     updated = cur.rowcount
-    print(f"Clientes con teléfono en legacy (elegibles): {eligible}")
-    print(f"Omitidos por teléfono duplicado: {skipped}")
-    print(f"Filas actualizadas: {updated}")
+    print(f"Actualizadas: {updated}")
     cur.close()
     conn.close()
 
