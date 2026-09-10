@@ -18,6 +18,24 @@ export function setNfcStationId(id: string) {
   localStorage.setItem(STATION_KEY, id.trim() || 'default');
 }
 
+/** Aplica `?nfc_station=` / `?station=` de la URL y lo persiste. */
+export function applyNfcStationFromUrl(search = window.location.search): string {
+  try {
+    const params = new URLSearchParams(search);
+    const fromUrl = (params.get('nfc_station') || params.get('station') || '').trim();
+    if (fromUrl) {
+      setNfcStationId(fromUrl);
+      params.delete('nfc_station');
+      params.delete('station');
+      const next = `${window.location.pathname}${params.toString() ? `?${params}` : ''}${window.location.hash}`;
+      window.history.replaceState({}, '', next);
+    }
+  } catch {
+    /* ignore */
+  }
+  return getNfcStationId();
+}
+
 export function normalizeNfcUid(raw: string): string {
   return String(raw ?? '')
     .trim()

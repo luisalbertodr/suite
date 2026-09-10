@@ -26,7 +26,7 @@ except ImportError:
 NFC_AUTH_URL = os.environ.get("NFC_AUTH_URL", "https://supabase.lipoout.com/functions/v1/nfc-auth").rstrip("/")
 NFC_AGENT_SECRET = os.environ.get("NFC_AGENT_SECRET", "").strip()
 NFC_STATION_ID = os.environ.get("NFC_STATION_ID", "default").strip() or "default"
-POLL_EMPTY_S = float(os.environ.get("NFC_POLL_EMPTY_S", "0.35"))
+POLL_EMPTY_S = float(os.environ.get("NFC_POLL_EMPTY_S", "0.25"))
 DEBOUNCE_S = float(os.environ.get("NFC_DEBOUNCE_S", "2.5"))
 
 # GET UID (PC/SC Get Data)
@@ -89,29 +89,37 @@ def read_uid_once(connection) -> str | None:
 
 
 def read_uid_stable(reader) -> str | None:
-    """Lee 2–3 veces y solo acepta si coincide (evita basura del ACR122U)."""
+    """Mantiene la conexión mientras la tarjeta esté presente y confirma 2 lecturas iguales."""
+    connection = reader.createConnection()
+    try:
+        connection.connect()
+    except NoCardException:
+        return None
+    except CardConnectionException as e:
+        print(f"[acr122] connect error: {e}", file=sys.stderr)
+        return None
+
     samples: list[str] = []
-    for _ in range(3):
-        connection = reader.createConnection()
-        try:
-            connection.connect()
-        except (NoCardException, CardConnectionException):
-            return None
-        try:
+    try:
+        for attempt in range(8):
             uid = read_uid_once(connection)
-        finally:
-            try:
-                connection.disconnect()
-            except Exception:
-                pass
-        if not uid:
-            time.sleep(0.08)
-            continue
-        samples.append(uid)
-        if len(samples) >= 2 and samples[-1] == samples[-2]:
-            return samples[-1]
-        time.sleep(0.08)
-    return None
+            if not uid:
+                time.sleep(0.06)
+                continue
+            samples.append(uid)
+            if len(samples) >= 2 and samples[-1] == samples[-2]:
+                return samples[-1]
+            time.sleep(0.05)
+        if samples:
+            print(f"[acr122] UID inestable: {samples}", file=sys.stderr)
+        else:
+            print("[acr122] Tarjeta presente pero sin UID válido", file=sys.stderr)
+        return None
+    finally:
+        try:
+            connection.disconnect()
+        except Exception:
+            pass
 
 
 def main() -> int:
@@ -119,7 +127,7 @@ def main() -> int:
         print("Define NFC_AGENT_SECRET", file=sys.stderr)
         return 2
 
-    print(f"[acr122] station={NFC_STATION_ID} url={NFC_AUTH_URL}")
+    print(f"[acr122] station={NFC_STATION_ID} url={NFC_AUTH_URL}", flush=True)
     last_uid = ""
     last_ts = 0.0
 
@@ -127,7 +135,7 @@ def main() -> int:
         try:
             rs = readers()
             if not rs:
-                print("[acr122] No hay lectores PC/SC. ¿pcscd activo y ACR122U conectado?")
+                print("[acr122] No hay lectores PC/SC. ¿pcscd activo y ACR122U conectado?", flush=True)
                 time.sleep(2)
                 continue
 
@@ -142,23 +150,29 @@ def main() -> int:
                 time.sleep(POLL_EMPTY_S)
                 continue
             last_uid, last_ts = uid, now
-            print(f"[acr122] UID={uid}")
+            print(f"[acr122] UID={uid}", flush=True)
 
             try:
                 result = post_tag(uid)
-                print(f"[acr122] → {result}")
+                print(f"[acr122] → {result}", flush=True)
+                if result.get("ignored"):
+                    print(
+                        "[acr122] Aviso: no hay login esperando en esta estación "
+                        f"(abre Suite con station_id={NFC_STATION_ID})",
+                        flush=True,
+                    )
             except urllib.error.HTTPError as e:
                 err_body = e.read().decode("utf-8", errors="replace")
-                print(f"[acr122] HTTP {e.code}: {err_body}", file=sys.stderr)
+                print(f"[acr122] HTTP {e.code}: {err_body}", file=sys.stderr, flush=True)
             except Exception as e:
-                print(f"[acr122] error: {e}", file=sys.stderr)
+                print(f"[acr122] error: {e}", file=sys.stderr, flush=True)
 
             time.sleep(DEBOUNCE_S)
         except KeyboardInterrupt:
-            print("\n[acr122] stop")
+            print("\n[acr122] stop", flush=True)
             return 0
         except Exception as e:
-            print(f"[acr122] loop error: {e}", file=sys.stderr)
+            print(f"[acr122] loop error: {e}", file=sys.stderr, flush=True)
             time.sleep(1)
 
 

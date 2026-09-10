@@ -3,7 +3,7 @@ import { User, Lock, Eye, EyeOff } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabase';
-import { callNfcAuth, getNfcStationId, normalizeNfcUid } from '@/lib/nfcAuth';
+import { applyNfcStationFromUrl, callNfcAuth, getNfcStationId, normalizeNfcUid } from '@/lib/nfcAuth';
 import { checkNetworkAccess, NETWORK_ACCESS_DENIED_MESSAGE } from '@/lib/networkAccess';
 
 function isTypingInLoginForm(el: EventTarget | null): boolean {
@@ -34,6 +34,14 @@ export const Login: React.FC = () => {
   const [showTextLogin, setShowTextLogin] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [nfcStatus, setNfcStatus] = useState('Preparando lector NFC…');
+  const [stationId, setStationId] = useState(() => {
+    try {
+      return applyNfcStationFromUrl();
+    } catch {
+      return getNfcStationId();
+    }
+  });
   const [now, setNow] = useState(() => new Date());
   const wedgeBuffer = useRef('');
   const wedgeLastKeyAt = useRef(0);
@@ -93,7 +101,9 @@ export const Login: React.FC = () => {
     clearPoll();
     setError('');
     try {
-      const station_id = getNfcStationId();
+      const station_id = applyNfcStationFromUrl();
+      setStationId(station_id);
+      setNfcStatus(`Esperando tarjeta NFC… (${station_id})`);
       const started = await callNfcAuth({ action: 'challenge.start', station_id });
       const challenge_id = String(started.challenge_id ?? '');
       const poll_token = String(started.poll_token ?? '');
@@ -113,13 +123,16 @@ export const Login: React.FC = () => {
             const status = String(polled.status ?? '');
             if (status === 'completed') {
               clearPoll();
+              setNfcStatus('Tarjeta reconocida, abriendo sesión…');
               await applySessionTokens(
                 String(polled.access_token ?? ''),
                 String(polled.refresh_token ?? ''),
               );
             } else if (status === 'failed' || status === 'expired') {
               clearPoll();
-              setError(String(polled.error_message ?? 'Lectura NFC caducada o fallida'));
+              const msg = String(polled.error_message ?? 'Lectura NFC caducada o fallida');
+              setError(msg);
+              setNfcStatus(msg);
               window.setTimeout(() => void startNfcChallenge(), 800);
             }
           } catch (e) {
@@ -128,7 +141,9 @@ export const Login: React.FC = () => {
         })();
       }, 900);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudo iniciar NFC');
+      const msg = e instanceof Error ? e.message : 'No se pudo iniciar NFC';
+      setError(msg);
+      setNfcStatus(msg);
     }
   }, [applySessionTokens]);
 
@@ -279,6 +294,30 @@ export const Login: React.FC = () => {
         <div className="space-y-3">
           <p className={dateClass}>{dateLabel}</p>
           <p className={timeClass}>{timeLabel}</p>
+          <p
+            className={
+              isDark
+                ? 'text-sm text-white/70 max-w-md mx-auto'
+                : 'text-sm text-slate-600 max-w-md mx-auto'
+            }
+          >
+            {nfcStatus}
+          </p>
+          {error && !showTextLogin && (
+            <div className="mx-auto max-w-md p-3 bg-red-500/20 border border-red-500/50 rounded-lg text-red-700 dark:text-red-200 text-sm">
+              {error}
+            </div>
+          )}
+          <p
+            className={
+              isDark
+                ? 'text-[10px] text-white/35 font-mono'
+                : 'text-[10px] text-slate-400 font-mono'
+            }
+            title="Debe coincidir con NFC_STATION_ID del agente ACR122U"
+          >
+            {stationId}
+          </p>
         </div>
 
         {showTextLogin && (
