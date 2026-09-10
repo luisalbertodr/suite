@@ -257,8 +257,17 @@ serve(async (req) => {
     if (action === 'challenge.start') {
       const stationId = String(body.station_id ?? '').trim() || 'default';
       if (stationId.length > 80) return json({ error: 'station_id inválido' }, 400);
+      // Un solo reto activo por estación: evita que el agente complete un reto
+      // distinto al que el navegador está sondeando.
+      await admin
+        .from('nfc_login_challenges')
+        .update({ status: 'expired', error_message: 'superseded' })
+        .eq('station_id', stationId)
+        .eq('status', 'waiting');
+
       const poll = randomToken(24);
       const code = publicCode();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
       const { data, error } = await admin
         .from('nfc_login_challenges')
         .insert({
@@ -266,6 +275,7 @@ serve(async (req) => {
           public_code: code,
           poll_token: poll,
           status: 'waiting',
+          expires_at: expiresAt,
         })
         .select('id, public_code, expires_at, station_id')
         .single();
@@ -298,8 +308,8 @@ serve(async (req) => {
       }
 
       if (data.status === 'completed' && data.access_token && data.refresh_token) {
-        // One-shot: wipe tokens after read
-        await admin
+        // One-shot: wipe tokens after read (best-effort; no fallar el login si el wipe falla)
+        void admin
           .from('nfc_login_challenges')
           .update({ access_token: null, refresh_token: null })
           .eq('id', id);
@@ -308,6 +318,14 @@ serve(async (req) => {
           access_token: data.access_token,
           refresh_token: data.refresh_token,
           user_id: data.user_id,
+        });
+      }
+
+      // Completado pero tokens ya consumidos por otro poll: el cliente debe reiniciar.
+      if (data.status === 'completed') {
+        return json({
+          status: 'failed',
+          error_message: 'Sesión NFC ya consumida; acerca de nuevo la tarjeta',
         });
       }
 

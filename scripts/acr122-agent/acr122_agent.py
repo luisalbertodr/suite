@@ -17,7 +17,9 @@ import urllib.request
 
 try:
     from smartcard.System import readers
-    from smartcard.Exceptions import CardConnectionException, NoCardException
+    from smartcard.CardRequest import CardRequest
+    from smartcard.CardType import AnyCardType
+    from smartcard.Exceptions import CardConnectionException, CardRequestTimeoutException, NoCardException
 except ImportError:
     print("Falta pyscard. Instala: pip3 install pyscard  (y pcscd en el sistema)", file=sys.stderr)
     sys.exit(1)
@@ -26,10 +28,9 @@ except ImportError:
 NFC_AUTH_URL = os.environ.get("NFC_AUTH_URL", "https://supabase.lipoout.com/functions/v1/nfc-auth").rstrip("/")
 NFC_AGENT_SECRET = os.environ.get("NFC_AGENT_SECRET", "").strip()
 NFC_STATION_ID = os.environ.get("NFC_STATION_ID", "default").strip() or "default"
-POLL_EMPTY_S = float(os.environ.get("NFC_POLL_EMPTY_S", "0.25"))
 DEBOUNCE_S = float(os.environ.get("NFC_DEBOUNCE_S", "2.5"))
+CARD_WAIT_S = float(os.environ.get("NFC_CARD_WAIT_S", "1.5"))
 
-# GET UID (PC/SC Get Data)
 GET_UID = [0xFF, 0xCA, 0x00, 0x00, 0x00]
 GET_UID_7 = [0xFF, 0xCA, 0x00, 0x00, 0x07]
 
@@ -53,12 +54,10 @@ def post_tag(uid: str) -> dict:
 def is_plausible_uid(uid: str) -> bool:
     if not uid:
         return False
-    # UIDs ISO14443: 4 / 7 / 10 bytes
     if len(uid) not in (8, 14, 20):
         return False
     if set(uid) <= {"0"}:
         return False
-    # Lecturas corruptas típicas del ACR122U
     if uid.startswith("0000"):
         return False
     if uid.count("F") >= max(4, len(uid) // 2):
@@ -85,36 +84,62 @@ def read_uid_once(connection) -> str | None:
     uid7 = transmit_uid(connection, GET_UID_7)
     if is_plausible_uid(uid7 or ""):
         return uid7
+    raw = transmit_uid(connection, GET_UID) or transmit_uid(connection, GET_UID_7)
+    if raw:
+        print(f"[acr122] UID descartado (formato): {raw}", flush=True)
     return None
 
 
-def read_uid_stable(reader) -> str | None:
-    """Mantiene la conexión mientras la tarjeta esté presente y confirma 2 lecturas iguales."""
-    connection = reader.createConnection()
-    try:
-        connection.connect()
-    except NoCardException:
-        return None
-    except CardConnectionException as e:
-        print(f"[acr122] connect error: {e}", file=sys.stderr)
+def read_uid_from_connection(connection) -> str | None:
+    samples: list[str] = []
+    for _ in range(8):
+        uid = read_uid_once(connection)
+        if not uid:
+            time.sleep(0.05)
+            continue
+        samples.append(uid)
+        if len(samples) >= 2 and samples[-1] == samples[-2]:
+            return samples[-1]
+        time.sleep(0.04)
+    if samples:
+        print(f"[acr122] UID inestable: {samples}", flush=True)
+        # Último recurso: mayoría simple
+        best = max(set(samples), key=samples.count)
+        if samples.count(best) >= 2 and is_plausible_uid(best):
+            return best
+    return None
+
+
+def wait_and_read_uid() -> str | None:
+    """Espera presencia de tarjeta (PC/SC) y lee UID estable."""
+    rs = readers()
+    if not rs:
+        print("[acr122] No hay lectores PC/SC. ¿pcscd activo y ACR122U conectado?", flush=True)
+        time.sleep(2)
         return None
 
-    samples: list[str] = []
     try:
-        for attempt in range(8):
-            uid = read_uid_once(connection)
-            if not uid:
-                time.sleep(0.06)
-                continue
-            samples.append(uid)
-            if len(samples) >= 2 and samples[-1] == samples[-2]:
-                return samples[-1]
-            time.sleep(0.05)
-        if samples:
-            print(f"[acr122] UID inestable: {samples}", file=sys.stderr)
-        else:
-            print("[acr122] Tarjeta presente pero sin UID válido", file=sys.stderr)
+        req = CardRequest(timeout=CARD_WAIT_S, cardType=AnyCardType(), readers=rs)
+        service = req.waitforcard()
+    except CardRequestTimeoutException:
         return None
+    except Exception as e:
+        print(f"[acr122] waitforcard: {e}", file=sys.stderr, flush=True)
+        time.sleep(0.5)
+        return None
+
+    connection = service.connection
+    try:
+        connection.connect()
+    except (NoCardException, CardConnectionException) as e:
+        print(f"[acr122] connect tras presencia: {e}", flush=True)
+        return None
+
+    try:
+        uid = read_uid_from_connection(connection)
+        if not uid:
+            print("[acr122] Tarjeta presente pero sin UID válido", flush=True)
+        return uid
     finally:
         try:
             connection.disconnect()
@@ -133,21 +158,13 @@ def main() -> int:
 
     while True:
         try:
-            rs = readers()
-            if not rs:
-                print("[acr122] No hay lectores PC/SC. ¿pcscd activo y ACR122U conectado?", flush=True)
-                time.sleep(2)
-                continue
-
-            reader = rs[0]
-            uid = read_uid_stable(reader)
+            uid = wait_and_read_uid()
             if not uid:
-                time.sleep(POLL_EMPTY_S)
                 continue
 
             now = time.time()
             if uid == last_uid and (now - last_ts) < DEBOUNCE_S:
-                time.sleep(POLL_EMPTY_S)
+                time.sleep(0.2)
                 continue
             last_uid, last_ts = uid, now
             print(f"[acr122] UID={uid}", flush=True)
@@ -158,7 +175,7 @@ def main() -> int:
                 if result.get("ignored"):
                     print(
                         "[acr122] Aviso: no hay login esperando en esta estación "
-                        f"(abre Suite con station_id={NFC_STATION_ID})",
+                        f"(Chrome localStorage suite_nfc_station_id={NFC_STATION_ID})",
                         flush=True,
                     )
             except urllib.error.HTTPError as e:

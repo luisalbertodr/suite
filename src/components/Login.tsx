@@ -124,10 +124,20 @@ export const Login: React.FC = () => {
             if (status === 'completed') {
               clearPoll();
               setNfcStatus('Tarjeta reconocida, abriendo sesión…');
-              await applySessionTokens(
-                String(polled.access_token ?? ''),
-                String(polled.refresh_token ?? ''),
-              );
+              try {
+                const access = String(polled.access_token ?? '');
+                const refresh = String(polled.refresh_token ?? '');
+                if (!access || !refresh) {
+                  throw new Error('Sesión NFC incompleta; acerca de nuevo la tarjeta');
+                }
+                await applySessionTokens(access, refresh);
+              } catch (sessionErr) {
+                const msg =
+                  sessionErr instanceof Error ? sessionErr.message : 'No se pudo abrir la sesión';
+                setError(msg);
+                setNfcStatus(msg);
+                window.setTimeout(() => void startNfcChallenge(), 1200);
+              }
             } else if (status === 'failed' || status === 'expired') {
               clearPoll();
               const msg = String(polled.error_message ?? 'Lectura NFC caducada o fallida');
@@ -137,6 +147,8 @@ export const Login: React.FC = () => {
             }
           } catch (e) {
             console.warn('nfc poll', e);
+            const msg = e instanceof Error ? e.message : 'Error consultando NFC';
+            setError(msg);
           }
         })();
       }, 900);
