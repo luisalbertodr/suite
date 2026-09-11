@@ -48,6 +48,9 @@ export const Login: React.FC = () => {
   const challengeRef = useRef<{ id: string; poll: string } | null>(null);
   const pollTimer = useRef<number | null>(null);
   const submittingWedge = useRef(false);
+  const challengeGen = useRef(0);
+  const startingChallenge = useRef(false);
+  const restartTimer = useRef<number | null>(null);
   const { signIn } = useAuth();
   const { theme, resolvedTheme } = useTheme();
   const [themeReady, setThemeReady] = useState(false);
@@ -83,6 +86,10 @@ export const Login: React.FC = () => {
       window.clearInterval(pollTimer.current);
       pollTimer.current = null;
     }
+    if (restartTimer.current != null) {
+      window.clearTimeout(restartTimer.current);
+      restartTimer.current = null;
+    }
   };
 
   const applySessionTokens = useCallback(async (access_token: string, refresh_token: string) => {
@@ -97,14 +104,20 @@ export const Login: React.FC = () => {
     }
   }, []);
 
+  const scheduleNfcRestart = useRef<(delayMs?: number) => void>(() => {});
+
   const startNfcChallenge = useCallback(async () => {
+    if (startingChallenge.current) return;
+    startingChallenge.current = true;
     clearPoll();
+    const gen = ++challengeGen.current;
     setError('');
     try {
       const station_id = applyNfcStationFromUrl();
       setStationId(station_id);
       setNfcStatus(`Esperando tarjeta NFC… (${station_id})`);
       const started = await callNfcAuth({ action: 'challenge.start', station_id });
+      if (gen !== challengeGen.current) return;
       const challenge_id = String(started.challenge_id ?? '');
       const poll_token = String(started.poll_token ?? '');
       if (!challenge_id || !poll_token) throw new Error('No se pudo iniciar lectura NFC');
@@ -112,6 +125,7 @@ export const Login: React.FC = () => {
 
       pollTimer.current = window.setInterval(() => {
         void (async () => {
+          if (gen !== challengeGen.current) return;
           const ch = challengeRef.current;
           if (!ch) return;
           try {
@@ -120,7 +134,9 @@ export const Login: React.FC = () => {
               challenge_id: ch.id,
               poll_token: ch.poll,
             });
+            if (gen !== challengeGen.current) return;
             const status = String(polled.status ?? '');
+            const errMsg = String(polled.error_message ?? '');
             if (status === 'completed') {
               clearPoll();
               setNfcStatus('Tarjeta reconocida, abriendo sesión…');
@@ -136,28 +152,45 @@ export const Login: React.FC = () => {
                   sessionErr instanceof Error ? sessionErr.message : 'No se pudo abrir la sesión';
                 setError(msg);
                 setNfcStatus(msg);
-                window.setTimeout(() => void startNfcChallenge(), 1200);
+                scheduleNfcRestart.current(1200);
               }
             } else if (status === 'failed' || status === 'expired') {
               clearPoll();
-              const msg = String(polled.error_message ?? 'Lectura NFC caducada o fallida');
+              // Reto reemplazado por otro start: reinicio silencioso (evita bucle "superseded").
+              if (errMsg === 'superseded') {
+                setNfcStatus(`Esperando tarjeta NFC… (${stationId})`);
+                scheduleNfcRestart.current(300);
+                return;
+              }
+              const msg = errMsg || 'Lectura NFC caducada o fallida';
               setError(msg);
               setNfcStatus(msg);
-              window.setTimeout(() => void startNfcChallenge(), 800);
+              scheduleNfcRestart.current(800);
             }
           } catch (e) {
+            if (gen !== challengeGen.current) return;
             console.warn('nfc poll', e);
-            const msg = e instanceof Error ? e.message : 'Error consultando NFC';
-            setError(msg);
           }
         })();
       }, 900);
     } catch (e) {
+      if (gen !== challengeGen.current) return;
       const msg = e instanceof Error ? e.message : 'No se pudo iniciar NFC';
       setError(msg);
       setNfcStatus(msg);
+      scheduleNfcRestart.current(2000);
+    } finally {
+      startingChallenge.current = false;
     }
-  }, [applySessionTokens]);
+  }, [applySessionTokens, stationId]);
+
+  scheduleNfcRestart.current = (delayMs = 800) => {
+    if (restartTimer.current != null) window.clearTimeout(restartTimer.current);
+    restartTimer.current = window.setTimeout(() => {
+      restartTimer.current = null;
+      void startNfcChallenge();
+    }, delayMs);
+  };
 
   const submitWedgeUid = useCallback(
     async (raw: string) => {
@@ -189,15 +222,16 @@ export const Login: React.FC = () => {
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Error NFC');
-        void startNfcChallenge();
+        scheduleNfcRestart.current(400);
       } finally {
         wedgeBuffer.current = '';
         submittingWedge.current = false;
       }
     },
-    [applySessionTokens, startNfcChallenge],
+    [applySessionTokens],
   );
 
+  // Una sola suscripción al montar: evita recrear retos en bucle (superseded).
   useEffect(() => {
     void startNfcChallenge();
 
@@ -227,10 +261,12 @@ export const Login: React.FC = () => {
 
     window.addEventListener('keydown', onKeyDown, true);
     return () => {
+      challengeGen.current += 1;
       clearPoll();
       window.removeEventListener('keydown', onKeyDown, true);
     };
-  }, [startNfcChallenge, submitWedgeUid]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only NFC lifecycle
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
