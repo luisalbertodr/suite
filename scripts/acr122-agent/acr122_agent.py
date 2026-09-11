@@ -101,12 +101,17 @@ def read_uid_from_connection(connection) -> str | None:
         if len(samples) >= 2 and samples[-1] == samples[-2]:
             return samples[-1]
         time.sleep(0.04)
-    if samples:
-        print(f"[acr122] UID inestable: {samples}", flush=True)
-        # Último recurso: mayoría simple
-        best = max(set(samples), key=samples.count)
-        if samples.count(best) >= 2 and is_plausible_uid(best):
-            return best
+    if not samples:
+        return None
+    # ACR122U a menudo solo entrega 1 lectura buena antes de fallar el canal.
+    best = max(set(samples), key=samples.count)
+    if is_plausible_uid(best):
+        if len(samples) == 1:
+            print(f"[acr122] UID aceptado (1 lectura): {best}", flush=True)
+        else:
+            print(f"[acr122] UID por mayoría {samples} → {best}", flush=True)
+        return best
+    print(f"[acr122] UID inestable/inválido: {samples}", flush=True)
     return None
 
 
