@@ -1860,6 +1860,9 @@ const WEBHOOK_EVENTS = [
   'group.v2.join',
   'group.v2.participants',
   'group.v2.participants.join-request',
+  'call.received',
+  'call.accepted',
+  'call.rejected',
 ];
 
 /** Body PUT sesión WAHA (documentación oficial: solo `config` en el cuerpo). */
@@ -2003,6 +2006,22 @@ async function fetchWahaSession(
 }
 
 /** Aplica store NOWEB + webhook si faltan (sin esto no entran mensajes). */
+function wahaWebhookEventsComplete(session: WahaSessionSnapshot | null): boolean {
+  const webhooks = session?.config?.webhooks;
+  if (!Array.isArray(webhooks) || webhooks.length === 0) return false;
+  const events = new Set<string>();
+  for (const wh of webhooks) {
+    const list = (wh as { events?: unknown })?.events;
+    if (!Array.isArray(list)) continue;
+    for (const ev of list) {
+      if (typeof ev === 'string' && ev.trim()) events.add(ev.trim());
+    }
+  }
+  // Exigimos al menos los eventos críticos de mensajes + llamadas.
+  const required = ['message.any', 'call.received', 'call.rejected'];
+  return required.every((ev) => events.has(ev));
+}
+
 async function ensureWahaSessionConfig(
   cfg: WhatsappConfig,
   supabaseUrl: string,
@@ -2011,7 +2030,8 @@ async function ensureWahaSessionConfig(
 ): Promise<{ webhooksConfigured: boolean; nowebStoreEnabled: boolean }> {
   let session = await fetchWahaSession(cfg, sessionName);
   let health = readWahaSessionHealth(session);
-  if (health.webhooksConfigured && health.nowebStoreEnabled) return health;
+  const eventsOk = wahaWebhookEventsComplete(session);
+  if (health.webhooksConfigured && health.nowebStoreEnabled && eventsOk) return health;
 
   const sessionConfig = buildWahaSessionConfig(supabaseUrl, companyId, cfg);
   try {

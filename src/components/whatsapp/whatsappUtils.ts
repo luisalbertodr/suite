@@ -976,6 +976,9 @@ export function messagePreviewText(m: MessagePreviewSource): string {
   if (type === 'audio' || type === 'voice' || type === 'ptt') return '🎤 Audio';
   if (type === 'sticker') return '🎭 Sticker';
   if (type === 'document') return m.media_filename?.trim() || '📎 Documento';
+  if (type === 'call' || type === 'call_missed' || type === 'call_accepted' || type === 'call_rejected' || type.startsWith('call')) {
+    return m.body?.trim() || '📞 Llamada';
+  }
   if (!type || type === 'undefined' || type === 'null') return '🎤 Audio';
   return `[${type}]`;
 }

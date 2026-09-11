@@ -14,6 +14,7 @@
 //   * "message.ack"               → cambio de estado de entrega/lectura
 //   * "session.status", "state.change", "engine.event" → estado de sesión
 //   * "chat.archive"              → cambio de archivado
+//   * "call.received|accepted|rejected" → llamadas WhatsApp (entrada/contestada/perdida)
 // ---------------------------------------------------------------------------
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
@@ -1119,6 +1120,115 @@ async function handleMessage(
   }
 }
 
+
+async function handleCallEvent(
+  admin: SupabaseClient,
+  companyId: string,
+  event: string,
+  payload: Record<string, unknown> | null | undefined,
+) {
+  const p = payload ?? {};
+  const callId = String(p.id ?? p.callId ?? '').trim();
+  const fromRaw = String(p.from ?? p.chatId ?? '').trim();
+  if (!fromRaw) {
+    console.warn('handleCallEvent: sin from/chatId', JSON.stringify(p).slice(0, 300));
+    return;
+  }
+  const chatId = normalizeWhatsappJid(fromRaw);
+  const isGroup = isGroupJid(chatId);
+  const isVideo = !!(p.isVideo ?? p.is_video ?? false);
+  const kind = isVideo ? 'vídeo' : 'voz';
+  const tsRaw = p.timestamp;
+  const tsSecs =
+    typeof tsRaw === 'number'
+      ? tsRaw
+      : typeof tsRaw === 'string' && /^\d+$/.test(tsRaw)
+        ? Number(tsRaw)
+        : Math.floor(Date.now() / 1000);
+  const timestamp = isoFromUnixSecondsLive(tsSecs);
+
+  let type = 'call';
+  let body = `📞 Llamada de ${kind}`;
+  if (event === 'call.received') {
+    type = 'call';
+    body = `📞 Llamada de ${kind} entrante`;
+  } else if (event === 'call.accepted') {
+    type = 'call_accepted';
+    body = `📞 Llamada de ${kind} contestada`;
+  } else if (event === 'call.rejected') {
+    type = 'call_missed';
+    body = `📞 Llamada de ${kind} perdida`;
+  }
+
+  const wahaMessageId = callId
+    ? `call_${callId}_${event.replace(/\./g, '_')}`
+    : `call_${chatId}_${tsSecs}_${event.replace(/\./g, '_')}`;
+
+  const messageRow = {
+    company_id: companyId,
+    chat_id: chatId,
+    source_provider: 'waha',
+    waha_message_id: wahaMessageId,
+    from_jid: chatId,
+    from_me: false,
+    type,
+    body,
+    caption: null,
+    media_url: null,
+    media_mime_type: null,
+    media_filename: null,
+    media_size: null,
+    ack: 0,
+    timestamp,
+    raw: { event, ...p },
+  };
+
+  const { error } = await admin.from('whatsapp_messages').upsert(messageRow, {
+    onConflict: 'company_id,waha_message_id',
+    ignoreDuplicates: false,
+  });
+  if (error) {
+    console.error('handleCallEvent upsert failed:', error, messageRow);
+    return;
+  }
+
+  const { data: existingChat } = await admin
+    .from('whatsapp_chats')
+    .select('id, unread_count')
+    .eq('company_id', companyId)
+    .eq('chat_id', chatId)
+    .maybeSingle();
+
+  const unread =
+    event === 'call.received' || event === 'call.rejected'
+      ? Math.max(0, Number(existingChat?.unread_count ?? 0)) + 1
+      : Number(existingChat?.unread_count ?? 0);
+
+  const { error: chatErr } = await admin.from('whatsapp_chats').upsert(
+    {
+      company_id: companyId,
+      chat_id: chatId,
+      is_group: isGroup,
+      last_message_preview: body.slice(0, 200),
+      last_message_at: timestamp,
+      last_message_from_me: false,
+      unread_count: unread,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'company_id,chat_id', ignoreDuplicates: false },
+  );
+  if (chatErr) console.error('handleCallEvent chat upsert failed:', chatErr);
+
+  try {
+    await admin.rpc('whatsapp_auto_link_chat', {
+      p_company_id: companyId,
+      p_chat_id: chatId,
+    });
+  } catch {
+    // no bloquear
+  }
+}
+
 async function handleAck(
   admin: SupabaseClient,
   companyId: string,
@@ -1524,7 +1634,19 @@ serve(async (req) => {
           ? { baseUrl, apiKey, sessionName }
           : null;
       await handleStateChange(admin, companyId, envelope, event, wahaConn);
+    } else if (
+      event === 'call.received' ||
+      event === 'call.accepted' ||
+      event === 'call.rejected'
+    ) {
+      await handleCallEvent(
+        admin,
+        companyId,
+        event,
+        asRecord(envelope.payload),
+      );
     } else if (event === 'chat.archive') {
+
       const p = (envelope.payload ?? {}) as { chatId?: string; archived?: boolean };
       if (p.chatId) {
         await admin

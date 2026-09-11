@@ -176,5 +176,8 @@ export function whatsappMediaPreviewLabel(type: string): string {
   if (t === 'sticker') return '🎭 Sticker';
   if (t === 'document') return '📎 Documento';
   if (t === 'text' || t === 'chat') return 'Mensaje';
+  if (t === 'call' || t === 'call_missed' || t === 'call_accepted' || t === 'call_rejected' || t.startsWith('call')) {
+    return '📞 Llamada';
+  }
   return `[${t}]`;
 }
