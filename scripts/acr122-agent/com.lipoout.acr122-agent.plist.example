@@ -17,6 +17,8 @@
     <string>CHANGE_ME</string>
     <key>NFC_STATION_ID</key>
     <string>station-medicina</string>
+    <key>NFC_CURL_INSECURE</key>
+    <string>1</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>

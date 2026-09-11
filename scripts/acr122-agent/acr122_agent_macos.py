@@ -1,28 +1,33 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""Agente ACR122U para macOS 10.11 (PC/SC via ctypes, Python 2.7)."""
+"""Agente ACR122U para macOS 10.11 (PC/SC via ctypes, Python 2.7).
+
+Problemas tipicos en El Capitan:
+- OpenSSL 0.9.8 sin TLS1.2 -> HTTPS con /usr/bin/curl (-k)
+- SCARD_READERSTATE con ctypes suele fallar por alineacion -> sondeo SCardConnect
+"""
 from __future__ import print_function
 
 import json
 import os
+import subprocess
 import sys
 import time
 import ctypes
-from ctypes import Structure, byref, c_char_p, c_ulong, c_void_p, create_string_buffer
-
-try:
-    from urllib.request import Request, urlopen
-    from urllib.error import HTTPError
-except ImportError:
-    from urllib2 import Request, urlopen, HTTPError
+from ctypes import Structure, byref, c_ulong, create_string_buffer
 
 NFC_AUTH_URL = os.environ.get(
     "NFC_AUTH_URL", "https://supabase.lipoout.com/functions/v1/nfc-auth"
 ).rstrip("/")
 NFC_AGENT_SECRET = os.environ.get("NFC_AGENT_SECRET", "").strip()
 NFC_STATION_ID = os.environ.get("NFC_STATION_ID", "default").strip() or "default"
-NFC_SUITE_URL = os.environ.get("NFC_SUITE_URL", "https://suite.lipoout.com").rstrip("/")
 DEBOUNCE_S = float(os.environ.get("NFC_DEBOUNCE_S", "2.5"))
+POLL_S = float(os.environ.get("NFC_POLL_S", "0.35"))
+CURL_INSECURE = os.environ.get("NFC_CURL_INSECURE", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+)
 
 SCARD_SCOPE_SYSTEM = 2
 SCARD_SHARE_SHARED = 2
@@ -30,25 +35,11 @@ SCARD_PROTOCOL_T0 = 0x0001
 SCARD_PROTOCOL_T1 = 0x0002
 SCARD_LEAVE_CARD = 0
 SCARD_S_SUCCESS = 0
-SCARD_STATE_UNAWARE = 0x0000
-SCARD_STATE_PRESENT = 0x0020
-MAX_ATR_SIZE = 33
 MAX_BUFFER_SIZE = 264
 
 
 class SCARD_IO_REQUEST(Structure):
     _fields_ = [("dwProtocol", c_ulong), ("cbPciLength", c_ulong)]
-
-
-class SCARD_READERSTATE(Structure):
-    _fields_ = [
-        ("szReader", c_char_p),
-        ("pvUserData", c_void_p),
-        ("dwCurrentState", c_ulong),
-        ("dwEventState", c_ulong),
-        ("cbAtr", c_ulong),
-        ("rgbAtr", ctypes.c_ubyte * MAX_ATR_SIZE),
-    ]
 
 
 def log(msg):
@@ -96,7 +87,7 @@ def is_plausible_uid(uid):
     return True
 
 
-def transmit_uid(lib, card, protocol, apdu):
+def transmit(lib, card, protocol, apdu):
     send_pci = SCARD_IO_REQUEST(protocol, ctypes.sizeof(SCARD_IO_REQUEST))
     send = (ctypes.c_ubyte * len(apdu))(*apdu)
     recv = (ctypes.c_ubyte * MAX_BUFFER_SIZE)()
@@ -105,51 +96,51 @@ def transmit_uid(lib, card, protocol, apdu):
         card, byref(send_pci), send, len(apdu), None, recv, byref(recv_len)
     )
     if rv != SCARD_S_SUCCESS or recv_len.value < 2:
-        return None
+        return None, None, None
     data = [recv[i] for i in range(recv_len.value)]
-    sw1, sw2 = data[-2], data[-1]
-    payload = data[:-2]
-    if (sw1, sw2) != (0x90, 0x00) or not payload:
+    return data[:-2], data[-2], data[-1]
+
+
+def transmit_uid(lib, card, protocol, apdu):
+    payload, sw1, sw2 = transmit(lib, card, protocol, apdu)
+    if payload is None or (sw1, sw2) != (0x90, 0x00) or not payload:
         return None
     return "".join("%02X" % b for b in payload)
 
 
+def buzz_ok(lib, card, protocol):
+    # ACS ACR122U: LED verde + beep corto (mejor esfuerzo; ignora fallo)
+    try:
+        transmit(lib, card, protocol, [0xFF, 0x00, 0x40, 0xA2, 0x04, 0x01, 0x01, 0x02, 0x02])
+    except Exception:
+        pass
+
+
 def read_uid(lib, card, protocol):
     samples = []
-    for _ in range(8):
+    for _ in range(6):
         uid = transmit_uid(lib, card, protocol, [0xFF, 0xCA, 0x00, 0x00, 0x00])
         if not is_plausible_uid(uid or ""):
             uid = transmit_uid(lib, card, protocol, [0xFF, 0xCA, 0x00, 0x00, 0x07])
         if uid and is_plausible_uid(uid):
             samples.append(uid)
             if len(samples) >= 2 and samples[-1] == samples[-2]:
+                buzz_ok(lib, card, protocol)
                 return samples[-1]
-        time.sleep(0.04)
+        time.sleep(0.03)
     if not samples:
         return None
     best = max(set(samples), key=samples.count)
     if is_plausible_uid(best):
+        buzz_ok(lib, card, protocol)
         log("[acr122] UID aceptado: %s (%s)" % (best, samples))
         return best
     return None
 
 
-def wait_card_and_read(lib, ctx, readers):
-    states = (SCARD_READERSTATE * len(readers))()
-    for i, name in enumerate(readers):
-        states[i].szReader = name
-        states[i].dwCurrentState = SCARD_STATE_UNAWARE
-    lib.SCardGetStatusChange(ctx, 0, states, len(readers))
-    for i in range(len(readers)):
-        states[i].dwCurrentState = states[i].dwEventState
-
-    rv = lib.SCardGetStatusChange(ctx, 1500, states, len(readers))
-    if rv != SCARD_S_SUCCESS:
-        return None
-
-    for i, name in enumerate(readers):
-        if not (states[i].dwEventState & SCARD_STATE_PRESENT):
-            continue
+def poll_uid_once(lib, ctx, readers):
+    """Intenta SCardConnect en cada lector; si hay tarjeta, lee UID."""
+    for name in readers:
         hcard = c_ulong()
         proto = c_ulong()
         crv = lib.SCardConnect(
@@ -163,7 +154,9 @@ def wait_card_and_read(lib, ctx, readers):
         if crv != SCARD_S_SUCCESS:
             continue
         try:
-            return read_uid(lib, hcard.value, proto.value)
+            uid = read_uid(lib, hcard.value, proto.value)
+            if uid:
+                return uid
         finally:
             lib.SCardDisconnect(hcard.value, SCARD_LEAVE_CARD)
     return None
@@ -172,35 +165,48 @@ def wait_card_and_read(lib, ctx, readers):
 def post_tag(uid):
     body = json.dumps(
         {"action": "agent.tag", "uid": uid, "station_id": NFC_STATION_ID}
-    ).encode("utf-8")
-    req = Request(NFC_AUTH_URL, data=body)
-    req.add_header("Content-Type", "application/json")
-    req.add_header("x-nfc-agent-secret", NFC_AGENT_SECRET)
-    resp = urlopen(req, timeout=20)
-    raw = resp.read()
+    )
+    cmd = [
+        "/usr/bin/curl",
+        "-sS",
+        "--max-time",
+        "20",
+        "-X",
+        "POST",
+        NFC_AUTH_URL,
+        "-H",
+        "Content-Type: application/json",
+        "-H",
+        "x-nfc-agent-secret: %s" % NFC_AGENT_SECRET,
+        "--data-binary",
+        body,
+    ]
+    if CURL_INSECURE:
+        cmd.insert(1, "-k")
+
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        out, err = proc.communicate()
+    except OSError as e:
+        raise RuntimeError("No se pudo ejecutar curl: %s" % e)
+
+    if isinstance(out, bytes):
+        out = out.decode("utf-8", "replace")
+    if isinstance(err, bytes):
+        err = err.decode("utf-8", "replace")
+
+    if proc.returncode != 0:
+        raise RuntimeError(
+            "curl exit=%s err=%s out=%s" % (proc.returncode, err.strip(), out[:300])
+        )
+
+    raw = (out or "").strip()
     if not raw:
         return {}
-    if isinstance(raw, bytes):
-        raw = raw.decode("utf-8", "replace")
-    return json.loads(raw)
-
-
-def open_suite_browser(result):
-    import subprocess
-
-    q = str(result.get("suite_query") or "").strip()
-    if not q:
-        q = "nfc_station=%s" % NFC_STATION_ID
-    url = "%s/?%s" % (NFC_SUITE_URL, q)
-    log("[acr122] Abriendo navegador: %s" % url)
     try:
-        # macOS: open -a "Google Chrome" enfoca o lanza Chrome
-        subprocess.call(["open", "-a", "Google Chrome", url])
-    except Exception:
-        try:
-            subprocess.call(["open", url])
-        except Exception as e:
-            logerr("[acr122] No se pudo abrir Chrome: %s" % e)
+        return json.loads(raw)
+    except ValueError:
+        raise RuntimeError("Respuesta no JSON de nfc-auth: %s" % raw[:300])
 
 
 def main():
@@ -209,7 +215,10 @@ def main():
         return 2
 
     lib = load_pcsc()
-    log("[acr122] station=%s url=%s" % (NFC_STATION_ID, NFC_AUTH_URL))
+    log(
+        "[acr122] station=%s url=%s curl_insecure=%s poll=%.2fs"
+        % (NFC_STATION_ID, NFC_AUTH_URL, CURL_INSECURE, POLL_S)
+    )
     last_uid = ""
     last_ts = 0.0
     no_reader_logged = False
@@ -236,32 +245,32 @@ def main():
                 if no_reader_logged:
                     log("[acr122] Lectores: %s" % readers)
                 no_reader_logged = False
-                uid = wait_card_and_read(lib, ctx.value, readers)
+                uid = poll_uid_once(lib, ctx.value, readers)
             finally:
                 lib.SCardReleaseContext(ctx.value)
 
             if not uid:
+                time.sleep(POLL_S)
                 continue
 
             now = time.time()
             if uid == last_uid and (now - last_ts) < DEBOUNCE_S:
-                time.sleep(0.2)
+                time.sleep(POLL_S)
                 continue
             last_uid, last_ts = uid, now
             log("[acr122] UID=%s" % uid)
             try:
                 result = post_tag(uid)
                 log("[acr122] -> %s" % result)
-                if result.get("open_browser") or result.get("focus_browser") or result.get("ignored"):
-                    open_suite_browser(result)
-            except HTTPError as e:
-                try:
-                    body = e.read()
-                except Exception:
-                    body = b""
-                logerr("[acr122] HTTP %s: %s" % (e.code, body))
+                if result.get("error"):
+                    logerr("[acr122] nfc-auth error: %s" % result.get("error"))
+                else:
+                    log(
+                        "[acr122] OK — la sesion la recoge Chrome en la VM "
+                        "(station=%s)" % NFC_STATION_ID
+                    )
             except Exception as e:
-                logerr("[acr122] error: %s" % e)
+                logerr("[acr122] post error: %s" % e)
             time.sleep(DEBOUNCE_S)
         except KeyboardInterrupt:
             log("\n[acr122] stop")
