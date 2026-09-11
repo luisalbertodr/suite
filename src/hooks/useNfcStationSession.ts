@@ -26,7 +26,19 @@ async function applySessionTokens(accessToken: string, refreshToken: string) {
     access_token: accessToken,
     refresh_token: refreshToken,
   });
-  if (setErr) throw setErr;
+  if (setErr) {
+    // Tokens NFC huérfanos/revocados: limpiar basura local para no romper login manual.
+    try {
+      await supabase.auth.signOut();
+    } catch {
+      /* ignore */
+    }
+    const raw = setErr.message || '';
+    if (/session missing|session_not_found|Invalid Refresh Token|refresh_token/i.test(raw)) {
+      throw new Error('Sesión NFC caducada; acerca de nuevo la tarjeta');
+    }
+    throw setErr;
+  }
   const gate = await checkNetworkAccess();
   if (!gate.allowed) {
     await supabase.auth.signOut();
@@ -95,17 +107,23 @@ export function useNfcStationSession({ enabled, currentUserId = null, onError }:
       const started = await callNfcAuth({ action: 'challenge.start', station_id });
       if (gen !== challengeGen.current) return;
 
+      // No confiar en completed huérfanos (tokens a menudo ya revocados).
       if (
         String(started.status ?? '') === 'completed' &&
         started.access_token &&
         started.refresh_token
       ) {
-        await applyCompleted(
-          String(started.access_token),
-          String(started.refresh_token),
-          started.user_id ? String(started.user_id) : null,
-        );
-        return;
+        try {
+          await applyCompleted(
+            String(started.access_token),
+            String(started.refresh_token),
+            started.user_id ? String(started.user_id) : null,
+          );
+          return;
+        } catch (e) {
+          console.warn('nfc claim discarded', e);
+          // Continuar creando un waiting limpio.
+        }
       }
 
       const challenge_id = String(started.challenge_id ?? '');

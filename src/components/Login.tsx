@@ -28,8 +28,11 @@ export const Login: React.FC = () => {
   const [logoFailed, setLogoFailed] = useState(false);
 
   useNfcStationSession({
-    enabled: true,
-    onError: (msg) => setError(msg),
+    // Pausar NFC con formulario manual: evita "Auth session missing!" pisando el login.
+    enabled: !showTextLogin,
+    onError: (msg) => {
+      if (!showTextLogin) setError(msg);
+    },
   });
 
   useEffect(() => setThemeReady(true), []);

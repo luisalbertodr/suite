@@ -258,46 +258,16 @@ serve(async (req) => {
       const stationId = String(body.station_id ?? '').trim() || 'default';
       if (stationId.length > 80) return json({ error: 'station_id inválido' }, 400);
 
-      // Si el agente completó un tag mientras Chrome no tenía reto waiting
-      // (cambio de usuario / gap de reinicio), reclamar esa sesión ahora.
-      // Solo si no hay otro waiting activo (evita pisar un poll en curso).
-      const { data: activeWaiting } = await admin
+      // Invalidar tokens huérfanos recientes: reclamarlos provocaba
+      // "Auth session missing!" (refresh ya revocado por otro mint).
+      // Chrome debe crear siempre un waiting limpio.
+      void admin
         .from('nfc_login_challenges')
-        .select('id')
+        .update({ access_token: null, refresh_token: null })
         .eq('station_id', stationId)
-        .eq('status', 'waiting')
-        .gt('expires_at', new Date().toISOString())
-        .limit(1)
-        .maybeSingle();
-      if (!activeWaiting) {
-        const claimSince = new Date(Date.now() - 45_000).toISOString();
-        const { data: pending } = await admin
-          .from('nfc_login_challenges')
-          .select('id, poll_token, access_token, refresh_token, user_id, completed_at')
-          .eq('station_id', stationId)
-          .eq('status', 'completed')
-          .not('access_token', 'is', null)
-          .not('refresh_token', 'is', null)
-          .gte('completed_at', claimSince)
-          .order('completed_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (pending?.access_token && pending?.refresh_token && pending.poll_token) {
-          void admin
-            .from('nfc_login_challenges')
-            .update({ access_token: null, refresh_token: null })
-            .eq('id', pending.id);
-          return json({
-            challenge_id: pending.id,
-            poll_token: pending.poll_token,
-            station_id: stationId,
-            status: 'completed',
-            access_token: pending.access_token,
-            refresh_token: pending.refresh_token,
-            user_id: pending.user_id,
-          });
-        }
-      }
+        .eq('status', 'completed')
+        .not('access_token', 'is', null)
+        .gte('completed_at', new Date(Date.now() - 120_000).toISOString());
 
       // Un solo reto activo por estación: evita que el agente complete un reto
       // distinto al que el navegador está sondeando.
@@ -429,6 +399,19 @@ serve(async (req) => {
 
       // No hay pestaña esperando: crear sesión lista para pickup y pedir al agente
       // que abra/enfoque Chrome con challenge+poll en la URL.
+      // iMac: no mintear sesión huérfana (revoca refresh y rompe Chrome).
+      if (body.require_waiting === true || body.waiting_only === true) {
+        return json(
+          {
+            ok: false,
+            error: 'no_waiting_challenge',
+            open_browser: false,
+            station_id: stationId,
+          },
+          409,
+        );
+      }
+
       const userId = await findUserIdByUid(uid);
       if (!userId) {
         return json({ ok: false, error: 'Tarjeta no asociada a ningún usuario' }, 400);

@@ -206,7 +206,12 @@ def wait_card_gone(lib, readers, timeout_s=8.0):
 
 def post_tag(uid):
     body = json.dumps(
-        {"action": "agent.tag", "uid": uid, "station_id": NFC_STATION_ID}
+        {
+            "action": "agent.tag",
+            "uid": uid,
+            "station_id": NFC_STATION_ID,
+            "require_waiting": True,
+        }
     )
     cmd = [
         "/usr/bin/curl",
@@ -252,35 +257,35 @@ def post_tag(uid):
 
 
 def handle_tag(lib, readers, uid):
-    result = post_tag(uid)
-    log("[acr122] -> %s" % result)
-    if result.get("error"):
-        logerr("[acr122] nfc-auth error: %s" % result.get("error"))
-        with_card(lib, readers, lambda l, c, p: buzz(l, c, p, ok=False) or True)
+    attempts = 0
+    result = {}
+    while attempts < 4:
+        attempts += 1
+        result = post_tag(uid)
+        log("[acr122] try=%s -> %s" % (attempts, result))
+        err = result.get("error")
+        if err == "no_waiting_challenge" or result.get("open_browser"):
+            log(
+                "[acr122] Chrome sin reto waiting; reintento en %.1fs..."
+                % RETRY_NO_WAITING_S
+            )
+            time.sleep(RETRY_NO_WAITING_S)
+            continue
+        if err:
+            logerr("[acr122] nfc-auth error: %s" % err)
+            with_card(lib, readers, lambda l, c, p: buzz(l, c, p, ok=False) or True)
+            return result
+        with_card(lib, readers, lambda l, c, p: buzz(l, c, p, ok=True) or True)
+        log("[acr122] OK — Chrome VM debe aplicar sesion (station=%s)" % NFC_STATION_ID)
         return result
 
-    # open_browser=True => no habia reto waiting (gap tras login/cambio de usuario).
-    # Esperar a que Chrome recree el reto y reintentar una vez.
-    if result.get("open_browser"):
-        log("[acr122] Chrome sin reto waiting; reintento en %.1fs..." % RETRY_NO_WAITING_S)
-        time.sleep(RETRY_NO_WAITING_S)
-        result2 = post_tag(uid)
-        log("[acr122] retry -> %s" % result2)
-        if result2.get("error"):
-            logerr("[acr122] retry error: %s" % result2.get("error"))
-            with_card(lib, readers, lambda l, c, p: buzz(l, c, p, ok=False) or True)
-            return result2
-        result = result2
-
-    with_card(lib, readers, lambda l, c, p: buzz(l, c, p, ok=True) or True)
-    if result.get("open_browser"):
-        log(
-            "[acr122] sesion creada sin pestaña waiting; "
-            "Chrome la reclamara al recrear el reto (station=%s)" % NFC_STATION_ID
-        )
-    else:
-        log("[acr122] OK — Chrome VM debe aplicar sesion (station=%s)" % NFC_STATION_ID)
+    logerr(
+        "[acr122] Chrome no tenia reto waiting tras %s intentos (station=%s)"
+        % (attempts, NFC_STATION_ID)
+    )
+    with_card(lib, readers, lambda l, c, p: buzz(l, c, p, ok=False) or True)
     return result
+
 
 
 def main():
