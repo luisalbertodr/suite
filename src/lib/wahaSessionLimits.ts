@@ -44,8 +44,15 @@ export function buildSessionLimitAlerts(
   if (!limits) return [];
   const alerts: SessionLimitAlert[] = [];
 
-  const cappingStatus = (limits.capping?.cappingStatus ?? '').toUpperCase();
-  if (cappingStatus && cappingStatus !== 'OK') {
+  const cappingStatus = (limits.capping?.cappingStatus ?? '').trim().toUpperCase();
+  // NONE / OK / vacío = sin restricción activa; no mostrar aviso.
+  const cappingIdle =
+    !cappingStatus ||
+    cappingStatus === 'OK' ||
+    cappingStatus === 'NONE' ||
+    cappingStatus === 'UNLIMITED' ||
+    cappingStatus === 'NORMAL';
+  if (!cappingIdle) {
     const used = limits.capping?.usedQuota;
     const total = limits.capping?.totalQuota;
     const quotaText =
