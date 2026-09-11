@@ -103,10 +103,27 @@
     --suite-vh: 100vh;
     /* Diálogos dejan este hueco cuando el dock está expandido (overlay). Las pestañas no lo reservan. */
     --suite-dock-clearance: 6.5rem;
+    --suite-dock-clearance-bottom: 6.5rem;
+    --suite-dock-clearance-start: 0px;
   }
 
   html.suite-dock-collapsed {
     --suite-dock-clearance: 0px;
+    --suite-dock-clearance-bottom: 0px;
+    --suite-dock-clearance-start: 0px;
+  }
+
+  /* Dock vertical en el margen izquierdo: liberar izquierda, no inferior. */
+  html.suite-dock-vertical:not(.suite-dock-collapsed) {
+    --suite-dock-clearance: 0px;
+    --suite-dock-clearance-bottom: 0px;
+    --suite-dock-clearance-start: 5.25rem;
+  }
+
+  html.suite-dock-vertical.suite-dock-collapsed {
+    --suite-dock-clearance: 0px;
+    --suite-dock-clearance-bottom: 0px;
+    --suite-dock-clearance-start: 0px;
   }
 
   @supports (height: 100dvh) {
@@ -163,7 +180,9 @@
     max-height: min(90vh, calc(var(--suite-vh) - 12rem));
   }
   .suite-dock-clearance-bottom {
-    bottom: var(--suite-dock-clearance, 6.5rem);
+    bottom: var(--suite-dock-clearance-bottom, var(--suite-dock-clearance, 6.5rem));
+    /* Gana a inset-x-0 en modales legacy cuando el dock es vertical. */
+    left: var(--suite-dock-clearance-start, 0px) !important;
   }
   .suite-h-whatsapp {
     height: calc(var(--suite-vh) - var(--suite-topbar-h, 3rem));

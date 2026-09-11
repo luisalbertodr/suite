@@ -13,6 +13,8 @@ import {
   MessageCircle,
   Phone,
   LayoutDashboard,
+  PanelBottom,
+  PanelLeft,
 } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useWhatsappUnread } from '@/hooks/useWhatsappUnread';
@@ -22,9 +24,11 @@ import { canAccessPhone } from '@/lib/phonePermissions';
 import { canAccessDashboard } from '@/lib/menuPermissions';
 import { useNotificationSoundOnIncrease } from '@/hooks/useNotificationSoundOnIncrease';
 import { usePrefetchDockPanel } from '@/contexts/DockKeepAliveContext';
-import { matchDockRoute } from '@/lib/dockRoutes';
+import { FACTURACION_DOCK_PATHS, matchDockRoute } from '@/lib/dockRoutes';
 import { DOCK_BAR_Z } from '@/lib/dialogLayers';
 import { useDockCollapsed } from '@/hooks/useDockCollapsed';
+import { useDockOrientation } from '@/hooks/useDockOrientation';
+
 /** Por encima de modales para poder cambiar de pestaña con popups abiertos. */
 const DOCK_Z_CLASS = DOCK_BAR_Z;
 
@@ -56,18 +60,9 @@ const dockItems: DockItem[] = [
   { label: 'Dashboard', path: '/inicio', icon: LayoutDashboard, color: 'text-indigo-500', dashboardAccess: true },
 ];
 
-const FACTURACION_PATHS = [
-  '/facturacion',
-  '/facturas',
-  '/presupuestos',
-  '/presupuestos-n',
-  '/albaranes-entrada',
-  '/albaranes-salida',
-];
-
 function isDockItemActive(pathname: string, itemPath: string): boolean {
   if (pathname === itemPath) return true;
-  return itemPath === '/facturacion' && FACTURACION_PATHS.includes(pathname);
+  return itemPath === '/facturacion' && (FACTURACION_DOCK_PATHS as readonly string[]).includes(pathname);
 }
 
 function DockBadge({ count }: { count: number }) {
@@ -83,6 +78,7 @@ export const DockBar: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { collapsed, setCollapsed } = useDockCollapsed();
+  const { isVertical, toggleOrientation } = useDockOrientation();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
   const canSeeMarketing = hasPermission('marketing', 'read');
   const canSeeWhatsapp = hasPermission('whatsapp', 'read') || canSeeMarketing;
@@ -122,25 +118,31 @@ export const DockBar: React.FC = () => {
     (canSeeMarketing ? marketingUnread : 0) +
     missedUnread;
 
-  // Mantener el ítem activo visible al cambiar de ruta o al cargar en pantallas estrechas.
   useEffect(() => {
     const root = scrollRef.current;
     if (!root || collapsed) return;
     const active = root.querySelector<HTMLElement>('[aria-current="page"]');
     active?.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
-  }, [location.pathname, visibleItems.length, collapsed]);
+  }, [location.pathname, visibleItems.length, collapsed, isVertical]);
 
   if (typeof document === 'undefined') return null;
 
-  const bottomStyle = { bottom: 'max(0.75rem, env(safe-area-inset-bottom, 0px))' } as const;
+  const safeBottom = 'max(0.75rem, env(safe-area-inset-bottom, 0px))';
+  const safeLeft = 'max(0.75rem, env(safe-area-inset-left, 0px))';
+  const safeTop = 'max(calc(var(--suite-topbar-h, 3rem) + 0.5rem), env(safe-area-inset-top, 0px))';
 
   if (collapsed) {
+    const collapsedStyle = isVertical
+      ? ({ top: safeTop, left: 0 } as const)
+      : ({ bottom: safeBottom, left: 0 } as const);
+
     return createPortal(
       <div
-        className={`fixed left-0 ${DOCK_Z_CLASS} pointer-events-none`}
+        className={`fixed ${DOCK_Z_CLASS} pointer-events-none`}
         data-suite-dock-bar
         data-collapsed="true"
-        style={bottomStyle}
+        data-orientation={isVertical ? 'vertical' : 'horizontal'}
+        style={collapsedStyle}
       >
         <button
           type="button"
@@ -165,37 +167,64 @@ export const DockBar: React.FC = () => {
     );
   }
 
+  const expandedStyle = isVertical
+    ? ({ top: safeTop, left: safeLeft, bottom: safeBottom } as const)
+    : ({ bottom: safeBottom, left: 0, right: 0 } as const);
+
   return createPortal(
     <div
-      className={`fixed left-0 right-0 flex justify-center px-2 ${DOCK_Z_CLASS} pointer-events-none`}
+      className={`fixed ${DOCK_Z_CLASS} pointer-events-none ${
+        isVertical ? 'flex items-stretch' : 'flex justify-center px-2'
+      }`}
       data-suite-dock-bar
-      style={bottomStyle}
+      data-orientation={isVertical ? 'vertical' : 'horizontal'}
+      style={expandedStyle}
     >
       <div
         ref={scrollRef}
-        className="
+        className={
+          isVertical
+            ? `
+          pointer-events-auto max-h-full
+          overflow-y-auto overflow-x-visible overscroll-y-contain touch-pan-y
+          [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden
+        `
+            : `
           pointer-events-auto max-w-[calc(100vw-1rem)]
           overflow-x-auto overflow-y-visible overscroll-x-contain touch-pan-x
           [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden
-        "
+        `
+        }
       >
-        <div className="flex w-max items-end gap-1 px-2 py-2 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border border-white/20 dark:border-gray-700/50 rounded-2xl shadow-2xl shadow-black/10">
+        <div
+          className={`
+            bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl
+            border border-white/20 dark:border-gray-700/50 rounded-2xl
+            shadow-2xl shadow-black/10
+            ${
+              isVertical
+                ? 'flex h-max max-h-full w-max flex-col items-center gap-1 px-2 py-2'
+                : 'flex w-max items-end gap-1 px-2 py-2'
+            }
+          `}
+        >
           <button
             type="button"
-            title="Ocultar barra a la izquierda"
+            title="Ocultar barra"
             aria-label="Ocultar barra de pestañas"
             onClick={() => setCollapsed(true)}
-            className="
-              group relative mb-1 flex shrink-0 cursor-pointer flex-col items-center justify-center
-              h-12 w-8 rounded-xl border-0 bg-transparent p-0 text-muted-foreground
+            className={`
+              group relative flex shrink-0 cursor-pointer items-center justify-center
+              rounded-xl border-0 bg-transparent p-0 text-muted-foreground
               transition-all duration-300 ease-out hover:bg-white/60 dark:hover:bg-gray-800/60
-            "
+              ${isVertical ? 'h-8 w-12' : 'mb-1 h-12 w-8 flex-col'}
+            `}
           >
             <ChevronLeft className="h-5 w-5" />
           </button>
+
           {visibleItems.map((item) => {
             const isActive = isDockItemActive(location.pathname, item.path);
-
             const dockKey = matchDockRoute(item.path);
 
             const goTo = () => {
@@ -216,14 +245,11 @@ export const DockBar: React.FC = () => {
                   if (dockKey) prefetchDockPanel(dockKey);
                 }}
                 onPointerDown={(e) => {
-                  // En touch no capturar pointerdown: permite scroll horizontal del dock.
-                  // En ratón sí: evita perder el clic si un input (TPV, WhatsApp…) tiene el foco.
                   if (e.pointerType === 'touch') return;
                   e.preventDefault();
                   goTo();
                 }}
                 onClick={() => {
-                  // Tap táctil (y fallback) tras soltar sin haber hecho scroll cancelatorio.
                   goTo();
                 }}
                 onKeyDown={(e) => {
@@ -234,30 +260,74 @@ export const DockBar: React.FC = () => {
                 }}
                 className={`
                   group relative flex shrink-0 cursor-pointer flex-col items-center justify-center
-                  w-14 h-14 rounded-xl border-0 bg-transparent p-0
+                  h-14 w-14 rounded-xl border-0 bg-transparent p-0
                   transition-all duration-300 ease-out
-                  hover:scale-125 hover:-translate-y-2
                   active:scale-95
-                  ${isActive ? 'scale-110 -translate-y-1' : ''}
+                  ${
+                    isVertical
+                      ? `hover:scale-110 hover:translate-x-1 ${isActive ? 'scale-105 translate-x-0.5' : ''}`
+                      : `hover:scale-125 hover:-translate-y-2 ${isActive ? 'scale-110 -translate-y-1' : ''}`
+                  }
                 `}
               >
-                <div className={`
-                  relative flex items-center justify-center w-12 h-12 rounded-xl
+                <div
+                  className={`
+                  relative flex h-12 w-12 items-center justify-center rounded-xl
                   transition-all duration-300
-                  ${isActive
-                    ? 'bg-white dark:bg-gray-800 shadow-lg shadow-black/10'
-                    : 'hover:bg-white/60 dark:hover:bg-gray-800/60'
+                  ${
+                    isActive
+                      ? 'bg-white shadow-lg shadow-black/10 dark:bg-gray-800'
+                      : 'hover:bg-white/60 dark:hover:bg-gray-800/60'
                   }
-                `}>
-                  <item.icon className={`h-6 w-6 transition-all duration-300 ${item.color} ${isActive ? 'scale-110' : 'group-hover:scale-110'}`} />
+                `}
+                >
+                  <item.icon
+                    className={`h-6 w-6 transition-all duration-300 ${item.color} ${
+                      isActive ? 'scale-110' : 'group-hover:scale-110'
+                    }`}
+                  />
                   <DockBadge count={badgeForItem(item.path)} />
                 </div>
-                {isActive && (
-                  <div className="absolute -bottom-1 w-1.5 h-1.5 rounded-full bg-gray-400 dark:bg-gray-500" />
-                )}
+                {isActive ? (
+                  <div
+                    className={`absolute rounded-full bg-gray-400 dark:bg-gray-500 ${
+                      isVertical
+                        ? '-right-1 top-1/2 h-1.5 w-1.5 -translate-y-1/2'
+                        : '-bottom-1 h-1.5 w-1.5'
+                    }`}
+                  />
+                ) : null}
               </button>
             );
           })}
+
+          <button
+            type="button"
+            title={
+              isVertical
+                ? 'Barra inferior (horizontal)'
+                : 'Barra lateral izquierda (vertical)'
+            }
+            aria-label={
+              isVertical
+                ? 'Cambiar barra a orientación horizontal'
+                : 'Cambiar barra a orientación vertical'
+            }
+            onClick={toggleOrientation}
+            className={`
+              group relative flex shrink-0 cursor-pointer items-center justify-center
+              rounded-xl border-0 bg-transparent p-0 text-muted-foreground
+              transition-all duration-300 ease-out hover:bg-white/60 hover:text-foreground
+              dark:hover:bg-gray-800/60
+              ${isVertical ? 'mt-0.5 h-10 w-12' : 'mb-1 h-12 w-10 flex-col'}
+            `}
+          >
+            {isVertical ? (
+              <PanelBottom className="h-5 w-5" />
+            ) : (
+              <PanelLeft className="h-5 w-5" />
+            )}
+          </button>
         </div>
       </div>
     </div>,
