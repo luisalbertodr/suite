@@ -15,10 +15,23 @@
 # RDP vs Chrome local
 # -------------------
 # - Chrome en thin client (USB local): corre el agente aquí, o usa modo teclado.
-# - RDP (recomendado en Recepción): el agente corre en el thin client Linux
-#   (donde está el USB). Chrome en el Windows remoto solo hace polling.
+# - RDP (recomendado): el agente corre en el thin client (donde está el USB).
+#   Chrome en el Windows remoto solo hace polling.
 #   El `station_id` del navegador RDP (`localStorage.suite_nfc_station_id`)
-#   DEBE coincidir con `NFC_STATION_ID` del agente (p.ej. `station-recepcion`).
+#   DEBE coincidir con `NFC_STATION_ID` del agente.
+#
+# Estaciones Lipoout (2 terminales físicos → 1 VM Windows compartida)
+# -------------------------------------------------------------------
+# Cada thin client tiene su propio ACR122U + agente + station_id.
+# En la VM (192.168.99.16) cada usuario RDP abre Chrome con SU station:
+#
+# | Puesto     | Thin client        | IP             | Usuario RDP | NFC_STATION_ID      | Favorito Chrome                          |
+# |------------|--------------------|----------------|-------------|---------------------|------------------------------------------|
+# | Recepción  | MacBookPro + Mint  | 192.168.99.14  | Compaq / l  | station-recepcion   | https://suite.lipoout.com/?nfc_station=station-recepcion |
+# | Medicina   | iMac               | 192.168.99.30  | Lipoout / l | station-medicina    | https://suite.lipoout.com/?nfc_station=station-medicina  |
+#
+# Misma `NFC_AGENT_SECRET` en ambos agentes (la del servidor Supabase).
+# NO redirigir el USB del ACR122U por FreeRDP (`/usb:...`).
 #
 # IMPORTANTE — no mezclar con FreeRDP `/usb:id,dev:072f:2200`
 # -----------------------------------------------------------
