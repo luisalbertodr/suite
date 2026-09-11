@@ -21,8 +21,11 @@ NFC_AUTH_URL = os.environ.get(
 ).rstrip("/")
 NFC_AGENT_SECRET = os.environ.get("NFC_AGENT_SECRET", "").strip()
 NFC_STATION_ID = os.environ.get("NFC_STATION_ID", "default").strip() or "default"
-DEBOUNCE_S = float(os.environ.get("NFC_DEBOUNCE_S", "2.5"))
-POLL_S = float(os.environ.get("NFC_POLL_S", "0.35"))
+# Debounce solo para el MISMO UID (evitar doble envio). Otro UID entra al momento.
+SAME_UID_DEBOUNCE_S = float(os.environ.get("NFC_DEBOUNCE_S", "1.2"))
+POLL_S = float(os.environ.get("NFC_POLL_S", "0.25"))
+# Si Chrome aun no tiene reto waiting, reintentar engancharse.
+RETRY_NO_WAITING_S = float(os.environ.get("NFC_RETRY_NO_WAITING_S", "0.55"))
 CURL_INSECURE = os.environ.get("NFC_CURL_INSECURE", "1").strip().lower() not in (
     "0",
     "false",
@@ -108,58 +111,97 @@ def transmit_uid(lib, card, protocol, apdu):
     return "".join("%02X" % b for b in payload)
 
 
-def buzz_ok(lib, card, protocol):
-    # ACS ACR122U: LED verde + beep corto (mejor esfuerzo; ignora fallo)
+def buzz(lib, card, protocol, ok=True):
+    # ACS ACR122U: LED + beep (mejor esfuerzo)
     try:
-        transmit(lib, card, protocol, [0xFF, 0x00, 0x40, 0xA2, 0x04, 0x01, 0x01, 0x02, 0x02])
+        if ok:
+            # verde + beep corto
+            transmit(
+                lib, card, protocol, [0xFF, 0x00, 0x40, 0xA2, 0x04, 0x01, 0x01, 0x02, 0x02]
+            )
+        else:
+            # rojo + beep largo
+            transmit(
+                lib, card, protocol, [0xFF, 0x00, 0x40, 0x5C, 0x04, 0x02, 0x01, 0x05, 0x02]
+            )
     except Exception:
         pass
 
 
 def read_uid(lib, card, protocol):
     samples = []
-    for _ in range(6):
+    for _ in range(5):
         uid = transmit_uid(lib, card, protocol, [0xFF, 0xCA, 0x00, 0x00, 0x00])
         if not is_plausible_uid(uid or ""):
             uid = transmit_uid(lib, card, protocol, [0xFF, 0xCA, 0x00, 0x00, 0x07])
         if uid and is_plausible_uid(uid):
             samples.append(uid)
             if len(samples) >= 2 and samples[-1] == samples[-2]:
-                buzz_ok(lib, card, protocol)
                 return samples[-1]
-        time.sleep(0.03)
+        time.sleep(0.025)
     if not samples:
         return None
     best = max(set(samples), key=samples.count)
     if is_plausible_uid(best):
-        buzz_ok(lib, card, protocol)
-        log("[acr122] UID aceptado: %s (%s)" % (best, samples))
         return best
     return None
 
 
-def poll_uid_once(lib, ctx, readers):
-    """Intenta SCardConnect en cada lector; si hay tarjeta, lee UID."""
-    for name in readers:
-        hcard = c_ulong()
-        proto = c_ulong()
-        crv = lib.SCardConnect(
-            ctx,
-            name,
-            SCARD_SHARE_SHARED,
-            SCARD_PROTOCOL_T0 | SCARD_PROTOCOL_T1,
-            byref(hcard),
-            byref(proto),
-        )
-        if crv != SCARD_S_SUCCESS:
-            continue
-        try:
-            uid = read_uid(lib, hcard.value, proto.value)
-            if uid:
-                return uid
-        finally:
-            lib.SCardDisconnect(hcard.value, SCARD_LEAVE_CARD)
-    return None
+def with_card(lib, readers, fn):
+    """Abre la primera tarjeta presente y ejecuta fn(lib, hcard, proto)."""
+    ctx = c_ulong()
+    rv = lib.SCardEstablishContext(SCARD_SCOPE_SYSTEM, None, None, byref(ctx))
+    if rv != SCARD_S_SUCCESS:
+        return None
+    try:
+        names = readers
+        if not names:
+            names = list_readers(lib, ctx.value)
+        for name in names:
+            hcard = c_ulong()
+            proto = c_ulong()
+            crv = lib.SCardConnect(
+                ctx.value,
+                name,
+                SCARD_SHARE_SHARED,
+                SCARD_PROTOCOL_T0 | SCARD_PROTOCOL_T1,
+                byref(hcard),
+                byref(proto),
+            )
+            if crv != SCARD_S_SUCCESS:
+                continue
+            try:
+                return fn(lib, hcard.value, proto.value)
+            finally:
+                lib.SCardDisconnect(hcard.value, SCARD_LEAVE_CARD)
+        return None
+    finally:
+        lib.SCardReleaseContext(ctx.value)
+
+
+def poll_uid_once(lib, readers):
+    def _read(lib_, card, proto):
+        return read_uid(lib_, card, proto)
+
+    return with_card(lib, readers, _read)
+
+
+def card_present(lib, readers):
+    def _probe(lib_, card, proto):
+        # Conectar ya implica presencia
+        return True
+
+    return bool(with_card(lib, readers, _probe))
+
+
+def wait_card_gone(lib, readers, timeout_s=8.0):
+    """Espera a que retiren la tarjeta (evita re-disparos y lecturas a medias)."""
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        if not card_present(lib, readers):
+            return True
+        time.sleep(0.15)
+    return False
 
 
 def post_tag(uid):
@@ -209,6 +251,38 @@ def post_tag(uid):
         raise RuntimeError("Respuesta no JSON de nfc-auth: %s" % raw[:300])
 
 
+def handle_tag(lib, readers, uid):
+    result = post_tag(uid)
+    log("[acr122] -> %s" % result)
+    if result.get("error"):
+        logerr("[acr122] nfc-auth error: %s" % result.get("error"))
+        with_card(lib, readers, lambda l, c, p: buzz(l, c, p, ok=False) or True)
+        return result
+
+    # open_browser=True => no habia reto waiting (gap tras login/cambio de usuario).
+    # Esperar a que Chrome recree el reto y reintentar una vez.
+    if result.get("open_browser"):
+        log("[acr122] Chrome sin reto waiting; reintento en %.1fs..." % RETRY_NO_WAITING_S)
+        time.sleep(RETRY_NO_WAITING_S)
+        result2 = post_tag(uid)
+        log("[acr122] retry -> %s" % result2)
+        if result2.get("error"):
+            logerr("[acr122] retry error: %s" % result2.get("error"))
+            with_card(lib, readers, lambda l, c, p: buzz(l, c, p, ok=False) or True)
+            return result2
+        result = result2
+
+    with_card(lib, readers, lambda l, c, p: buzz(l, c, p, ok=True) or True)
+    if result.get("open_browser"):
+        log(
+            "[acr122] sesion creada sin pestaña waiting; "
+            "Chrome la reclamara al recrear el reto (station=%s)" % NFC_STATION_ID
+        )
+    else:
+        log("[acr122] OK — Chrome VM debe aplicar sesion (station=%s)" % NFC_STATION_ID)
+    return result
+
+
 def main():
     if not NFC_AGENT_SECRET:
         logerr("Define NFC_AGENT_SECRET")
@@ -222,6 +296,7 @@ def main():
     last_uid = ""
     last_ts = 0.0
     no_reader_logged = False
+    cached_readers = []
 
     while True:
         try:
@@ -233,45 +308,51 @@ def main():
                 continue
             try:
                 readers = list_readers(lib, ctx.value)
-                if not readers:
-                    if not no_reader_logged:
-                        log(
-                            "[acr122] No hay lectores PC/SC. "
-                            "Desenchufa/enchufa el ACR122U y no redirijas USB por RDP."
-                        )
-                        no_reader_logged = True
-                    time.sleep(2)
-                    continue
-                if no_reader_logged:
-                    log("[acr122] Lectores: %s" % readers)
-                no_reader_logged = False
-                uid = poll_uid_once(lib, ctx.value, readers)
             finally:
                 lib.SCardReleaseContext(ctx.value)
 
+            if not readers:
+                if not no_reader_logged:
+                    log(
+                        "[acr122] No hay lectores PC/SC. "
+                        "Desenchufa/enchufa el ACR122U y no redirijas USB por RDP."
+                    )
+                    no_reader_logged = True
+                time.sleep(2)
+                continue
+            if no_reader_logged:
+                log("[acr122] Lectores: %s" % readers)
+            no_reader_logged = False
+            cached_readers = readers
+
+            uid = poll_uid_once(lib, readers)
             if not uid:
                 time.sleep(POLL_S)
                 continue
 
             now = time.time()
-            if uid == last_uid and (now - last_ts) < DEBOUNCE_S:
+            if uid == last_uid and (now - last_ts) < SAME_UID_DEBOUNCE_S:
+                # Misma tarjeta aun apoyada: esperar a que la retiren.
+                wait_card_gone(lib, readers, timeout_s=SAME_UID_DEBOUNCE_S)
                 time.sleep(POLL_S)
                 continue
+
             last_uid, last_ts = uid, now
             log("[acr122] UID=%s" % uid)
             try:
-                result = post_tag(uid)
-                log("[acr122] -> %s" % result)
-                if result.get("error"):
-                    logerr("[acr122] nfc-auth error: %s" % result.get("error"))
-                else:
-                    log(
-                        "[acr122] OK — la sesion la recoge Chrome en la VM "
-                        "(station=%s)" % NFC_STATION_ID
-                    )
+                handle_tag(lib, readers, uid)
             except Exception as e:
                 logerr("[acr122] post error: %s" % e)
-            time.sleep(DEBOUNCE_S)
+                try:
+                    with_card(
+                        lib, readers, lambda l, c, p: buzz(l, c, p, ok=False) or True
+                    )
+                except Exception:
+                    pass
+
+            # Obligar retirar tarjeta antes del siguiente usuario.
+            wait_card_gone(lib, cached_readers, timeout_s=10.0)
+            time.sleep(0.15)
         except KeyboardInterrupt:
             log("\n[acr122] stop")
             return 0

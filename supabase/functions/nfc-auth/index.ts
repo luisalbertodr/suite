@@ -257,6 +257,48 @@ serve(async (req) => {
     if (action === 'challenge.start') {
       const stationId = String(body.station_id ?? '').trim() || 'default';
       if (stationId.length > 80) return json({ error: 'station_id inválido' }, 400);
+
+      // Si el agente completó un tag mientras Chrome no tenía reto waiting
+      // (cambio de usuario / gap de reinicio), reclamar esa sesión ahora.
+      // Solo si no hay otro waiting activo (evita pisar un poll en curso).
+      const { data: activeWaiting } = await admin
+        .from('nfc_login_challenges')
+        .select('id')
+        .eq('station_id', stationId)
+        .eq('status', 'waiting')
+        .gt('expires_at', new Date().toISOString())
+        .limit(1)
+        .maybeSingle();
+      if (!activeWaiting) {
+        const claimSince = new Date(Date.now() - 45_000).toISOString();
+        const { data: pending } = await admin
+          .from('nfc_login_challenges')
+          .select('id, poll_token, access_token, refresh_token, user_id, completed_at')
+          .eq('station_id', stationId)
+          .eq('status', 'completed')
+          .not('access_token', 'is', null)
+          .not('refresh_token', 'is', null)
+          .gte('completed_at', claimSince)
+          .order('completed_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (pending?.access_token && pending?.refresh_token && pending.poll_token) {
+          void admin
+            .from('nfc_login_challenges')
+            .update({ access_token: null, refresh_token: null })
+            .eq('id', pending.id);
+          return json({
+            challenge_id: pending.id,
+            poll_token: pending.poll_token,
+            station_id: stationId,
+            status: 'completed',
+            access_token: pending.access_token,
+            refresh_token: pending.refresh_token,
+            user_id: pending.user_id,
+          });
+        }
+      }
+
       // Un solo reto activo por estación: evita que el agente complete un reto
       // distinto al que el navegador está sondeando.
       await admin
@@ -286,6 +328,7 @@ serve(async (req) => {
         poll_token: poll,
         expires_at: data.expires_at,
         station_id: data.station_id,
+        status: 'waiting',
       });
     }
 

@@ -16,6 +16,11 @@ type Options = {
   onError?: (message: string) => void;
 };
 
+const POLL_MS = 400;
+const RESTART_AFTER_LOGIN_MS = 150;
+const RESTART_AFTER_SAME_USER_MS = 300;
+const RESTART_AFTER_ERROR_MS = 600;
+
 async function applySessionTokens(accessToken: string, refreshToken: string) {
   const { error: setErr } = await supabase.auth.setSession({
     access_token: accessToken,
@@ -65,7 +70,7 @@ export function useNfcStationSession({ enabled, currentUserId = null, onError }:
   const applyCompleted = useCallback(async (access: string, refresh: string, userId?: string | null) => {
     if (applying.current) return;
     if (userId && currentUserIdRef.current && userId === currentUserIdRef.current) {
-      scheduleRestartRef.current(400);
+      scheduleRestartRef.current(RESTART_AFTER_SAME_USER_MS);
       return;
     }
     applying.current = true;
@@ -73,6 +78,9 @@ export function useNfcStationSession({ enabled, currentUserId = null, onError }:
       await applySessionTokens(access, refresh);
     } finally {
       applying.current = false;
+      // Tras login/cambio de usuario hay que recrear el reto waiting de inmediato.
+      // Si no, el siguiente tag crea un pickup huérfano y Chrome no responde.
+      scheduleRestartRef.current(RESTART_AFTER_LOGIN_MS);
     }
   }, []);
 
@@ -86,6 +94,20 @@ export function useNfcStationSession({ enabled, currentUserId = null, onError }:
       const station_id = getNfcStationId();
       const started = await callNfcAuth({ action: 'challenge.start', station_id });
       if (gen !== challengeGen.current) return;
+
+      if (
+        String(started.status ?? '') === 'completed' &&
+        started.access_token &&
+        started.refresh_token
+      ) {
+        await applyCompleted(
+          String(started.access_token),
+          String(started.refresh_token),
+          started.user_id ? String(started.user_id) : null,
+        );
+        return;
+      }
+
       const challenge_id = String(started.challenge_id ?? '');
       const poll_token = String(started.poll_token ?? '');
       if (!challenge_id || !poll_token) throw new Error('No se pudo iniciar lectura NFC');
@@ -117,18 +139,18 @@ export function useNfcStationSession({ enabled, currentUserId = null, onError }:
             } else if (status === 'failed' || status === 'expired') {
               clearTimers();
               if (errMsg === 'superseded') {
-                scheduleRestartRef.current(300);
+                scheduleRestartRef.current(200);
                 return;
               }
               if (errMsg) onErrorRef.current?.(errMsg);
-              scheduleRestartRef.current(800);
+              scheduleRestartRef.current(RESTART_AFTER_ERROR_MS);
             }
           } catch (e) {
             if (gen !== challengeGen.current) return;
             console.warn('nfc poll', e);
           }
         })();
-      }, 700);
+      }, POLL_MS);
     } catch (e) {
       if (gen !== challengeGen.current) return;
       const msg = e instanceof Error ? e.message : 'No se pudo iniciar NFC';
