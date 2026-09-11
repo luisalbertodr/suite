@@ -28,6 +28,7 @@ except ImportError:
 NFC_AUTH_URL = os.environ.get("NFC_AUTH_URL", "https://supabase.lipoout.com/functions/v1/nfc-auth").rstrip("/")
 NFC_AGENT_SECRET = os.environ.get("NFC_AGENT_SECRET", "").strip()
 NFC_STATION_ID = os.environ.get("NFC_STATION_ID", "default").strip() or "default"
+NFC_SUITE_URL = os.environ.get("NFC_SUITE_URL", "https://suite.lipoout.com").rstrip("/")
 DEBOUNCE_S = float(os.environ.get("NFC_DEBOUNCE_S", "2.5"))
 CARD_WAIT_S = float(os.environ.get("NFC_CARD_WAIT_S", "1.5"))
 
@@ -49,6 +50,28 @@ def post_tag(uid: str) -> dict:
     with urllib.request.urlopen(req, timeout=20) as resp:
         raw = resp.read().decode("utf-8", errors="replace")
         return json.loads(raw) if raw else {}
+
+
+def open_suite_browser(result: dict) -> None:
+    """Abre/enfoca Chrome con Suite. Si hay pickup (challenge+poll), va en la URL."""
+    import shutil
+    import subprocess
+    import webbrowser
+
+    q = str(result.get("suite_query") or "").strip()
+    if not q:
+        q = f"nfc_station={NFC_STATION_ID}"
+    url = f"{NFC_SUITE_URL}/?{q}"
+    print(f"[acr122] Abriendo navegador: {url}", flush=True)
+
+    chrome = shutil.which("google-chrome") or shutil.which("google-chrome-stable") or shutil.which("chromium-browser") or shutil.which("chromium")
+    try:
+        if chrome:
+            subprocess.Popen([chrome, "--new-window", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            webbrowser.open(url, new=1)
+    except Exception as e:
+        print(f"[acr122] No se pudo abrir Chrome: {e}", file=sys.stderr, flush=True)
 
 
 def is_plausible_uid(uid: str) -> bool:
@@ -101,12 +124,17 @@ def read_uid_from_connection(connection) -> str | None:
         if len(samples) >= 2 and samples[-1] == samples[-2]:
             return samples[-1]
         time.sleep(0.04)
-    if samples:
-        print(f"[acr122] UID inestable: {samples}", flush=True)
-        # Último recurso: mayoría simple
-        best = max(set(samples), key=samples.count)
-        if samples.count(best) >= 2 and is_plausible_uid(best):
-            return best
+    if not samples:
+        return None
+    # ACR122U a menudo solo entrega 1 lectura buena antes de fallar el canal.
+    best = max(set(samples), key=samples.count)
+    if is_plausible_uid(best):
+        if len(samples) == 1:
+            print(f"[acr122] UID aceptado (1 lectura): {best}", flush=True)
+        else:
+            print(f"[acr122] UID por mayoría {samples} → {best}", flush=True)
+        return best
+    print(f"[acr122] UID inestable/inválido: {samples}", flush=True)
     return None
 
 
@@ -172,12 +200,8 @@ def main() -> int:
             try:
                 result = post_tag(uid)
                 print(f"[acr122] → {result}", flush=True)
-                if result.get("ignored"):
-                    print(
-                        "[acr122] Aviso: no hay login esperando en esta estación "
-                        f"(Chrome localStorage suite_nfc_station_id={NFC_STATION_ID})",
-                        flush=True,
-                    )
+                if result.get("open_browser") or result.get("focus_browser") or result.get("ignored"):
+                    open_suite_browser(result)
             except urllib.error.HTTPError as e:
                 err_body = e.read().decode("utf-8", errors="replace")
                 print(f"[acr122] HTTP {e.code}: {err_body}", file=sys.stderr, flush=True)

@@ -21,6 +21,7 @@ NFC_AUTH_URL = os.environ.get(
 ).rstrip("/")
 NFC_AGENT_SECRET = os.environ.get("NFC_AGENT_SECRET", "").strip()
 NFC_STATION_ID = os.environ.get("NFC_STATION_ID", "default").strip() or "default"
+NFC_SUITE_URL = os.environ.get("NFC_SUITE_URL", "https://suite.lipoout.com").rstrip("/")
 DEBOUNCE_S = float(os.environ.get("NFC_DEBOUNCE_S", "2.5"))
 
 SCARD_SCOPE_SYSTEM = 2
@@ -184,6 +185,24 @@ def post_tag(uid):
     return json.loads(raw)
 
 
+def open_suite_browser(result):
+    import subprocess
+
+    q = str(result.get("suite_query") or "").strip()
+    if not q:
+        q = "nfc_station=%s" % NFC_STATION_ID
+    url = "%s/?%s" % (NFC_SUITE_URL, q)
+    log("[acr122] Abriendo navegador: %s" % url)
+    try:
+        # macOS: open -a "Google Chrome" enfoca o lanza Chrome
+        subprocess.call(["open", "-a", "Google Chrome", url])
+    except Exception:
+        try:
+            subprocess.call(["open", url])
+        except Exception as e:
+            logerr("[acr122] No se pudo abrir Chrome: %s" % e)
+
+
 def main():
     if not NFC_AGENT_SECRET:
         logerr("Define NFC_AGENT_SECRET")
@@ -233,11 +252,8 @@ def main():
             try:
                 result = post_tag(uid)
                 log("[acr122] -> %s" % result)
-                if result.get("ignored"):
-                    log(
-                        "[acr122] Aviso: no hay login esperando "
-                        "(Chrome ?nfc_station=%s)" % NFC_STATION_ID
-                    )
+                if result.get("open_browser") or result.get("focus_browser") or result.get("ignored"):
+                    open_suite_browser(result)
             except HTTPError as e:
                 try:
                     body = e.read()

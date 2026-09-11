@@ -36,6 +36,35 @@ export function applyNfcStationFromUrl(search = window.location.search): string 
   return getNfcStationId();
 }
 
+export type NfcPickup = { challengeId: string; pollToken: string };
+
+/**
+ * Si el agente abrió Chrome con `?nfc_challenge=&nfc_poll=`, consume esos
+ * parámetros (one-shot) para aplicar la sesión sin esperar otra lectura.
+ */
+export function consumeNfcPickupFromUrl(search = window.location.search): NfcPickup | null {
+  try {
+    const params = new URLSearchParams(search);
+    const challengeId = (params.get('nfc_challenge') || params.get('nfc_cid') || '').trim();
+    const pollToken = (params.get('nfc_poll') || params.get('nfc_pt') || '').trim();
+    const station = (params.get('nfc_station') || params.get('station') || '').trim();
+    if (station) setNfcStationId(station);
+    if (!challengeId || !pollToken) return null;
+
+    params.delete('nfc_challenge');
+    params.delete('nfc_cid');
+    params.delete('nfc_poll');
+    params.delete('nfc_pt');
+    params.delete('nfc_station');
+    params.delete('station');
+    const next = `${window.location.pathname}${params.toString() ? `?${params}` : ''}${window.location.hash}`;
+    window.history.replaceState({}, '', next);
+    return { challengeId, pollToken };
+  } catch {
+    return null;
+  }
+}
+
 export function normalizeNfcUid(raw: string): string {
   return String(raw ?? '')
     .trim()

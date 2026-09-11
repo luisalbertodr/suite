@@ -372,16 +372,58 @@ serve(async (req) => {
         .limit(1)
         .maybeSingle();
       if (error) return json({ error: error.message }, 500);
-      if (!waiting) {
+
+      if (waiting) {
+        const result = await completeChallengeWithUid(waiting.id, uid);
         return json({
-          ok: false,
-          ignored: true,
-          message: 'No hay pantalla de login esperando en esta estación',
+          ...result,
+          open_browser: false,
+          focus_browser: true,
+          station_id: stationId,
+          suite_query: `nfc_station=${encodeURIComponent(stationId)}`,
         });
       }
 
-      const result = await completeChallengeWithUid(waiting.id, uid);
-      return json(result);
+      // No hay pestaña esperando: crear sesión lista para pickup y pedir al agente
+      // que abra/enfoque Chrome con challenge+poll en la URL.
+      const userId = await findUserIdByUid(uid);
+      if (!userId) {
+        return json({ ok: false, error: 'Tarjeta no asociada a ningún usuario' }, 400);
+      }
+      const session = await mintSessionForUserId(userId);
+      const poll = randomToken(24);
+      const code = publicCode();
+      const expiresAt = new Date(Date.now() + 2 * 60 * 1000).toISOString();
+      const { data: created, error: createErr } = await admin
+        .from('nfc_login_challenges')
+        .insert({
+          station_id: stationId,
+          public_code: code,
+          poll_token: poll,
+          status: 'completed',
+          nfc_uid: uid,
+          user_id: userId,
+          access_token: session.access_token,
+          refresh_token: session.refresh_token,
+          completed_at: new Date().toISOString(),
+          expires_at: expiresAt,
+          error_message: null,
+        })
+        .select('id')
+        .single();
+      if (createErr) return json({ error: createErr.message }, 500);
+
+      return json({
+        ok: true,
+        open_browser: true,
+        focus_browser: true,
+        station_id: stationId,
+        challenge_id: created.id,
+        poll_token: poll,
+        user_id: userId,
+        email: session.email,
+        suite_query: `nfc_station=${encodeURIComponent(stationId)}&nfc_challenge=${encodeURIComponent(created.id)}&nfc_poll=${encodeURIComponent(poll)}`,
+      });
     }
 
     if (action === 'enroll.set' || action === 'enroll.clear') {
