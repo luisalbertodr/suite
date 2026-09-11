@@ -1846,17 +1846,21 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
     employeesViewportPx > 0 ? TIME_GUTTER_PX + employeesViewportPx : undefined;
 
   return (
-    <div ref={shellRef} className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] bg-card">
-      <div className="relative shrink-0 border-b border-border shadow-sm overflow-hidden">
+    <div ref={shellRef} className="relative grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden bg-card">
+      {/* Cabecera fija fuera del scroll: nombres de empleadas siempre visibles. */}
+      <div
+        className="relative z-[40] shrink-0 border-b border-border bg-card shadow-sm overflow-hidden"
+        style={{ minHeight: EMPLOYEE_NAMES_ROW_MIN_H }}
+      >
         <div
           className="pointer-events-none absolute left-0 top-0 z-[55] flex items-center justify-center border-r border-border bg-card px-3 py-1 text-center text-xs font-semibold leading-tight text-foreground"
-          style={{ width: TIME_GUTTER_PX, minHeight: EMPLOYEE_NAMES_ROW_MIN_H }}
+          style={{ width: TIME_GUTTER_PX, minHeight: EMPLOYEE_NAMES_ROW_MIN_H, height: '100%' }}
         >
           Hora
         </div>
         <div
           ref={headerClipRef}
-          className="overflow-hidden"
+          className="overflow-hidden bg-card"
           style={{
             marginLeft: TIME_GUTTER_PX,
             width: employeesViewportPx > 0 ? employeesViewportPx : undefined,
@@ -1886,6 +1890,7 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
       <div className="relative min-h-0 h-full overflow-hidden">
         {/*
           Viewport H acotado por visualViewport. Clip en px absolutos.
+          Solo esta zona hace scroll vertical; la fila de nombres queda arriba.
         */}
         <div
           ref={scrollRootRef}
@@ -1993,17 +1998,20 @@ export const AgendaGrid: React.FC<AgendaGridProps> = React.memo(function AgendaG
         </div>
       </div>
 
-      <div className="relative shrink-0 border-t border-border shadow-[0_-2px_4px_rgba(0,0,0,0.04)]">
+      <div
+        className="relative z-[40] shrink-0 border-t border-border bg-card shadow-[0_-2px_4px_rgba(0,0,0,0.04)] overflow-hidden"
+        style={{ minHeight: EMPLOYEE_NAMES_ROW_MIN_H }}
+      >
         <div
           className="pointer-events-none absolute left-0 top-0 z-[55] flex items-center justify-center border-r border-border bg-card"
-          style={{ width: TIME_GUTTER_PX, minHeight: EMPLOYEE_NAMES_ROW_MIN_H }}
+          style={{ width: TIME_GUTTER_PX, minHeight: EMPLOYEE_NAMES_ROW_MIN_H, height: '100%' }}
           aria-hidden
         >
           {'\u00a0'}
         </div>
         <div
           ref={footerClipRef}
-          className="overflow-hidden"
+          className="overflow-hidden bg-card"
           style={{
             marginLeft: TIME_GUTTER_PX,
             width: employeesViewportPx > 0 ? employeesViewportPx : undefined,
