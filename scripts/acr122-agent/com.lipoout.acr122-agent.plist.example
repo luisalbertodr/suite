@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.lipoout.acr122-agent</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python</string>
+    <string>/Users/Lipoout/suite-acr122-agent/acr122_agent_macos.py</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>NFC_AUTH_URL</key>
+    <string>https://supabase.lipoout.com/functions/v1/nfc-auth</string>
+    <key>NFC_AGENT_SECRET</key>
+    <string>CHANGE_ME</string>
+    <key>NFC_STATION_ID</key>
+    <string>station-medicina</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/Users/Lipoout/suite-acr122-agent/agent.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/Lipoout/suite-acr122-agent/agent.err</string>
+  <key>WorkingDirectory</key>
+  <string>/Users/Lipoout/suite-acr122-agent</string>
+</dict>
+</plist>
