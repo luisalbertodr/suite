@@ -61,7 +61,8 @@ const MATCH_WEIGHT_KG = 0.8;
  * 350ms was too short for cold edge starts → fell back to config male/26/170
  * (seen 2026-08-11 Marta Loureiro: weight 62.4 kg arrived, profile never applied).
  */
-const PENDING_HANDSHAKE_WAIT_MS = 2_000;
+/** Debe ser >= timeout HTTP de suite-pending (12s) para no caer al perfil config.yaml. */
+const PENDING_HANDSHAKE_WAIT_MS = 12_000;
 /**
  * MorphoScan DF-BIA `z1` (LE/10 after weight + 0x0a00) impedance scale factors.
  * End-anchored plen-8 fat is NOT Renpho body-fat % (Luis 2026-08-06: frame 14.4 %

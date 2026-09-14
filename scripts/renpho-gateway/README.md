@@ -14,13 +14,17 @@
 # Tras instalar, `npm run validate` debe mostrar ≥1 exporter(s).
 #
 # Parches (install-continuous.ps1 los sube y aplica con apply-gateway-ble-fixes.py):
-#   suite-pending.ts   — poll ?pending=1 + target_scale_mac
+#   suite-pending.ts   — poll ?pending=1 + target_scale_mac (timeout 12s, fail logs)
 #   renpho-msc04.ts    — handshake BIA con perfil del paciente
 #   loop.ts (parche)   — idle sin escaneo BLE hasta «Pesar»
 #   discovery.ts       — conecta solo la MAC elegida (Pesar / Pesar+)
 #
-# Botones Suite:
-#   «Pesar»   → 60:30:F2:74:26:E2 (Morpho, referencia)
-#   «Pesar+»  → 60:30:F2:74:22:B6 (Morpho+3, ~+100–300 g en pesajes simultáneos)
+# Fiabilidad (host Supabase .110):
+#   /usr/local/bin/suite-scale-ingest-watchdog.sh  (cron * * * *)
+#   Reinicia supabase-edge-functions si scale-ingest no responde 3 min seguidos.
+#
+# Botones Suite (src/lib/inbodyMeasurements.ts):
+#   «Pesar»   → 60:30:F2:74:22:B6
+#   «Pesar+»  → 60:30:F2:74:26:E2
 #
 # .env SCALE_MACS=MAC1,MAC2 (allowlist; ambas deben estar listadas)

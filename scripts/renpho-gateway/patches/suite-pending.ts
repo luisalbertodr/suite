@@ -18,12 +18,21 @@ export type PendingWeighState = {
   profile: PendingScaleProfile | null;
 };
 
-const PENDING_CACHE_MS = 45_000;
+/** Caché corta cuando hay pending: evita pending fantasma tras cancel/expire. */
+const PENDING_CACHE_MS = 8_000;
 const PENDING_NEGATIVE_CACHE_MS = 1_500;
 /** Poll mientras no hay petición abierta (modo idle). */
 export const PENDING_IDLE_POLL_MS = 3_000;
+/** Tras fallos de edge, no martillar cada 3 s. */
+const PENDING_FAIL_POLL_MS = 6_000;
+/** Timeout HTTP más generoso: edge frío / reinicio no debe parecer «sin Pesar». */
+const PENDING_FETCH_TIMEOUT_MS = 12_000;
+/** Tras N fallos seguidos, log warn (visible en journal). */
+const FAIL_WARN_THRESHOLD = 3;
 
 let cache: { at: number; data: PendingWeighState } | null = null;
+let consecutiveFailures = 0;
+let lastFailLogAt = 0;
 
 function normalizeMac(mac: string): string {
   return mac.replace(/[^a-fA-F0-9]/g, '').toUpperCase();
@@ -37,12 +46,36 @@ function emptyState(): PendingWeighState {
   return { pending: false, ready: false, targetScaleMac: null, profile: null };
 }
 
+function noteFailure(reason: string): void {
+  consecutiveFailures += 1;
+  const now = Date.now();
+  const isDown =
+    consecutiveFailures >= FAIL_WARN_THRESHOLD && now - lastFailLogAt > 30_000;
+  if (isDown) lastFailLogAt = now;
+  bleLog.info(
+    isDown
+      ? `Suite pending DOWN (#${consecutiveFailures}): ${reason} — edge/bridge unreachable; weigh requests will not fulfill`
+      : `Suite pending fetch failed (#${consecutiveFailures}): ${reason}`,
+  );
+}
+
+function noteSuccess(): void {
+  if (consecutiveFailures >= FAIL_WARN_THRESHOLD) {
+    bleLog.info(`Suite pending recovered after ${consecutiveFailures} failure(s)`);
+  }
+  consecutiveFailures = 0;
+}
+
 export function getTargetScaleMac(): string | null {
   return cache?.data.targetScaleMac ?? null;
 }
 
 export function isWeighPendingReady(): boolean {
   return Boolean(cache?.data.pending && cache?.data.ready);
+}
+
+export function getPendingConsecutiveFailures(): number {
+  return consecutiveFailures;
 }
 
 export async function fetchPendingWeigh(force = false): Promise<PendingWeighState> {
@@ -54,6 +87,7 @@ export async function fetchPendingWeigh(force = false): Promise<PendingWeighStat
   const secret = (process.env.SCALE_INGEST_SECRET || '').trim().replace(/\r/g, '');
   const companyId = (process.env.SUITE_COMPANY_ID || '').trim().replace(/\r/g, '');
   if (!secret || !companyId) {
+    noteFailure('SCALE_INGEST_SECRET or SUITE_COMPANY_ID missing');
     const data = emptyState();
     cache = { at: now, data };
     return data;
@@ -73,10 +107,12 @@ export async function fetchPendingWeigh(force = false): Promise<PendingWeighStat
         'X-Scale-Ingest-Secret': secret,
         'X-Suite-Company-Id': companyId,
       },
-      signal: AbortSignal.timeout(4500),
+      signal: AbortSignal.timeout(PENDING_FETCH_TIMEOUT_MS),
     });
     if (!res.ok) {
-      bleLog.info(`Suite pending: HTTP ${res.status}`);
+      noteFailure(`HTTP ${res.status}`);
+      // 5xx: no reutilizar pending en caché (perfil fantasma). 4xx: conservar último estado conocido.
+      if (res.status >= 500) return emptyState();
       return cache?.data ?? emptyState();
     }
 
@@ -89,6 +125,8 @@ export async function fetchPendingWeigh(force = false): Promise<PendingWeighStat
       name?: string;
       target_scale_mac?: string;
     };
+
+    noteSuccess();
 
     if (!body.pending || !body.ready) {
       const data = emptyState();
@@ -139,9 +177,7 @@ export async function fetchPendingWeigh(force = false): Promise<PendingWeighStat
     );
     return data;
   } catch (e) {
-    bleLog.info(
-      `Suite pending fetch failed: ${e instanceof Error ? e.message : String(e)}`,
-    );
+    noteFailure(e instanceof Error ? e.message : String(e));
     return cache?.data ?? emptyState();
   }
 }
@@ -157,7 +193,9 @@ export async function waitUntilWeighPending(signal: AbortSignal): Promise<void> 
     const state = await fetchPendingWeigh(true);
     if (state.pending && state.ready) return;
     bleLog.debug('Idle: no open weigh request — skipping BLE scan');
-    await abortableSleep(PENDING_IDLE_POLL_MS, signal).catch(() => {});
+    const delay =
+      consecutiveFailures >= FAIL_WARN_THRESHOLD ? PENDING_FAIL_POLL_MS : PENDING_IDLE_POLL_MS;
+    await abortableSleep(delay, signal).catch(() => {});
   }
 }
 

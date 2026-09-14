@@ -24,6 +24,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useInbodyMeasurements } from '@/hooks/useInbodyMeasurements';
 import {
+  SCALE_WEIGH_STALE_WARN_MS,
   SCALE_WEIGH_TTL_SECONDS,
   useActiveScaleWeighRequest,
   useCancelScaleWeighRequest,
@@ -187,9 +188,35 @@ function ScaleWeighNowControls({
   const start = useStartScaleWeighRequest();
   const cancel = useCancelScaleWeighRequest();
   const toastedMeasurementRef = React.useRef<string | null>(null);
+  const staleWarnedRef = React.useRef<string | null>(null);
   const secondsLeft = useWeighCountdown(
     active?.status === 'open' ? active.expires_at : null,
   );
+
+  const weighOpenMs =
+    active?.status === 'open' && active.created_at
+      ? Date.now() - new Date(active.created_at).getTime()
+      : 0;
+  const weighLooksStale = active?.status === 'open' && weighOpenMs >= SCALE_WEIGH_STALE_WARN_MS;
+
+  useEffect(() => {
+    if (!weighLooksStale || !active?.id) return;
+    if (staleWarnedRef.current === active.id) return;
+    staleWarnedRef.current = active.id;
+    toast({
+      title: 'La báscula no responde',
+      description:
+        'Suite ya pidió el pesaje, pero el puente MorphoScan no lo está recibiendo (edge/gateway). Cancela, espera 10 s y vuelve a pulsar Pesar. Si sigue fallando, avisa a IT.',
+      variant: 'destructive',
+    });
+  }, [weighLooksStale, active?.id, toast]);
+
+  useEffect(() => {
+    if (active?.status !== 'open') {
+      // Permitir re-avisar en el próximo «Pesar».
+      if (active?.id !== staleWarnedRef.current) staleWarnedRef.current = null;
+    }
+  }, [active?.status, active?.id]);
 
   const [profileOpen, setProfileOpen] = useState(false);
   const [pendingWeighTarget, setPendingWeighTarget] = useState<MorphoWeighTarget>('base');
@@ -507,37 +534,44 @@ function ScaleWeighNowControls({
     const mm = Math.floor(secondsLeft / 60);
     const ss = String(secondsLeft % 60).padStart(2, '0');
     return (
-      <div className="flex items-center gap-2">
-        <Badge
-          variant="default"
-          className={cn('tabular-nums gap-1.5 py-1.5 px-2.5', compact ? 'text-[10px]' : 'text-xs')}
-        >
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          Esperando {scaleLabel} {mm}:{ss}
-        </Badge>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-8 px-2"
-          disabled={cancel.isPending}
-          onClick={() => {
-            cancel.mutate(
-              { id: active.id, companyId, customerId },
-              {
-                onError: (e: Error) =>
-                  toast({
-                    title: 'No se pudo cancelar',
-                    description: e.message,
-                    variant: 'destructive',
-                  }),
-              },
-            );
-          }}
-          title="Cancelar espera"
-        >
-          <X className="h-4 w-4" />
-        </Button>
+      <div className="flex flex-col items-stretch gap-1.5">
+        <div className="flex items-center gap-2">
+          <Badge
+            variant={weighLooksStale ? 'destructive' : 'default'}
+            className={cn('tabular-nums gap-1.5 py-1.5 px-2.5', compact ? 'text-[10px]' : 'text-xs')}
+          >
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            {weighLooksStale ? 'Sin respuesta' : 'Esperando'} {scaleLabel} {mm}:{ss}
+          </Badge>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 px-2"
+            disabled={cancel.isPending}
+            onClick={() => {
+              cancel.mutate(
+                { id: active.id, companyId, customerId },
+                {
+                  onError: (e: Error) =>
+                    toast({
+                      title: 'No se pudo cancelar',
+                      description: e.message,
+                      variant: 'destructive',
+                    }),
+                },
+              );
+            }}
+            title="Cancelar espera"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+        {weighLooksStale ? (
+          <p className={cn('text-destructive max-w-[22rem] leading-snug', compact ? 'text-[10px]' : 'text-xs')}>
+            El puente no está recibiendo el pesaje. Cancela y reintenta; si falla otra vez, avisa a IT.
+          </p>
+        ) : null}
       </div>
     );
   }

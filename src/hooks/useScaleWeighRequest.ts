@@ -4,6 +4,11 @@ import { supabase } from '@/lib/supabase';
 export const SCALE_WEIGH_TTL_SECONDS = 5 * 60;
 /** Cuánto mostrar «Medición vinculada» antes de volver a «Pesar». */
 export const SCALE_WEIGH_FULFILLED_HOLD_MS = 8_000;
+/**
+ * Si la petición sigue «open» más de esto sin fulfill, avisar en UI:
+ * probablemente el bridge/edge no está viendo el pending (no es la báscula).
+ */
+export const SCALE_WEIGH_STALE_WARN_MS = 45_000;
 
 export type ScaleWeighRequestStatus = 'open' | 'fulfilled' | 'cancelled' | 'expired';
 
