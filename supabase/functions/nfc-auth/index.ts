@@ -34,6 +34,9 @@ type Body = {
   uid?: string;
   user_id?: string;
   company_id?: string;
+  force?: boolean;
+  require_waiting?: boolean;
+  waiting_only?: boolean;
 };
 
 function json(data: unknown, status = 200) {
@@ -54,6 +57,9 @@ function isBogusUid(uid: string): boolean {
   if (![8, 14, 20].includes(uid.length)) return true;
   if (/^0+$/.test(uid)) return true;
   if (uid.startsWith('0000')) return true;
+  // ACR122U / PCSC a veces emiten UIDs fantasma 003F… / 003FFC… al fallar la lectura.
+  if (uid.startsWith('003F') || uid.startsWith('003FFC')) return true;
+  if (/^00[0-9A-F]{2}FC/i.test(uid)) return true;
   const fCount = (uid.match(/F/g) ?? []).length;
   if (fCount >= Math.max(4, Math.floor(uid.length / 2))) return true;
   if (uid.includes('FFFFFFFF')) return true;
@@ -257,6 +263,7 @@ serve(async (req) => {
     if (action === 'challenge.start') {
       const stationId = String(body.station_id ?? '').trim() || 'default';
       if (stationId.length > 80) return json({ error: 'station_id inválido' }, 400);
+      const forceNew = body.force === true;
 
       // Invalidar tokens huérfanos recientes: reclamarlos provocaba
       // "Auth session missing!" (refresh ya revocado por otro mint).
@@ -268,6 +275,32 @@ serve(async (req) => {
         .eq('status', 'completed')
         .not('access_token', 'is', null)
         .gte('completed_at', new Date(Date.now() - 120_000).toISOString());
+
+      // Reutilizar waiting vivo: varias pestañas/ventanas con el mismo station_id
+      // no deben pelearse superseding (tormenta de miles de retos/día en Medicina).
+      if (!forceNew) {
+        const { data: existing, error: existingErr } = await admin
+          .from('nfc_login_challenges')
+          .select('id, public_code, poll_token, expires_at, station_id, created_at')
+          .eq('station_id', stationId)
+          .eq('status', 'waiting')
+          .gt('expires_at', new Date(Date.now() + 30_000).toISOString())
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (existingErr) return json({ error: existingErr.message }, 500);
+        if (existing?.id && existing.poll_token) {
+          return json({
+            challenge_id: existing.id,
+            public_code: existing.public_code,
+            poll_token: existing.poll_token,
+            expires_at: existing.expires_at,
+            station_id: existing.station_id,
+            status: 'waiting',
+            reused: true,
+          });
+        }
+      }
 
       // Un solo reto activo por estación: evita que el agente complete un reto
       // distinto al que el navegador está sondeando.
@@ -299,6 +332,7 @@ serve(async (req) => {
         expires_at: data.expires_at,
         station_id: data.station_id,
         status: 'waiting',
+        reused: false,
       });
     }
 

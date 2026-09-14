@@ -16,10 +16,13 @@ type Options = {
   onError?: (message: string) => void;
 };
 
-const POLL_MS = 400;
-const RESTART_AFTER_LOGIN_MS = 150;
-const RESTART_AFTER_SAME_USER_MS = 300;
-const RESTART_AFTER_ERROR_MS = 600;
+const POLL_MS = 700;
+const RESTART_AFTER_LOGIN_MS = 400;
+const RESTART_AFTER_SAME_USER_MS = 800;
+const RESTART_AFTER_ERROR_MS = 1200;
+const RESTART_AFTER_SUPERSEDED_MS = 2500;
+const LEADER_KEY_PREFIX = 'suite_nfc_leader:';
+const LEADER_TTL_MS = 4000;
 
 async function applySessionTokens(accessToken: string, refreshToken: string) {
   const { error: setErr } = await supabase.auth.setSession({
@@ -48,6 +51,51 @@ async function applySessionTokens(accessToken: string, refreshToken: string) {
   }
 }
 
+function tabId(): string {
+  try {
+    const key = 'suite_nfc_tab_id';
+    let id = sessionStorage.getItem(key);
+    if (!id) {
+      id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+      sessionStorage.setItem(key, id);
+    }
+    return id;
+  } catch {
+    return `tmp-${Math.random().toString(36).slice(2)}`;
+  }
+}
+
+/** Solo una pestaña por estación crea retos; el resto espera. */
+function tryBecomeLeader(stationId: string): boolean {
+  const key = `${LEADER_KEY_PREFIX}${stationId || 'default'}`;
+  const now = Date.now();
+  const me = tabId();
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) {
+      const parsed = JSON.parse(raw) as { id?: string; at?: number };
+      if (parsed.id && parsed.id !== me && typeof parsed.at === 'number' && now - parsed.at < LEADER_TTL_MS) {
+        return false;
+      }
+    }
+    localStorage.setItem(key, JSON.stringify({ id: me, at: now }));
+    // Confirmar que ganamos (carrera entre pestañas).
+    const confirm = JSON.parse(localStorage.getItem(key) || '{}') as { id?: string };
+    return confirm.id === me;
+  } catch {
+    return true;
+  }
+}
+
+function renewLeader(stationId: string): void {
+  const key = `${LEADER_KEY_PREFIX}${stationId || 'default'}`;
+  try {
+    localStorage.setItem(key, JSON.stringify({ id: tabId(), at: Date.now() }));
+  } catch {
+    /* ignore */
+  }
+}
+
 /**
  * Reto NFC continuo por estación: login y cambio de usuario con otra tarjeta.
  */
@@ -55,6 +103,7 @@ export function useNfcStationSession({ enabled, currentUserId = null, onError }:
   const challengeRef = useRef<{ id: string; poll: string } | null>(null);
   const pollTimer = useRef<number | null>(null);
   const restartTimer = useRef<number | null>(null);
+  const leaderTimer = useRef<number | null>(null);
   const challengeGen = useRef(0);
   const starting = useRef(false);
   const applying = useRef(false);
@@ -98,12 +147,18 @@ export function useNfcStationSession({ enabled, currentUserId = null, onError }:
 
   const startChallenge = useCallback(async () => {
     if (!enabled || starting.current || applying.current) return;
+    applyNfcStationFromUrl();
+    const station_id = getNfcStationId();
+    if (!tryBecomeLeader(station_id)) {
+      // Otra pestaña lidera esta estación: no crear retos (evita supersede storm).
+      scheduleRestartRef.current(RESTART_AFTER_SUPERSEDED_MS);
+      return;
+    }
+    renewLeader(station_id);
     starting.current = true;
     clearTimers();
     const gen = ++challengeGen.current;
     try {
-      applyNfcStationFromUrl();
-      const station_id = getNfcStationId();
       const started = await callNfcAuth({ action: 'challenge.start', station_id });
       if (gen !== challengeGen.current) return;
 
@@ -136,6 +191,7 @@ export function useNfcStationSession({ enabled, currentUserId = null, onError }:
           if (gen !== challengeGen.current) return;
           const ch = challengeRef.current;
           if (!ch) return;
+          renewLeader(station_id);
           try {
             const polled = await callNfcAuth({
               action: 'challenge.poll',
@@ -157,7 +213,9 @@ export function useNfcStationSession({ enabled, currentUserId = null, onError }:
             } else if (status === 'failed' || status === 'expired') {
               clearTimers();
               if (errMsg === 'superseded') {
-                scheduleRestartRef.current(200);
+                // No reiniciar en 200ms: alimenta la guerra entre pestañas.
+                const jitter = 500 + Math.floor(Math.random() * 1500);
+                scheduleRestartRef.current(RESTART_AFTER_SUPERSEDED_MS + jitter);
                 return;
               }
               if (errMsg) onErrorRef.current?.(errMsg);
@@ -218,7 +276,7 @@ export function useNfcStationSession({ enabled, currentUserId = null, onError }:
         }
       } catch (e) {
         onErrorRef.current?.(e instanceof Error ? e.message : 'Error NFC');
-        scheduleRestartRef.current(400);
+        scheduleRestartRef.current(800);
       } finally {
         wedgeBuffer.current = '';
         submittingWedge.current = false;
@@ -231,6 +289,10 @@ export function useNfcStationSession({ enabled, currentUserId = null, onError }:
     if (!enabled) {
       challengeGen.current += 1;
       clearTimers();
+      if (leaderTimer.current != null) {
+        window.clearInterval(leaderTimer.current);
+        leaderTimer.current = null;
+      }
       challengeRef.current = null;
       return;
     }
@@ -260,6 +322,11 @@ export function useNfcStationSession({ enabled, currentUserId = null, onError }:
       }
       if (!cancelled) void startChallenge();
     })();
+
+    // Renovar liderazgo periódicamente mientras esta pestaña está activa.
+    leaderTimer.current = window.setInterval(() => {
+      renewLeader(getNfcStationId());
+    }, Math.floor(LEADER_TTL_MS / 2));
 
     const onKeyDown = (e: KeyboardEvent) => {
       const t = e.target;
@@ -304,6 +371,10 @@ export function useNfcStationSession({ enabled, currentUserId = null, onError }:
       cancelled = true;
       challengeGen.current += 1;
       clearTimers();
+      if (leaderTimer.current != null) {
+        window.clearInterval(leaderTimer.current);
+        leaderTimer.current = null;
+      }
       window.removeEventListener('keydown', onKeyDown, true);
     };
   }, [applyCompleted, clearTimers, enabled, startChallenge, submitWedgeUid]);
