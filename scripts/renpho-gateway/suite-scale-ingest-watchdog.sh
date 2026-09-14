@@ -30,6 +30,12 @@ body_head=$(head -c 120 /tmp/scale-ingest-health.out 2>/dev/null || true)
 if [[ "$code" == "200" ]]; then
   if [[ "$fails" -gt 0 ]]; then
     log "OK recovered after ${fails} fail(s) http=$code"
+  else
+    # Heartbeat cada ~30 min para confirmar que el cron vive.
+    minute=$(date +%M)
+    if [[ "$minute" == "00" || "$minute" == "30" ]]; then
+      log "OK http=$code"
+    fi
   fi
   echo 0 > "$FAIL_FILE"
   exit 0

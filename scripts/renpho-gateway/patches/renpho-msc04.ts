@@ -18,6 +18,7 @@ import {
   type ScaleBodyComp,
 } from './body-comp-helpers.js';
 import { matchesDescriptor, type MatchDescriptor } from './match-descriptor.js';
+import { readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { bleLog } from '../ble/types.js';
 import {
   fetchPendingWeigh,
@@ -45,13 +46,14 @@ const FRAG_LAST = 0xaf;
 
 const FRAME_OVERHEAD = 6;
 const HANDSHAKE_GAP_MS = 400;
-const HANDSHAKE_GAP_RECONNECT_MS = 200;
+/** Reconnect: >200ms reduce «In Progress» cuando llegan frags BIA a la vez. */
+const HANDSHAKE_GAP_RECONNECT_MS = 350;
 /** Per-frame GATT write budget; BlueZ can hang forever on withResponse. */
 const HANDSHAKE_WRITE_TIMEOUT_MS = 2_000;
 /** Keep early 0x25/0x26 across a hung/dropped handshake for the next connect. */
 const ORPHAN_BODY_COMP_MAX_AGE_MS = 120_000;
 /** After this many reconnects without body-comp, export weight-only. */
-const WEIGHT_ONLY_AFTER_SESSIONS = 3;
+const WEIGHT_ONLY_AFTER_SESSIONS = 2;
 /** Accept a stored 0x26 as this weigh-in when age < this and weight matches. */
 const FRESH_AGE_S = 60;
 const MATCH_AGE_S = 1800;
@@ -63,6 +65,8 @@ const MATCH_WEIGHT_KG = 0.8;
  */
 /** Debe ser >= timeout HTTP de suite-pending (12s) para no caer al perfil config.yaml. */
 const PENDING_HANDSHAKE_WAIT_MS = 12_000;
+/** Persiste expectKg entre reinicios del proceso (no perder BIA mid-weigh). */
+const EXPECT_STATE_PATH = '/tmp/ble-msc04-expect.json';
 /**
  * MorphoScan DF-BIA `z1` (LE/10 after weight + 0x0a00) impedance scale factors.
  * End-anchored plen-8 fat is NOT Renpho body-fat % (Luis 2026-08-06: frame 14.4 %
@@ -118,6 +122,44 @@ function msc04SmmFromLbm(lbm: number, isAthlete: boolean): number {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+type ExpectStateFile = {
+  expectKg: number;
+  expectAtMs: number;
+  sessionsSinceExpect: number;
+  weightOnlyFallback: boolean;
+};
+
+function loadExpectState(): ExpectStateFile | null {
+  try {
+    const raw = readFileSync(EXPECT_STATE_PATH, 'utf8');
+    const data = JSON.parse(raw) as ExpectStateFile;
+    if (!(data.expectKg > 0) || !(data.expectAtMs > 0)) return null;
+    if (Date.now() - data.expectAtMs > 15 * 60_000) {
+      try {
+        unlinkSync(EXPECT_STATE_PATH);
+      } catch {
+        /* ignore */
+      }
+      return null;
+    }
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+function saveExpectState(state: ExpectStateFile | null): void {
+  try {
+    if (!state || !(state.expectKg > 0)) {
+      unlinkSync(EXPECT_STATE_PATH);
+      return;
+    }
+    writeFileSync(EXPECT_STATE_PATH, JSON.stringify(state), 'utf8');
+  } catch {
+    /* best-effort */
+  }
 }
 
 function handshakeCmdLabel(frame: number[] | Buffer): string {
@@ -470,6 +512,22 @@ export class RenphoMsc04Adapter
       bleLog.info(`Renpho R-MSC04: connected MAC ${this.lastDeviceMac}`);
     }
     this.pruneOrphans();
+
+    // Recuperar expect tras reinicio del proceso (deploy/watchdog mid-weigh).
+    if (Number.isNaN(this.expectKg)) {
+      const saved = loadExpectState();
+      if (saved) {
+        this.expectKg = saved.expectKg;
+        this.expectAtMs = saved.expectAtMs;
+        this.sessionsSinceExpect = saved.sessionsSinceExpect ?? 0;
+        this.weightOnlyFallback = Boolean(saved.weightOnlyFallback);
+        bleLog.info(
+          `Renpho R-MSC04: restored expect ${this.expectKg.toFixed(2)} kg ` +
+            `(sessions=${this.sessionsSinceExpect}, weightOnly=${this.weightOnlyFallback})`,
+        );
+      }
+    }
+
     if (this.orphanedBodyComp.length > 0) {
       bleLog.info(
         `Renpho R-MSC04: ${this.orphanedBodyComp.length} orphaned body-comp frame(s) ` +
@@ -490,6 +548,7 @@ export class RenphoMsc04Adapter
           `Renpho R-MSC04: no body-comp after ${this.sessionsSinceExpect} sessions — weight-only fallback`,
         );
       }
+      this.persistExpect();
     }
 
     if (!ctx.availableChars.has(CHR_WRITE)) {
@@ -522,6 +581,7 @@ export class RenphoMsc04Adapter
         : HANDSHAKE_GAP_MS;
     const handshake = [HS_B3, HS_B2, nameFrame, profileFrame];
 
+    let handshakeOk = true;
     try {
       for (const frame of handshake) {
         await this.writeHandshakeFrame(ctx, frame);
@@ -533,13 +593,24 @@ export class RenphoMsc04Adapter
         this.orphanedAtMs = Date.now();
       }
       const msg = e instanceof Error ? e.message : String(e);
-      bleLog.info(`Renpho R-MSC04: handshake aborted — ${msg}`);
-      throw e;
+      const buffered =
+        this.earlyBodyComp.length > 0 || this.orphanedBodyComp.length > 0;
+      if (buffered) {
+        // Caso Gemma 2026-09-14: frags BIA llegan durante b8 → «In Progress» abortaba
+        // y se perdía el body-comp ya en cola. Recuperar en lugar de tirar la sesión.
+        handshakeOk = false;
+        bleLog.info(
+          `Renpho R-MSC04: handshake incomplete (${msg}) but body-comp buffered — recovering`,
+        );
+      } else {
+        bleLog.info(`Renpho R-MSC04: handshake aborted — ${msg}`);
+        throw e;
+      }
     }
 
     this.handshakeReady = true;
     bleLog.info(
-      `Renpho R-MSC04: handshake sent ` +
+      `Renpho R-MSC04: handshake ${handshakeOk ? 'sent' : 'recovered'} ` +
         `(${pending ? 'Pesar ahora' : 'config'} ` +
         `${effectiveProfile.gender}/${effectiveProfile.age}y/${effectiveProfile.height}cm` +
         `${!Number.isNaN(this.expectKg) ? `; expect ${this.expectKg.toFixed(2)} kg` : ''})`,
@@ -570,43 +641,82 @@ export class RenphoMsc04Adapter
     }
   }
 
-  /** GATT write with timeout; falls back to no-response if withResponse hangs. */
+  /** GATT write with timeout; retries «In Progress»; falls back to no-response. */
   private async writeHandshakeFrame(
     ctx: ConnectionContext,
     frame: number[],
   ): Promise<void> {
     const label = handshakeCmdLabel(frame);
     const t0 = Date.now();
-    try {
-      await writeWithTimeout(
-        ctx.write,
-        CHR_WRITE,
-        frame,
-        true,
-        HANDSHAKE_WRITE_TIMEOUT_MS,
-        label,
-      );
-      bleLog.info(
-        `Renpho R-MSC04: handshake write 0x${label} ok (${Date.now() - t0}ms, withResponse)`,
-      );
-      return;
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      bleLog.info(
-        `Renpho R-MSC04: handshake write 0x${label} failed (${msg}); retry without response`,
-      );
+    const maxAttempts = 4;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await writeWithTimeout(
+          ctx.write,
+          CHR_WRITE,
+          frame,
+          true,
+          HANDSHAKE_WRITE_TIMEOUT_MS,
+          label,
+        );
+        bleLog.info(
+          `Renpho R-MSC04: handshake write 0x${label} ok (${Date.now() - t0}ms, withResponse)`,
+        );
+        return;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        const inProgress = /in progress/i.test(msg);
+        bleLog.info(
+          `Renpho R-MSC04: handshake write 0x${label} failed (${msg})` +
+            (inProgress && attempt < maxAttempts
+              ? `; backoff ${150 * attempt}ms`
+              : '; retry without response'),
+        );
+        if (inProgress && attempt < maxAttempts) {
+          await sleep(150 * attempt);
+          continue;
+        }
+
+        try {
+          await writeWithTimeout(
+            ctx.write,
+            CHR_WRITE,
+            frame,
+            false,
+            HANDSHAKE_WRITE_TIMEOUT_MS,
+            label,
+          );
+          bleLog.info(
+            `Renpho R-MSC04: handshake write 0x${label} ok (${Date.now() - t0}ms, noResponse)`,
+          );
+          return;
+        } catch (e2) {
+          const msg2 = e2 instanceof Error ? e2.message : String(e2);
+          // Si ya tenemos body-comp en cola, no tumbar la sesión por un b8 fallido.
+          if (this.earlyBodyComp.length > 0 || this.orphanedBodyComp.length > 0) {
+            bleLog.info(
+              `Renpho R-MSC04: skip write 0x${label} (${msg2}) — body-comp already buffered`,
+            );
+            return;
+          }
+          throw e2 instanceof Error ? e2 : new Error(msg2);
+        }
+      }
     }
-    await writeWithTimeout(
-      ctx.write,
-      CHR_WRITE,
-      frame,
-      false,
-      HANDSHAKE_WRITE_TIMEOUT_MS,
-      label,
-    );
-    bleLog.info(
-      `Renpho R-MSC04: handshake write 0x${label} ok (${Date.now() - t0}ms, noResponse)`,
-    );
+  }
+
+  private persistExpect(): void {
+    if (Number.isNaN(this.expectKg) || !(this.expectKg > 0)) {
+      saveExpectState(null);
+      return;
+    }
+    saveExpectState({
+      expectKg: this.expectKg,
+      expectAtMs: this.expectAtMs,
+      sessionsSinceExpect: this.sessionsSinceExpect,
+      weightOnlyFallback: this.weightOnlyFallback,
+    });
   }
 
   private pruneOrphans(): void {
@@ -751,6 +861,7 @@ export class RenphoMsc04Adapter
     }
     this.expectKg = weight;
     this.expectAtMs = Date.now();
+    this.persistExpect();
   }
 
   parseNotification(data: Buffer): ScaleReading | null {
@@ -927,6 +1038,7 @@ export class RenphoMsc04Adapter
     this.sessionsSinceExpect = 0;
     this.weightOnlyFallback = false;
     this.lastLiveWeight = 0;
+    saveExpectState(null);
   }
 
   private decodeFrame(data: Buffer): { cmd: number; weight: number } | null {

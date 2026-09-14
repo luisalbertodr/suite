@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-type ServiceKey = 'supabase' | 'waha' | 'meta' | 'issabel' | 'style_dunasoft' | 'spa3102';
+type ServiceKey = 'supabase' | 'waha' | 'meta' | 'issabel' | 'style_dunasoft' | 'spa3102' | 'morphoscan';
 type ServiceStatus = 'ok' | 'degraded' | 'down' | 'unknown';
 
 type CheckResult = {
@@ -144,6 +144,49 @@ async function checkSupabase(admin: ReturnType<typeof createClient>): Promise<Ch
       status: 'down',
       latencyMs: Date.now() - t0,
       message: e instanceof Error ? e.message : 'Supabase no responde',
+    };
+  }
+}
+
+/** Health de scale-ingest (puente MorphoScan → Suite). */
+async function checkMorphoscan(): Promise<CheckResult> {
+  const t0 = Date.now();
+  const url =
+    (Deno.env.get('SCALE_INGEST_HEALTH_URL') ?? '').trim() ||
+    'https://supabase.lipoout.com/functions/v1/scale-ingest';
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8_000);
+    const res = await fetch(url, { method: 'GET', signal: ctrl.signal });
+    clearTimeout(timer);
+    const latencyMs = Date.now() - t0;
+    if (res.status === 200) {
+      return {
+        status: 'ok',
+        latencyMs,
+        message: `scale-ingest OK (${latencyMs} ms)`,
+        details: { http: res.status },
+      };
+    }
+    if (res.status >= 500) {
+      return {
+        status: 'down',
+        latencyMs,
+        message: `scale-ingest HTTP ${res.status} — básculas no pueden recibir «Pesar»`,
+        details: { http: res.status },
+      };
+    }
+    return {
+      status: 'degraded',
+      latencyMs,
+      message: `scale-ingest HTTP ${res.status}`,
+      details: { http: res.status },
+    };
+  } catch (e) {
+    return {
+      status: 'down',
+      latencyMs: Date.now() - t0,
+      message: e instanceof Error ? e.message : 'scale-ingest inalcanzable',
     };
   }
 }
@@ -1069,6 +1112,7 @@ serve(async (req) => {
       return checkWaha(waCfg, runRecovery, prev.details);
     } },
     { key: 'supabase', name: 'Supabase', run: () => checkSupabase(admin) },
+    { key: 'morphoscan', name: 'MorphoScan / básculas', run: () => checkMorphoscan() },
     { key: 'meta', name: 'Meta', run: () => checkMeta(admin, companyId) },
     { key: 'issabel', name: 'Issabel', run: () => checkIssabel() },
     { key: 'spa3102', name: 'FXO-FXS SPA3102', run: async () => {
