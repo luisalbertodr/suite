@@ -1070,7 +1070,8 @@ async function handleMessage(
     // No bloqueamos el webhook si la auto-vinculación falla
   }
 
-  // Contactos nuevos entrantes (CTWA / WhatsApp Meta) → lead en Marketing
+  // Solo CTWA/Meta con evidencia en el payload → lead en Marketing.
+  // WhatsApp orgánico ya no crea «Nuevo lead» automático.
   if (!m.fromMe && !m.isGroup) {
     try {
       const { maybeAutoCreateMarketingLeadFromInbound } = await import(
