@@ -12,13 +12,14 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { UserPlus, Shield, RefreshCw, Eye, EyeOff, KeyRound, Network, CreditCard } from 'lucide-react';
+import { UserPlus, Shield, RefreshCw, Eye, EyeOff, KeyRound, Network, CreditCard, Palette } from 'lucide-react';
 import { toast } from 'sonner';
 import { UserListTable } from '@/components/UserListTable';
 import { useAgendaEmployees } from '@/hooks/useAgendaEmployees';
 import { UserPermissionsPanel } from '@/components/UserPermissionsPanel';
 import { UserCompanyAccessPanel } from '@/components/UserCompanyAccessPanel';
 import { UserAllowedNetworksPanel } from '@/components/UserAllowedNetworksPanel';
+import { UserAppearancePanel } from '@/components/UserAppearancePanel';
 import { useWorkCenter } from '@/hooks/useWorkCenter';
 import { RECEPTION_ROLE_NAME } from '@/lib/receptionUserAccess';
 import { applyInternalNetworksToUsers } from '@/hooks/useUserAllowedNetworks';
@@ -485,6 +486,10 @@ export const UserManagement = () => {
               <TabsTrigger value="datos" className="flex-1">
                 Datos
               </TabsTrigger>
+              <TabsTrigger value="apariencia" className="flex-1 gap-1" disabled={!editingUser?.id}>
+                <Palette className="h-3.5 w-3.5" />
+                Apariencia
+              </TabsTrigger>
               {canChangePasswords && (
                 <TabsTrigger value="redes" className="flex-1" disabled={!editingUser?.id}>
                   Redes
@@ -734,6 +739,21 @@ export const UserManagement = () => {
                     : `Guardar${permissionsCompanyId ? ` (${companyLabel(permissionsCompanyId)})` : ''}`}
                 </Button>
               </div>
+            </TabsContent>
+
+            <TabsContent value="apariencia" className="space-y-3">
+              {editingUser?.id ? (
+                <UserAppearancePanel
+                  userId={editingUser.id}
+                  applyTheme={editingUser.id === session?.user?.id}
+                  title="General · Apariencia"
+                  description={`Personaliza la interfaz de ${editingUser.email}. El color del sidebar ayuda a distinguir de quién es la sesión iniciada.`}
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Selecciona un usuario para editar su apariencia.
+                </p>
+              )}
             </TabsContent>
 
             <TabsContent value="excepciones">

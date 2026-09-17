@@ -4214,6 +4214,36 @@ export type Database = {
         }
         Relationships: []
       }
+      user_appearance_preferences: {
+        Row: {
+          id: string
+          user_id: string
+          sidebar_color: string
+          theme: string
+          logo_url: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          sidebar_color?: string
+          theme?: string
+          logo_url?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          sidebar_color?: string
+          theme?: string
+          logo_url?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       user_permission_overrides: {
         Row: {
           id: string

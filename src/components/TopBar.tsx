@@ -1,11 +1,12 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { User, LogOut, Settings, ChevronDown, Moon, Sun } from 'lucide-react';
+import { User, LogOut, Settings, ChevronDown, Moon, Sun, Palette } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from 'next-themes';
 import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { useWorkCenterBranding } from '@/hooks/useWorkCenterBranding';
+import { useUserAppearance } from '@/hooks/useUserAppearance';
 import { useBillingScopeRoute } from '@/hooks/useBillingScopeRoute';
 import { BillingScopeToggle } from '@/components/BillingScopeToggle';
 import { useTopBarContent } from './TopBarContentContext';
@@ -65,12 +66,26 @@ export const TopBar: React.FC = () => {
   const { user, signOut } = useAuth();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
   const canSeeSettings = permissionsLoading || hasPermission('settings', 'read');
-  const { theme, resolvedTheme, setTheme } = useTheme();
+  const { theme, resolvedTheme } = useTheme();
   const { loading: companyLoading } = useCompanyFilter();
   const { displayName, logoUrlLight, logoUrlDark, isLoading: brandingLoading } = useWorkCenterBranding();
+  const { sidebarColor, updateThemePreference } = useUserAppearance({ showToasts: false });
   const { enabled: billingScopeEnabled } = useBillingScopeRoute();
   const { content } = useTopBarContent();
   const [currentDateTime, setCurrentDateTime] = useState(new Date());
+
+  const avatarGradientByColor: Record<string, string> = {
+    blue: 'from-blue-400 to-blue-700',
+    green: 'from-green-400 to-green-700',
+    purple: 'from-purple-400 to-purple-700',
+    red: 'from-red-400 to-red-700',
+    gray: 'from-gray-400 to-gray-700',
+    indigo: 'from-indigo-400 to-indigo-700',
+    teal: 'from-teal-400 to-teal-700',
+    orange: 'from-orange-400 to-orange-700',
+  };
+  const avatarGradient =
+    avatarGradientByColor[sidebarColor] || avatarGradientByColor.blue;
   const [hideRouteTitle, setHideRouteTitle] = useState(false);
   const [stackDateTime, setStackDateTime] = useState(false);
   const [stacked, setStacked] = useState(false);
@@ -153,7 +168,10 @@ export const TopBar: React.FC = () => {
     navigate(`/agenda?date=${ymd}&now=1`);
   };
 
-  const toggleTheme = () => setTheme(theme === 'dark' ? 'light' : 'dark');
+  const toggleTheme = () => {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    void updateThemePreference(next);
+  };
   const activeTheme = resolvedTheme ?? theme;
   const logoUrl = activeTheme === 'dark' ? (logoUrlDark || logoUrlLight) : logoUrlLight;
 
@@ -247,7 +265,13 @@ export const TopBar: React.FC = () => {
 
       <DropdownMenu>
         <DropdownMenuTrigger className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 transition-colors outline-none">
-          <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center">
+          <div
+            className={cn(
+              'w-7 h-7 rounded-full bg-gradient-to-br flex items-center justify-center ring-2 ring-background shadow-sm',
+              avatarGradient,
+            )}
+            title={`Sesión: ${user?.email ?? 'usuario'}`}
+          >
             <User className="h-3.5 w-3.5 text-white" />
           </div>
           <span className="text-xs font-medium text-foreground/70 hidden sm:block max-w-[120px] truncate">
@@ -255,11 +279,20 @@ export const TopBar: React.FC = () => {
           </span>
           <ChevronDown className="h-3 w-3 text-foreground/40" />
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuContent align="end" className="w-52">
           {canSeeSettings ? (
             <DropdownMenuItem className="text-xs" onClick={() => navigate('/configuracion')}>
               <Settings className="h-3.5 w-3.5 mr-2" />
               Configuración
+            </DropdownMenuItem>
+          ) : null}
+          {canSeeSettings ? (
+            <DropdownMenuItem
+              className="text-xs"
+              onClick={() => navigate('/configuracion?tab=general&subtab=apariencia')}
+            >
+              <Palette className="h-3.5 w-3.5 mr-2" />
+              General · Apariencia
             </DropdownMenuItem>
           ) : null}
           {canSeeSettings ? <DropdownMenuSeparator /> : null}
