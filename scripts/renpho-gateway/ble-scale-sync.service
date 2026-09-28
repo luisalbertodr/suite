@@ -4,7 +4,14 @@ After=network-online.target bluetooth.service
 Wants=network-online.target
 
 [Service]
-Type=simple
+# Type=notify + WatchdogSec: si el event loop se congela (D-Bus sync stall),
+# dejan de llegar WATCHDOG=1 y systemd mata/reinicia. Escaneos async colgados
+# los cubre suite-ble-gateway-watchdog.sh (cron).
+Type=notify
+NotifyAccess=all
+WatchdogSec=120
+WatchdogSignal=SIGKILL
+TimeoutStartSec=90
 WorkingDirectory=/root/renpho-gateway/ble-scale-sync
 EnvironmentFile=-/root/renpho-gateway/ble-scale-sync/.env
 Environment=CONTINUOUS_MODE=true

@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-type ServiceKey = 'supabase' | 'waha' | 'meta' | 'issabel' | 'style_dunasoft' | 'spa3102';
+type ServiceKey = 'supabase' | 'waha' | 'meta' | 'issabel' | 'style_dunasoft' | 'spa3102' | 'morphoscan';
 type ServiceStatus = 'ok' | 'degraded' | 'down' | 'unknown';
 
 type CheckResult = {
@@ -148,6 +148,72 @@ async function checkSupabase(admin: ReturnType<typeof createClient>): Promise<Ch
   }
 }
 
+/** Health de scale-ingest (puente MorphoScan → Suite) + «Pesar» abiertos atascados. */
+async function checkMorphoscan(admin: ReturnType<typeof createClient>): Promise<CheckResult> {
+  const t0 = Date.now();
+  const url =
+    (Deno.env.get('SCALE_INGEST_HEALTH_URL') ?? '').trim() ||
+    'https://supabase.lipoout.com/functions/v1/scale-ingest';
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8_000);
+    const res = await fetch(url, { method: 'GET', signal: ctrl.signal });
+    clearTimeout(timer);
+    const latencyMs = Date.now() - t0;
+    if (res.status >= 500) {
+      return {
+        status: 'down',
+        latencyMs,
+        message: `scale-ingest HTTP ${res.status} — básculas no pueden recibir «Pesar»`,
+        details: { http: res.status },
+      };
+    }
+    if (res.status !== 200) {
+      return {
+        status: 'degraded',
+        latencyMs,
+        message: `scale-ingest HTTP ${res.status}`,
+        details: { http: res.status },
+      };
+    }
+
+    // Detección temprana: «Pesar» abierto >2 min sin cumplir → gateway BLE o báscula.
+    const staleCutoff = new Date(Date.now() - 2 * 60_000).toISOString();
+    const { data: staleOpen, error: staleErr } = await admin
+      .from('scale_weigh_requests')
+      .select('id, profile_name, target_scale_mac, created_at')
+      .eq('status', 'open')
+      .lt('created_at', staleCutoff)
+      .limit(5);
+    if (!staleErr && staleOpen && staleOpen.length > 0) {
+      const sample = staleOpen[0] as {
+        profile_name?: string | null;
+        target_scale_mac?: string | null;
+      };
+      const who = (sample.profile_name || 'paciente').trim();
+      const mac = (sample.target_scale_mac || '?').trim();
+      return {
+        status: 'degraded',
+        latencyMs: Date.now() - t0,
+        message: `${staleOpen.length} «Pesar» sin respuesta (>2 min) — p.ej. ${who} @ ${mac}`,
+        details: { http: 200, stale_open: staleOpen.length, sample_mac: mac },
+      };
+    }
+
+    return {
+      status: 'ok',
+      latencyMs,
+      message: `scale-ingest OK (${latencyMs} ms)`,
+      details: { http: res.status },
+    };
+  } catch (e) {
+    return {
+      status: 'down',
+      latencyMs: Date.now() - t0,
+      message: e instanceof Error ? e.message : 'scale-ingest inalcanzable',
+    };
+  }
+}
 async function wahaJson<T>(cfg: WhatsappCfg, path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set('X-Api-Key', cfg.api_key);
@@ -1069,6 +1135,7 @@ serve(async (req) => {
       return checkWaha(waCfg, runRecovery, prev.details);
     } },
     { key: 'supabase', name: 'Supabase', run: () => checkSupabase(admin) },
+    { key: 'morphoscan', name: 'MorphoScan / básculas', run: () => checkMorphoscan(admin) },
     { key: 'meta', name: 'Meta', run: () => checkMeta(admin, companyId) },
     { key: 'issabel', name: 'Issabel', run: () => checkIssabel() },
     { key: 'spa3102', name: 'FXO-FXS SPA3102', run: async () => {

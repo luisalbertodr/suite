@@ -79,6 +79,15 @@ Invoke-SuiteSsh "cd '$RemoteDir' && set -a && . ./.env && set +a && npm run vali
 Write-Host "Activando servicio systemd continuo ..." -ForegroundColor Green
 Invoke-SuiteSsh "systemctl daemon-reload && systemctl enable --now ble-scale-sync.service && sleep 2 && systemctl --no-pager --full status ble-scale-sync.service | head -25"
 
+Write-Host "Instalando watchdog BLE (detección de escaneo D-Bus colgado) ..." -ForegroundColor Green
+$watchdogSrc = Join-Path $LocalDir "suite-ble-gateway-watchdog.sh"
+$restartSrc = Join-Path $LocalDir "restart-ble-safe.sh"
+& scp @SshArgs $watchdogSrc "${SshTarget}:/tmp/suite-ble-gateway-watchdog.sh"
+if ($LASTEXITCODE -ne 0) { throw "scp suite-ble-gateway-watchdog.sh falló" }
+& scp @SshArgs $restartSrc "${SshTarget}:/tmp/restart-ble-safe.sh"
+if ($LASTEXITCODE -ne 0) { throw "scp restart-ble-safe.sh falló" }
+Invoke-SuiteSsh "sed -i 's/\r`$//' /tmp/suite-ble-gateway-watchdog.sh /tmp/restart-ble-safe.sh && install -m 755 /tmp/restart-ble-safe.sh /usr/local/bin/restart-ble-safe.sh && install -m 755 /tmp/suite-ble-gateway-watchdog.sh /usr/local/bin/suite-ble-gateway-watchdog.sh && mkdir -p /var/lib/suite-ble-watchdog /var/log/suite && (crontab -l 2>/dev/null | grep -v suite-ble-gateway-watchdog || true; echo '* * * * * /usr/local/bin/suite-ble-gateway-watchdog.sh') | crontab - && /usr/local/bin/suite-ble-gateway-watchdog.sh || true"
+
 Write-Host "Últimas líneas de log:" -ForegroundColor Cyan
 Invoke-SuiteSsh "journalctl -u ble-scale-sync.service -n 30 --no-pager"
 
