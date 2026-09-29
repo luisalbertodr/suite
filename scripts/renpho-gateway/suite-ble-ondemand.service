@@ -1,0 +1,15 @@
+[Unit]
+Description=Suite BLE on-demand controller (start ble-scale-sync on «Pesar», stop after idle)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/suite-ble-ondemand.sh loop
+Restart=always
+RestartSec=3
+Environment=BLE_ONDEMAND_POLL_SEC=5
+Environment=BLE_ONDEMAND_IDLE_STOP_SEC=600
+
+[Install]
+WantedBy=multi-user.target

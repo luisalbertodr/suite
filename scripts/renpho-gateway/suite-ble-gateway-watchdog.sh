@@ -1,11 +1,8 @@
 #!/bin/bash
 # Watchdog del gateway BLE (MorphoScan): detecta escaneo/D-Bus colgado.
 #
-# Caso típico: btAdapter.devices() no resuelve → no más logs "Still scanning"
-# aunque el event loop (setInterval heartbeat) siga vivo. WatchdogSec de
-# systemd NO lo detecta. Este cron mira frescura del journal + Discovering.
-#
-# En idle normal Discovering=no y el journal puede estar callado horas → OK.
+# Con modo on-demand, ble-scale-sync puede estar parado a propósito (sin «Pesar»).
+# Solo es fallo si hay pending abierto y el unit no corre, o si hay hung_scan.
 #
 # Instalar en suite-web (.112):
 #   install -m 755 suite-ble-gateway-watchdog.sh /usr/local/bin/
@@ -13,9 +10,9 @@
 set -eu
 
 UNIT="${BLE_WATCHDOG_UNIT:-ble-scale-sync}"
+ENV_FILE="${BLE_WATCHDOG_ENV:-/root/renpho-gateway/ble-scale-sync/.env}"
 STATE_DIR="${BLE_WATCHDOG_STATE_DIR:-/var/lib/suite-ble-watchdog}"
 LOG="${BLE_WATCHDOG_LOG:-/var/log/suite/ble-gateway-watchdog.log}"
-# Sin líneas nuevas en journal durante este tiempo → colgado (discovery=120s + margen).
 STALE_SEC="${BLE_WATCHDOG_STALE_SEC:-180}"
 MAX_FAILS="${BLE_WATCHDOG_MAX_FAILS:-2}"
 COOLDOWN_SEC="${BLE_WATCHDOG_COOLDOWN_SEC:-300}"
@@ -28,6 +25,19 @@ mkdir -p "$STATE_DIR" "$(dirname "$LOG")"
 ts() { date -Is; }
 log() { echo "$(ts) $*" | tee -a "$LOG"; }
 
+pending_open() {
+  local secret cid url pend
+  secret=$(grep '^SCALE_INGEST_SECRET=' "$ENV_FILE" | cut -d= -f2- | tr -d '\r')
+  cid=$(grep '^SUITE_COMPANY_ID=' "$ENV_FILE" | cut -d= -f2- | tr -d '\r')
+  url=$(grep '^SCALE_INGEST_URL=' "$ENV_FILE" | cut -d= -f2- | tr -d '\r')
+  url=${url:-https://supabase.lipoout.com/functions/v1/scale-ingest}
+  pend=$(curl -sS -m 8 \
+    -H "X-Scale-Ingest-Secret: $secret" \
+    -H "X-Suite-Company-Id: $cid" \
+    "${url}?pending=1" 2>/dev/null || echo '{}')
+  echo "$pend" | grep -q '"pending":true'
+}
+
 fails=0
 if [[ -f "$FAIL_FILE" ]]; then
   fails=$(cat "$FAIL_FILE" 2>/dev/null || echo 0)
@@ -37,9 +47,23 @@ case "$fails" in
 esac
 
 if ! systemctl is-active --quiet "$UNIT"; then
-  fails=$((fails + 1))
-  echo "$fails" > "$FAIL_FILE"
-  log "FAIL #$fails unit=$UNIT not active"
+  if pending_open; then
+    fails=$((fails + 1))
+    echo "$fails" > "$FAIL_FILE"
+    log "FAIL #$fails unit=$UNIT not active while pending weigh open"
+  else
+    # Parado a propósito (ondemand idle) — OK.
+    if [[ "$fails" -gt 0 ]]; then
+      log "OK idle-stopped recovered after ${fails} fail(s)"
+    else
+      minute=$(date +%M)
+      if [[ "$minute" == "00" || "$minute" == "30" ]]; then
+        log "OK idle-stopped (ondemand)"
+      fi
+    fi
+    echo 0 > "$FAIL_FILE"
+    exit 0
+  fi
 else
   last_ts=$(journalctl -u "$UNIT" -n 1 -o short-unix --no-pager 2>/dev/null \
     | awk '{print int($1)}' | tail -1 || true)
@@ -96,22 +120,26 @@ if [[ $((now - last)) -lt "$COOLDOWN_SEC" ]]; then
 fi
 
 echo "$now" > "$COOLDOWN_FILE"
-log "RESTART $UNIT (hung BLE gateway)"
+log "RESTART $UNIT (watchdog recovery)"
+# Con pending abierto NO usar restart-ble-safe (rechaza). Arrancar/reiniciar directo.
+if pending_open; then
+  systemctl reset-failed "$UNIT" 2>/dev/null || true
+  systemctl restart "$UNIT" >>"$LOG" 2>&1 || log "ERROR: systemctl restart failed"
+  sleep 3
+  systemctl is-active --quiet "$UNIT" && echo 0 > "$FAIL_FILE" || true
+  exit 0
+fi
+
 if [[ -x "$RESTART_SCRIPT" ]]; then
   if "$RESTART_SCRIPT" >>"$LOG" 2>&1; then
     echo 0 > "$FAIL_FILE"
     log "restart-ble-safe OK"
   else
     rc=$?
-    if [[ "$rc" -eq 2 ]]; then
-      log "SKIP restart: pending weigh open (safe script refused)"
-      echo 1 > "$FAIL_FILE"
-    else
-      log "ERROR: restart-ble-safe failed rc=$rc — forcing systemctl restart"
-      systemctl restart "$UNIT" >>"$LOG" 2>&1 || log "ERROR: systemctl restart failed"
-      sleep 3
-      systemctl is-active --quiet "$UNIT" && echo 0 > "$FAIL_FILE" || true
-    fi
+    log "ERROR: restart-ble-safe failed rc=$rc — forcing systemctl restart"
+    systemctl restart "$UNIT" >>"$LOG" 2>&1 || log "ERROR: systemctl restart failed"
+    sleep 3
+    systemctl is-active --quiet "$UNIT" && echo 0 > "$FAIL_FILE" || true
   fi
 else
   systemctl restart "$UNIT" >>"$LOG" 2>&1 || log "ERROR: systemctl restart failed"

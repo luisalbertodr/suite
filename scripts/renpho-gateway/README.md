@@ -2,13 +2,15 @@
 #
 # Host: mail.lipoout.com (192.168.99.112), ruta /root/renpho-gateway/ble-scale-sync
 #
-# Instalar / actualizar continuo:
+# Instalar / actualizar:
 #   .\scripts\renpho-gateway\install-continuous.ps1
 #   .\scripts\renpho-gateway\install-continuous.ps1 -SshTarget suite-web
 #
-# El servicio systemd `ble-scale-sync` corre siempre (CONTINUOUS_MODE).
-# Suite asigna cliente y báscula con «Pesar» / «Pesar+»; el bridge solo escanea BLE
-# mientras haya petición abierta (modo idle/active, TTL 5 min).
+# Modo on-demand:
+#   suite-ble-ondemand.service (siempre) hace poll a scale-ingest ?pending=1 cada 5s.
+#   Al detectar «Pesar» → systemctl start/restart ble-scale-sync (proceso fresco).
+#   Tras 10 min sin pending → systemctl stop ble-scale-sync.
+#   ble-scale-sync NO arranca en boot.
 #
 # Requisitos: no usar la app Renpho Health a la vez en esa báscula.
 # Tras instalar, `npm run validate` debe mostrar ≥1 exporter(s).
@@ -17,18 +19,15 @@
 #   suite-pending.ts   — poll ?pending=1 + target_scale_mac (timeout 12s, fail logs)
 #   renpho-msc04.ts    — handshake BIA con perfil del paciente
 #   loop.ts (parche)   — idle sin escaneo BLE hasta «Pesar»
-#   discovery.ts       — conecta solo la MAC elegida (Pesar / Pesar+)
+#   discovery.ts       — MAC objetivo + timeout D-Bus 8s + abort si pending expira
 #
 # Fiabilidad (host Supabase .110):
 #   /usr/local/bin/suite-scale-ingest-watchdog.sh  (cron * * * *)
-#   Reinicia supabase-edge-functions si scale-ingest no responde 3 min seguidos.
 #
 # Fiabilidad (gateway BLE .112):
-#   systemd WatchdogSec=120 (Type=notify) — event loop congelado
-#   /usr/local/bin/suite-ble-gateway-watchdog.sh  (cron * * * *)
-#   Detecta escaneo D-Bus colgado (journal stale + Discovering=yes) y reinicia
-#   vía restart-ble-safe.sh (no tumba mid-weigh).
-#   discovery.ts: timeout 8s en Adapter.devices()/getDevice + abort si pending expira.
+#   suite-ble-ondemand.service — lifecycle start/stop
+#   systemd WatchdogSec=120 en ble-scale-sync — event loop congelado
+#   /usr/local/bin/suite-ble-gateway-watchdog.sh  (cron * * * *) — hung scan
 #
 # Botones Suite (src/lib/inbodyMeasurements.ts):
 #   «Pesar»   → 60:30:F2:74:22:B6

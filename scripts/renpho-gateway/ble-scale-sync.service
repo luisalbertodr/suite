@@ -4,9 +4,9 @@ After=network-online.target bluetooth.service
 Wants=network-online.target
 
 [Service]
-# Type=notify + WatchdogSec: si el event loop se congela (D-Bus sync stall),
-# dejan de llegar WATCHDOG=1 y systemd mata/reinicia. Escaneos async colgados
-# los cubre suite-ble-gateway-watchdog.sh (cron).
+# Arrancado bajo demanda por suite-ble-ondemand.service al detectar «Pesar».
+# Type=notify + WatchdogSec: event loop congelado → systemd mata/reinicia.
+# Escaneos async colgados: suite-ble-gateway-watchdog.sh (cron).
 Type=notify
 NotifyAccess=all
 WatchdogSec=120
@@ -17,14 +17,12 @@ EnvironmentFile=-/root/renpho-gateway/ble-scale-sync/.env
 Environment=CONTINUOUS_MODE=true
 Environment=PATH=/root/renpho-gateway/ble-scale-sync/venv/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=/usr/bin/npm start
-Restart=always
+# on-failure: un `systemctl stop` del ondemand se mantiene parado.
+Restart=on-failure
 RestartSec=5
-# node-ble acumula match rules de D-Bus; reciclar el proceso limpia la conexión.
-# Con modo idle (solo escanea tras «Pesar») el límite tarda más en alcanzarse.
-RuntimeMaxSec=3600
-# Bluetooth / D-Bus
+# Seguridad si un pesaje deja el proceso vivo demasiado (TTL 5 min + gracia).
+RuntimeMaxSec=1800
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
 
-[Install]
-WantedBy=multi-user.target
+# Sin [Install]/ no se habilita en boot. suite-ble-ondemand lo arranca al «Pesar».
