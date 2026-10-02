@@ -70,7 +70,8 @@ SCALE_INGEST_URL=https://supabase.lipoout.com/functions/v1/scale-ingest
 SCALE_MACS=$scaleMacs
 CONTINUOUS_MODE=true
 "@
-$b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($envBody))
+$envBodyUnix = ($envBody -replace "`r`n", "`n" -replace "`r", "`n").TrimEnd() + "`n"
+$b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($envBodyUnix))
 Invoke-SuiteSsh "echo $b64 | base64 -d > '$RemoteDir/.env' && chmod 600 '$RemoteDir/.env'"
 
 Write-Host "Validando config ..." -ForegroundColor Green
@@ -80,9 +81,9 @@ Write-Host "Instalando ondemand + watchdog ..." -ForegroundColor Green
 & scp @SshArgs $ondemandShSrc $watchdogSrc $restartSrc "${SshTarget}:/tmp/"
 if ($LASTEXITCODE -ne 0) { throw "scp scripts falló" }
 
-Invoke-SuiteSsh @"
+$remoteInstall = @'
 set -e
-sed -i 's/\r`$//' /tmp/suite-ble-ondemand.sh /tmp/suite-ble-gateway-watchdog.sh /tmp/restart-ble-safe.sh
+sed -i 's/\r$//' /tmp/suite-ble-ondemand.sh /tmp/suite-ble-gateway-watchdog.sh /tmp/restart-ble-safe.sh
 install -m 755 /tmp/suite-ble-ondemand.sh /usr/local/bin/suite-ble-ondemand.sh
 install -m 755 /tmp/suite-ble-gateway-watchdog.sh /usr/local/bin/suite-ble-gateway-watchdog.sh
 install -m 755 /tmp/restart-ble-safe.sh /usr/local/bin/restart-ble-safe.sh
@@ -100,7 +101,10 @@ systemctl --no-pager --full status suite-ble-ondemand.service | head -20
 systemctl is-active suite-ble-ondemand
 systemctl is-active ble-scale-sync || echo 'ble-scale-sync inactive (esperado sin Pesar)'
 tail -10 /var/log/suite/ble-ondemand.log || true
-"@
+'@
+$remoteInstallUnix = $remoteInstall -replace "`r`n", "`n" -replace "`r", "`n"
+$remoteB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($remoteInstallUnix))
+Invoke-SuiteSsh "echo $remoteB64 | base64 -d | bash"
 
 Write-Host ""
 Write-Host "OK: on-demand BLE en $SshTarget" -ForegroundColor Green

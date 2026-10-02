@@ -16,10 +16,10 @@
 # Tras instalar, `npm run validate` debe mostrar ≥1 exporter(s).
 #
 # Parches (install-continuous.ps1 los sube y aplica con apply-gateway-ble-fixes.py):
-#   suite-pending.ts   — poll ?pending=1 + target_scale_mac (timeout 12s, fail logs)
-#   renpho-msc04.ts    — handshake BIA con perfil del paciente
-#   loop.ts (parche)   — idle sin escaneo BLE hasta «Pesar»
-#   discovery.ts       — MAC objetivo + timeout D-Bus 8s + abort si pending expira
+#   suite-pending.ts   — poll ?pending=1 + target_scale_mac + expires_at + expect por MAC
+#   renpho-msc04.ts    — BIA preferido; weight-only solo al borde TTL / fin de «Pesar»
+#   loop.ts (parche)   — idle sin escaneo BLE hasta «Pesar» o flush weight-only
+#   discovery.ts       — MAC objetivo + flush MAC si pending cerró con peso stashed
 #
 # Fiabilidad (host Supabase .110):
 #   /usr/local/bin/suite-scale-ingest-watchdog.sh  (cron * * * *)

@@ -20,8 +20,15 @@ import {
 import { matchesDescriptor, type MatchDescriptor } from './match-descriptor.js';
 import { bleLog } from '../ble/types.js';
 import {
+  allowWeightOnlyExport,
+  clearMacExpect,
   fetchPendingWeigh,
+  getPendingExpiresAtMs,
+  isWeighPendingReady,
+  loadMacExpect,
+  saveMacExpect,
   startPendingPrefetch,
+  type MacExpectState,
   type PendingScaleProfile,
 } from '../suite-pending.js';
 
@@ -45,13 +52,12 @@ const FRAG_LAST = 0xaf;
 
 const FRAME_OVERHEAD = 6;
 const HANDSHAKE_GAP_MS = 400;
-const HANDSHAKE_GAP_RECONNECT_MS = 200;
+/** Reconnect: >200ms reduce «In Progress» cuando llegan frags BIA a la vez. */
+const HANDSHAKE_GAP_RECONNECT_MS = 350;
 /** Per-frame GATT write budget; BlueZ can hang forever on withResponse. */
 const HANDSHAKE_WRITE_TIMEOUT_MS = 2_000;
 /** Keep early 0x25/0x26 across a hung/dropped handshake for the next connect. */
 const ORPHAN_BODY_COMP_MAX_AGE_MS = 120_000;
-/** After this many reconnects without body-comp, export weight-only. */
-const WEIGHT_ONLY_AFTER_SESSIONS = 3;
 /** Accept a stored 0x26 as this weigh-in when age < this and weight matches. */
 const FRESH_AGE_S = 60;
 const MATCH_AGE_S = 1800;
@@ -61,7 +67,8 @@ const MATCH_WEIGHT_KG = 0.8;
  * 350ms was too short for cold edge starts → fell back to config male/26/170
  * (seen 2026-08-11 Marta Loureiro: weight 62.4 kg arrived, profile never applied).
  */
-const PENDING_HANDSHAKE_WAIT_MS = 2_000;
+/** Debe ser >= timeout HTTP de suite-pending (12s) para no caer al perfil config.yaml. */
+const PENDING_HANDSHAKE_WAIT_MS = 12_000;
 /**
  * MorphoScan DF-BIA `z1` (LE/10 after weight + 0x0a00) impedance scale factors.
  * End-anchored plen-8 fat is NOT Renpho body-fat % (Luis 2026-08-06: frame 14.4 %
@@ -449,6 +456,8 @@ export class RenphoMsc04Adapter
   private readonly compByReading = new WeakMap<ScaleReading, CachedComp>();
   /** Last profile used in handshake (Pesar ahora or config) for computeMetrics. */
   private lastProfile: UserProfile | null = null;
+  /** Pending display name for flush after «Pesar» closes. */
+  private lastPendingName = 'Suite';
   /** Connected scale MAC (uppercase, no separators) for Suite scale-id. */
   private lastDeviceMac = '';
 
@@ -469,6 +478,10 @@ export class RenphoMsc04Adapter
       bleLog.info(`Renpho R-MSC04: connected MAC ${this.lastDeviceMac}`);
     }
     this.pruneOrphans();
+
+    // Expect is per-MAC: never restore another scale's locked weight.
+    this.loadExpectForMac(this.lastDeviceMac);
+
     if (this.orphanedBodyComp.length > 0) {
       bleLog.info(
         `Renpho R-MSC04: ${this.orphanedBodyComp.length} orphaned body-comp frame(s) ` +
@@ -483,12 +496,8 @@ export class RenphoMsc04Adapter
 
     if (!Number.isNaN(this.expectKg)) {
       this.sessionsSinceExpect += 1;
-      if (this.sessionsSinceExpect >= WEIGHT_ONLY_AFTER_SESSIONS) {
-        this.weightOnlyFallback = true;
-        bleLog.info(
-          `Renpho R-MSC04: no body-comp after ${this.sessionsSinceExpect} sessions — weight-only fallback`,
-        );
-      }
+      this.refreshWeightOnlyPolicy('reconnect');
+      this.persistExpect();
     }
 
     if (!ctx.availableChars.has(CHR_WRITE)) {
@@ -500,6 +509,7 @@ export class RenphoMsc04Adapter
 
     // Wait briefly for Suite «Pesar ahora» profile (see PENDING_HANDSHAKE_WAIT_MS).
     const pending = await resolvePendingForHandshake();
+    const savedProfile = !pending ? loadMacExpect(this.lastDeviceMac)?.profile : null;
     const effectiveProfile: UserProfile = pending
       ? {
           height: pending.height,
@@ -507,11 +517,23 @@ export class RenphoMsc04Adapter
           gender: pending.gender,
           isAthlete: ctx.profile.isAthlete,
         }
-      : ctx.profile;
+      : savedProfile
+        ? {
+            height: savedProfile.height,
+            age: savedProfile.age,
+            gender: savedProfile.gender,
+            isAthlete: ctx.profile.isAthlete,
+          }
+        : ctx.profile;
     this.lastProfile = effectiveProfile;
-    const displayName = pending?.name || 'Suite';
+    this.lastPendingName = pending?.name || savedProfile?.name || 'Suite';
+    // Re-evaluate weight-only with fresh pending/TTL (may have closed while connecting).
+    if (!Number.isNaN(this.expectKg)) {
+      this.refreshWeightOnlyPolicy('handshake');
+      this.persistExpect();
+    }
 
-    const nameFrame = buildNameB7(displayName);
+    const nameFrame = buildNameB7(this.lastPendingName);
     const profileFrame = buildProfileB8(effectiveProfile);
     // On reconnect (we already locked a weight), still handshake — the scale
     // needs it to dump the fresh 0x26 — but use a tighter gap.
@@ -521,6 +543,7 @@ export class RenphoMsc04Adapter
         : HANDSHAKE_GAP_MS;
     const handshake = [HS_B3, HS_B2, nameFrame, profileFrame];
 
+    let handshakeOk = true;
     try {
       for (const frame of handshake) {
         await this.writeHandshakeFrame(ctx, frame);
@@ -532,16 +555,28 @@ export class RenphoMsc04Adapter
         this.orphanedAtMs = Date.now();
       }
       const msg = e instanceof Error ? e.message : String(e);
-      bleLog.info(`Renpho R-MSC04: handshake aborted — ${msg}`);
-      throw e;
+      const buffered =
+        this.earlyBodyComp.length > 0 || this.orphanedBodyComp.length > 0;
+      if (buffered) {
+        // Caso Gemma 2026-09-14: frags BIA llegan durante b8 → «In Progress» abortaba
+        // y se perdía el body-comp ya en cola. Recuperar en lugar de tirar la sesión.
+        handshakeOk = false;
+        bleLog.info(
+          `Renpho R-MSC04: handshake incomplete (${msg}) but body-comp buffered — recovering`,
+        );
+      } else {
+        bleLog.info(`Renpho R-MSC04: handshake aborted — ${msg}`);
+        throw e;
+      }
     }
 
     this.handshakeReady = true;
     bleLog.info(
-      `Renpho R-MSC04: handshake sent ` +
-        `(${pending ? 'Pesar ahora' : 'config'} ` +
+      `Renpho R-MSC04: handshake ${handshakeOk ? 'sent' : 'recovered'} ` +
+        `(${pending ? 'Pesar ahora' : savedProfile ? 'flush profile' : 'config'} ` +
         `${effectiveProfile.gender}/${effectiveProfile.age}y/${effectiveProfile.height}cm` +
-        `${!Number.isNaN(this.expectKg) ? `; expect ${this.expectKg.toFixed(2)} kg` : ''})`,
+        `${!Number.isNaN(this.expectKg) ? `; expect ${this.expectKg.toFixed(2)} kg` : ''}` +
+        `${this.weightOnlyFallback ? '; weight-only armed' : ''})`,
     );
 
     // Replay body-comp that arrived during the subscribe→handshake race, then
@@ -567,45 +602,164 @@ export class RenphoMsc04Adapter
         }
       }
     }
+
+    // Two-phase: if BIA never arrived and policy allows, flush stashed weight now
+    // (no need to wait for a new live/final that may never come after disconnect storms).
+    if (!this.postHandshakeReading && this.weightOnlyFallback && !Number.isNaN(this.expectKg)) {
+      this.postHandshakeReading = this.makeWeightOnlyReading(this.expectKg);
+      bleLog.info(
+        `Renpho R-MSC04: flushing stashed weight-only ${this.expectKg.toFixed(2)} kg ` +
+          `(sessions=${this.sessionsSinceExpect})`,
+      );
+      this.clearExpect();
+    }
   }
 
-  /** GATT write with timeout; falls back to no-response if withResponse hangs. */
+  /** GATT write with timeout; retries «In Progress»; falls back to no-response. */
   private async writeHandshakeFrame(
     ctx: ConnectionContext,
     frame: number[],
   ): Promise<void> {
     const label = handshakeCmdLabel(frame);
     const t0 = Date.now();
-    try {
-      await writeWithTimeout(
-        ctx.write,
-        CHR_WRITE,
-        frame,
-        true,
-        HANDSHAKE_WRITE_TIMEOUT_MS,
-        label,
-      );
-      bleLog.info(
-        `Renpho R-MSC04: handshake write 0x${label} ok (${Date.now() - t0}ms, withResponse)`,
-      );
-      return;
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      bleLog.info(
-        `Renpho R-MSC04: handshake write 0x${label} failed (${msg}); retry without response`,
-      );
+    const maxAttempts = 4;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await writeWithTimeout(
+          ctx.write,
+          CHR_WRITE,
+          frame,
+          true,
+          HANDSHAKE_WRITE_TIMEOUT_MS,
+          label,
+        );
+        bleLog.info(
+          `Renpho R-MSC04: handshake write 0x${label} ok (${Date.now() - t0}ms, withResponse)`,
+        );
+        return;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        const inProgress = /in progress/i.test(msg);
+        bleLog.info(
+          `Renpho R-MSC04: handshake write 0x${label} failed (${msg})` +
+            (inProgress && attempt < maxAttempts
+              ? `; backoff ${150 * attempt}ms`
+              : '; retry without response'),
+        );
+        if (inProgress && attempt < maxAttempts) {
+          await sleep(150 * attempt);
+          continue;
+        }
+
+        try {
+          await writeWithTimeout(
+            ctx.write,
+            CHR_WRITE,
+            frame,
+            false,
+            HANDSHAKE_WRITE_TIMEOUT_MS,
+            label,
+          );
+          bleLog.info(
+            `Renpho R-MSC04: handshake write 0x${label} ok (${Date.now() - t0}ms, noResponse)`,
+          );
+          return;
+        } catch (e2) {
+          const msg2 = e2 instanceof Error ? e2.message : String(e2);
+          // Si ya tenemos body-comp en cola, no tumbar la sesión por un b8 fallido.
+          if (this.earlyBodyComp.length > 0 || this.orphanedBodyComp.length > 0) {
+            bleLog.info(
+              `Renpho R-MSC04: skip write 0x${label} (${msg2}) — body-comp already buffered`,
+            );
+            return;
+          }
+          throw e2 instanceof Error ? e2 : new Error(msg2);
+        }
+      }
     }
-    await writeWithTimeout(
-      ctx.write,
-      CHR_WRITE,
-      frame,
-      false,
-      HANDSHAKE_WRITE_TIMEOUT_MS,
-      label,
-    );
+  }
+
+  private loadExpectForMac(mac: string): void {
+    // Always bind in-memory expect to this MAC (drop other scale's lock).
+    this.expectKg = Number.NaN;
+    this.expectAtMs = 0;
+    this.sessionsSinceExpect = 0;
+    this.weightOnlyFallback = false;
+    if (!mac) return;
+    const saved = loadMacExpect(mac);
+    if (!saved) return;
+    this.expectKg = saved.expectKg;
+    this.expectAtMs = saved.expectAtMs;
+    this.sessionsSinceExpect = saved.sessionsSinceExpect ?? 0;
+    this.weightOnlyFallback = Boolean(saved.weightOnlyFallback);
+    if (saved.profile && !this.lastProfile) {
+      this.lastProfile = {
+        height: saved.profile.height,
+        age: saved.profile.age,
+        gender: saved.profile.gender,
+        isAthlete: false,
+      };
+      this.lastPendingName = saved.profile.name || 'Suite';
+    }
     bleLog.info(
-      `Renpho R-MSC04: handshake write 0x${label} ok (${Date.now() - t0}ms, noResponse)`,
+      `Renpho R-MSC04: restored expect ${this.expectKg.toFixed(2)} kg for ${mac} ` +
+        `(sessions=${this.sessionsSinceExpect}, weightOnly=${this.weightOnlyFallback})`,
     );
+  }
+
+  private refreshWeightOnlyPolicy(reason: string): void {
+    if (Number.isNaN(this.expectKg)) return;
+    const pendingActive = isWeighPendingReady();
+    const expiresAtMs = getPendingExpiresAtMs();
+    const allow = allowWeightOnlyExport(
+      { sessionsSinceExpect: this.sessionsSinceExpect },
+      { pendingActive, expiresAtMs },
+    );
+    if (allow && !this.weightOnlyFallback) {
+      this.weightOnlyFallback = true;
+      const ttl =
+        expiresAtMs != null ? Math.max(0, Math.round((expiresAtMs - Date.now()) / 1000)) : null;
+      bleLog.info(
+        `Renpho R-MSC04: weight-only armed (${reason}; sessions=${this.sessionsSinceExpect}` +
+          `${pendingActive ? '' : '; pending closed'}` +
+          `${ttl != null ? `; ttl ${ttl}s` : ''})`,
+      );
+    } else if (!allow && this.weightOnlyFallback) {
+      // Keep trying BIA while «Pesar» still has headroom.
+      this.weightOnlyFallback = false;
+    }
+  }
+
+  private makeWeightOnlyReading(weight: number): ScaleReading {
+    const reading: ScaleReading = { weight, impedance: 0 };
+    this.compByReading.set(reading, { weightOnly: true, fatSource: 'none' });
+    this.finalReceived = true;
+    return reading;
+  }
+
+  private persistExpect(): void {
+    if (!this.lastDeviceMac) return;
+    if (Number.isNaN(this.expectKg) || !(this.expectKg > 0)) {
+      clearMacExpect(this.lastDeviceMac);
+      return;
+    }
+    const profile: PendingScaleProfile | null = this.lastProfile
+      ? {
+          height: this.lastProfile.height,
+          age: this.lastProfile.age,
+          gender: this.lastProfile.gender,
+          name: this.lastPendingName || 'Suite',
+        }
+      : null;
+    const state: MacExpectState = {
+      expectKg: this.expectKg,
+      expectAtMs: this.expectAtMs,
+      sessionsSinceExpect: this.sessionsSinceExpect,
+      weightOnlyFallback: this.weightOnlyFallback,
+      profile,
+    };
+    saveMacExpect(this.lastDeviceMac, state);
   }
 
   private pruneOrphans(): void {
@@ -712,9 +866,7 @@ export class RenphoMsc04Adapter
       this.noteExpect(frame.weight);
       if (this.weightOnlyFallback) {
         bleLog.info(`Renpho R-MSC04: weight-only fallback ${frame.weight.toFixed(2)} kg (live)`);
-        const reading: ScaleReading = { weight: frame.weight, impedance: 0 };
-        this.compByReading.set(reading, { weightOnly: true });
-        this.finalReceived = true;
+        const reading = this.makeWeightOnlyReading(frame.weight);
         this.clearExpect();
         return reading;
       }
@@ -725,11 +877,14 @@ export class RenphoMsc04Adapter
       this.finalReceived = true;
       this.finalWeight = frame.weight;
       this.noteExpect(frame.weight);
-      bleLog.info(`Renpho R-MSC04: final weight ${frame.weight.toFixed(2)} kg — waiting for body-comp`);
+      bleLog.info(
+        this.weightOnlyFallback
+          ? `Renpho R-MSC04: final weight ${frame.weight.toFixed(2)} kg — weight-only export`
+          : `Renpho R-MSC04: final weight ${frame.weight.toFixed(2)} kg — waiting for body-comp`,
+      );
 
       if (this.weightOnlyFallback) {
-        const reading: ScaleReading = { weight: frame.weight, impedance: 0 };
-        this.compByReading.set(reading, { weightOnly: true });
+        const reading = this.makeWeightOnlyReading(frame.weight);
         this.clearExpect();
         return reading;
       }
@@ -750,6 +905,9 @@ export class RenphoMsc04Adapter
     }
     this.expectKg = weight;
     this.expectAtMs = Date.now();
+    // Prefer BIA while «Pesar» has time left — do not arm weight-only on first lock.
+    this.refreshWeightOnlyPolicy('note-expect');
+    this.persistExpect();
   }
 
   parseNotification(data: Buffer): ScaleReading | null {
@@ -921,11 +1079,13 @@ export class RenphoMsc04Adapter
   }
 
   private clearExpect(): void {
+    const mac = this.lastDeviceMac;
     this.expectKg = Number.NaN;
     this.expectAtMs = 0;
     this.sessionsSinceExpect = 0;
     this.weightOnlyFallback = false;
     this.lastLiveWeight = 0;
+    if (mac) clearMacExpect(mac);
   }
 
   private decodeFrame(data: Buffer): { cmd: number; weight: number } | null {

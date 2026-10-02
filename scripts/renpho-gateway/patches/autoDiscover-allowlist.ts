@@ -18,7 +18,11 @@ import type { BleDeviceInfo, ScaleAdapter } from '../../interfaces/scale-adapter
 import { resolveAdapter } from '../../scales/resolve.js';
 import { bleLog } from '../types.js';
 import { DISCOVERY_TIMEOUT_MS, DISCOVERY_POLL_MS, sleep, RSSI_UNAVAILABLE } from './constants.js';
-import { fetchPendingWeigh, getTargetScaleMac } from '../../../suite-pending.js';
+import {
+  fetchPendingWeigh,
+  getFlushTargetMac,
+  getTargetScaleMac,
+} from '../../../suite-pending.js';
 
 function normalizeMac(mac: string): string {
   return mac.replace(/[^a-fA-F0-9]/g, '').toUpperCase();
@@ -103,6 +107,12 @@ export async function autoDiscover(
   const deadline = Date.now() + DISCOVERY_TIMEOUT_MS;
   let heartbeat = 0;
   const allow = allowedScaleMacs();
+  const pending = await fetchPendingWeigh(true);
+  const flushMac = getFlushTargetMac();
+  if ((!pending.pending || !pending.ready) && !flushMac) {
+    bleLog.debug('Auto-discovery idle: no pending weigh request');
+    throw new Error('No pending weigh request');
+  }
   const targetMac = getTargetScaleMac();
   const pollMs = allow || targetMac ? ALLOWLIST_POLL_MS : DISCOVERY_POLL_MS;
   const renphoFallback =
@@ -111,7 +121,8 @@ export async function autoDiscover(
     null;
   if (targetMac) {
     bleLog.info(
-      `Auto-discovery target scale: ${formatMacColons(targetMac)} (poll ${pollMs}ms)`,
+      `Auto-discovery target scale: ${formatMacColons(targetMac)}` +
+        `${!pending.pending ? ' (weight-only flush)' : ''} (poll ${pollMs}ms)`,
     );
   } else if (allow) {
     bleLog.info(
@@ -125,9 +136,9 @@ export async function autoDiscover(
       throw abortSignal.reason ?? new DOMException('Aborted', 'AbortError');
     }
 
-    const pending = await fetchPendingWeigh(true);
-    if (!pending.pending || !pending.ready) {
-      bleLog.debug('Auto-discovery idle: no pending weigh request');
+    const live = await fetchPendingWeigh(false);
+    const liveFlush = getFlushTargetMac();
+    if ((!live.pending || !live.ready) && !liveFlush) {
       throw new Error('No pending weigh request');
     }
 

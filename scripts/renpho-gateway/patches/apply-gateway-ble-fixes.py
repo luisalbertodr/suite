@@ -89,7 +89,8 @@ export async function autoDiscover(
   let heartbeat = 0;
   const allow = allowedScaleMacs();
   const pending = await fetchPendingWeigh(true);
-  if (!pending.pending || !pending.ready) {
+  const flushMac = getFlushTargetMac();
+  if ((!pending.pending || !pending.ready) && !flushMac) {
     bleLog.debug('Auto-discovery idle: no pending weigh request');
     throw new Error('No pending weigh request');
   }
@@ -101,7 +102,8 @@ export async function autoDiscover(
     null;
   if (targetMac) {
     const label = targetMac.match(/.{1,2}/g)?.join(':') ?? targetMac;
-    bleLog.info(`Auto-discovery target scale: ${label} (poll ${pollMs}ms)`);
+    const flushTag = !pending.pending ? ' (weight-only flush)' : '';
+    bleLog.info(`Auto-discovery target scale: ${label}${flushTag} (poll ${pollMs}ms)`);
   } else if (allow) {
     bleLog.info(
       `Auto-discovery allowlist: ${[...allow].map((m) => m.match(/.{1,2}/g)?.join(':') ?? m).join(', ')} ` +
@@ -113,9 +115,10 @@ export async function autoDiscover(
     if (abortSignal?.aborted) {
       throw abortSignal.reason ?? new DOMException('Aborted', 'AbortError');
     }
-    // Si Suite canceló/expiró el «Pesar», no seguir escaneando hasta el timeout.
+    // Si Suite canceló/expiró el «Pesar», solo seguir si hay flush weight-only.
     const live = await fetchPendingWeigh(false);
-    if (!live.pending || !live.ready) {
+    const liveFlush = getFlushTargetMac();
+    if ((!live.pending || !live.ready) && !liveFlush) {
       throw new Error('No pending weigh request');
     }
     let addresses: string[];
@@ -254,12 +257,23 @@ def patch_discovery() -> None:
     )
     # discovery.ts vive en src/ble/handler-node-ble/, así que para llegar a src/suite-pending.ts
     # hay que subir 2 niveles: ../../suite-pending.js (subir 3 lleva fuera de /src).
-    import_line = "import { fetchPendingWeigh, getTargetScaleMac } from '../../suite-pending.js';\n"
+    import_line = (
+        "import { fetchPendingWeigh, getFlushTargetMac, getTargetScaleMac } "
+        "from '../../suite-pending.js';\n"
+    )
     if "fetchPendingWeigh" not in text:
         anchor = "import { resolveAdapter } from '../../scales/resolve.js';\n"
         if anchor not in text:
             raise SystemExit("discovery.ts: resolveAdapter import not found")
         text = text.replace(anchor, anchor + import_line, 1)
+    elif "getFlushTargetMac" not in text:
+        text = re.sub(
+            r"import \{ fetchPendingWeigh, getTargetScaleMac \} from '../../suite-pending\.js';",
+            "import { fetchPendingWeigh, getFlushTargetMac, getTargetScaleMac } "
+            "from '../../suite-pending.js';",
+            text,
+            count=1,
+        )
 
     if "RSSI_UNAVAILABLE" not in text.split("autoDiscover")[0]:
         text = text.replace(
