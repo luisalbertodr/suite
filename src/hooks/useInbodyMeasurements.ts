@@ -10,8 +10,6 @@ import {
   normInbodyUserId,
   type InbodyMeasurement,
 } from '@/lib/inbodyMeasurements';
-import { useCompanyFilter } from '@/hooks/useCompanyFilter';
-
 /** Clave de persona (DNI/NIE), no IDs de báscula tipo SCALE+MAC. */
 function looksLikePersonDocumentKey(key: string | null | undefined): boolean {
   if (!key) return false;
@@ -54,18 +52,19 @@ function measurementBelongsToCustomer(
 export function useInbodyMeasurements(
   customerId: string | undefined,
   taxId: string | null | undefined,
-  /** Empresa del cliente (customers.company_id); evita filtrar por la sesión activa si difiere. */
-  customerCompanyId?: string | null,
+  /**
+   * @deprecated Ignorado. Los clientes se comparten; el listado InBody es cross-company.
+   * Se mantiene en la firma por compatibilidad con callers.
+   */
+  _customerCompanyId?: string | null,
 ) {
-  const { companyId: sessionCompanyId } = useCompanyFilter();
-  const companyId = customerCompanyId || sessionCompanyId;
   const taxKeys = taxId ? dniMatchKeys(taxId) : [];
 
   return useQuery({
-    queryKey: ['inbody_measurements', companyId, customerId, taxKeys.join('|')],
-    enabled: Boolean(companyId && customerId),
+    queryKey: ['inbody_measurements', 'cross-company', customerId, taxKeys.join('|')],
+    enabled: Boolean(customerId),
     queryFn: async (): Promise<InbodyMeasurement[]> => {
-      if (!companyId || !customerId) return [];
+      if (!customerId) return [];
 
       const orParts = [`customer_id.eq.${customerId}`];
       for (const key of taxKeys) {
@@ -75,7 +74,6 @@ export function useInbodyMeasurements(
       const { data, error } = await (supabase as any)
         .from('inbody_measurements')
         .select('*')
-        .eq('company_id', companyId)
         .or(orParts.join(','))
         .order('measured_at', { ascending: false });
 
