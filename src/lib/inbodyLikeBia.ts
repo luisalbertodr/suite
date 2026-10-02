@@ -5,7 +5,7 @@
  * No usa %BF comercial Renpho; recalcula TBW→FFM→BFM y objetivos clínicos.
  *
  * R efectiva ~50 kHz (prioridad):
- * 1) Path RA+tronco+RL × escala sexo (M 0.73 / F 0.635; pares InBody Luis+Marta)
+ * 1) Path RA+tronco+RL × escala sexo (M 0.73 / F 0.635) × (path/z1)^γ si path<z1
  * 2) Fallback z1 × escala sexo (Marta F×1.08, Luis M×1.33)
  */
 
@@ -83,7 +83,13 @@ export const INBODY_LIKE_PATH_SCALE_FEMALE = 0.635;
 /** @deprecated Prefer pathScaleForSex — male default for back-compat. */
 export const INBODY_LIKE_PATH_SCALE = INBODY_LIKE_PATH_SCALE_MALE;
 
-export const INBODY_LIKE_FORMULA_VERSION = 'inbody-like-v3-2026-10-ctrl';
+/**
+ * Si pathR < z1R, R_eff = pathR × (pathR/z1R)^γ.
+ * γ=0.4 clava fat_control Luis Oct (−2.4) sin romper Aug/Marta (path≈z1 → casi no-op).
+ */
+export const INBODY_LIKE_PATH_Z1_GAMMA = 0.4;
+
+export const INBODY_LIKE_FORMULA_VERSION = 'inbody-like-v4-2026-10-fc';
 
 const HYDRATION_FFM = 0.73;
 const PROTEIN_OF_FFM = 0.18;
@@ -160,6 +166,8 @@ export function estimatePathR50Ohm(
  * R efectiva ~50 kHz.
  * Preferir path segmentario; si path y z1 discrepan >12 % relativo, usar z1
  * (mapas Morpho a veces truncan tronco/pierna y el path se dispara).
+ * Si pathR < z1R, aplicar (pathR/z1R)^γ para alinear TBW/fat_control con InBody
+ * del mismo día (Luis 2026-10-02: −2.4 kg).
  */
 export function resolveEffectiveR50Ohm(opts: {
   sex: InbodyLikeSex;
@@ -175,8 +183,13 @@ export function resolveEffectiveR50Ohm(opts: {
   const path = estimatePathR50Ohm(opts.z20, opts.z100);
   if (path != null) {
     const pathR = r1(path * pathScaleForSex(opts.sex));
-    if (z1R != null && z1R > 0 && Math.abs(pathR - z1R) / z1R > 0.12) {
-      return z1R;
+    if (z1R != null && z1R > 0) {
+      if (Math.abs(pathR - z1R) / z1R > 0.12) {
+        return z1R;
+      }
+      if (pathR < z1R && INBODY_LIKE_PATH_Z1_GAMMA > 0) {
+        return r1(pathR * Math.pow(pathR / z1R, INBODY_LIKE_PATH_Z1_GAMMA));
+      }
     }
     return pathR;
   }
