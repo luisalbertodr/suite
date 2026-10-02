@@ -6,6 +6,7 @@ import {
   extractInbodyDni,
   dedupeInbodyMeasurements,
   isMorphoScanMeasurement,
+  isScaleBridgeUserId,
   normalizeInbodyMeasurement,
   normInbodyUserId,
   type InbodyMeasurement,
@@ -14,12 +15,6 @@ import {
 function looksLikePersonDocumentKey(key: string | null | undefined): boolean {
   if (!key) return false;
   return /^\d{7,8}$/.test(key) || /^[XYZ]\d{7}$/i.test(key);
-}
-
-/** IDs del puente BLE / MorphoScan (no son DNI LookInBody). */
-function isScaleBridgeUserId(userId: string | null | undefined): boolean {
-  const s = normInbodyUserId(userId);
-  return /^SCALE[0-9A-F]{12}$/i.test(s) || /^SCALE-/i.test(s);
 }
 
 function measurementBelongsToCustomer(

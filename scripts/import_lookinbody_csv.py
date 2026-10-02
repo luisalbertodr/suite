@@ -304,7 +304,7 @@ INSERT INTO public.inbody_measurements (
   %s, %s
 )
 ON CONFLICT (company_id, inbody_user_id, measured_at) DO UPDATE SET
-  customer_id = EXCLUDED.customer_id,
+  customer_id = COALESCE(EXCLUDED.customer_id, public.inbody_measurements.customer_id),
   height_cm = EXCLUDED.height_cm,
   age_years = EXCLUDED.age_years,
   sex = EXCLUDED.sex,
