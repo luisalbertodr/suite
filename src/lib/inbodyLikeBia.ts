@@ -83,13 +83,16 @@ export const INBODY_LIKE_PATH_SCALE_FEMALE = 0.635;
 /** @deprecated Prefer pathScaleForSex — male default for back-compat. */
 export const INBODY_LIKE_PATH_SCALE = INBODY_LIKE_PATH_SCALE_MALE;
 
-export const INBODY_LIKE_FORMULA_VERSION = 'inbody-like-v2-2026-10-path';
+export const INBODY_LIKE_FORMULA_VERSION = 'inbody-like-v3-2026-10-ctrl';
 
 const HYDRATION_FFM = 0.73;
 const PROTEIN_OF_FFM = 0.18;
 const BONE_OF_FFM = 0.07;
 /** SMM ≈ fracción de FFM en adultos (LookInBody / clínica ~55–57 %). */
 const SMM_OF_FFM = 0.57;
+/** %BF objetivo LookInBody Standard. */
+const IDEAL_PBF_MALE = 0.15;
+const IDEAL_PBF_FEMALE = 0.23;
 
 function r1(v: number): number {
   return Math.round(v * 10) / 10;
@@ -205,10 +208,52 @@ export function computeSmmKg(
   return h2r * 0.401 + s * 3.825 - ageYears * 0.071 + 5.1;
 }
 
+/**
+ * FFM máx. del rango normal LookInBody (InBody 270 clínica).
+ * Hombres: ajuste lineal a ffm_max_kg importado (180 cm → 64.9).
+ * Mujeres: ajuste a tabla InBody (167 cm → 49.8).
+ */
+export function inbodyStandardFfmMaxKg(heightCm: number, sex: InbodyLikeSex): number {
+  const h = clamp(heightCm, 140, 200);
+  if (sex === 'male') {
+    return r1(clamp(-63.16 + 0.7124 * h, 35, 90));
+  }
+  return r1(clamp(-47.2 + 0.58 * h, 30, 80));
+}
+
+/**
+ * Peso ideal LookInBody para controles.
+ * Hombre: FFM_max / (1 − 0.15) — clava fat_control InBody (Luis 180 → 76.4 kg / BFM 11.5).
+ * Mujer: IMC 21.5 (ya alineado con fat_control femenino en clínica).
+ */
 export function idealWeightKg(heightCm: number, sex: InbodyLikeSex): number {
+  if (sex === 'male') {
+    const pbf = IDEAL_PBF_MALE;
+    return r1(inbodyStandardFfmMaxKg(heightCm, sex) / (1 - pbf));
+  }
   const h = heightCm / 100;
-  const bmi = sex === 'male' ? 22 : 21.5;
-  return r1(bmi * h * h);
+  return r1(21.5 * h * h);
+}
+
+export function idealBfmKg(heightCm: number, sex: InbodyLikeSex): number {
+  const idealW = idealWeightKg(heightCm, sex);
+  const pbf = sex === 'male' ? IDEAL_PBF_MALE : IDEAL_PBF_FEMALE;
+  return r2(idealW * pbf);
+}
+
+/** Rangos masa grasa estilo InBody 270 (no ±% del ideal Suite). */
+function inbodyFatMassRange(
+  heightCm: number,
+  sex: InbodyLikeSex,
+): { min: number; max: number } {
+  const h = clamp(heightCm, 140, 200);
+  if (sex === 'male') {
+    // 180 cm → 8.6–17.1 (tabla clínica)
+    return { min: r1(-9.4 + 0.1 * h), max: r1(-15.3 + 0.18 * h) };
+  }
+  // Mujer: ancla a ideal ± banda LookInBody (~fat_min/max 153→10.1–16.1)
+  const ideal = idealBfmKg(heightCm, sex);
+  return { min: r1(ideal * 0.75), max: r1(ideal * 1.4) };
 }
 
 export function buildInbodyLikeRanges(
@@ -217,14 +262,15 @@ export function buildInbodyLikeRanges(
   idealW: number,
 ): InbodyLikeRanges {
   const h = heightCm / 100;
+  // InBody 270: ~IMC 18.5–25.3 (Luis 180 → 60.6–82.0)
   const wMin = r1(18.5 * h * h);
-  const wMax = r1(24.9 * h * h);
-  const idealBfm = sex === 'male' ? 0.15 * idealW : 0.23 * idealW;
-  const idealFfm = idealW - idealBfm;
-  // Bandas ± alrededor del ideal (LookInBody-ish, no 0.95–1.35×peso medido)
+  const wMax = r1(25.3 * h * h);
+  const idealBfm = idealBfmKg(heightCm, sex);
+  const idealFfm = r2(idealW - idealBfm);
+  const fatRange = inbodyFatMassRange(heightCm, sex);
   return {
     weightKg: { min: wMin, max: wMax },
-    fatKg: { min: r1(idealBfm * 0.7), max: r1(idealBfm * 1.35) },
+    fatKg: fatRange,
     boneKg: sex === 'male' ? { min: 2.5, max: 4.3 } : { min: 1.8, max: 3.2 },
     proteinKg: { min: r1(idealFfm * 0.16), max: r1(idealFfm * 0.22) },
     waterKg: { min: r1(idealFfm * 0.68), max: r1(idealFfm * 0.78) },
@@ -233,12 +279,11 @@ export function buildInbodyLikeRanges(
       min: r1(idealFfm * SMM_OF_FFM * 0.9),
       max: r1(idealFfm * SMM_OF_FFM * 1.1),
     },
-    bmi: { min: 18.5, max: 24.9 },
-    // Objetivo InBody ~15 % / 23 %; banda clínica adulta (no 10–20 comercial estrecha)
+    bmi: { min: 18.5, max: 25.0 },
     pbf:
       sex === 'male'
-        ? { min: 10, max: 22 }
-        : { min: 18, max: 30 },
+        ? { min: 10, max: 20 }
+        : { min: 18, max: 28 },
   };
 }
 
@@ -330,21 +375,22 @@ export function computeInbodyLikeComposition(
   const bmrKcal = Math.round(370 + 21.6 * ffm);
 
   const idealW = idealWeightKg(heightCm, sex);
-  const idealBfmKg = (sex === 'male' ? 0.15 : 0.23) * idealW;
-  const idealFfmKg = idealW - idealBfmKg;
-  const idealSmmKg = idealFfmKg * SMM_OF_FFM;
+  const idealBfm = idealBfmKg(heightCm, sex);
+  const idealFfm = r2(idealW - idealBfm);
+  const idealSmm = r2(idealFfm * SMM_OF_FFM);
 
   const weightControlKg = r1(idealW - weightKg);
-  const fatControlKg = r1(idealBfmKg - bodyFatKg);
-  let muscleControlKg = r1(idealFfmKg - ffm);
+  const fatControlKg = r1(idealBfm - bodyFatKg);
+  // LookInBody: si FFM/SMM ≥ ideal, control músculo = 0 (no “quitar músculo”).
+  let muscleControlKg = r1(idealFfm - ffm);
   if (muscleControlKg < 0) muscleControlKg = 0;
 
   const metabolicAge = computeMetabolicAge({
     ageYears,
     bodyFatKg,
-    idealBfmKg,
+    idealBfmKg: idealBfm,
     smmKg,
-    idealSmmKg,
+    idealSmmKg: idealSmm,
   });
 
   const ranges = buildInbodyLikeRanges(heightCm, sex, idealW);
@@ -365,9 +411,9 @@ export function computeInbodyLikeComposition(
     bmi: r1(bmi),
     bmrKcal,
     idealWeightKg: idealW,
-    idealBfmKg: r2(idealBfmKg),
-    idealFfmKg: r2(idealFfmKg),
-    idealSmmKg: r2(idealSmmKg),
+    idealBfmKg: idealBfm,
+    idealFfmKg: idealFfm,
+    idealSmmKg: idealSmm,
     weightControlKg,
     fatControlKg,
     muscleControlKg,
