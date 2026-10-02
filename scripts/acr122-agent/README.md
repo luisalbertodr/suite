@@ -67,8 +67,30 @@
 #   # debe ser el mismo valor (o ábrelo una vez y cópialo).
 #   python3 acr122_agent.py
 #
-# macOS
-# -----
+# macOS (Medicina / iMac El Capitan 10.11)
+# ----------------------------------------
+# El hardware USB solo no basta: hace falta driver CCID + agente local.
+# En 10.11 NO uses Homebrew (ya no es viable). Pasos:
+#   1) Driver CCID en /usr/local (installer martinpaljak osx-ccid-installer
+#      o el bundle ACS). Reiniciar el Mac.
+#   2) Si el lector se cuelga (LIBUSB_ERROR_TIMEOUT / error 229):
+#      desenchufar/enchufar el ACR122U. NO redirigir smartcard/USB en
+#      Microsoft Remote Desktop.
+#   3) Agente sin pyscard (Python 2.7 del sistema + ctypes):
+#        export NFC_AGENT_SECRET='...'
+#        export NFC_STATION_ID='station-medicina'
+#        export NFC_CURL_INSECURE=1   # El Capitan: CA/TLS viejos
+#        /usr/bin/python acr122_agent_macos.py
+#      LaunchAgent de ejemplo: com.lipoout.acr122-agent.plist.example
+#      NOTA: el Python 2.7 de 10.11 usa OpenSSL 0.9.8 (sin TLS1.2). El agente
+#      publica el UID con /usr/bin/curl -k. Un beep/LED del ACR122U NO implica
+#      que nfc-auth haya recibido el tag; mira agent.log / agent.err.
+#   4) Chrome en el RDP (usuario Lipoout) debe estar en login con:
+#        https://suite.lipoout.com/?nfc_station=station-medicina
+#      El agente NO abre Chrome en el iMac (la sesion la recoge la VM).
+#
+# macOS reciente (con brew)
+# -------------------------
 #   brew install pcsc-lite
 #   pip3 install pyscard
 #   # mismos exports y python3 acr122_agent.py

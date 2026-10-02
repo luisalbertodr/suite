@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Recepción
+Name[es_ES]=Recepción
+Exec=env DISPLAY=:0 RDP_PASS_FILE=/home/recepcion/.config/rdp-compaq.pass /home/recepcion/bin/rdp-recepcion.sh
+Exec[es_ES]=env DISPLAY=:0 RDP_PASS_FILE=/home/recepcion/.config/rdp-compaq.pass /home/recepcion/bin/rdp-recepcion.sh
+Comment=RDP Compaq + audio Pulse; NFC via agente local Linux (no USB ACR122U)
+Comment[es_ES]=RDP Compaq + audio Pulse; NFC via agente local Linux (no USB ACR122U)
+Terminal=false
+PrefersNonDefaultGPU=false
+Icon=xsi-drive-removable-media-symbolic
+Icon[es_ES]=xsi-drive-removable-media-symbolic
+Type=Application

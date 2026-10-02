@@ -554,7 +554,14 @@ export const WhatsappMessageBubble: React.FC<Props> = ({
   const isOut = message.from_me;
   const type = resolveWhatsappMessageType(message);
   const revoked = isMessageRevoked(message);
-  const isMedia = !revoked && type !== 'text' && type !== 'chat';
+  const isCall =
+    type === 'call' ||
+    type === 'call_missed' ||
+    type === 'call_accepted' ||
+    type === 'call_rejected' ||
+    type.startsWith('call');
+
+  const isMedia = !revoked && !isCall && type !== 'text' && type !== 'chat';
   const time = formatMessageTime(message.timestamp);
   const rawText = extractBodyFromWahaMessageRaw(message.raw);
   const textLine =
@@ -686,6 +693,10 @@ export const WhatsappMessageBubble: React.FC<Props> = ({
           }`}
         >
           {revokedMessageLabel(isOut)}
+        </p>
+      ) : isCall ? (
+        <p className="whitespace-pre-wrap break-words pr-12 text-sm italic text-[#667781] dark:text-zinc-300">
+          {textLine || '📞 Llamada'}
         </p>
       ) : isMedia ? (
         <div className="mb-1">

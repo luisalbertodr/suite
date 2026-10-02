@@ -24,14 +24,14 @@ export const TOP_BAR_CLEARANCE = 'top-[var(--suite-topbar-h,3rem)]';
  * Usar en Dialog/AlertDialog y en modales custom `fixed inset-0`.
  */
 export const DOCK_SAFE_MODAL_SHELL =
-  'fixed inset-x-0 top-0 suite-dock-clearance-bottom flex items-center justify-center p-3 sm:p-4';
+  'fixed top-0 right-0 suite-dock-clearance-bottom flex items-center justify-center p-3 sm:p-4';
 
 /**
  * Shell para modales de agenda (nueva/editar cita): libre de TopBar + dock,
  * anclado arriba para que el encabezado nunca quede fuera de pantalla.
  */
 export const AGENDA_MODAL_SHELL =
-  'fixed inset-x-0 top-[var(--suite-topbar-h,3rem)] suite-dock-clearance-bottom flex items-start justify-center overflow-y-auto p-3 sm:p-4';
+  'fixed top-[var(--suite-topbar-h,3rem)] right-0 suite-dock-clearance-bottom flex items-start justify-center overflow-y-auto p-3 sm:p-4';
 
 /** z-index de diálogos estándar (por debajo del dock). */
 export const ABOVE_DOCK_DIALOG_Z = 'z-[125]';
