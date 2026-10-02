@@ -491,14 +491,20 @@ async function fulfillWeighRequest(
 
 async function loadCustomerProfile(
   admin: SupabaseClient,
-  companyId: string,
+  _companyId: string,
   customerId: string,
-): Promise<{ tax_id: string | null; height_cm: number | null; birth_date: string | null; sex: string | null }> {
+): Promise<{
+  tax_id: string | null;
+  company_id: string | null;
+  height_cm: number | null;
+  birth_date: string | null;
+  sex: string | null;
+}> {
+  // Clientes compartidos: no filtrar por company del ingest.
   const { data } = await admin
     .from('customers')
-    .select('tax_id, height_cm, birth_date, clinical_profile')
+    .select('tax_id, company_id, height_cm, birth_date, clinical_profile')
     .eq('id', customerId)
-    .eq('company_id', companyId)
     .maybeSingle();
 
   const profile = (data?.clinical_profile && typeof data.clinical_profile === 'object'
@@ -511,6 +517,7 @@ async function loadCustomerProfile(
 
   return {
     tax_id: data?.tax_id ?? null,
+    company_id: data?.company_id ?? null,
     height_cm: asNumber(data?.height_cm),
     birth_date: data?.birth_date ? String(data.birth_date).slice(0, 10) : null,
     sex,
@@ -535,7 +542,7 @@ async function resolveCustomerId(
     customerId?: string | null;
     taxId?: string | null;
   },
-): Promise<{ customerId: string | null; matchedBy: string | null }> {
+): Promise<{ customerId: string | null; customerCompanyId: string | null; matchedBy: string | null }> {
   if (opts.customerId) {
     // Clientes compartidos: aceptar ficha aunque customers.company_id ≠ company del ingest.
     const { data } = await admin
@@ -546,30 +553,43 @@ async function resolveCustomerId(
     if (data?.id) {
       return {
         customerId: data.id,
+        customerCompanyId: data.company_id ?? null,
         matchedBy: data.company_id === companyId ? 'customer_id' : 'customer_id_shared',
       };
     }
   }
 
   const tax = completeSpanishDni(opts.taxId);
-  if (!tax) return { customerId: null, matchedBy: null };
+  if (!tax) return { customerId: null, customerCompanyId: null, matchedBy: null };
 
-  // Prefer same company, then any company (shared customers).
+  // Prefer same company, then any company (shared customers). Con/sin letra vía ilike + numérico.
   const { data: exactSame } = await admin
     .from('customers')
-    .select('id, tax_id')
+    .select('id, tax_id, company_id')
     .eq('company_id', companyId)
     .ilike('tax_id', tax)
     .maybeSingle();
-  if (exactSame?.id) return { customerId: exactSame.id, matchedBy: 'tax_id' };
+  if (exactSame?.id) {
+    return {
+      customerId: exactSame.id,
+      customerCompanyId: exactSame.company_id ?? null,
+      matchedBy: 'tax_id',
+    };
+  }
 
   const { data: exactAny } = await admin
     .from('customers')
-    .select('id, tax_id')
+    .select('id, tax_id, company_id')
     .ilike('tax_id', tax)
     .limit(1)
     .maybeSingle();
-  if (exactAny?.id) return { customerId: exactAny.id, matchedBy: 'tax_id_shared' };
+  if (exactAny?.id) {
+    return {
+      customerId: exactAny.id,
+      customerCompanyId: exactAny.company_id ?? null,
+      matchedBy: 'tax_id_shared',
+    };
+  }
 
   const numKey = dniNumericKey(tax);
   if (numKey) {
@@ -578,18 +598,32 @@ async function resolveCustomerId(
       .select('id, tax_id, company_id')
       .not('tax_id', 'is', null)
       .limit(2000);
-    let shared: string | null = null;
+    let sharedId: string | null = null;
+    let sharedCompany: string | null = null;
     for (const row of candidates ?? []) {
       if (dniNumericKey(row.tax_id) !== numKey) continue;
       if (row.company_id === companyId) {
-        return { customerId: row.id, matchedBy: 'tax_id_numeric' };
+        return {
+          customerId: row.id,
+          customerCompanyId: row.company_id ?? null,
+          matchedBy: 'tax_id_numeric',
+        };
       }
-      if (!shared) shared = row.id;
+      if (!sharedId) {
+        sharedId = row.id;
+        sharedCompany = row.company_id ?? null;
+      }
     }
-    if (shared) return { customerId: shared, matchedBy: 'tax_id_numeric_shared' };
+    if (sharedId) {
+      return {
+        customerId: sharedId,
+        customerCompanyId: sharedCompany,
+        matchedBy: 'tax_id_numeric_shared',
+      };
+    }
   }
 
-  return { customerId: null, matchedBy: null };
+  return { customerId: null, customerCompanyId: null, matchedBy: null };
 }
 
 function pickMetric(body: ScaleIngestBody, keys: (keyof ScaleIngestBody)[]): number | null {
@@ -1114,12 +1148,19 @@ serve(async (req) => {
   });
 
   if (!link.customerId && weighRequest) {
-    link = { customerId: weighRequest.customer_id, matchedBy: 'weigh_request' };
+    link = {
+      customerId: weighRequest.customer_id,
+      customerCompanyId: null,
+      matchedBy: 'weigh_request',
+    };
   }
 
   let profile: Awaited<ReturnType<typeof loadCustomerProfile>> | null = null;
   if (link.customerId) {
     profile = await loadCustomerProfile(admin, companyId, link.customerId);
+    if (!link.customerCompanyId && profile.company_id) {
+      link.customerCompanyId = profile.company_id;
+    }
   }
 
   let userId = completeSpanishDni(taxHint) || completeSpanishDni(profile?.tax_id);
@@ -1149,8 +1190,11 @@ serve(async (req) => {
     }
   }
 
+  // Preferir company de la ficha (clientes compartidos); la UI lee por customer_id sin filtrar company.
+  const measurementCompanyId = link.customerCompanyId || companyId;
+
   const row = buildRow(body, {
-    companyId,
+    companyId: measurementCompanyId,
     customerId: link.customerId,
     userId,
     measuredAt,
