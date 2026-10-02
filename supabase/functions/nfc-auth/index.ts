@@ -34,6 +34,9 @@ type Body = {
   uid?: string;
   user_id?: string;
   company_id?: string;
+  force?: boolean;
+  require_waiting?: boolean;
+  waiting_only?: boolean;
 };
 
 function json(data: unknown, status = 200) {
@@ -54,6 +57,9 @@ function isBogusUid(uid: string): boolean {
   if (![8, 14, 20].includes(uid.length)) return true;
   if (/^0+$/.test(uid)) return true;
   if (uid.startsWith('0000')) return true;
+  // ACR122U / PCSC a veces emiten UIDs fantasma 003F… / 003FFC… al fallar la lectura.
+  if (uid.startsWith('003F') || uid.startsWith('003FFC')) return true;
+  if (/^00[0-9A-F]{2}FC/i.test(uid)) return true;
   const fCount = (uid.match(/F/g) ?? []).length;
   if (fCount >= Math.max(4, Math.floor(uid.length / 2))) return true;
   if (uid.includes('FFFFFFFF')) return true;
@@ -257,6 +263,45 @@ serve(async (req) => {
     if (action === 'challenge.start') {
       const stationId = String(body.station_id ?? '').trim() || 'default';
       if (stationId.length > 80) return json({ error: 'station_id inválido' }, 400);
+      const forceNew = body.force === true;
+
+      // Invalidar tokens huérfanos recientes: reclamarlos provocaba
+      // "Auth session missing!" (refresh ya revocado por otro mint).
+      // Chrome debe crear siempre un waiting limpio.
+      void admin
+        .from('nfc_login_challenges')
+        .update({ access_token: null, refresh_token: null })
+        .eq('station_id', stationId)
+        .eq('status', 'completed')
+        .not('access_token', 'is', null)
+        .gte('completed_at', new Date(Date.now() - 120_000).toISOString());
+
+      // Reutilizar waiting vivo: varias pestañas/ventanas con el mismo station_id
+      // no deben pelearse superseding (tormenta de miles de retos/día en Medicina).
+      if (!forceNew) {
+        const { data: existing, error: existingErr } = await admin
+          .from('nfc_login_challenges')
+          .select('id, public_code, poll_token, expires_at, station_id, created_at')
+          .eq('station_id', stationId)
+          .eq('status', 'waiting')
+          .gt('expires_at', new Date(Date.now() + 30_000).toISOString())
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (existingErr) return json({ error: existingErr.message }, 500);
+        if (existing?.id && existing.poll_token) {
+          return json({
+            challenge_id: existing.id,
+            public_code: existing.public_code,
+            poll_token: existing.poll_token,
+            expires_at: existing.expires_at,
+            station_id: existing.station_id,
+            status: 'waiting',
+            reused: true,
+          });
+        }
+      }
+
       // Un solo reto activo por estación: evita que el agente complete un reto
       // distinto al que el navegador está sondeando.
       await admin
@@ -286,6 +331,8 @@ serve(async (req) => {
         poll_token: poll,
         expires_at: data.expires_at,
         station_id: data.station_id,
+        status: 'waiting',
+        reused: false,
       });
     }
 
@@ -372,16 +419,71 @@ serve(async (req) => {
         .limit(1)
         .maybeSingle();
       if (error) return json({ error: error.message }, 500);
-      if (!waiting) {
+
+      if (waiting) {
+        const result = await completeChallengeWithUid(waiting.id, uid);
         return json({
-          ok: false,
-          ignored: true,
-          message: 'No hay pantalla de login esperando en esta estación',
+          ...result,
+          open_browser: false,
+          focus_browser: true,
+          station_id: stationId,
+          suite_query: `nfc_station=${encodeURIComponent(stationId)}`,
         });
       }
 
-      const result = await completeChallengeWithUid(waiting.id, uid);
-      return json(result);
+      // No hay pestaña esperando: crear sesión lista para pickup y pedir al agente
+      // que abra/enfoque Chrome con challenge+poll en la URL.
+      // iMac: no mintear sesión huérfana (revoca refresh y rompe Chrome).
+      if (body.require_waiting === true || body.waiting_only === true) {
+        return json(
+          {
+            ok: false,
+            error: 'no_waiting_challenge',
+            open_browser: false,
+            station_id: stationId,
+          },
+          409,
+        );
+      }
+
+      const userId = await findUserIdByUid(uid);
+      if (!userId) {
+        return json({ ok: false, error: 'Tarjeta no asociada a ningún usuario' }, 400);
+      }
+      const session = await mintSessionForUserId(userId);
+      const poll = randomToken(24);
+      const code = publicCode();
+      const expiresAt = new Date(Date.now() + 2 * 60 * 1000).toISOString();
+      const { data: created, error: createErr } = await admin
+        .from('nfc_login_challenges')
+        .insert({
+          station_id: stationId,
+          public_code: code,
+          poll_token: poll,
+          status: 'completed',
+          nfc_uid: uid,
+          user_id: userId,
+          access_token: session.access_token,
+          refresh_token: session.refresh_token,
+          completed_at: new Date().toISOString(),
+          expires_at: expiresAt,
+          error_message: null,
+        })
+        .select('id')
+        .single();
+      if (createErr) return json({ error: createErr.message }, 500);
+
+      return json({
+        ok: true,
+        open_browser: true,
+        focus_browser: true,
+        station_id: stationId,
+        challenge_id: created.id,
+        poll_token: poll,
+        user_id: userId,
+        email: session.email,
+        suite_query: `nfc_station=${encodeURIComponent(stationId)}&nfc_challenge=${encodeURIComponent(created.id)}&nfc_poll=${encodeURIComponent(poll)}`,
+      });
     }
 
     if (action === 'enroll.set' || action === 'enroll.clear') {
