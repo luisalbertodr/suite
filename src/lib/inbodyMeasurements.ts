@@ -153,6 +153,12 @@ export function morphoWeighLabelFromMac(mac: string | null | undefined): 'Pesar'
   return null;
 }
 
+/** IDs del puente BLE / MorphoScan (no son DNI LookInBody). */
+export function isScaleBridgeUserId(userId: string | null | undefined): boolean {
+  const s = normInbodyUserId(userId);
+  return /^SCALE[0-9A-F]{12}$/i.test(s) || /^SCALE-/i.test(s);
+}
+
 /** Detecta la unidad Morpho por MAC en inbody_user_id (SCALE…, scale-…, …-22b6). */
 export function morphoScaleUnitLabel(userId: string | null | undefined): 'Morpho+1' | 'Morpho' | null {
   const s = String(userId ?? '').toUpperCase().replace(/[^0-9A-Z]/g, '');
@@ -564,10 +570,18 @@ export function dedupeInbodyMeasurements(rows: InbodyMeasurement[]): InbodyMeasu
     const t = new Date(row.measured_at).getTime();
 
     const dupIdx = kept.findIndex((existing) => {
-      const sameUser =
-        normInbodyUserId(existing.inbody_user_id) === userKey ||
-        dniNumericKey(existing.inbody_user_id) === dniNumericKey(row.inbody_user_id);
-      if (!sameUser) return false;
+      // Nunca colapsar Morpho (SCALE+MAC) con LookInBody (DNI), ni MACs distintas.
+      const existingBridge = isScaleBridgeUserId(existing.inbody_user_id);
+      const rowBridge = isScaleBridgeUserId(row.inbody_user_id);
+      if (existingBridge !== rowBridge) return false;
+      if (existingBridge && rowBridge) {
+        if (normInbodyUserId(existing.inbody_user_id) !== userKey) return false;
+      } else {
+        const sameUser =
+          normInbodyUserId(existing.inbody_user_id) === userKey ||
+          dniNumericKey(existing.inbody_user_id) === dniNumericKey(row.inbody_user_id);
+        if (!sameUser) return false;
+      }
 
       const dt = Math.abs(new Date(existing.measured_at).getTime() - t);
       if (dt === 0) return true;

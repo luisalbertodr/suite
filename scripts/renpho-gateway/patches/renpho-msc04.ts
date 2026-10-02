@@ -14,14 +14,20 @@ import type {
 import {
   uuid16,
   buildPayload,
-  computeBiaFat,
   type ScaleBodyComp,
 } from './body-comp-helpers.js';
 import { matchesDescriptor, type MatchDescriptor } from './match-descriptor.js';
 import { bleLog } from '../ble/types.js';
 import {
+  allowWeightOnlyExport,
+  clearMacExpect,
   fetchPendingWeigh,
+  getPendingExpiresAtMs,
+  isWeighPendingReady,
+  loadMacExpect,
+  saveMacExpect,
   startPendingPrefetch,
+  type MacExpectState,
   type PendingScaleProfile,
 } from '../suite-pending.js';
 
@@ -45,13 +51,12 @@ const FRAG_LAST = 0xaf;
 
 const FRAME_OVERHEAD = 6;
 const HANDSHAKE_GAP_MS = 400;
-const HANDSHAKE_GAP_RECONNECT_MS = 200;
+/** Reconnect: >200ms reduce «In Progress» cuando llegan frags BIA a la vez. */
+const HANDSHAKE_GAP_RECONNECT_MS = 350;
 /** Per-frame GATT write budget; BlueZ can hang forever on withResponse. */
 const HANDSHAKE_WRITE_TIMEOUT_MS = 2_000;
 /** Keep early 0x25/0x26 across a hung/dropped handshake for the next connect. */
 const ORPHAN_BODY_COMP_MAX_AGE_MS = 120_000;
-/** After this many reconnects without body-comp, export weight-only. */
-const WEIGHT_ONLY_AFTER_SESSIONS = 3;
 /** Accept a stored 0x26 as this weigh-in when age < this and weight matches. */
 const FRESH_AGE_S = 60;
 const MATCH_AGE_S = 1800;
@@ -61,20 +66,30 @@ const MATCH_WEIGHT_KG = 0.8;
  * 350ms was too short for cold edge starts → fell back to config male/26/170
  * (seen 2026-08-11 Marta Loureiro: weight 62.4 kg arrived, profile never applied).
  */
-const PENDING_HANDSHAKE_WAIT_MS = 2_000;
+/** Debe ser >= timeout HTTP de suite-pending (12s) para no caer al perfil config.yaml. */
+const PENDING_HANDSHAKE_WAIT_MS = 12_000;
 /**
- * MorphoScan DF-BIA `z1` (LE/10 after weight + 0x0a00) impedance scale factors.
- * End-anchored plen-8 fat is NOT Renpho body-fat % (Luis 2026-08-06: frame 14.4 %
- * vs Renpho report 20.7 % / InBody 19.2 %). Always prefer BIA when z1 is present.
- *
- * Female 1.08 — 2026-08-05 Marta Loureiro: InBody 62.5 kg / 21.4 %; z1≈380 Ω.
- * Male 1.33 — 2026-08-06 Luis A. Renpho PDF (P26080602) 80.90 kg / 20.7 % /
- *   fat 16.75 / muscle 59.87 / SMM 36.65 / bone 4.30; BLE z1≈301.6 Ω @ 80.4 kg.
+ * Suite InBody-like TBW engine (keep in sync with src/lib/inbodyLikeBia.ts).
+ * Prefer path RA+tronco+RL × PATH_SCALE over z1×sex (Luis 2026-08-06 + 2026-10-02).
+ * End-anchored plen-8 fat is NOT Renpho/InBody % — always prefer TBW when Z present.
  */
 const MSC04_Z1_BIA_SCALE_FEMALE = 1.08;
 const MSC04_Z1_BIA_SCALE_MALE = 1.33;
+/** Keep in sync with src/lib/inbodyLikeBia.ts pathScaleForSex. */
+const MSC04_PATH_SCALE_MALE = 0.73;
+const MSC04_PATH_SCALE_FEMALE = 0.635;
+const MSC04_HYDRATION_FFM = 0.73;
+const MSC04_FORMULA_VERSION = 'inbody-like-v2-2026-10-path';
 /** Non-athlete SMM ≈ FFM × this (Renpho Luis: 36.65 / 64.15 ≈ 0.571). */
 const MSC04_SMM_FFM_RATIO = 0.57;
+
+type SegmentalOhms = {
+  right_arm?: number;
+  left_arm?: number;
+  trunk?: number;
+  right_leg?: number;
+  left_leg?: number;
+};
 
 type CachedComp = ScaleBodyComp & {
   bodyFat?: number;
@@ -97,17 +112,143 @@ type CachedComp = ScaleBodyComp & {
   muscleMassKg?: number;
   /** Skeletal muscle mass (kg). */
   smmKg?: number;
+  /** Effective R ~50 kHz used by Suite TBW. */
+  rEffOhm?: number;
+  /** path | z1 — which impedance source fed TBW. */
+  rSource?: 'path' | 'z1';
 };
 
 function msc04Z1Scale(profile: UserProfile): number {
   return profile.gender === 'male' ? MSC04_Z1_BIA_SCALE_MALE : MSC04_Z1_BIA_SCALE_FEMALE;
 }
 
-/** Body fat % from DF-BIA z1 + user profile (sex-specific Renpho/InBody scale). */
-function msc04BiaFat(weight: number, z1Ohm: number, profile: UserProfile): number {
-  const z = z1Ohm * msc04Z1Scale(profile);
-  if (!(z >= 100 && z <= 1500) || !(weight >= 0.5 && weight <= 300)) return Number.NaN;
-  return Math.round(computeBiaFat(weight, z, profile) * 10) / 10;
+function msc04PathScale(profile: UserProfile): number {
+  return profile.gender === 'male' ? MSC04_PATH_SCALE_MALE : MSC04_PATH_SCALE_FEMALE;
+}
+
+function msc04InterpolateZ50(z20: number, z100: number): number {
+  const t = Math.log(50 / 20) / Math.log(100 / 20);
+  return Math.exp(Math.log(z20) + t * (Math.log(z100) - Math.log(z20)));
+}
+
+/** Hemicuerpo dcho. RA+tronco+RL → R ~50 kHz (misma lógica que Suite UI). */
+function msc04EstimatePathR50Ohm(
+  z20: SegmentalOhms | null | undefined,
+  z100: SegmentalOhms | null | undefined,
+): number | null {
+  const segs = ['right_arm', 'trunk', 'right_leg'] as const;
+  const vals: number[] = [];
+  for (const k of segs) {
+    const a = z20?.[k];
+    const b = z100?.[k];
+    if (a != null && a > 0 && b != null && b > 0) {
+      const z = msc04InterpolateZ50(a, b);
+      if (Number.isFinite(z)) vals.push(z);
+    } else if (b != null && b > 0) {
+      vals.push(b);
+    } else if (a != null && a > 0) {
+      vals.push(a);
+    }
+  }
+  if (vals.length < 3) return null;
+  const sum = vals.reduce((s, v) => s + v, 0);
+  return sum > 50 && sum < 2000 ? Math.round(sum * 10) / 10 : null;
+}
+
+function msc04ResolveR50Ohm(opts: {
+  profile: UserProfile;
+  z1Ohm?: number | null;
+  impedanceMap?: CachedComp['impedanceMap'] | null;
+}): { rOhm: number; source: 'path' | 'z1' } | null {
+  const z1 = opts.z1Ohm;
+  const z1R =
+    z1 != null && z1 >= 100 && z1 <= 1500
+      ? Math.round(z1 * msc04Z1Scale(opts.profile) * 10) / 10
+      : null;
+  const path = msc04EstimatePathR50Ohm(
+    opts.impedanceMap?.['20khz'],
+    opts.impedanceMap?.['100khz'],
+  );
+  if (path != null) {
+    const pathR = Math.round(path * msc04PathScale(opts.profile) * 10) / 10;
+    // Segmental maps can be truncated; if path drifts >12% from z1, trust z1.
+    if (z1R != null && z1R > 0 && Math.abs(pathR - z1R) / z1R > 0.12) {
+      return { rOhm: z1R, source: 'z1' };
+    }
+    return { rOhm: pathR, source: 'path' };
+  }
+  if (z1R != null) return { rOhm: z1R, source: 'z1' };
+  return null;
+}
+
+/** TBW clínico H²/R (misma fórmula que src/lib/inbodyLikeBia.ts). */
+function msc04ComputeTbwLiters(
+  weightKg: number,
+  heightCm: number,
+  ageYears: number,
+  sexMale: boolean,
+  rOhm: number,
+): number {
+  const s = sexMale ? 1 : 0;
+  const h2r = (heightCm * heightCm) / rOhm;
+  return 0.396 * h2r + 0.156 * weightKg + 0.046 * ageYears + 4.104 * s - 3.19;
+}
+
+type Msc04TbwComp = {
+  pbfPct: number;
+  ffmKg: number;
+  tbwKg: number;
+  bodyFatKg: number;
+  smmKg: number;
+  rEffOhm: number;
+  rSource: 'path' | 'z1';
+};
+
+/**
+ * Composición Suite TBW→FFM→%BF (path×0.73 o z1×sexo).
+ * Sustituye computeBiaFat comercial Renpho.
+ */
+function msc04TbwComposition(
+  weight: number,
+  profile: UserProfile,
+  z1Ohm?: number | null,
+  impedanceMap?: CachedComp['impedanceMap'] | null,
+): Msc04TbwComp | null {
+  if (!(weight >= 20 && weight <= 300)) return null;
+  if (!(profile.height >= 100 && profile.height <= 230)) return null;
+  if (!(profile.age >= 10 && profile.age <= 100)) return null;
+
+  const resolved = msc04ResolveR50Ohm({ profile, z1Ohm, impedanceMap });
+  if (!resolved || !(resolved.rOhm >= 150 && resolved.rOhm <= 1200)) return null;
+
+  const sexMale = profile.gender === 'male';
+  let tbw = msc04ComputeTbwLiters(
+    weight,
+    profile.height,
+    profile.age,
+    sexMale,
+    resolved.rOhm,
+  );
+  if (!(tbw > 10 && tbw < weight)) return null;
+
+  let ffm = tbw / MSC04_HYDRATION_FFM;
+  if (ffm >= weight) ffm = weight * 0.96;
+  if (ffm <= weight * 0.4) return null;
+
+  const bodyFatKg = weight - ffm;
+  const pbfPct = (bodyFatKg / weight) * 100;
+  if (!(pbfPct >= 3 && pbfPct <= 55)) return null;
+
+  const smmRatio = profile.isAthlete ? 0.6 : MSC04_SMM_FFM_RATIO;
+  return {
+    pbfPct: Math.round(pbfPct * 10) / 10,
+    ffmKg: Math.round(ffm * 100) / 100,
+    tbwKg: Math.round(tbw * 100) / 100,
+    bodyFatKg: Math.round(bodyFatKg * 100) / 100,
+    smmKg: Math.round(ffm * smmRatio * 100) / 100,
+    rEffOhm: resolved.rOhm,
+    rSource: resolved.source,
+  };
 }
 
 function msc04SmmFromLbm(lbm: number, isAthlete: boolean): number {
@@ -449,6 +590,8 @@ export class RenphoMsc04Adapter
   private readonly compByReading = new WeakMap<ScaleReading, CachedComp>();
   /** Last profile used in handshake (Pesar ahora or config) for computeMetrics. */
   private lastProfile: UserProfile | null = null;
+  /** Pending display name for flush after «Pesar» closes. */
+  private lastPendingName = 'Suite';
   /** Connected scale MAC (uppercase, no separators) for Suite scale-id. */
   private lastDeviceMac = '';
 
@@ -469,6 +612,10 @@ export class RenphoMsc04Adapter
       bleLog.info(`Renpho R-MSC04: connected MAC ${this.lastDeviceMac}`);
     }
     this.pruneOrphans();
+
+    // Expect is per-MAC: never restore another scale's locked weight.
+    this.loadExpectForMac(this.lastDeviceMac);
+
     if (this.orphanedBodyComp.length > 0) {
       bleLog.info(
         `Renpho R-MSC04: ${this.orphanedBodyComp.length} orphaned body-comp frame(s) ` +
@@ -483,12 +630,8 @@ export class RenphoMsc04Adapter
 
     if (!Number.isNaN(this.expectKg)) {
       this.sessionsSinceExpect += 1;
-      if (this.sessionsSinceExpect >= WEIGHT_ONLY_AFTER_SESSIONS) {
-        this.weightOnlyFallback = true;
-        bleLog.info(
-          `Renpho R-MSC04: no body-comp after ${this.sessionsSinceExpect} sessions — weight-only fallback`,
-        );
-      }
+      this.refreshWeightOnlyPolicy('reconnect');
+      this.persistExpect();
     }
 
     if (!ctx.availableChars.has(CHR_WRITE)) {
@@ -500,6 +643,7 @@ export class RenphoMsc04Adapter
 
     // Wait briefly for Suite «Pesar ahora» profile (see PENDING_HANDSHAKE_WAIT_MS).
     const pending = await resolvePendingForHandshake();
+    const savedProfile = !pending ? loadMacExpect(this.lastDeviceMac)?.profile : null;
     const effectiveProfile: UserProfile = pending
       ? {
           height: pending.height,
@@ -507,11 +651,23 @@ export class RenphoMsc04Adapter
           gender: pending.gender,
           isAthlete: ctx.profile.isAthlete,
         }
-      : ctx.profile;
+      : savedProfile
+        ? {
+            height: savedProfile.height,
+            age: savedProfile.age,
+            gender: savedProfile.gender,
+            isAthlete: ctx.profile.isAthlete,
+          }
+        : ctx.profile;
     this.lastProfile = effectiveProfile;
-    const displayName = pending?.name || 'Suite';
+    this.lastPendingName = pending?.name || savedProfile?.name || 'Suite';
+    // Re-evaluate weight-only with fresh pending/TTL (may have closed while connecting).
+    if (!Number.isNaN(this.expectKg)) {
+      this.refreshWeightOnlyPolicy('handshake');
+      this.persistExpect();
+    }
 
-    const nameFrame = buildNameB7(displayName);
+    const nameFrame = buildNameB7(this.lastPendingName);
     const profileFrame = buildProfileB8(effectiveProfile);
     // On reconnect (we already locked a weight), still handshake — the scale
     // needs it to dump the fresh 0x26 — but use a tighter gap.
@@ -521,6 +677,7 @@ export class RenphoMsc04Adapter
         : HANDSHAKE_GAP_MS;
     const handshake = [HS_B3, HS_B2, nameFrame, profileFrame];
 
+    let handshakeOk = true;
     try {
       for (const frame of handshake) {
         await this.writeHandshakeFrame(ctx, frame);
@@ -532,16 +689,28 @@ export class RenphoMsc04Adapter
         this.orphanedAtMs = Date.now();
       }
       const msg = e instanceof Error ? e.message : String(e);
-      bleLog.info(`Renpho R-MSC04: handshake aborted — ${msg}`);
-      throw e;
+      const buffered =
+        this.earlyBodyComp.length > 0 || this.orphanedBodyComp.length > 0;
+      if (buffered) {
+        // Caso Gemma 2026-09-14: frags BIA llegan durante b8 → «In Progress» abortaba
+        // y se perdía el body-comp ya en cola. Recuperar en lugar de tirar la sesión.
+        handshakeOk = false;
+        bleLog.info(
+          `Renpho R-MSC04: handshake incomplete (${msg}) but body-comp buffered — recovering`,
+        );
+      } else {
+        bleLog.info(`Renpho R-MSC04: handshake aborted — ${msg}`);
+        throw e;
+      }
     }
 
     this.handshakeReady = true;
     bleLog.info(
-      `Renpho R-MSC04: handshake sent ` +
-        `(${pending ? 'Pesar ahora' : 'config'} ` +
+      `Renpho R-MSC04: handshake ${handshakeOk ? 'sent' : 'recovered'} ` +
+        `(${pending ? 'Pesar ahora' : savedProfile ? 'flush profile' : 'config'} ` +
         `${effectiveProfile.gender}/${effectiveProfile.age}y/${effectiveProfile.height}cm` +
-        `${!Number.isNaN(this.expectKg) ? `; expect ${this.expectKg.toFixed(2)} kg` : ''})`,
+        `${!Number.isNaN(this.expectKg) ? `; expect ${this.expectKg.toFixed(2)} kg` : ''}` +
+        `${this.weightOnlyFallback ? '; weight-only armed' : ''})`,
     );
 
     // Replay body-comp that arrived during the subscribe→handshake race, then
@@ -567,45 +736,164 @@ export class RenphoMsc04Adapter
         }
       }
     }
+
+    // Two-phase: if BIA never arrived and policy allows, flush stashed weight now
+    // (no need to wait for a new live/final that may never come after disconnect storms).
+    if (!this.postHandshakeReading && this.weightOnlyFallback && !Number.isNaN(this.expectKg)) {
+      this.postHandshakeReading = this.makeWeightOnlyReading(this.expectKg);
+      bleLog.info(
+        `Renpho R-MSC04: flushing stashed weight-only ${this.expectKg.toFixed(2)} kg ` +
+          `(sessions=${this.sessionsSinceExpect})`,
+      );
+      this.clearExpect();
+    }
   }
 
-  /** GATT write with timeout; falls back to no-response if withResponse hangs. */
+  /** GATT write with timeout; retries «In Progress»; falls back to no-response. */
   private async writeHandshakeFrame(
     ctx: ConnectionContext,
     frame: number[],
   ): Promise<void> {
     const label = handshakeCmdLabel(frame);
     const t0 = Date.now();
-    try {
-      await writeWithTimeout(
-        ctx.write,
-        CHR_WRITE,
-        frame,
-        true,
-        HANDSHAKE_WRITE_TIMEOUT_MS,
-        label,
-      );
-      bleLog.info(
-        `Renpho R-MSC04: handshake write 0x${label} ok (${Date.now() - t0}ms, withResponse)`,
-      );
-      return;
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      bleLog.info(
-        `Renpho R-MSC04: handshake write 0x${label} failed (${msg}); retry without response`,
-      );
+    const maxAttempts = 4;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await writeWithTimeout(
+          ctx.write,
+          CHR_WRITE,
+          frame,
+          true,
+          HANDSHAKE_WRITE_TIMEOUT_MS,
+          label,
+        );
+        bleLog.info(
+          `Renpho R-MSC04: handshake write 0x${label} ok (${Date.now() - t0}ms, withResponse)`,
+        );
+        return;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        const inProgress = /in progress/i.test(msg);
+        bleLog.info(
+          `Renpho R-MSC04: handshake write 0x${label} failed (${msg})` +
+            (inProgress && attempt < maxAttempts
+              ? `; backoff ${150 * attempt}ms`
+              : '; retry without response'),
+        );
+        if (inProgress && attempt < maxAttempts) {
+          await sleep(150 * attempt);
+          continue;
+        }
+
+        try {
+          await writeWithTimeout(
+            ctx.write,
+            CHR_WRITE,
+            frame,
+            false,
+            HANDSHAKE_WRITE_TIMEOUT_MS,
+            label,
+          );
+          bleLog.info(
+            `Renpho R-MSC04: handshake write 0x${label} ok (${Date.now() - t0}ms, noResponse)`,
+          );
+          return;
+        } catch (e2) {
+          const msg2 = e2 instanceof Error ? e2.message : String(e2);
+          // Si ya tenemos body-comp en cola, no tumbar la sesión por un b8 fallido.
+          if (this.earlyBodyComp.length > 0 || this.orphanedBodyComp.length > 0) {
+            bleLog.info(
+              `Renpho R-MSC04: skip write 0x${label} (${msg2}) — body-comp already buffered`,
+            );
+            return;
+          }
+          throw e2 instanceof Error ? e2 : new Error(msg2);
+        }
+      }
     }
-    await writeWithTimeout(
-      ctx.write,
-      CHR_WRITE,
-      frame,
-      false,
-      HANDSHAKE_WRITE_TIMEOUT_MS,
-      label,
-    );
+  }
+
+  private loadExpectForMac(mac: string): void {
+    // Always bind in-memory expect to this MAC (drop other scale's lock).
+    this.expectKg = Number.NaN;
+    this.expectAtMs = 0;
+    this.sessionsSinceExpect = 0;
+    this.weightOnlyFallback = false;
+    if (!mac) return;
+    const saved = loadMacExpect(mac);
+    if (!saved) return;
+    this.expectKg = saved.expectKg;
+    this.expectAtMs = saved.expectAtMs;
+    this.sessionsSinceExpect = saved.sessionsSinceExpect ?? 0;
+    this.weightOnlyFallback = Boolean(saved.weightOnlyFallback);
+    if (saved.profile && !this.lastProfile) {
+      this.lastProfile = {
+        height: saved.profile.height,
+        age: saved.profile.age,
+        gender: saved.profile.gender,
+        isAthlete: false,
+      };
+      this.lastPendingName = saved.profile.name || 'Suite';
+    }
     bleLog.info(
-      `Renpho R-MSC04: handshake write 0x${label} ok (${Date.now() - t0}ms, noResponse)`,
+      `Renpho R-MSC04: restored expect ${this.expectKg.toFixed(2)} kg for ${mac} ` +
+        `(sessions=${this.sessionsSinceExpect}, weightOnly=${this.weightOnlyFallback})`,
     );
+  }
+
+  private refreshWeightOnlyPolicy(reason: string): void {
+    if (Number.isNaN(this.expectKg)) return;
+    const pendingActive = isWeighPendingReady();
+    const expiresAtMs = getPendingExpiresAtMs();
+    const allow = allowWeightOnlyExport(
+      { sessionsSinceExpect: this.sessionsSinceExpect },
+      { pendingActive, expiresAtMs },
+    );
+    if (allow && !this.weightOnlyFallback) {
+      this.weightOnlyFallback = true;
+      const ttl =
+        expiresAtMs != null ? Math.max(0, Math.round((expiresAtMs - Date.now()) / 1000)) : null;
+      bleLog.info(
+        `Renpho R-MSC04: weight-only armed (${reason}; sessions=${this.sessionsSinceExpect}` +
+          `${pendingActive ? '' : '; pending closed'}` +
+          `${ttl != null ? `; ttl ${ttl}s` : ''})`,
+      );
+    } else if (!allow && this.weightOnlyFallback) {
+      // Keep trying BIA while «Pesar» still has headroom.
+      this.weightOnlyFallback = false;
+    }
+  }
+
+  private makeWeightOnlyReading(weight: number): ScaleReading {
+    const reading: ScaleReading = { weight, impedance: 0 };
+    this.compByReading.set(reading, { weightOnly: true, fatSource: 'none' });
+    this.finalReceived = true;
+    return reading;
+  }
+
+  private persistExpect(): void {
+    if (!this.lastDeviceMac) return;
+    if (Number.isNaN(this.expectKg) || !(this.expectKg > 0)) {
+      clearMacExpect(this.lastDeviceMac);
+      return;
+    }
+    const profile: PendingScaleProfile | null = this.lastProfile
+      ? {
+          height: this.lastProfile.height,
+          age: this.lastProfile.age,
+          gender: this.lastProfile.gender,
+          name: this.lastPendingName || 'Suite',
+        }
+      : null;
+    const state: MacExpectState = {
+      expectKg: this.expectKg,
+      expectAtMs: this.expectAtMs,
+      sessionsSinceExpect: this.sessionsSinceExpect,
+      weightOnlyFallback: this.weightOnlyFallback,
+      profile,
+    };
+    saveMacExpect(this.lastDeviceMac, state);
   }
 
   private pruneOrphans(): void {
@@ -712,9 +1000,7 @@ export class RenphoMsc04Adapter
       this.noteExpect(frame.weight);
       if (this.weightOnlyFallback) {
         bleLog.info(`Renpho R-MSC04: weight-only fallback ${frame.weight.toFixed(2)} kg (live)`);
-        const reading: ScaleReading = { weight: frame.weight, impedance: 0 };
-        this.compByReading.set(reading, { weightOnly: true });
-        this.finalReceived = true;
+        const reading = this.makeWeightOnlyReading(frame.weight);
         this.clearExpect();
         return reading;
       }
@@ -725,11 +1011,14 @@ export class RenphoMsc04Adapter
       this.finalReceived = true;
       this.finalWeight = frame.weight;
       this.noteExpect(frame.weight);
-      bleLog.info(`Renpho R-MSC04: final weight ${frame.weight.toFixed(2)} kg — waiting for body-comp`);
+      bleLog.info(
+        this.weightOnlyFallback
+          ? `Renpho R-MSC04: final weight ${frame.weight.toFixed(2)} kg — weight-only export`
+          : `Renpho R-MSC04: final weight ${frame.weight.toFixed(2)} kg — waiting for body-comp`,
+      );
 
       if (this.weightOnlyFallback) {
-        const reading: ScaleReading = { weight: frame.weight, impedance: 0 };
-        this.compByReading.set(reading, { weightOnly: true });
+        const reading = this.makeWeightOnlyReading(frame.weight);
         this.clearExpect();
         return reading;
       }
@@ -750,6 +1039,9 @@ export class RenphoMsc04Adapter
     }
     this.expectKg = weight;
     this.expectAtMs = Date.now();
+    // Prefer BIA while «Pesar» has time left — do not arm weight-only on first lock.
+    this.refreshWeightOnlyPolicy('note-expect');
+    this.persistExpect();
   }
 
   parseNotification(data: Buffer): ScaleReading | null {
@@ -815,27 +1107,35 @@ export class RenphoMsc04Adapter
     let muscleMassKg: number | undefined;
     let smmKg: number | undefined;
 
-    // plen-8 fat is unreliable on MorphoScan (guest/mid junk). Prefer BIA from z1
-    // whenever profile is known; if z1 exists but profile not yet, defer to computeMetrics.
+    // plen-8 fat is unreliable on MorphoScan. Prefer Suite TBW (path×0.73 / z1×sexo).
     let weightOnlyComp = false;
-    if (parsed.z1 != null && this.lastProfile) {
-      const bia = msc04BiaFat(weight, parsed.z1, this.lastProfile);
-      if (Number.isFinite(bia) && bia >= 5 && bia <= 55) {
-        bodyFat = bia;
+    let rEffOhm: number | undefined;
+    let rSource: 'path' | 'z1' | undefined;
+    if ((parsed.z1 != null || parsed.impedance) && this.lastProfile) {
+      const tbw = msc04TbwComposition(
+        weight,
+        this.lastProfile,
+        parsed.z1,
+        parsed.impedance,
+      );
+      if (tbw != null && tbw.pbfPct >= 5 && tbw.pbfPct <= 55) {
+        bodyFat = tbw.pbfPct;
         fatSource = 'from_bia';
-        const lbm = weight * (1 - bodyFat / 100);
+        rEffOhm = tbw.rEffOhm;
+        rSource = tbw.rSource;
         muscleMassKg =
           parsed.boneKg != null
-            ? Math.round((lbm - parsed.boneKg) * 100) / 100
-            : Math.round(lbm * 100) / 100;
-        smmKg = msc04SmmFromLbm(lbm, this.lastProfile.isAthlete);
+            ? Math.round((tbw.ffmKg - parsed.boneKg) * 100) / 100
+            : Math.round(tbw.ffmKg * 100) / 100;
+        smmKg = tbw.smmKg;
+        waterPct = Math.round((tbw.tbwKg / weight) * 1000) / 10;
       } else {
         weightOnlyComp = true;
         bodyFat = 0;
         fatSource = 'none';
       }
-    } else if (parsed.z1 != null) {
-      // z1 captured; wait for profile at export (computeMetrics late BIA).
+    } else if (parsed.z1 != null || parsed.impedance) {
+      // Z captured; wait for profile at export (computeMetrics late TBW).
       weightOnlyComp = true;
       bodyFat = 0;
       fatSource = 'none';
@@ -851,7 +1151,7 @@ export class RenphoMsc04Adapter
       fatSource = 'none';
     }
 
-    if (!weightOnlyComp) {
+    if (!weightOnlyComp && waterPct == null) {
       const lbm = weight * (1 - bodyFat / 100);
       const leanHydration = this.lastProfile?.isAthlete ? 0.74 : 0.73;
       waterPct = Math.round(((lbm * leanHydration) / weight) * 1000) / 10;
@@ -900,6 +1200,8 @@ export class RenphoMsc04Adapter
       impedanceOhm2: parsed.z2,
       impedanceMap: parsed.impedance,
       fatSource,
+      rEffOhm,
+      rSource,
     };
 
     if (!fresh) {
@@ -921,11 +1223,13 @@ export class RenphoMsc04Adapter
   }
 
   private clearExpect(): void {
+    const mac = this.lastDeviceMac;
     this.expectKg = Number.NaN;
     this.expectAtMs = 0;
     this.sessionsSinceExpect = 0;
     this.weightOnlyFallback = false;
     this.lastLiveWeight = 0;
+    if (mac) clearMacExpect(mac);
   }
 
   private decodeFrame(data: Buffer): { cmd: number; weight: number } | null {
@@ -975,21 +1279,28 @@ export class RenphoMsc04Adapter
     let muscleMassKg = c.muscleMassKg;
     let smmKg = c.smmKg;
     let waterPct = c.water;
+    let rEffOhm = c.rEffOhm;
+    let rSource = c.rSource;
 
-    // Prefer BIA whenever z1 is present — plen-8 frame fat is not Renpho %.
-    if (impedance >= 100 && effective?.height) {
-      const bia = msc04BiaFat(reading.weight, impedance, effective);
-      if (Number.isFinite(bia) && bia >= 5 && bia <= 55) {
-        fatPct = bia;
+    // Prefer Suite TBW whenever Z (path/z1) present — plen-8 is not InBody %.
+    if ((impedance >= 100 || c.impedanceMap) && effective?.height) {
+      const tbw = msc04TbwComposition(
+        reading.weight,
+        effective,
+        impedance >= 100 ? impedance : c.impedanceOhm,
+        c.impedanceMap,
+      );
+      if (tbw != null && tbw.pbfPct >= 5 && tbw.pbfPct <= 55) {
+        fatPct = tbw.pbfPct;
         fatSource = 'from_bia';
-        const lbm = reading.weight * (1 - fatPct / 100);
+        rEffOhm = tbw.rEffOhm;
+        rSource = tbw.rSource;
         muscleMassKg =
           c.bone != null
-            ? Math.round((lbm - c.bone) * 100) / 100
-            : Math.round(lbm * 100) / 100;
-        smmKg = msc04SmmFromLbm(lbm, effective.isAthlete);
-        const leanHydration = effective.isAthlete ? 0.74 : 0.73;
-        waterPct = Math.round(((lbm * leanHydration) / reading.weight) * 1000) / 10;
+            ? Math.round((tbw.ffmKg - c.bone) * 100) / 100
+            : Math.round(tbw.ffmKg * 100) / 100;
+        smmKg = tbw.smmKg;
+        waterPct = Math.round((tbw.tbwKg / reading.weight) * 1000) / 10;
       }
     }
 
@@ -1047,8 +1358,14 @@ export class RenphoMsc04Adapter
         : msc04SmmFromLbm(lbm, effective.isAthlete);
     const ffm = Math.round(lbm * 100) / 100;
     const derived = ['subcutaneousFatPercent'];
-    if (fatSource === 'from_bia') derived.push('bodyFatPercent(from_bia_z1)');
-    if (waterPct != null) derived.push('waterPercent(from_lbm)');
+    if (fatSource === 'from_bia') {
+      derived.push(
+        rSource === 'path'
+          ? 'bodyFatPercent(from_tbw_path)'
+          : 'bodyFatPercent(from_tbw_z1)',
+      );
+    }
+    if (waterPct != null) derived.push('waterPercent(from_tbw)');
     if (smmKg == null) derived.push('smmKg');
     derived.push('proteinPercent');
 
@@ -1071,14 +1388,24 @@ export class RenphoMsc04Adapter
         body_comp_hex: c.frameHex ?? null,
         payload_len: c.payloadLen ?? null,
         fat_source: fatSource ?? 'frame',
-        bia_z_scale: fatSource === 'from_bia' ? msc04Z1Scale(effective) : null,
+        bia_formula: fatSource === 'from_bia' ? MSC04_FORMULA_VERSION : null,
+        bia_r_eff_ohm: fatSource === 'from_bia' ? rEffOhm ?? null : null,
+        bia_r_source: fatSource === 'from_bia' ? rSource ?? null : null,
+        bia_z_scale:
+          fatSource === 'from_bia' && rSource === 'z1' ? msc04Z1Scale(effective) : null,
+        bia_path_scale:
+          fatSource === 'from_bia' && rSource === 'path'
+            ? msc04PathScale(effective)
+            : null,
         impedance_ohm: c.impedanceOhm ?? null,
         impedance_ohm_2: c.impedanceOhm2 ?? null,
         impedance: c.impedanceMap ?? null,
         derived,
         note:
           fatSource === 'from_bia'
-            ? `DF-BIA: fat from z1×${msc04Z1Scale(effective)} + profile (Renpho/InBody sex scale); bone from frame`
+            ? rSource === 'path'
+              ? `Suite TBW: fat from path×${msc04PathScale(effective)} (RA+trunk+RL) → FFM/0.73; bone from frame`
+              : `Suite TBW: fat from z1×${msc04Z1Scale(effective)} → FFM/0.73; bone from frame`
             : 'frame fat % used (no z1); DF-BIA Z/bone from frame when present',
       },
     } as BodyComposition;

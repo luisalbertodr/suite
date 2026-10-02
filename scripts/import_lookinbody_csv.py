@@ -237,12 +237,21 @@ def parse_dbbackup_row(cells: list[str]) -> dict[str, Any]:
     }
 
 
-def load_customer_map(conn, company_id: str) -> dict[str, str]:
+def load_customer_map(conn, company_id: str | None = None) -> dict[str, str]:
+    """DNI→customer_id en todas las empresas; prioriza company_id si se indica."""
     lookup: dict[str, str] = {}
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT id, tax_id FROM public.customers WHERE company_id = %s::uuid AND tax_id IS NOT NULL",
-            (company_id,),
+            """
+            SELECT id, tax_id
+            FROM public.customers
+            WHERE tax_id IS NOT NULL AND btrim(tax_id) <> ''
+            ORDER BY
+              CASE WHEN %s::uuid IS NOT NULL AND company_id = %s::uuid THEN 0 ELSE 1 END,
+              created_at ASC NULLS LAST,
+              id ASC
+            """,
+            (company_id, company_id),
         )
         for customer_id, tax_id in cur.fetchall():
             for key in dni_match_keys(tax_id):
@@ -295,7 +304,7 @@ INSERT INTO public.inbody_measurements (
   %s, %s
 )
 ON CONFLICT (company_id, inbody_user_id, measured_at) DO UPDATE SET
-  customer_id = EXCLUDED.customer_id,
+  customer_id = COALESCE(EXCLUDED.customer_id, public.inbody_measurements.customer_id),
   height_cm = EXCLUDED.height_cm,
   age_years = EXCLUDED.age_years,
   sex = EXCLUDED.sex,

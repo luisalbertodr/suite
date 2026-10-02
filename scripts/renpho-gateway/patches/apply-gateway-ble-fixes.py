@@ -49,10 +49,31 @@ type DiscoverCandidate = {
 
 /** MorphoScan advertises briefly — poll faster when an allowlist is set. */
 const ALLOWLIST_POLL_MS = 500;
+/** BlueZ D-Bus can hang forever inside devices()/getDevice(); hard-cap each call. */
+const DBUS_CALL_TIMEOUT_MS = 8_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`BlueZ D-Bus timeout after ${ms}ms (${label})`)),
+      ms,
+    );
+    promise.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
 
 async function readDeviceRssi(dev: Device): Promise<number | undefined> {
   try {
-    const rssi = await helperOf(dev).prop('RSSI');
+    const rssi = await withTimeout(helperOf(dev).prop('RSSI'), DBUS_CALL_TIMEOUT_MS, 'RSSI');
     return typeof rssi === 'number' ? rssi : undefined;
   } catch {
     return undefined;
@@ -68,7 +89,8 @@ export async function autoDiscover(
   let heartbeat = 0;
   const allow = allowedScaleMacs();
   const pending = await fetchPendingWeigh(true);
-  if (!pending.pending || !pending.ready) {
+  const flushMac = getFlushTargetMac();
+  if ((!pending.pending || !pending.ready) && !flushMac) {
     bleLog.debug('Auto-discovery idle: no pending weigh request');
     throw new Error('No pending weigh request');
   }
@@ -80,7 +102,8 @@ export async function autoDiscover(
     null;
   if (targetMac) {
     const label = targetMac.match(/.{1,2}/g)?.join(':') ?? targetMac;
-    bleLog.info(`Auto-discovery target scale: ${label} (poll ${pollMs}ms)`);
+    const flushTag = !pending.pending ? ' (weight-only flush)' : '';
+    bleLog.info(`Auto-discovery target scale: ${label}${flushTag} (poll ${pollMs}ms)`);
   } else if (allow) {
     bleLog.info(
       `Auto-discovery allowlist: ${[...allow].map((m) => m.match(/.{1,2}/g)?.join(':') ?? m).join(', ')} ` +
@@ -92,7 +115,20 @@ export async function autoDiscover(
     if (abortSignal?.aborted) {
       throw abortSignal.reason ?? new DOMException('Aborted', 'AbortError');
     }
-    const addresses: string[] = await btAdapter.devices();
+    // Si Suite canceló/expiró el «Pesar», solo seguir si hay flush weight-only.
+    const live = await fetchPendingWeigh(false);
+    const liveFlush = getFlushTargetMac();
+    if ((!live.pending || !live.ready) && !liveFlush) {
+      throw new Error('No pending weigh request');
+    }
+    let addresses: string[];
+    try {
+      addresses = await withTimeout(btAdapter.devices(), DBUS_CALL_TIMEOUT_MS, 'Adapter.devices');
+    } catch (e) {
+      bleLog.info(`Auto-discovery D-Bus glitch: ${e instanceof Error ? e.message : String(e)}`);
+      await sleep(pollMs);
+      continue;
+    }
     const fresh: DiscoverCandidate[] = [];
     const staleAllowlisted: string[] = [];
 
@@ -106,8 +142,8 @@ export async function autoDiscover(
           continue;
         }
 
-        const dev = await btAdapter.getDevice(addr);
-        const name = (await dev.getName().catch(() => '')) || '';
+        const dev = await withTimeout(btAdapter.getDevice(addr), DBUS_CALL_TIMEOUT_MS, `getDevice:${addr}`);
+        const name = (await withTimeout(dev.getName().catch(() => ''), DBUS_CALL_TIMEOUT_MS, 'getName').catch(() => '')) || '';
 
         let matched: ScaleAdapter | null = null;
         if (name) {
@@ -128,7 +164,7 @@ export async function autoDiscover(
 
         fresh.push({ addr, name: name || matched.name, device: dev, adapter: matched, rssi });
       } catch {
-        /* device may have gone away */
+        /* device may have gone away / D-Bus timeout on this addr */
       }
     }
 
@@ -221,12 +257,23 @@ def patch_discovery() -> None:
     )
     # discovery.ts vive en src/ble/handler-node-ble/, así que para llegar a src/suite-pending.ts
     # hay que subir 2 niveles: ../../suite-pending.js (subir 3 lleva fuera de /src).
-    import_line = "import { fetchPendingWeigh, getTargetScaleMac } from '../../suite-pending.js';\n"
+    import_line = (
+        "import { fetchPendingWeigh, getFlushTargetMac, getTargetScaleMac } "
+        "from '../../suite-pending.js';\n"
+    )
     if "fetchPendingWeigh" not in text:
         anchor = "import { resolveAdapter } from '../../scales/resolve.js';\n"
         if anchor not in text:
             raise SystemExit("discovery.ts: resolveAdapter import not found")
         text = text.replace(anchor, anchor + import_line, 1)
+    elif "getFlushTargetMac" not in text:
+        text = re.sub(
+            r"import \{ fetchPendingWeigh, getTargetScaleMac \} from '../../suite-pending\.js';",
+            "import { fetchPendingWeigh, getFlushTargetMac, getTargetScaleMac } "
+            "from '../../suite-pending.js';",
+            text,
+            count=1,
+        )
 
     if "RSSI_UNAVAILABLE" not in text.split("autoDiscover")[0]:
         text = text.replace(

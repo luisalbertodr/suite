@@ -5,6 +5,7 @@ import {
   completeSpanishDni,
   dniMatchKeys,
   findCustomerIdByDniKeys,
+  isInbodyPlaceholderCustomerName,
   normInbodyUserId,
   type InbodyImpedanceFreq,
   type InbodySegmentalFat,
@@ -506,21 +507,54 @@ export function parseInbodyCsv(
   return { rows: annotated, errors, skipped, skippedBlank, suspicious };
 }
 
-export async function loadCustomerTaxMap(companyId: string): Promise<Map<string, string>> {
+/**
+ * Mapa DNI → customer_id para import InBody.
+ * Clientes compartidos: carga fichas de todas las empresas.
+ * Si se pasa preferredCompanyId, prioriza fichas de esa company en colisiones de DNI.
+ */
+export async function loadCustomerTaxMap(
+  preferredCompanyId?: string | null,
+): Promise<Map<string, string>> {
   const { data, error } = await supabase
     .from('customers')
-    .select('id, tax_id')
-    .eq('company_id', companyId)
+    .select('id, tax_id, company_id, name, created_at')
     .not('tax_id', 'is', null);
 
   if (error) throw error;
 
-  const map = new Map<string, string>();
+  type Cand = { id: string; company_id: string | null; name: string | null; created_at: string | null };
+  const byKey = new Map<string, Cand>();
+
+  const rank = (c: Cand): number[] => [
+    isInbodyPlaceholderCustomerName(c.name) ? 1 : 0,
+    preferredCompanyId && c.company_id === preferredCompanyId ? 0 : 1,
+    c.created_at ? Date.parse(c.created_at) || Number.MAX_SAFE_INTEGER : Number.MAX_SAFE_INTEGER,
+  ];
+
+  const better = (a: Cand, b: Cand): boolean => {
+    const ra = rank(a);
+    const rb = rank(b);
+    for (let i = 0; i < ra.length; i++) {
+      if (ra[i] !== rb[i]) return ra[i] < rb[i];
+    }
+    return a.id < b.id;
+  };
+
   for (const row of data || []) {
+    const cand: Cand = {
+      id: row.id,
+      company_id: row.company_id ?? null,
+      name: row.name ?? null,
+      created_at: row.created_at ?? null,
+    };
     for (const key of dniMatchKeys(row.tax_id)) {
-      if (!map.has(key)) map.set(key, row.id);
+      const prev = byKey.get(key);
+      if (!prev || better(cand, prev)) byKey.set(key, cand);
     }
   }
+
+  const map = new Map<string, string>();
+  for (const [key, cand] of byKey) map.set(key, cand.id);
   return map;
 }
 
@@ -585,7 +619,7 @@ function registerCustomerInTaxMap(
 
 /** Persiste la decisión del usuario para un DNI InBody (vincular ficha existente, crear o omitir). */
 export async function persistInbodyCustomerLink(
-  companyId: string,
+  _companyId: string,
   inbodyUserId: string,
   decision: InbodyCustomerLinkDecision,
   customerByTax: Map<string, string>,
@@ -603,11 +637,11 @@ export async function persistInbodyCustomerLink(
   }
 
   const customerId = decision.customerId;
+  // Clientes compartidos: no exigir company_id de la sesión de import.
   const { data: customer, error: fetchError } = await supabase
     .from('customers')
     .select('id, tax_id')
     .eq('id', customerId)
-    .eq('company_id', companyId)
     .maybeSingle();
 
   if (fetchError) throw fetchError;
@@ -618,8 +652,7 @@ export async function persistInbodyCustomerLink(
     const { error: updateError } = await supabase
       .from('customers')
       .update({ tax_id: taxId } as never)
-      .eq('id', customerId)
-      .eq('company_id', companyId);
+      .eq('id', customerId);
     if (updateError) throw updateError;
   }
 

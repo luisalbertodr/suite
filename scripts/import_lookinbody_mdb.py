@@ -327,17 +327,25 @@ def impedance_data(imp: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def load_customer_map(cur, company_id: str) -> dict[str, str]:
+def load_customer_map(cur, company_id: str | None = None) -> dict[str, str]:
+    """Mapa DNI→customer_id. Clientes compartidos: todas las empresas.
+
+    Si company_id se indica, prioriza fichas de esa company en colisiones.
+    """
     cur.execute(
         """
-        SELECT id, tax_id
+        SELECT id, tax_id, company_id, created_at
         FROM public.customers
-        WHERE company_id = %s::uuid AND tax_id IS NOT NULL AND btrim(tax_id) <> ''
+        WHERE tax_id IS NOT NULL AND btrim(tax_id) <> ''
+        ORDER BY
+          CASE WHEN %s::uuid IS NOT NULL AND company_id = %s::uuid THEN 0 ELSE 1 END,
+          created_at ASC NULLS LAST,
+          id ASC
         """,
-        (company_id,),
+        (company_id, company_id),
     )
     out: dict[str, str] = {}
-    for cid, tax_id in cur.fetchall():
+    for cid, tax_id, _co, _created in cur.fetchall():
         for key in dni_match_keys(tax_id):
             if key not in out:
                 out[key] = str(cid)
@@ -497,7 +505,7 @@ INSERT INTO public.inbody_measurements (
   %s, %s, %s
 )
 ON CONFLICT (company_id, inbody_user_id, measured_at) DO UPDATE SET
-  customer_id = EXCLUDED.customer_id,
+  customer_id = COALESCE(EXCLUDED.customer_id, public.inbody_measurements.customer_id),
   height_cm = EXCLUDED.height_cm,
   age_years = EXCLUDED.age_years,
   sex = EXCLUDED.sex,

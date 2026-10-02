@@ -362,6 +362,7 @@ async function findOpenWeighRequest(
 ): Promise<{
   id: string;
   customer_id: string;
+  expires_at: string | null;
   height_cm: number | null;
   age_years: number | null;
   sex: string | null;
@@ -392,6 +393,7 @@ async function findOpenWeighRequest(
   return {
     id: data.id,
     customer_id: data.customer_id,
+    expires_at: asString(data.expires_at) || null,
     height_cm: asNumber(data.height_cm),
     age_years: asNumber(data.age_years) != null ? Math.trunc(asNumber(data.age_years)!) : null,
     sex: asString(data.sex),
@@ -465,6 +467,7 @@ async function pendingWeighProfile(req: Request): Promise<Response> {
     sex: gender === 'male' ? 'M' : gender === 'female' ? 'F' : null,
     gender,
     target_scale_mac: normalizeMac(asString(weigh.target_scale_mac)) || null,
+    expires_at: weigh.expires_at,
   });
 }
 
@@ -534,39 +537,56 @@ async function resolveCustomerId(
   },
 ): Promise<{ customerId: string | null; matchedBy: string | null }> {
   if (opts.customerId) {
+    // Clientes compartidos: aceptar ficha aunque customers.company_id ≠ company del ingest.
     const { data } = await admin
       .from('customers')
-      .select('id, tax_id')
+      .select('id, tax_id, company_id')
       .eq('id', opts.customerId)
-      .eq('company_id', companyId)
       .maybeSingle();
-    if (data?.id) return { customerId: data.id, matchedBy: 'customer_id' };
+    if (data?.id) {
+      return {
+        customerId: data.id,
+        matchedBy: data.company_id === companyId ? 'customer_id' : 'customer_id_shared',
+      };
+    }
   }
 
   const tax = completeSpanishDni(opts.taxId);
   if (!tax) return { customerId: null, matchedBy: null };
 
-  const { data: exact } = await admin
+  // Prefer same company, then any company (shared customers).
+  const { data: exactSame } = await admin
     .from('customers')
     .select('id, tax_id')
     .eq('company_id', companyId)
     .ilike('tax_id', tax)
     .maybeSingle();
-  if (exact?.id) return { customerId: exact.id, matchedBy: 'tax_id' };
+  if (exactSame?.id) return { customerId: exactSame.id, matchedBy: 'tax_id' };
+
+  const { data: exactAny } = await admin
+    .from('customers')
+    .select('id, tax_id')
+    .ilike('tax_id', tax)
+    .limit(1)
+    .maybeSingle();
+  if (exactAny?.id) return { customerId: exactAny.id, matchedBy: 'tax_id_shared' };
 
   const numKey = dniNumericKey(tax);
   if (numKey) {
     const { data: candidates } = await admin
       .from('customers')
-      .select('id, tax_id')
-      .eq('company_id', companyId)
+      .select('id, tax_id, company_id')
       .not('tax_id', 'is', null)
-      .limit(500);
+      .limit(2000);
+    let shared: string | null = null;
     for (const row of candidates ?? []) {
-      if (dniNumericKey(row.tax_id) === numKey) {
+      if (dniNumericKey(row.tax_id) !== numKey) continue;
+      if (row.company_id === companyId) {
         return { customerId: row.id, matchedBy: 'tax_id_numeric' };
       }
+      if (!shared) shared = row.id;
     }
+    if (shared) return { customerId: shared, matchedBy: 'tax_id_numeric_shared' };
   }
 
   return { customerId: null, matchedBy: null };
