@@ -148,16 +148,56 @@ const rMarta = resolveEffectiveR50Ohm({
 console.log('R_eff Marta path', rMarta);
 const marta = computeInbodyLikeComposition(62.5, martaProfile, rMarta!);
 if (!marta) throw new Error('Marta composition null');
-// InBody: 62.5 kg / 21.4 % / FFM 49.1
+// InBody: 62.5 kg / 21.4 % / FFM 49.1 / fat_control 0 (BFM en rango Standard)
 assertClose('Marta pbf vs InBody', marta.pbfPct, 21.4, 2.0);
 assertClose('Marta ffm vs InBody', marta.ffmKg, 49.1, 2.5);
 assertClose('Marta weight max (IMC ~25.3)', marta.ranges.weightKg.max, 70.6, 1.2);
-// Ideal femenino sigue IMC 21.5 (fat_control clínica alineado)
-assertClose('Marta idealW', marta.idealWeightKg, idealWeightKg(167, 'female'), 0.2);
+// Ideal F = FFM_max/(1−0.23) ≈ 64.7; BFM ideal = mid rango LookInBody 15.6
+assertClose('Marta idealW LookInBody', marta.idealWeightKg, 64.7, 0.5);
+assertClose('Marta idealBfm mid-range', marta.idealBfmKg, 15.6, 0.3);
+assertClose('Marta fatControl in-range → 0', marta.fatControlKg, 0, 0.05);
+assertClose('Marta fat range min LookInBody', marta.ranges.fatKg.min, 12, 0.3);
+assertClose('Marta fat range max LookInBody', marta.ranges.fatKg.max, 19.2, 0.3);
 if (marta.bodyType === 'Obeso') {
   throw new Error(`Marta body type should not be Obeso: ${marta.bodyType}`);
 }
 console.log('OK Marta metabolicAge', marta.metabolicAge, 'type', marta.bodyType, 'score', marta.bodyScore);
+
+console.log('\n=== Bethania (F, 167 cm, 40 y) — Morpho 13:01 vs InBody 13:04 ===');
+const bethProfile = { heightCm: 167, ageYears: 40, sex: 'female' as const };
+const bethZ20 = {
+  trunk: 26.3,
+  left_arm: 393.4,
+  left_leg: 265.6,
+  right_arm: 393.6,
+  right_leg: 276.1,
+};
+const bethZ100 = {
+  trunk: 26.7,
+  left_arm: 353,
+  left_leg: 234.7,
+  right_arm: 353.6,
+  right_leg: 234.7,
+};
+const rBeth = resolveEffectiveR50Ohm({
+  sex: 'female',
+  z1Ohm: 384.7,
+  z20: bethZ20,
+  z100: bethZ100,
+});
+console.log('R_eff Bethania path', rBeth);
+const beth = computeInbodyLikeComposition(78.2, bethProfile, rBeth!);
+if (!beth) throw new Error('Bethania composition null');
+// InBody OK: 78 kg / 32.9 % / FFM 52.3 / SMM 29.2 / TBW 38.4 / fat_control −10.1
+assertClose('Bethania pbf vs InBody', beth.pbfPct, 32.9, 1.2);
+assertClose('Bethania tbw vs InBody', beth.tbwKg, 38.4, 1.0);
+assertClose('Bethania smm vs InBody', beth.smmKg, 29.2, 0.8);
+assertClose('Bethania ffm vs InBody', beth.ffmKg, 52.3, 1.2);
+// fat_control InBody −10.1; Suite con BFM Morpho ~26.5 → ~−10.9 (ideal mid 15.6)
+assertClose('Bethania fatControl vs InBody', beth.fatControlKg, -10.1, 1.2);
+if (beth.fatControlKg >= -8) {
+  throw new Error(`Bethania fatControl too mild: ${beth.fatControlKg}`);
+}
 
 console.log('\n=== Report: ignore numeric physiqueRating ===');
 const fake = {

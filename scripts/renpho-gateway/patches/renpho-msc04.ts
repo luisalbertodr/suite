@@ -81,7 +81,7 @@ const MSC04_PATH_SCALE_FEMALE = 0.635;
 /** Keep in sync with INBODY_LIKE_PATH_Z1_GAMMA. */
 const MSC04_PATH_Z1_GAMMA = 0.4;
 const MSC04_HYDRATION_FFM = 0.73;
-const MSC04_FORMULA_VERSION = 'inbody-like-v4-2026-10-fc';
+const MSC04_FORMULA_VERSION = 'inbody-like-v5-2026-10-fc-f';
 /** Non-athlete SMM ≈ FFM × this (Renpho Luis: 36.65 / 64.15 ≈ 0.571). */
 const MSC04_SMM_FFM_RATIO = 0.57;
 
