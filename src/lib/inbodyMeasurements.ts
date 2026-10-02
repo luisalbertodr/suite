@@ -414,6 +414,24 @@ export function segmentLeanEvalPct(entry?: { pct?: number | null; eval_pct?: num
   return v == null || Number.isNaN(v) ? null : v;
 }
 
+/**
+ * Etiqueta Bajo/Normal/Alto para un segmento (misma lógica que «Análisis segmental»).
+ * - Código discreto legacy 0/1/2 (LookInBody antiguo)
+ * - En caso contrario: % vs estándar (90–110 = Normal), p. ej. Morpho eval_pct=108.3
+ */
+export function segmentEvalStatusLabel(entry?: {
+  pct?: number | null;
+  eval_pct?: number | null;
+}): string {
+  const raw = entry?.eval_pct ?? entry?.pct;
+  if (raw == null || Number.isNaN(raw)) return '';
+  if (Number.isInteger(raw) && raw >= 0 && raw <= 2) {
+    return raw === 0 ? 'Bajo' : raw === 2 ? 'Alto' : 'Normal';
+  }
+  const label = inbodyStatusLabel(segmentStatusFromPct(raw));
+  return label === '—' ? '' : label;
+}
+
 export function inbodyBarScale(
   value: number,
   min: number,
