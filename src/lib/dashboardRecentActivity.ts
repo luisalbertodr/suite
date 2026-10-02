@@ -318,13 +318,13 @@ function mapAuditEvents(events: AuditEventRow[]): DashboardRecentActivity[] {
 }
 
 async function fetchScaleActivities(
-  opCompanyId: string,
+  _opCompanyId: string,
   limit: number,
 ): Promise<DashboardRecentActivity[]> {
+  // Clientes compartidos: mediciones de báscula/InBody visibles desde cualquier empresa.
   const scaleRes = await supabase
     .from('inbody_measurements')
     .select('id, customer_id, measured_at, weight_kg, pbf_pct, device, source, customers(name)')
-    .eq('company_id', opCompanyId)
     .not('customer_id', 'is', null)
     .order('measured_at', { ascending: false })
     .limit(limit);

@@ -231,10 +231,7 @@ function ScaleWeighNowControls({
     const key = active.measurement_id;
     if (toastedMeasurementRef.current === key) return;
     toastedMeasurementRef.current = key;
-    const taxKeys = taxId ? dniMatchKeys(taxId) : [];
-    void queryClient.invalidateQueries({
-      queryKey: ['inbody_measurements', companyId, customerId, taxKeys.join('|')],
-    });
+    void queryClient.invalidateQueries({ queryKey: ['inbody_measurements'] });
     void queryClient.invalidateQueries({
       queryKey: ['scale_weigh_request', companyId, customerId],
     });
@@ -258,8 +255,8 @@ function ScaleWeighNowControls({
         ? assessMorphoTakeQuality(row, [])
         : { grade: 'bad' as const, needs_repeat: true, title: 'Repite la medición', message: '' };
 
-      // Consenso con otras tomas Morpho cercanas (±18 h).
-      if (row && companyId && row.measured_at) {
+      // Consenso con otras tomas Morpho cercanas (±18 h). Cross-company (clientes compartidos).
+      if (row && row.measured_at) {
         const t = new Date(row.measured_at).getTime();
         const from = new Date(t - 18 * 3600_000).toISOString();
         const to = new Date(t + 18 * 3600_000).toISOString();
@@ -268,7 +265,6 @@ function ScaleWeighNowControls({
           .select(
             'id, device, source, measured_at, sex, weight_kg, pbf_pct, body_fat_kg, impedance, raw_payload',
           )
-          .eq('company_id', companyId)
           .eq('customer_id', customerId)
           .eq('device', 'morphoscan')
           .gte('measured_at', from)

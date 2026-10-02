@@ -61,9 +61,12 @@ export function useInbodyMeasurements(
     queryFn: async (): Promise<InbodyMeasurement[]> => {
       if (!customerId) return [];
 
+      // Cross-company: no filtrar por company_id (clientes compartidos).
       const orParts = [`customer_id.eq.${customerId}`];
       for (const key of taxKeys) {
+        // eq exacto + ilike por si tax_id/inbody_user_id difieren en mayúsculas
         orParts.push(`inbody_user_id.eq.${key}`);
+        orParts.push(`inbody_user_id.ilike.${key}`);
       }
 
       const { data, error } = await (supabase as any)

@@ -17,6 +17,13 @@ import {
   type InbodyDataQuality,
 } from '@/lib/inbodyQuality';
 
+export type CustomerTaxMap = {
+  /** Claves DNI (con/sin letra, mayúsculas/minúsculas) → customer_id */
+  byTax: Map<string, string>;
+  /** customer_id → company_id de la ficha */
+  companyByCustomer: Map<string, string>;
+};
+
 export interface InbodyCsvImportRow {
   company_id: string;
   customer_id: string | null;
@@ -383,7 +390,7 @@ function parseDbBackupCells(cells: string[]): Record<string, string> {
 function rowToImportPayload(
   raw: Record<string, string>,
   companyId: string,
-  customerByTax: Map<string, string>,
+  customerMap: CustomerTaxMap | Map<string, string>,
   importBatch: string,
   source: string,
 ): InbodyCsvImportRow | null {
@@ -392,7 +399,12 @@ function rowToImportPayload(
   const measuredAt = parseMeasuredAt(pick(raw, 'measured_at'));
   if (!userId || !measuredAt) return null;
 
-  const customerId = findCustomerIdByDniKeys(userId, customerByTax);
+  const byTax = customerMap instanceof Map ? customerMap : customerMap.byTax;
+  const companyByCustomer =
+    customerMap instanceof Map ? new Map<string, string>() : customerMap.companyByCustomer;
+  const customerId = findCustomerIdByDniKeys(userId, byTax);
+  const rowCompanyId =
+    (customerId && companyByCustomer.get(customerId)) || companyId;
   const weightKg = pickFloat(raw, 'weight_kg');
   const bfmRange = fixBodyFatMassRangeKg(
     weightKg,
@@ -401,7 +413,7 @@ function rowToImportPayload(
   );
 
   return {
-    company_id: companyId,
+    company_id: rowCompanyId,
     customer_id: customerId,
     inbody_user_id: userId,
     measured_at: measuredAt,
@@ -451,7 +463,7 @@ function rowToImportPayload(
 export function parseInbodyCsv(
   text: string,
   companyId: string,
-  customerByTax: Map<string, string>,
+  customerMap: CustomerTaxMap | Map<string, string>,
   importBatch: string,
 ): InbodyCsvParseResult {
   const sanitized = text.replace(/\u0000/g, '');
@@ -488,7 +500,7 @@ export function parseInbodyCsv(
           return mapped;
         })();
 
-    const payload = rowToImportPayload(raw, companyId, customerByTax, importBatch, source);
+    const payload = rowToImportPayload(raw, companyId, customerMap, importBatch, source);
     if (!payload) {
       if (!rowHasRecoverableHints(raw)) {
         skippedBlank++;
@@ -514,7 +526,7 @@ export function parseInbodyCsv(
  */
 export async function loadCustomerTaxMap(
   preferredCompanyId?: string | null,
-): Promise<Map<string, string>> {
+): Promise<CustomerTaxMap> {
   const { data, error } = await supabase
     .from('customers')
     .select('id, tax_id, company_id, name, created_at')
@@ -524,6 +536,7 @@ export async function loadCustomerTaxMap(
 
   type Cand = { id: string; company_id: string | null; name: string | null; created_at: string | null };
   const byKey = new Map<string, Cand>();
+  const companyByCustomer = new Map<string, string>();
 
   const rank = (c: Cand): number[] => [
     isInbodyPlaceholderCustomerName(c.name) ? 1 : 0,
@@ -547,15 +560,16 @@ export async function loadCustomerTaxMap(
       name: row.name ?? null,
       created_at: row.created_at ?? null,
     };
+    if (row.company_id) companyByCustomer.set(row.id, row.company_id);
     for (const key of dniMatchKeys(row.tax_id)) {
       const prev = byKey.get(key);
       if (!prev || better(cand, prev)) byKey.set(key, cand);
     }
   }
 
-  const map = new Map<string, string>();
-  for (const [key, cand] of byKey) map.set(key, cand.id);
-  return map;
+  const byTax = new Map<string, string>();
+  for (const [key, cand] of byKey) byTax.set(key, cand.id);
+  return { byTax, companyByCustomer };
 }
 
 export type UnmatchedInbodyUser = {
@@ -586,14 +600,15 @@ export async function fetchLegacyNameForInbodyDni(taxId: string): Promise<string
 /** DNI del CSV sin ficha por tax_id (puede existir ficha solo por nombre). */
 export async function collectUnmatchedInbodyUsers(
   rows: InbodyCsvImportRow[],
-  customerByTax: Map<string, string>,
+  customerMap: CustomerTaxMap | Map<string, string>,
 ): Promise<UnmatchedInbodyUser[]> {
+  const byTax = customerMap instanceof Map ? customerMap : customerMap.byTax;
   const counts = new Map<string, number>();
   for (const row of rows) {
     if (row.customer_id) continue;
     const taxId = completeSpanishDni(row.inbody_user_id);
-    if (findCustomerIdByDniKeys(row.inbody_user_id, customerByTax)) continue;
-    if (findCustomerIdByDniKeys(taxId, customerByTax)) continue;
+    if (findCustomerIdByDniKeys(row.inbody_user_id, byTax)) continue;
+    if (findCustomerIdByDniKeys(taxId, byTax)) continue;
     counts.set(row.inbody_user_id, (counts.get(row.inbody_user_id) ?? 0) + 1);
   }
 
@@ -622,9 +637,10 @@ export async function persistInbodyCustomerLink(
   _companyId: string,
   inbodyUserId: string,
   decision: InbodyCustomerLinkDecision,
-  customerByTax: Map<string, string>,
+  customerMap: CustomerTaxMap | Map<string, string>,
 ): Promise<{ customerId: string | null; created: boolean; linked: boolean }> {
   const taxId = completeSpanishDni(inbodyUserId).toLowerCase();
+  const byTax = customerMap instanceof Map ? customerMap : customerMap.byTax;
 
   if (decision.kind === 'skip') {
     return { customerId: null, created: false, linked: false };
@@ -640,7 +656,7 @@ export async function persistInbodyCustomerLink(
   // Clientes compartidos: no exigir company_id de la sesión de import.
   const { data: customer, error: fetchError } = await supabase
     .from('customers')
-    .select('id, tax_id')
+    .select('id, tax_id, company_id')
     .eq('id', customerId)
     .maybeSingle();
 
@@ -656,21 +672,36 @@ export async function persistInbodyCustomerLink(
     if (updateError) throw updateError;
   }
 
-  registerCustomerInTaxMap(customerByTax, customerId, inbodyUserId, taxId);
+  registerCustomerInTaxMap(byTax, customerId, inbodyUserId, taxId);
+  if (!(customerMap instanceof Map) && customer.company_id) {
+    customerMap.companyByCustomer.set(customerId, customer.company_id);
+  }
   return { customerId, created: false, linked: true };
 }
 
 export function enrichInbodyRowsWithCustomerMap(
   rows: InbodyCsvImportRow[],
-  customerByTax: Map<string, string>,
+  customerMap: CustomerTaxMap | Map<string, string>,
 ): InbodyCsvImportRow[] {
+  const byTax = customerMap instanceof Map ? customerMap : customerMap.byTax;
+  const companyByCustomer =
+    customerMap instanceof Map ? new Map<string, string>() : customerMap.companyByCustomer;
+
   return rows.map((row) => {
-    if (row.customer_id) return row;
     const taxId = completeSpanishDni(row.inbody_user_id);
     const customerId =
-      findCustomerIdByDniKeys(row.inbody_user_id, customerByTax) ??
-      findCustomerIdByDniKeys(taxId, customerByTax);
-    return customerId ? { ...row, customer_id: customerId } : row;
+      row.customer_id ??
+      findCustomerIdByDniKeys(row.inbody_user_id, byTax) ??
+      findCustomerIdByDniKeys(taxId, byTax) ??
+      null;
+    if (!customerId) return row;
+    const customerCompany = companyByCustomer.get(customerId);
+    return {
+      ...row,
+      customer_id: customerId,
+      // Guardar en la company de la ficha (visible cross-company por customer_id).
+      company_id: customerCompany || row.company_id,
+    };
   });
 }
 
@@ -728,6 +759,13 @@ export async function upsertInbodyCsvRows(rows: InbodyCsvImportRow[]): Promise<n
     });
     if (error) throw error;
     total += chunk.length;
+  }
+
+  // Re-vincular/alinear por DNI (con/sin letra) por si quedó huérfano o en otra company.
+  try {
+    await (supabase as any).rpc('link_all_orphan_inbody_measurements_by_dni');
+  } catch {
+    // No bloquear el import si el RPC falla; las filas ya están upsertadas.
   }
 
   return total;

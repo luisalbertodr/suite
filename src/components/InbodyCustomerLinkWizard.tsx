@@ -30,6 +30,7 @@ import {
 import { dniNumericKey } from '@/lib/inbodyMeasurements';
 import {
   persistInbodyCustomerLink,
+  type CustomerTaxMap,
   type InbodyCustomerLinkStats,
   type UnmatchedInbodyUser,
 } from '@/lib/inbodyCsvImport';
@@ -39,8 +40,8 @@ type Props = {
   items: UnmatchedInbodyUser[];
   companyId: string;
   catalogCompanyId: string;
-  customerByTax: Map<string, string>;
-  onComplete: (customerByTax: Map<string, string>, stats: InbodyCustomerLinkStats) => void;
+  customerByTax: CustomerTaxMap;
+  onComplete: (customerByTax: CustomerTaxMap, stats: InbodyCustomerLinkStats) => void;
   onCancel: () => void;
 };
 
@@ -62,7 +63,7 @@ export const InbodyCustomerLinkWizard: React.FC<Props> = ({
 }) => {
   const { toast } = useToast();
   const [index, setIndex] = useState(0);
-  const [customerByTax, setCustomerByTax] = useState(initialMap);
+  const [customerByTax, setCustomerByTax] = useState<CustomerTaxMap>(initialMap);
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<CustomerSearchRow | null>(null);
   const [busy, setBusy] = useState(false);
@@ -74,7 +75,10 @@ export const InbodyCustomerLinkWizard: React.FC<Props> = ({
   useEffect(() => {
     if (!open) return;
     setIndex(0);
-    setCustomerByTax(new Map(initialMap));
+    setCustomerByTax({
+      byTax: new Map(initialMap.byTax),
+      companyByCustomer: new Map(initialMap.companyByCustomer),
+    });
     setStats({ linked: 0, created: 0, skipped: 0 });
   }, [open, initialMap, items]);
 
@@ -90,7 +94,7 @@ export const InbodyCustomerLinkWizard: React.FC<Props> = ({
     [selected, current?.tax_id],
   );
 
-  const advance = (nextMap: Map<string, string>, patch: Partial<InbodyCustomerLinkStats>) => {
+  const advance = (nextMap: CustomerTaxMap, patch: Partial<InbodyCustomerLinkStats>) => {
     const nextStats = {
       linked: stats.linked + (patch.linked ?? 0),
       created: stats.created + (patch.created ?? 0),
@@ -113,7 +117,10 @@ export const InbodyCustomerLinkWizard: React.FC<Props> = ({
     if (!current) return;
     setBusy(true);
     try {
-      const nextMap = new Map(customerByTax);
+      const nextMap: CustomerTaxMap = {
+        byTax: new Map(customerByTax.byTax),
+        companyByCustomer: new Map(customerByTax.companyByCustomer),
+      };
       await persistInbodyCustomerLink(companyId, current.inbody_user_id, decision, nextMap);
       advance(nextMap, patch);
     } catch (e) {

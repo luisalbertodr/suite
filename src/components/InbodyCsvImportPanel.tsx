@@ -14,6 +14,7 @@ import {
   loadCustomerTaxMap,
   parseInbodyCsv,
   upsertInbodyCsvRows,
+  type CustomerTaxMap,
   type InbodyCsvImportRow,
   type InbodyCustomerLinkStats,
   type UnmatchedInbodyUser,
@@ -23,7 +24,7 @@ import { cn } from '@/lib/utils';
 type PendingImport = {
   rows: InbodyCsvImportRow[];
   result: ReturnType<typeof parseInbodyCsv>;
-  customerMap: Map<string, string>;
+  customerMap: CustomerTaxMap;
 };
 
 interface InbodyCsvImportPanelProps {
@@ -301,7 +302,7 @@ export const InbodyCsvImportPanel: React.FC<InbodyCsvImportPanelProps> = ({
   };
 
   const handleWizardComplete = async (
-    customerMap: Map<string, string>,
+    customerMap: CustomerTaxMap,
     linkStats: InbodyCustomerLinkStats,
   ) => {
     if (!pendingImport || !companyId) return;
