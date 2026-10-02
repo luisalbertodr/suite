@@ -49,6 +49,7 @@ import {
   adaptMorphoMeasurementsForInbodyUi,
   morphoUsesSuiteBia,
 } from '@/lib/morphoInbodyView';
+import { assessMorphoTakeQuality } from '@/lib/morphoTakeQuality';
 import {
   ageYearsFromBirthDate,
   buildScaleProfileSnapshot,
@@ -246,23 +247,43 @@ function ScaleWeighNowControls({
     void (async () => {
       const { data: m } = await supabase
         .from('inbody_measurements')
-        .select('pbf_pct, smm_kg, data_quality, raw_payload')
+        .select(
+          'id, device, source, measured_at, sex, weight_kg, pbf_pct, body_fat_kg, smm_kg, impedance, data_quality, raw_payload',
+        )
         .eq('id', key)
         .maybeSingle();
-      const dq = (m?.data_quality ?? null) as {
-        needs_repeat?: boolean;
-        status?: string;
-      } | null;
-      const raw = (m?.raw_payload ?? null) as Record<string, unknown> | null;
-      const weightOnly =
-        raw?.weight_only === true ||
-        raw?.fat_source === 'none' ||
-        (m?.pbf_pct == null && dq?.needs_repeat);
 
-      if (weightOnly || dq?.needs_repeat) {
+      const row = m as InbodyMeasurement | null;
+      let quality = row
+        ? assessMorphoTakeQuality(row, [])
+        : { grade: 'bad' as const, needs_repeat: true, title: 'Repite la medición', message: '' };
+
+      // Consenso con otras tomas Morpho cercanas (±18 h).
+      if (row && companyId && row.measured_at) {
+        const t = new Date(row.measured_at).getTime();
+        const from = new Date(t - 18 * 3600_000).toISOString();
+        const to = new Date(t + 18 * 3600_000).toISOString();
+        const { data: siblings } = await supabase
+          .from('inbody_measurements')
+          .select(
+            'id, device, source, measured_at, sex, weight_kg, pbf_pct, body_fat_kg, impedance, raw_payload',
+          )
+          .eq('company_id', companyId)
+          .eq('customer_id', customerId)
+          .eq('device', 'morphoscan')
+          .gte('measured_at', from)
+          .lte('measured_at', to)
+          .order('measured_at', { ascending: false })
+          .limit(12);
+        quality = assessMorphoTakeQuality(row, (siblings as InbodyMeasurement[]) ?? []);
+      }
+
+      if (quality.needs_repeat || quality.grade !== 'good') {
         toast({
-          title: 'Repite la medición',
-          description: `${weightLabel} guardado, pero la composición no es fiable. Baja, espera 5 s y vuelve a subirte a la MorphoScan (pies descalzos, quieta hasta el bip).`,
+          title: quality.grade === 'bad' ? 'Medición errónea — repite' : 'Medición poco fiable — conviene repetir',
+          description:
+            quality.message ||
+            `${weightLabel} guardado, pero la composición no es fiable. Baja, espera 5 s y vuelve a subirte (pies descalzos, mango firme, quieta hasta el bip).`,
           variant: 'destructive',
         });
         return;
@@ -271,8 +292,8 @@ function ScaleWeighNowControls({
       toast({
         title: 'Medición recibida',
         description:
-          m?.pbf_pct != null
-            ? `${weightLabel} · grasa ${formatInbodyNumber(m.pbf_pct, 1, ' %')} vinculada a este cliente.`
+          row?.pbf_pct != null
+            ? `${weightLabel} · grasa ${formatInbodyNumber(row.pbf_pct, 1, ' %')} vinculada a este cliente.`
             : `${weightLabel} vinculada a este cliente.`,
       });
     })();

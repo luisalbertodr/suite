@@ -1,10 +1,16 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import {
   formatInbodyQualityAlert,
   resolveInbodyDataQuality,
 } from '@/lib/inbodyQuality';
-import type { InbodyMeasurement } from '@/lib/inbodyMeasurements';
+import { isMorphoScanMeasurement, type InbodyMeasurement } from '@/lib/inbodyMeasurements';
+import {
+  assessMorphoTakeQuality,
+  morphoTakeIssueLabel,
+  morphoTakeQualityLabels,
+  type MorphoTakeIssue,
+} from '@/lib/morphoTakeQuality';
 import {
   Tooltip,
   TooltipContent,
@@ -34,13 +40,42 @@ export function InbodyQualityWarningIcon({
   iconClassName,
   side = 'top',
 }: Props) {
-  const quality = resolveInbodyDataQuality(measurement, siblings);
-  if (!(quality.status === 'suspicious' && quality.needs_repeat)) return null;
+  const alert = useMemo(() => {
+    if (isMorphoScanMeasurement(measurement)) {
+      const raw = measurement.raw_payload ?? {};
+      const grade = raw.morpho_take_grade as string | undefined;
+      // Preferir calidad ya calculada en el adaptador (consenso con todas las tomas).
+      if (grade === 'good') return null;
+      if (grade === 'warn' || grade === 'bad') {
+        const issues = Array.isArray(raw.morpho_take_issues)
+          ? (raw.morpho_take_issues as MorphoTakeIssue[])
+          : [];
+        return {
+          title: String(raw.morpho_take_title || 'Medición poco fiable — conviene repetir'),
+          body: String(
+            raw.morpho_take_message ||
+              'La toma tiene señales de contacto irregular. Conviene repetir el pesaje.',
+          ),
+          issues: issues.map((i) => morphoTakeIssueLabel(i)),
+        };
+      }
+      const q = assessMorphoTakeQuality(measurement, siblings);
+      if (q.grade === 'good') return null;
+      return {
+        title: q.title,
+        body: q.message,
+        issues: morphoTakeQualityLabels(q),
+      };
+    }
+    const quality = resolveInbodyDataQuality(measurement, siblings);
+    if (!(quality.status === 'suspicious' && quality.needs_repeat)) return null;
+    const reference = quality.reference_measurement_id
+      ? siblings.find((m) => m.id === quality.reference_measurement_id) ?? null
+      : null;
+    return formatInbodyQualityAlert(quality, reference);
+  }, [measurement, siblings]);
 
-  const reference = quality.reference_measurement_id
-    ? siblings.find((m) => m.id === quality.reference_measurement_id) ?? null
-    : null;
-  const alert = formatInbodyQualityAlert(quality, reference);
+  if (!alert) return null;
 
   return (
     <TooltipProvider delayDuration={150}>

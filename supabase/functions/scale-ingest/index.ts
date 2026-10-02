@@ -905,12 +905,17 @@ function buildRow(
       bodyFatKg,
       smmKg: pickMetric(body, ['smm_kg', 'smmKg']),
       rawPayload,
+      impedance,
+      sex: asString(body.sex),
     }),
     updated_at: new Date().toISOString(),
   };
 }
 
-/** Calidad MorphoScan: composición solo si frame fiable; si no → needs_repeat. */
+/**
+ * Calidad MorphoScan (alineada con src/lib/morphoTakeQuality.ts):
+ * bad/warn → needs_repeat; UI oculta bad y avisa warn.
+ */
 function assessMorphoScanDataQuality(input: {
   device: DeviceKind;
   weightKg: number | null;
@@ -918,6 +923,8 @@ function assessMorphoScanDataQuality(input: {
   bodyFatKg: number | null;
   smmKg: number | null;
   rawPayload: Record<string, unknown>;
+  impedance?: Record<string, Record<string, number>> | null;
+  sex?: string | null;
 }): Record<string, unknown> | null {
   if (input.device !== 'morphoscan') return null;
 
@@ -929,25 +936,85 @@ function assessMorphoScanDataQuality(input: {
     (input.pbfPct == null && input.bodyFatKg == null);
 
   const issues: string[] = [];
-  if (weightOnly) issues.push('missing_core_fields');
-  if (input.pbfPct != null && input.pbfPct < 10 && (input.weightKg ?? 0) >= 40) {
-    issues.push('pbf_too_low');
+  if (weightOnly) issues.push('weight_only', 'missing_core_fields');
+  if (input.pbfPct == null && input.bodyFatKg == null) issues.push('no_composition');
+
+  const z1Raw = input.rawPayload.impedance_ohm ?? input.rawPayload.z1;
+  const z1 =
+    typeof z1Raw === 'number'
+      ? z1Raw
+      : typeof z1Raw === 'string' && Number(z1Raw) >= 100
+        ? Number(z1Raw)
+        : null;
+  if (z1 == null || z1 < 100) issues.push('no_z1');
+
+  const z20 = input.impedance?.['20khz'] ?? null;
+  const z100 = input.impedance?.['100khz'] ?? null;
+  const segs = ['right_arm', 'trunk', 'right_leg'] as const;
+  let pathSegs = 0;
+  let pathSum = 0;
+  if (z20) {
+    for (const k of segs) {
+      const a = z20[k];
+      const b = z100?.[k];
+      if (typeof a === 'number' && a > 0 && typeof b === 'number' && b > 0) {
+        pathSegs += 1;
+        const t = Math.log(50 / 20) / Math.log(100 / 20);
+        pathSum += Math.exp(Math.log(a) + t * (Math.log(b) - Math.log(a)));
+        if (k === 'trunk' && b < 15) issues.push('trunk100_suspect');
+      } else if (typeof b === 'number' && b > 0) {
+        pathSegs += 1;
+        pathSum += b;
+      } else if (typeof a === 'number' && a > 0) {
+        pathSegs += 1;
+        pathSum += a;
+        issues.push('missing_100khz_segment');
+      }
+    }
   }
-  if (input.smmKg != null && input.smmKg >= 25.4 && input.smmKg <= 25.7) {
-    issues.push('composition_sum_mismatch');
+  if (pathSegs < 3) {
+    issues.push('path_incomplete', 'no_path');
+  } else if (z1 != null && z1 >= 100) {
+    const sex = String(input.sex || '').toLowerCase();
+    const female = sex === 'f' || sex === 'female' || sex.startsWith('mujer');
+    const pathR = pathSum * (female ? 0.635 : 0.73);
+    const z1R = z1 * (female ? 1.08 : 1.33);
+    const rel = z1R > 0 ? Math.abs(pathR - z1R) / z1R : 0;
+    if (rel > 0.12) issues.push('path_z1_discord');
+    else if (rel > 0.08) issues.push('path_z1_warn');
   }
 
-  const needsRepeat = issues.length > 0;
+  if (input.pbfPct != null && input.pbfPct < 8 && (input.weightKg ?? 0) >= 40) {
+    issues.push('pbf_too_low');
+  }
+
+  const unique = [...new Set(issues)];
+  const badKeys = new Set([
+    'weight_only',
+    'missing_core_fields',
+    'no_composition',
+    'no_z1',
+    'no_path',
+    'path_incomplete',
+    'path_z1_discord',
+  ]);
+  const warnKeys = new Set(['trunk100_suspect', 'missing_100khz_segment', 'path_z1_warn', 'pbf_too_low']);
+  const isBad = unique.some((i) => badKeys.has(i));
+  const isWarn = !isBad && unique.some((i) => warnKeys.has(i));
+  const grade = isBad ? 'bad' : isWarn ? 'warn' : 'good';
+  const needsRepeat = grade !== 'good';
+
   return {
     status: needsRepeat ? 'suspicious' : 'ok',
     needs_repeat: needsRepeat,
-    issues,
+    morpho_grade: grade,
+    issues: unique,
     hint: needsRepeat
       ? {
           source: 'morphoscan_frame',
-          message: weightOnly
-            ? 'Composición no fiable (frame incompleto). Repite la medición en la báscula.'
-            : 'Valores de composición sospechosos. Repite la medición.',
+          message: isBad
+            ? 'Composición no fiable (impedancia incompleta o path inválido). Repite la medición.'
+            : 'Toma poco fiable (contacto irregular). Conviene repetir la medición.',
         }
       : null,
     checked_at: new Date().toISOString(),
