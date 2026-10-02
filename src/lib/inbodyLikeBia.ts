@@ -4,8 +4,9 @@
  * Entrada: peso + perfil (H/A/S) + impedancia (z1 o mapa segmentario).
  * No usa %BF comercial Renpho; recalcula TBW→FFM→BFM y objetivos clínicos.
  *
- * R efectiva ~50 kHz: z1 Morpho × escala sexo (calibrada a panel InBody/Renpho
- * 2026-08: Marta F×1.08, Luis M×1.33 → R≈400 Ω → TBW≈InBody).
+ * R efectiva ~50 kHz (prioridad):
+ * 1) Path RA+tronco+RL × escala sexo (M 0.73 / F 0.635; pares InBody Luis+Marta)
+ * 2) Fallback z1 × escala sexo (Marta F×1.08, Luis M×1.33)
  */
 
 export type InbodyLikeSex = 'male' | 'female';
@@ -68,11 +69,21 @@ export interface InbodyLikeRanges {
   pbf: { min: number; max: number };
 }
 
-/** Escala z1 Morpho → R50 efectiva (mismo factor que BIA gateway calibrada). */
+/** Escala z1 Morpho → R50 (solo si no hay path segmentario usable). */
 export const INBODY_LIKE_Z1_SCALE_MALE = 1.33;
 export const INBODY_LIKE_Z1_SCALE_FEMALE = 1.08;
 
-export const INBODY_LIKE_FORMULA_VERSION = 'inbody-like-v1-2026-08';
+/**
+ * Path Morpho (RA+tronco+RL Ω) → R50 clínica (por sexo).
+ * Male 0.73 — Luis 2026-08-06 / 2026-10-02 (TBW InBody ±1 L).
+ * Female 0.635 — Marta 2026-08-05 (InBody 62.5 kg / 21.4 %).
+ */
+export const INBODY_LIKE_PATH_SCALE_MALE = 0.73;
+export const INBODY_LIKE_PATH_SCALE_FEMALE = 0.635;
+/** @deprecated Prefer pathScaleForSex — male default for back-compat. */
+export const INBODY_LIKE_PATH_SCALE = INBODY_LIKE_PATH_SCALE_MALE;
+
+export const INBODY_LIKE_FORMULA_VERSION = 'inbody-like-v2-2026-10-path';
 
 const HYDRATION_FFM = 0.73;
 const PROTEIN_OF_FFM = 0.18;
@@ -100,6 +111,10 @@ export function normalizeInbodyLikeSex(sex: string | null | undefined): InbodyLi
 
 export function z1ScaleForSex(sex: InbodyLikeSex): number {
   return sex === 'male' ? INBODY_LIKE_Z1_SCALE_MALE : INBODY_LIKE_Z1_SCALE_FEMALE;
+}
+
+export function pathScaleForSex(sex: InbodyLikeSex): number {
+  return sex === 'male' ? INBODY_LIKE_PATH_SCALE_MALE : INBODY_LIKE_PATH_SCALE_FEMALE;
 }
 
 /**
@@ -140,8 +155,8 @@ export function estimatePathR50Ohm(
 
 /**
  * R efectiva ~50 kHz.
- * Preferir z1×escala (calibrada a InBody); si no hay z1, trayecto RA+TR+RL.
- * El path crudo Morpho suele quedar alto (~500–600 Ω) vs R clínica ~400 Ω.
+ * Preferir path segmentario; si path y z1 discrepan >12 % relativo, usar z1
+ * (mapas Morpho a veces truncan tronco/pierna y el path se dispara).
  */
 export function resolveEffectiveR50Ohm(opts: {
   sex: InbodyLikeSex;
@@ -150,15 +165,19 @@ export function resolveEffectiveR50Ohm(opts: {
   z100?: SegmentalOhms | null;
 }): number | null {
   const z1 = opts.z1Ohm;
-  if (z1 != null && z1 >= 100 && z1 <= 1500) {
-    return r1(z1 * z1ScaleForSex(opts.sex));
-  }
+  const z1R =
+    z1 != null && z1 >= 100 && z1 <= 1500
+      ? r1(z1 * z1ScaleForSex(opts.sex))
+      : null;
   const path = estimatePathR50Ohm(opts.z20, opts.z100);
   if (path != null) {
-    // Ajuste empírico path→R50 (Luis 2026-08: path≈518 → ~400)
-    return r1(path * 0.77);
+    const pathR = r1(path * pathScaleForSex(opts.sex));
+    if (z1R != null && z1R > 0 && Math.abs(pathR - z1R) / z1R > 0.12) {
+      return z1R;
+    }
+    return pathR;
   }
-  return null;
+  return z1R;
 }
 
 /** TBW (L≈kg) — modelo clínico H²/R + W + A + sexo. */

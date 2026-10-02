@@ -14,7 +14,6 @@ import type {
 import {
   uuid16,
   buildPayload,
-  computeBiaFat,
   type ScaleBodyComp,
 } from './body-comp-helpers.js';
 import { matchesDescriptor, type MatchDescriptor } from './match-descriptor.js';
@@ -70,18 +69,27 @@ const MATCH_WEIGHT_KG = 0.8;
 /** Debe ser >= timeout HTTP de suite-pending (12s) para no caer al perfil config.yaml. */
 const PENDING_HANDSHAKE_WAIT_MS = 12_000;
 /**
- * MorphoScan DF-BIA `z1` (LE/10 after weight + 0x0a00) impedance scale factors.
- * End-anchored plen-8 fat is NOT Renpho body-fat % (Luis 2026-08-06: frame 14.4 %
- * vs Renpho report 20.7 % / InBody 19.2 %). Always prefer BIA when z1 is present.
- *
- * Female 1.08 — 2026-08-05 Marta Loureiro: InBody 62.5 kg / 21.4 %; z1≈380 Ω.
- * Male 1.33 — 2026-08-06 Luis A. Renpho PDF (P26080602) 80.90 kg / 20.7 % /
- *   fat 16.75 / muscle 59.87 / SMM 36.65 / bone 4.30; BLE z1≈301.6 Ω @ 80.4 kg.
+ * Suite InBody-like TBW engine (keep in sync with src/lib/inbodyLikeBia.ts).
+ * Prefer path RA+tronco+RL × PATH_SCALE over z1×sex (Luis 2026-08-06 + 2026-10-02).
+ * End-anchored plen-8 fat is NOT Renpho/InBody % — always prefer TBW when Z present.
  */
 const MSC04_Z1_BIA_SCALE_FEMALE = 1.08;
 const MSC04_Z1_BIA_SCALE_MALE = 1.33;
+/** Keep in sync with src/lib/inbodyLikeBia.ts pathScaleForSex. */
+const MSC04_PATH_SCALE_MALE = 0.73;
+const MSC04_PATH_SCALE_FEMALE = 0.635;
+const MSC04_HYDRATION_FFM = 0.73;
+const MSC04_FORMULA_VERSION = 'inbody-like-v2-2026-10-path';
 /** Non-athlete SMM ≈ FFM × this (Renpho Luis: 36.65 / 64.15 ≈ 0.571). */
 const MSC04_SMM_FFM_RATIO = 0.57;
+
+type SegmentalOhms = {
+  right_arm?: number;
+  left_arm?: number;
+  trunk?: number;
+  right_leg?: number;
+  left_leg?: number;
+};
 
 type CachedComp = ScaleBodyComp & {
   bodyFat?: number;
@@ -104,17 +112,143 @@ type CachedComp = ScaleBodyComp & {
   muscleMassKg?: number;
   /** Skeletal muscle mass (kg). */
   smmKg?: number;
+  /** Effective R ~50 kHz used by Suite TBW. */
+  rEffOhm?: number;
+  /** path | z1 — which impedance source fed TBW. */
+  rSource?: 'path' | 'z1';
 };
 
 function msc04Z1Scale(profile: UserProfile): number {
   return profile.gender === 'male' ? MSC04_Z1_BIA_SCALE_MALE : MSC04_Z1_BIA_SCALE_FEMALE;
 }
 
-/** Body fat % from DF-BIA z1 + user profile (sex-specific Renpho/InBody scale). */
-function msc04BiaFat(weight: number, z1Ohm: number, profile: UserProfile): number {
-  const z = z1Ohm * msc04Z1Scale(profile);
-  if (!(z >= 100 && z <= 1500) || !(weight >= 0.5 && weight <= 300)) return Number.NaN;
-  return Math.round(computeBiaFat(weight, z, profile) * 10) / 10;
+function msc04PathScale(profile: UserProfile): number {
+  return profile.gender === 'male' ? MSC04_PATH_SCALE_MALE : MSC04_PATH_SCALE_FEMALE;
+}
+
+function msc04InterpolateZ50(z20: number, z100: number): number {
+  const t = Math.log(50 / 20) / Math.log(100 / 20);
+  return Math.exp(Math.log(z20) + t * (Math.log(z100) - Math.log(z20)));
+}
+
+/** Hemicuerpo dcho. RA+tronco+RL → R ~50 kHz (misma lógica que Suite UI). */
+function msc04EstimatePathR50Ohm(
+  z20: SegmentalOhms | null | undefined,
+  z100: SegmentalOhms | null | undefined,
+): number | null {
+  const segs = ['right_arm', 'trunk', 'right_leg'] as const;
+  const vals: number[] = [];
+  for (const k of segs) {
+    const a = z20?.[k];
+    const b = z100?.[k];
+    if (a != null && a > 0 && b != null && b > 0) {
+      const z = msc04InterpolateZ50(a, b);
+      if (Number.isFinite(z)) vals.push(z);
+    } else if (b != null && b > 0) {
+      vals.push(b);
+    } else if (a != null && a > 0) {
+      vals.push(a);
+    }
+  }
+  if (vals.length < 3) return null;
+  const sum = vals.reduce((s, v) => s + v, 0);
+  return sum > 50 && sum < 2000 ? Math.round(sum * 10) / 10 : null;
+}
+
+function msc04ResolveR50Ohm(opts: {
+  profile: UserProfile;
+  z1Ohm?: number | null;
+  impedanceMap?: CachedComp['impedanceMap'] | null;
+}): { rOhm: number; source: 'path' | 'z1' } | null {
+  const z1 = opts.z1Ohm;
+  const z1R =
+    z1 != null && z1 >= 100 && z1 <= 1500
+      ? Math.round(z1 * msc04Z1Scale(opts.profile) * 10) / 10
+      : null;
+  const path = msc04EstimatePathR50Ohm(
+    opts.impedanceMap?.['20khz'],
+    opts.impedanceMap?.['100khz'],
+  );
+  if (path != null) {
+    const pathR = Math.round(path * msc04PathScale(opts.profile) * 10) / 10;
+    // Segmental maps can be truncated; if path drifts >12% from z1, trust z1.
+    if (z1R != null && z1R > 0 && Math.abs(pathR - z1R) / z1R > 0.12) {
+      return { rOhm: z1R, source: 'z1' };
+    }
+    return { rOhm: pathR, source: 'path' };
+  }
+  if (z1R != null) return { rOhm: z1R, source: 'z1' };
+  return null;
+}
+
+/** TBW clínico H²/R (misma fórmula que src/lib/inbodyLikeBia.ts). */
+function msc04ComputeTbwLiters(
+  weightKg: number,
+  heightCm: number,
+  ageYears: number,
+  sexMale: boolean,
+  rOhm: number,
+): number {
+  const s = sexMale ? 1 : 0;
+  const h2r = (heightCm * heightCm) / rOhm;
+  return 0.396 * h2r + 0.156 * weightKg + 0.046 * ageYears + 4.104 * s - 3.19;
+}
+
+type Msc04TbwComp = {
+  pbfPct: number;
+  ffmKg: number;
+  tbwKg: number;
+  bodyFatKg: number;
+  smmKg: number;
+  rEffOhm: number;
+  rSource: 'path' | 'z1';
+};
+
+/**
+ * Composición Suite TBW→FFM→%BF (path×0.73 o z1×sexo).
+ * Sustituye computeBiaFat comercial Renpho.
+ */
+function msc04TbwComposition(
+  weight: number,
+  profile: UserProfile,
+  z1Ohm?: number | null,
+  impedanceMap?: CachedComp['impedanceMap'] | null,
+): Msc04TbwComp | null {
+  if (!(weight >= 20 && weight <= 300)) return null;
+  if (!(profile.height >= 100 && profile.height <= 230)) return null;
+  if (!(profile.age >= 10 && profile.age <= 100)) return null;
+
+  const resolved = msc04ResolveR50Ohm({ profile, z1Ohm, impedanceMap });
+  if (!resolved || !(resolved.rOhm >= 150 && resolved.rOhm <= 1200)) return null;
+
+  const sexMale = profile.gender === 'male';
+  let tbw = msc04ComputeTbwLiters(
+    weight,
+    profile.height,
+    profile.age,
+    sexMale,
+    resolved.rOhm,
+  );
+  if (!(tbw > 10 && tbw < weight)) return null;
+
+  let ffm = tbw / MSC04_HYDRATION_FFM;
+  if (ffm >= weight) ffm = weight * 0.96;
+  if (ffm <= weight * 0.4) return null;
+
+  const bodyFatKg = weight - ffm;
+  const pbfPct = (bodyFatKg / weight) * 100;
+  if (!(pbfPct >= 3 && pbfPct <= 55)) return null;
+
+  const smmRatio = profile.isAthlete ? 0.6 : MSC04_SMM_FFM_RATIO;
+  return {
+    pbfPct: Math.round(pbfPct * 10) / 10,
+    ffmKg: Math.round(ffm * 100) / 100,
+    tbwKg: Math.round(tbw * 100) / 100,
+    bodyFatKg: Math.round(bodyFatKg * 100) / 100,
+    smmKg: Math.round(ffm * smmRatio * 100) / 100,
+    rEffOhm: resolved.rOhm,
+    rSource: resolved.source,
+  };
 }
 
 function msc04SmmFromLbm(lbm: number, isAthlete: boolean): number {
@@ -973,27 +1107,35 @@ export class RenphoMsc04Adapter
     let muscleMassKg: number | undefined;
     let smmKg: number | undefined;
 
-    // plen-8 fat is unreliable on MorphoScan (guest/mid junk). Prefer BIA from z1
-    // whenever profile is known; if z1 exists but profile not yet, defer to computeMetrics.
+    // plen-8 fat is unreliable on MorphoScan. Prefer Suite TBW (path×0.73 / z1×sexo).
     let weightOnlyComp = false;
-    if (parsed.z1 != null && this.lastProfile) {
-      const bia = msc04BiaFat(weight, parsed.z1, this.lastProfile);
-      if (Number.isFinite(bia) && bia >= 5 && bia <= 55) {
-        bodyFat = bia;
+    let rEffOhm: number | undefined;
+    let rSource: 'path' | 'z1' | undefined;
+    if ((parsed.z1 != null || parsed.impedance) && this.lastProfile) {
+      const tbw = msc04TbwComposition(
+        weight,
+        this.lastProfile,
+        parsed.z1,
+        parsed.impedance,
+      );
+      if (tbw != null && tbw.pbfPct >= 5 && tbw.pbfPct <= 55) {
+        bodyFat = tbw.pbfPct;
         fatSource = 'from_bia';
-        const lbm = weight * (1 - bodyFat / 100);
+        rEffOhm = tbw.rEffOhm;
+        rSource = tbw.rSource;
         muscleMassKg =
           parsed.boneKg != null
-            ? Math.round((lbm - parsed.boneKg) * 100) / 100
-            : Math.round(lbm * 100) / 100;
-        smmKg = msc04SmmFromLbm(lbm, this.lastProfile.isAthlete);
+            ? Math.round((tbw.ffmKg - parsed.boneKg) * 100) / 100
+            : Math.round(tbw.ffmKg * 100) / 100;
+        smmKg = tbw.smmKg;
+        waterPct = Math.round((tbw.tbwKg / weight) * 1000) / 10;
       } else {
         weightOnlyComp = true;
         bodyFat = 0;
         fatSource = 'none';
       }
-    } else if (parsed.z1 != null) {
-      // z1 captured; wait for profile at export (computeMetrics late BIA).
+    } else if (parsed.z1 != null || parsed.impedance) {
+      // Z captured; wait for profile at export (computeMetrics late TBW).
       weightOnlyComp = true;
       bodyFat = 0;
       fatSource = 'none';
@@ -1009,7 +1151,7 @@ export class RenphoMsc04Adapter
       fatSource = 'none';
     }
 
-    if (!weightOnlyComp) {
+    if (!weightOnlyComp && waterPct == null) {
       const lbm = weight * (1 - bodyFat / 100);
       const leanHydration = this.lastProfile?.isAthlete ? 0.74 : 0.73;
       waterPct = Math.round(((lbm * leanHydration) / weight) * 1000) / 10;
@@ -1058,6 +1200,8 @@ export class RenphoMsc04Adapter
       impedanceOhm2: parsed.z2,
       impedanceMap: parsed.impedance,
       fatSource,
+      rEffOhm,
+      rSource,
     };
 
     if (!fresh) {
@@ -1135,21 +1279,28 @@ export class RenphoMsc04Adapter
     let muscleMassKg = c.muscleMassKg;
     let smmKg = c.smmKg;
     let waterPct = c.water;
+    let rEffOhm = c.rEffOhm;
+    let rSource = c.rSource;
 
-    // Prefer BIA whenever z1 is present — plen-8 frame fat is not Renpho %.
-    if (impedance >= 100 && effective?.height) {
-      const bia = msc04BiaFat(reading.weight, impedance, effective);
-      if (Number.isFinite(bia) && bia >= 5 && bia <= 55) {
-        fatPct = bia;
+    // Prefer Suite TBW whenever Z (path/z1) present — plen-8 is not InBody %.
+    if ((impedance >= 100 || c.impedanceMap) && effective?.height) {
+      const tbw = msc04TbwComposition(
+        reading.weight,
+        effective,
+        impedance >= 100 ? impedance : c.impedanceOhm,
+        c.impedanceMap,
+      );
+      if (tbw != null && tbw.pbfPct >= 5 && tbw.pbfPct <= 55) {
+        fatPct = tbw.pbfPct;
         fatSource = 'from_bia';
-        const lbm = reading.weight * (1 - fatPct / 100);
+        rEffOhm = tbw.rEffOhm;
+        rSource = tbw.rSource;
         muscleMassKg =
           c.bone != null
-            ? Math.round((lbm - c.bone) * 100) / 100
-            : Math.round(lbm * 100) / 100;
-        smmKg = msc04SmmFromLbm(lbm, effective.isAthlete);
-        const leanHydration = effective.isAthlete ? 0.74 : 0.73;
-        waterPct = Math.round(((lbm * leanHydration) / reading.weight) * 1000) / 10;
+            ? Math.round((tbw.ffmKg - c.bone) * 100) / 100
+            : Math.round(tbw.ffmKg * 100) / 100;
+        smmKg = tbw.smmKg;
+        waterPct = Math.round((tbw.tbwKg / reading.weight) * 1000) / 10;
       }
     }
 
@@ -1207,8 +1358,14 @@ export class RenphoMsc04Adapter
         : msc04SmmFromLbm(lbm, effective.isAthlete);
     const ffm = Math.round(lbm * 100) / 100;
     const derived = ['subcutaneousFatPercent'];
-    if (fatSource === 'from_bia') derived.push('bodyFatPercent(from_bia_z1)');
-    if (waterPct != null) derived.push('waterPercent(from_lbm)');
+    if (fatSource === 'from_bia') {
+      derived.push(
+        rSource === 'path'
+          ? 'bodyFatPercent(from_tbw_path)'
+          : 'bodyFatPercent(from_tbw_z1)',
+      );
+    }
+    if (waterPct != null) derived.push('waterPercent(from_tbw)');
     if (smmKg == null) derived.push('smmKg');
     derived.push('proteinPercent');
 
@@ -1231,14 +1388,24 @@ export class RenphoMsc04Adapter
         body_comp_hex: c.frameHex ?? null,
         payload_len: c.payloadLen ?? null,
         fat_source: fatSource ?? 'frame',
-        bia_z_scale: fatSource === 'from_bia' ? msc04Z1Scale(effective) : null,
+        bia_formula: fatSource === 'from_bia' ? MSC04_FORMULA_VERSION : null,
+        bia_r_eff_ohm: fatSource === 'from_bia' ? rEffOhm ?? null : null,
+        bia_r_source: fatSource === 'from_bia' ? rSource ?? null : null,
+        bia_z_scale:
+          fatSource === 'from_bia' && rSource === 'z1' ? msc04Z1Scale(effective) : null,
+        bia_path_scale:
+          fatSource === 'from_bia' && rSource === 'path'
+            ? msc04PathScale(effective)
+            : null,
         impedance_ohm: c.impedanceOhm ?? null,
         impedance_ohm_2: c.impedanceOhm2 ?? null,
         impedance: c.impedanceMap ?? null,
         derived,
         note:
           fatSource === 'from_bia'
-            ? `DF-BIA: fat from z1×${msc04Z1Scale(effective)} + profile (Renpho/InBody sex scale); bone from frame`
+            ? rSource === 'path'
+              ? `Suite TBW: fat from path×${msc04PathScale(effective)} (RA+trunk+RL) → FFM/0.73; bone from frame`
+              : `Suite TBW: fat from z1×${msc04Z1Scale(effective)} → FFM/0.73; bone from frame`
             : 'frame fat % used (no z1); DF-BIA Z/bone from frame when present',
       },
     } as BodyComposition;

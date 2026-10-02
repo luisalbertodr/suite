@@ -1,10 +1,13 @@
 /**
- * Validación motor InBody-like vs Luis (2026-08-06) y Marta (2026-08-05).
+ * Validación motor InBody-like vs Luis (2026-08-06 / 2026-10-02) y Marta (2026-08-05).
  * Ejecutar: npx --yes tsx scripts/validate-inbody-like-bia.ts
  */
 import {
   computeInbodyLikeComposition,
+  estimatePathR50Ohm,
   idealWeightKg,
+  INBODY_LIKE_FORMULA_VERSION,
+  pathScaleForSex,
   resolveEffectiveR50Ohm,
 } from '../src/lib/inbodyLikeBia.ts';
 import { buildMorphoScanReport } from '../src/lib/morphoscanReport.ts';
@@ -18,19 +21,47 @@ function assertClose(name: string, got: number, exp: number, tol: number) {
   console.log(`OK ${name}: ${got} ≈ ${exp}`);
 }
 
-console.log('=== Luis (M, 180 cm, 50 y, z1=301.6) ===');
-const luisProfile = { heightCm: 180, ageYears: 50, sex: 'male' as const };
-// InBody: 80.4 kg / 19.2 % / FFM 65 / SMM 37 / TBW 47.8 / BMR 1774
-const rLuis = resolveEffectiveR50Ohm({ sex: 'male', z1Ohm: 301.6 });
-console.log('R_eff Luis z1=301.6 →', rLuis);
-const luis = computeInbodyLikeComposition(80.4, luisProfile, rLuis!);
-if (!luis) throw new Error('Luis composition null');
+console.log('=== Formula', INBODY_LIKE_FORMULA_VERSION, '===');
+console.log('path scales M/F', pathScaleForSex('male'), pathScaleForSex('female'));
 
-assertClose('Luis pbf vs InBody', luis.pbfPct, 19.2, 2.5);
-assertClose('Luis tbw vs InBody', luis.tbwKg, 47.8, 3);
-assertClose('Luis ffm vs InBody', luis.ffmKg, 65, 3);
-assertClose('Luis smm vs InBody', luis.smmKg, 37, 3);
-assertClose('Luis bmr vs InBody', luis.bmrKcal, 1774, 120);
+console.log('\n=== Luis Aug (M, 180 cm, 50 y) — prefer path over z1 ===');
+const luisProfile = { heightCm: 180, ageYears: 50, sex: 'male' as const };
+const luisAugZ20 = {
+  trunk: 20,
+  left_arm: 297.2,
+  left_leg: 259.5,
+  right_arm: 285.1,
+  right_leg: 271.1,
+};
+const luisAugZ100 = {
+  trunk: 24,
+  left_arm: 265.5,
+  left_leg: 242.1,
+  right_arm: 251.5,
+  right_leg: 242.1,
+};
+const pathAug = estimatePathR50Ohm(luisAugZ20, luisAugZ100);
+console.log('path raw Aug', pathAug);
+const rLuisPath = resolveEffectiveR50Ohm({
+  sex: 'male',
+  z1Ohm: 301.6,
+  z20: luisAugZ20,
+  z100: luisAugZ100,
+});
+const rLuisZ1Only = resolveEffectiveR50Ohm({ sex: 'male', z1Ohm: 301.6 });
+console.log('R_eff Luis path', rLuisPath, 'z1-only', rLuisZ1Only);
+if (rLuisPath == null || rLuisZ1Only == null) throw new Error('Luis R null');
+if (Math.abs(rLuisPath - rLuisZ1Only) < 1) {
+  throw new Error('path should differ from z1-only for Luis Aug');
+}
+// InBody: 80.4 kg / 19.2 % / FFM 65 / SMM 37 / TBW 47.8 / BMR 1774
+const luis = computeInbodyLikeComposition(80.4, luisProfile, rLuisPath);
+if (!luis) throw new Error('Luis composition null');
+assertClose('Luis Aug pbf vs InBody', luis.pbfPct, 19.2, 2.0);
+assertClose('Luis Aug tbw vs InBody', luis.tbwKg, 47.8, 2.5);
+assertClose('Luis Aug ffm vs InBody', luis.ffmKg, 65, 2.5);
+assertClose('Luis Aug smm vs InBody', luis.smmKg, 37, 3);
+assertClose('Luis Aug bmr vs InBody', luis.bmrKcal, 1774, 120);
 assertClose('Luis idealW', luis.idealWeightKg, idealWeightKg(180, 'male'), 0.1);
 assertClose('Luis weight max (IMC 24.9)', luis.ranges.weightKg.max, 80.7, 0.5);
 if (luis.metabolicAge > 55) {
@@ -38,16 +69,71 @@ if (luis.metabolicAge > 55) {
 }
 console.log('OK Luis metabolicAge', luis.metabolicAge, 'type', luis.bodyType, 'score', luis.bodyScore);
 
-console.log('\n=== Marta (F, 167 cm, 37 y, z1=380) ===');
+console.log('\n=== Luis Oct (path) — z1 solo fallaba ~22 %; path ~18 % ===');
+const luisOctZ20 = {
+  trunk: 19.1,
+  left_arm: 316.4,
+  left_leg: 297.2,
+  right_arm: 297.2,
+  right_leg: 289.9,
+};
+const luisOctZ100 = {
+  trunk: 10,
+  left_arm: 280.3,
+  left_leg: 257.4,
+  right_arm: 258.5,
+  right_leg: 257.4,
+};
+const rLuisOct = resolveEffectiveR50Ohm({
+  sex: 'male',
+  z1Ohm: 326.3,
+  z20: luisOctZ20,
+  z100: luisOctZ100,
+});
+const rLuisOctZ1 = resolveEffectiveR50Ohm({ sex: 'male', z1Ohm: 326.3 });
+console.log('R_eff Luis Oct path', rLuisOct, 'z1-only', rLuisOctZ1);
+const luisOct = computeInbodyLikeComposition(79.5, luisProfile, rLuisOct!);
+if (!luisOct) throw new Error('Luis Oct composition null');
+// InBody 07:49: 79.3 kg / 17.6 % / FFM 65.4 / TBW 47.9
+assertClose('Luis Oct pbf vs InBody', luisOct.pbfPct, 17.6, 2.0);
+assertClose('Luis Oct tbw vs InBody', luisOct.tbwKg, 47.9, 2.5);
+assertClose('Luis Oct ffm vs InBody', luisOct.ffmKg, 65.4, 2.5);
+const luisOctZ1Comp = computeInbodyLikeComposition(79.5, luisProfile, rLuisOctZ1!);
+if (!luisOctZ1Comp) throw new Error('Luis Oct z1 null');
+if (Math.abs(luisOctZ1Comp.pbfPct - 17.6) < Math.abs(luisOct.pbfPct - 17.6)) {
+  throw new Error(
+    `path should beat z1 on Oct: path=${luisOct.pbfPct} z1=${luisOctZ1Comp.pbfPct}`,
+  );
+}
+console.log('OK path beats z1 on Oct', luisOct.pbfPct, '< error than', luisOctZ1Comp.pbfPct);
+
+console.log('\n=== Marta (F, 167 cm, 37 y) — path×0.635 ===');
 const martaProfile = { heightCm: 167, ageYears: 37, sex: 'female' as const };
-// InBody: 62.5 kg / 21.4 % / FFM 49.1
-const rMarta = resolveEffectiveR50Ohm({ sex: 'female', z1Ohm: 380 });
-console.log('R_eff Marta z1=380 →', rMarta);
+const martaZ20 = {
+  trunk: 21.7,
+  left_arm: 375.7,
+  right_arm: 380.2,
+  right_leg: 261.9,
+};
+const martaZ100 = {
+  trunk: 23.1,
+  left_arm: 335.2,
+  right_arm: 338.7,
+  right_leg: 240.3,
+  left_leg: 240.3,
+};
+const rMarta = resolveEffectiveR50Ohm({
+  sex: 'female',
+  z1Ohm: 380,
+  z20: martaZ20,
+  z100: martaZ100,
+});
+console.log('R_eff Marta path', rMarta);
 const marta = computeInbodyLikeComposition(62.5, martaProfile, rMarta!);
 if (!marta) throw new Error('Marta composition null');
-
-assertClose('Marta pbf vs InBody', marta.pbfPct, 21.4, 3);
-assertClose('Marta ffm vs InBody', marta.ffmKg, 49.1, 4);
+// InBody: 62.5 kg / 21.4 % / FFM 49.1
+assertClose('Marta pbf vs InBody', marta.pbfPct, 21.4, 2.0);
+assertClose('Marta ffm vs InBody', marta.ffmKg, 49.1, 2.5);
 assertClose('Marta weight max (IMC 24.9)', marta.ranges.weightKg.max, 69.5, 1);
 if (marta.bodyType === 'Obeso') {
   throw new Error(`Marta body type should not be Obeso: ${marta.bodyType}`);
@@ -66,9 +152,9 @@ const fake = {
   pbf_pct: 14.4,
   body_fat_kg: 11.6,
   raw_payload: { impedance_ohm: 301.6 },
+  impedance: { '20khz': luisAugZ20, '100khz': luisAugZ100 },
   segmental_lean: {},
   segmental_fat: {},
-  impedance: {},
   edema: {},
 } as InbodyMeasurement;
 const report = buildMorphoScanReport(fake);
@@ -79,10 +165,12 @@ if (report.body_type === '9' || report.body_type === 'Obeso') {
 const wMax = report.compositionRows[0]?.rangeMax;
 if (wMax == null || wMax > 90) throw new Error(`weight range still too wide: ${wMax}`);
 console.log('OK report body_type', report.body_type, 'pbf', report.pbf_pct, 'age', report.metabolic_age);
+assertClose('report Luis Aug path pbf', report.pbf_pct!, 19.2, 2.0);
 
 console.log('\n=== Adapter Morpho → UI InBody ===');
 const adapted = adaptMorphoToInbodyView(fake);
-if (adapted.pbf_pct == null || Math.abs(adapted.pbf_pct - 18.7) > 0.2) {
+if (adapted.pbf_pct == null || Math.abs(adapted.pbf_pct - 17.9) > 0.5) {
+  // path×0.73 @ 80.4 → ~17.9 %
   throw new Error(`adapted pbf ${adapted.pbf_pct}`);
 }
 if (adapted.weight_max_kg == null || adapted.weight_max_kg > 90) {
