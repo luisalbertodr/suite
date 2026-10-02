@@ -8,6 +8,7 @@ import {
   idealBfmKg,
   idealWeightKg,
   INBODY_LIKE_FORMULA_VERSION,
+  INBODY_LIKE_PATH_Z1_GAMMA,
   pathScaleForSex,
   resolveEffectiveR50Ohm,
 } from '../src/lib/inbodyLikeBia.ts';
@@ -23,7 +24,13 @@ function assertClose(name: string, got: number, exp: number, tol: number) {
 }
 
 console.log('=== Formula', INBODY_LIKE_FORMULA_VERSION, '===');
-console.log('path scales M/F', pathScaleForSex('male'), pathScaleForSex('female'));
+console.log(
+  'path scales M/F',
+  pathScaleForSex('male'),
+  pathScaleForSex('female'),
+  'gamma',
+  INBODY_LIKE_PATH_Z1_GAMMA,
+);
 
 console.log('\n=== Luis Aug (M, 180 cm, 50 y) — prefer path over z1 ===');
 const luisProfile = { heightCm: 180, ageYears: 50, sex: 'male' as const };
@@ -67,7 +74,7 @@ assertClose('Luis Aug bmr vs InBody', luis.bmrKcal, 1774, 120);
 assertClose('Luis idealW LookInBody', luis.idealWeightKg, 76.4, 0.5);
 assertClose('Luis idealBfm LookInBody', luis.idealBfmKg, 11.5, 0.3);
 assertClose('Luis idealBfm helper', idealBfmKg(180, 'male'), 11.5, 0.3);
-// InBody Aug fat_control -3.9; Morpho path fat≈14.4 → ctrl≈-2.9 (±1.5 ok)
+// InBody Aug fat_control -3.9; path×γ → ~−2.6 (path≈z1 → γ casi no-op)
 assertClose('Luis Aug fatControl vs InBody', luis.fatControlKg, -3.9, 1.5);
 assertClose('Luis weight max (InBody ~82)', luis.ranges.weightKg.max, 82.0, 0.8);
 assertClose('Luis fat range min (InBody 8.6)', luis.ranges.fatKg.min, 8.6, 0.4);
@@ -102,12 +109,12 @@ const rLuisOctZ1 = resolveEffectiveR50Ohm({ sex: 'male', z1Ohm: 326.3 });
 console.log('R_eff Luis Oct path', rLuisOct, 'z1-only', rLuisOctZ1);
 const luisOct = computeInbodyLikeComposition(79.5, luisProfile, rLuisOct!);
 if (!luisOct) throw new Error('Luis Oct composition null');
-// InBody 07:49: 79.3 kg / 17.6 % / FFM 65.4 / TBW 47.9
-assertClose('Luis Oct pbf vs InBody', luisOct.pbfPct, 17.6, 2.0);
-assertClose('Luis Oct tbw vs InBody', luisOct.tbwKg, 47.9, 2.5);
-assertClose('Luis Oct ffm vs InBody', luisOct.ffmKg, 65.4, 2.5);
-// InBody Oct fat_control -2.4
-assertClose('Luis Oct fatControl vs InBody', luisOct.fatControlKg, -2.4, 1.5);
+// InBody 07:49: 79.3 kg / 17.6 % / FFM 65.4 / TBW 47.9 / fat_control −2.4
+assertClose('Luis Oct pbf vs InBody', luisOct.pbfPct, 17.6, 1.0);
+assertClose('Luis Oct tbw vs InBody', luisOct.tbwKg, 47.9, 1.0);
+assertClose('Luis Oct ffm vs InBody', luisOct.ffmKg, 65.4, 1.2);
+assertClose('Luis Oct bodyFat vs InBody', luisOct.bodyFatKg, 13.9, 0.5);
+assertClose('Luis Oct fatControl vs InBody', luisOct.fatControlKg, -2.4, 0.5);
 const luisOctZ1Comp = computeInbodyLikeComposition(79.5, luisProfile, rLuisOctZ1!);
 if (!luisOctZ1Comp) throw new Error('Luis Oct z1 null');
 if (Math.abs(luisOctZ1Comp.pbfPct - 17.6) < Math.abs(luisOct.pbfPct - 17.6)) {
@@ -178,11 +185,12 @@ const wMax = report.compositionRows[0]?.rangeMax;
 if (wMax == null || wMax > 90) throw new Error(`weight range still too wide: ${wMax}`);
 console.log('OK report body_type', report.body_type, 'pbf', report.pbf_pct, 'age', report.metabolic_age);
 assertClose('report Luis Aug path pbf', report.pbf_pct!, 19.2, 2.0);
+assertClose('report Luis Aug fatControl', report.fat_control_kg!, -3.9, 1.5);
 
 console.log('\n=== Adapter Morpho → UI InBody ===');
 const adapted = adaptMorphoToInbodyView(fake);
-if (adapted.pbf_pct == null || Math.abs(adapted.pbf_pct - 17.9) > 0.5) {
-  // path×0.73 @ 80.4 → ~17.9 %
+if (adapted.pbf_pct == null || Math.abs(adapted.pbf_pct - 17.6) > 0.6) {
+  // path×0.73×(path/z1)^γ @ 80.4 → ~17.6 %
   throw new Error(`adapted pbf ${adapted.pbf_pct}`);
 }
 if (adapted.weight_max_kg == null || adapted.weight_max_kg > 90) {
@@ -192,8 +200,8 @@ if (adapted.smm_min_kg == null || adapted.tbw_min_kg == null) {
   throw new Error('adapted missing ranges');
 }
 if (adapted.raw_payload?.suite_bia !== true) throw new Error('suite_bia flag missing');
-// Aug InBody fat_ctrl -3.9; Morpho path no debe dispararse a -7/-8 (ideal viejo 10.7)
-if (adapted.fat_control_kg == null || adapted.fat_control_kg < -5.5 || adapted.fat_control_kg > -1.5) {
+// Aug InBody fat_ctrl -3.9; no volver al ideal BMI22 (−4.7 con grasa alta)
+if (adapted.fat_control_kg == null || adapted.fat_control_kg < -4.0 || adapted.fat_control_kg > -1.5) {
   throw new Error(`adapted fat_control out of band: ${adapted.fat_control_kg}`);
 }
 console.log('OK adapted pbf', adapted.pbf_pct, 'smm', adapted.smm_kg, 'fatCtrl', adapted.fat_control_kg);

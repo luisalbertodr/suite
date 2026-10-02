@@ -370,8 +370,8 @@ describe('RenphoMsc04Adapter', () => {
         height: 180,
         isAthlete: false,
       });
-      // Suite TBW path×0.73 → ~17.9 % (InBody 19.2 ±2)
-      expect(m.bodyFatPercent).toBeCloseTo(17.9, 0);
+      // Suite TBW path×0.73×(path/z1)^γ → ~17.6 % (InBody 19.2 ±2)
+      expect(m.bodyFatPercent).toBeCloseTo(17.6, 0);
       expect(m.bodyFatPercent).not.toBeCloseTo(14.4, 0);
       expect((m as { smmKg?: number }).smmKg).toBeCloseTo(37.6, 0);
       expect((m.raw as { fat_source?: string }).fat_source).toBe('from_bia');

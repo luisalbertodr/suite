@@ -75,11 +75,13 @@ const PENDING_HANDSHAKE_WAIT_MS = 12_000;
  */
 const MSC04_Z1_BIA_SCALE_FEMALE = 1.08;
 const MSC04_Z1_BIA_SCALE_MALE = 1.33;
-/** Keep in sync with src/lib/inbodyLikeBia.ts pathScaleForSex. */
+/** Keep in sync with src/lib/inbodyLikeBia.ts pathScaleForSex / PATH_Z1_GAMMA. */
 const MSC04_PATH_SCALE_MALE = 0.73;
 const MSC04_PATH_SCALE_FEMALE = 0.635;
+/** Keep in sync with INBODY_LIKE_PATH_Z1_GAMMA. */
+const MSC04_PATH_Z1_GAMMA = 0.4;
 const MSC04_HYDRATION_FFM = 0.73;
-const MSC04_FORMULA_VERSION = 'inbody-like-v2-2026-10-path';
+const MSC04_FORMULA_VERSION = 'inbody-like-v4-2026-10-fc';
 /** Non-athlete SMM ≈ FFM × this (Renpho Luis: 36.65 / 64.15 ≈ 0.571). */
 const MSC04_SMM_FFM_RATIO = 0.57;
 
@@ -172,8 +174,16 @@ function msc04ResolveR50Ohm(opts: {
   if (path != null) {
     const pathR = Math.round(path * msc04PathScale(opts.profile) * 10) / 10;
     // Segmental maps can be truncated; if path drifts >12% from z1, trust z1.
-    if (z1R != null && z1R > 0 && Math.abs(pathR - z1R) / z1R > 0.12) {
-      return { rOhm: z1R, source: 'z1' };
+    if (z1R != null && z1R > 0) {
+      if (Math.abs(pathR - z1R) / z1R > 0.12) {
+        return { rOhm: z1R, source: 'z1' };
+      }
+      // path < z1 → mild shrink (path/z1)^γ — sync with inbodyLikeBia (Luis Oct −2.4).
+      if (pathR < z1R && MSC04_PATH_Z1_GAMMA > 0) {
+        const adjusted =
+          Math.round(pathR * Math.pow(pathR / z1R, MSC04_PATH_Z1_GAMMA) * 10) / 10;
+        return { rOhm: adjusted, source: 'path' };
+      }
     }
     return { rOhm: pathR, source: 'path' };
   }

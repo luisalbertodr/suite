@@ -2,7 +2,7 @@
 """
 Recalcula composición MorphoScan en inbody_measurements con el motor Suite TBW
 (path×sexo → z1×sexo → TBW→FFM→%BF). Misma lógica que src/lib/inbodyLikeBia.ts
-(inbody-like-v2-2026-10-path).
+(inbody-like-v4-2026-10-fc).
 
 Uso:
   python scripts/backfill_morpho_suite_bia.py --dry-run
@@ -30,9 +30,10 @@ except ImportError:
     raise
 
 ROOT = Path(__file__).resolve().parents[1]
-FORMULA = "inbody-like-v2-2026-10-path"
+FORMULA = "inbody-like-v4-2026-10-fc"
 Z1_SCALE = {"male": 1.33, "female": 1.08}
 PATH_SCALE = {"male": 0.73, "female": 0.635}
+PATH_Z1_GAMMA = 0.4
 HYDRATION = 0.73
 PROTEIN_OF_FFM = 0.18
 BONE_OF_FFM = 0.07
@@ -117,8 +118,11 @@ def resolve_r(sex: str, z1: float | None, impedance: dict | None) -> tuple[float
     path = estimate_path(z20, z100)
     if path is not None:
         path_r = r1(path * PATH_SCALE[sex])
-        if z1_r is not None and z1_r > 0 and abs(path_r - z1_r) / z1_r > 0.12:
-            return z1_r, "z1"
+        if z1_r is not None and z1_r > 0:
+            if abs(path_r - z1_r) / z1_r > 0.12:
+                return z1_r, "z1"
+            if path_r < z1_r and PATH_Z1_GAMMA > 0:
+                path_r = r1(path_r * (path_r / z1_r) ** PATH_Z1_GAMMA)
         return path_r, "path"
     if z1_r is not None:
         return z1_r, "z1"
@@ -161,6 +165,18 @@ def compute_comp(
     hm = height / 100
     bmi = weight / (hm * hm)
     bmr = round(370 + 21.6 * ffm)
+    # LookInBody-like controls (sync idealWeightKg / idealBfmKg)
+    if sex == "male":
+        ffm_max = max(35.0, min(90.0, -63.16 + 0.7124 * height))
+        ideal_w = r1(ffm_max / 0.85)
+        ideal_bfm = r2(ideal_w * 0.15)
+    else:
+        ideal_w = r1(21.5 * hm * hm)
+        ideal_bfm = r2(ideal_w * 0.23)
+    ideal_ffm = r2(ideal_w - ideal_bfm)
+    fat_control = r1(ideal_bfm - fat)
+    muscle_control = r1(max(0.0, ideal_ffm - ffm))
+    weight_control = r1(ideal_w - weight)
     return {
         "pbf_pct": r1(pbf),
         "body_fat_kg": r2(fat),
@@ -174,6 +190,10 @@ def compute_comp(
         "bmi": r1(bmi),
         "bmr_kcal": bmr,
         "smi": r1(smm / (hm * hm)),
+        "fat_control_kg": fat_control,
+        "muscle_control_kg": muscle_control,
+        "weight_control_kg": weight_control,
+        "target_weight_kg": ideal_w,
     }
 
 
@@ -290,6 +310,10 @@ def main() -> None:
               bmi = %s,
               bmr_kcal = %s,
               smi = %s,
+              fat_control_kg = %s,
+              muscle_control_kg = %s,
+              weight_control_kg = %s,
+              target_weight_kg = %s,
               raw_payload = %s,
               updated_at = now()
             WHERE id = %s
@@ -307,6 +331,10 @@ def main() -> None:
                 comp["bmi"],
                 comp["bmr_kcal"],
                 comp["smi"],
+                comp["fat_control_kg"],
+                comp["muscle_control_kg"],
+                comp["weight_control_kg"],
+                comp["target_weight_kg"],
                 Json(new_raw),
                 row["id"],
             ),
