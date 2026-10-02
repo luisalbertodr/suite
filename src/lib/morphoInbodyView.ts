@@ -10,6 +10,10 @@ import {
 import { buildMorphoScanReport, type MorphoScanDerivedReport } from '@/lib/morphoscanReport';
 import { enrichMorphoScanSegmentals } from '@/lib/morphoscanSegmentals';
 import { normalizeInbodyLikeSex } from '@/lib/inbodyLikeBia';
+import {
+  assessMorphoTakeQuality,
+  filterMeasurementsForClinicalUi,
+} from '@/lib/morphoTakeQuality';
 
 export type MorphoExtraFidelity = 'good' | 'orientative' | 'unreliable';
 
@@ -126,11 +130,37 @@ export function adaptMorphoToInbodyView(m: InbodyMeasurement): InbodyMeasurement
   return morphoReportToInbodyFields(enriched, report);
 }
 
-/** Lista completa adaptada (gráficos de evolución coherentes con el informe). */
+/**
+ * Lista adaptada para UI clínica:
+ * - oculta tomas Morpho claramente rechazables (sin Z / path inválido)
+ * - marca data_quality Morpho warn → suspicious + needs_repeat
+ */
 export function adaptMorphoMeasurementsForInbodyUi(
   list: InbodyMeasurement[],
 ): InbodyMeasurement[] {
-  return list.map(adaptMorphoToInbodyView);
+  const visible = filterMeasurementsForClinicalUi(list);
+  return visible.map((m) => {
+    const adapted = adaptMorphoToInbodyView(m);
+    if (!isMorphoScanMeasurement(m)) return adapted;
+    const q = assessMorphoTakeQuality(m, list);
+    return {
+      ...adapted,
+      raw_payload: {
+        ...(adapted.raw_payload ?? {}),
+        morpho_take_grade: q.grade,
+        morpho_take_issues: q.issues,
+        morpho_take_title: q.title,
+        morpho_take_message: q.message,
+      },
+      data_quality: {
+        status: q.grade === 'good' ? 'ok' : 'suspicious',
+        needs_repeat: q.needs_repeat,
+        issues: q.needs_repeat ? ['missing_impedance'] : [],
+        hint: null,
+        checked_at: new Date().toISOString(),
+      },
+    };
+  });
 }
 
 export function morphoUsesSuiteBia(m: InbodyMeasurement): boolean {
