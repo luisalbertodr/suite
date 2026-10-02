@@ -50,7 +50,7 @@ BEGIN
     IF v ~ '^\d{7,8}$' THEN
       keys := array_append(
         keys,
-        v_num || substr('TRWAGMYFPDXBNJZSQVHLCKE', (v_num::bigint % 23) + 1, 1)
+        v_num || substr('TRWAGMYFPDXBNJZSQVHLCKE', ((v_num::bigint % 23)::integer + 1), 1)
       );
     END IF;
   ELSIF v ~ '^[XYZ]\d{7}[A-Z]?$' THEN
