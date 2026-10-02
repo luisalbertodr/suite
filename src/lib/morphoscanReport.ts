@@ -9,6 +9,7 @@ import {
   computeMetabolicAge,
   deriveInbodyLikeBodyScore,
   deriveInbodyLikeBodyType,
+  idealBfmKg,
   idealWeightKg,
   INBODY_LIKE_FORMULA_VERSION,
   normalizeInbodyLikeSex,
@@ -289,7 +290,7 @@ export function buildMorphoScanReport(m: InbodyMeasurement): MorphoScanDerivedRe
   let muscleControl = suite?.muscleControlKg ?? n(m.muscle_control_kg);
 
   if (suite == null && height != null && weight != null && idealW != null) {
-    const idealBfm = (sexNorm === 'male' ? 0.15 : 0.23) * idealW;
+    const idealBfm = idealBfmKg(height, sexNorm);
     const idealFfm = idealW - idealBfm;
     if (weightControl == null) weightControl = round1(idealW - weight);
     if (fatControl == null && bodyFatKg != null) fatControl = round1(idealBfm - bodyFatKg);
@@ -316,7 +317,7 @@ export function buildMorphoScanReport(m: InbodyMeasurement): MorphoScanDerivedRe
     smm != null &&
     idealW != null
   ) {
-    const idealBfm = (sexNorm === 'male' ? 0.15 : 0.23) * idealW;
+    const idealBfm = idealBfmKg(height!, sexNorm);
     const idealFfm = idealW - idealBfm;
     metabolicAge = computeMetabolicAge({
       ageYears: age,

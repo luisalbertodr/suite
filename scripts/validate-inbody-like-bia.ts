@@ -5,6 +5,7 @@
 import {
   computeInbodyLikeComposition,
   estimatePathR50Ohm,
+  idealBfmKg,
   idealWeightKg,
   INBODY_LIKE_FORMULA_VERSION,
   pathScaleForSex,
@@ -62,8 +63,15 @@ assertClose('Luis Aug tbw vs InBody', luis.tbwKg, 47.8, 2.5);
 assertClose('Luis Aug ffm vs InBody', luis.ffmKg, 65, 2.5);
 assertClose('Luis Aug smm vs InBody', luis.smmKg, 37, 3);
 assertClose('Luis Aug bmr vs InBody', luis.bmrKcal, 1774, 120);
-assertClose('Luis idealW', luis.idealWeightKg, idealWeightKg(180, 'male'), 0.1);
-assertClose('Luis weight max (IMC 24.9)', luis.ranges.weightKg.max, 80.7, 0.5);
+// LookInBody: ideal ≈ FFM_max/0.85 → 76.4 kg; BFM ideal 11.5 (no BMI22→71.3/10.7)
+assertClose('Luis idealW LookInBody', luis.idealWeightKg, 76.4, 0.5);
+assertClose('Luis idealBfm LookInBody', luis.idealBfmKg, 11.5, 0.3);
+assertClose('Luis idealBfm helper', idealBfmKg(180, 'male'), 11.5, 0.3);
+// InBody Aug fat_control -3.9; Morpho path fat≈14.4 → ctrl≈-2.9 (±1.5 ok)
+assertClose('Luis Aug fatControl vs InBody', luis.fatControlKg, -3.9, 1.5);
+assertClose('Luis weight max (InBody ~82)', luis.ranges.weightKg.max, 82.0, 0.8);
+assertClose('Luis fat range min (InBody 8.6)', luis.ranges.fatKg.min, 8.6, 0.4);
+assertClose('Luis fat range max (InBody 17.1)', luis.ranges.fatKg.max, 17.1, 0.4);
 if (luis.metabolicAge > 55) {
   throw new Error(`Luis metabolic age too high: ${luis.metabolicAge}`);
 }
@@ -98,6 +106,8 @@ if (!luisOct) throw new Error('Luis Oct composition null');
 assertClose('Luis Oct pbf vs InBody', luisOct.pbfPct, 17.6, 2.0);
 assertClose('Luis Oct tbw vs InBody', luisOct.tbwKg, 47.9, 2.5);
 assertClose('Luis Oct ffm vs InBody', luisOct.ffmKg, 65.4, 2.5);
+// InBody Oct fat_control -2.4
+assertClose('Luis Oct fatControl vs InBody', luisOct.fatControlKg, -2.4, 1.5);
 const luisOctZ1Comp = computeInbodyLikeComposition(79.5, luisProfile, rLuisOctZ1!);
 if (!luisOctZ1Comp) throw new Error('Luis Oct z1 null');
 if (Math.abs(luisOctZ1Comp.pbfPct - 17.6) < Math.abs(luisOct.pbfPct - 17.6)) {
@@ -134,7 +144,9 @@ if (!marta) throw new Error('Marta composition null');
 // InBody: 62.5 kg / 21.4 % / FFM 49.1
 assertClose('Marta pbf vs InBody', marta.pbfPct, 21.4, 2.0);
 assertClose('Marta ffm vs InBody', marta.ffmKg, 49.1, 2.5);
-assertClose('Marta weight max (IMC 24.9)', marta.ranges.weightKg.max, 69.5, 1);
+assertClose('Marta weight max (IMC ~25.3)', marta.ranges.weightKg.max, 70.6, 1.2);
+// Ideal femenino sigue IMC 21.5 (fat_control clínica alineado)
+assertClose('Marta idealW', marta.idealWeightKg, idealWeightKg(167, 'female'), 0.2);
 if (marta.bodyType === 'Obeso') {
   throw new Error(`Marta body type should not be Obeso: ${marta.bodyType}`);
 }
@@ -180,6 +192,10 @@ if (adapted.smm_min_kg == null || adapted.tbw_min_kg == null) {
   throw new Error('adapted missing ranges');
 }
 if (adapted.raw_payload?.suite_bia !== true) throw new Error('suite_bia flag missing');
-console.log('OK adapted pbf', adapted.pbf_pct, 'smm', adapted.smm_kg, 'controls', adapted.fat_control_kg);
+// Aug InBody fat_ctrl -3.9; Morpho path no debe dispararse a -7/-8 (ideal viejo 10.7)
+if (adapted.fat_control_kg == null || adapted.fat_control_kg < -5.5 || adapted.fat_control_kg > -1.5) {
+  throw new Error(`adapted fat_control out of band: ${adapted.fat_control_kg}`);
+}
+console.log('OK adapted pbf', adapted.pbf_pct, 'smm', adapted.smm_kg, 'fatCtrl', adapted.fat_control_kg);
 
 console.log('\nALL PASSED');
