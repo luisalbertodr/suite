@@ -293,7 +293,13 @@ export function buildMorphoScanReport(m: InbodyMeasurement): MorphoScanDerivedRe
     const idealBfm = idealBfmKg(height, sexNorm);
     const idealFfm = idealW - idealBfm;
     if (weightControl == null) weightControl = round1(idealW - weight);
-    if (fatControl == null && bodyFatKg != null) fatControl = round1(idealBfm - bodyFatKg);
+    if (fatControl == null && bodyFatKg != null) {
+      fatControl = round1(idealBfm - bodyFatKg);
+      if (sexNorm === 'female') {
+        const fatRange = buildInbodyLikeRanges(height, sexNorm, idealW).fatKg;
+        if (bodyFatKg >= fatRange.min && bodyFatKg <= fatRange.max) fatControl = 0;
+      }
+    }
     if (muscleControl == null && ffm != null) {
       muscleControl = round1(Math.max(0, idealFfm - ffm));
     }

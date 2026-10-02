@@ -89,7 +89,8 @@ export const INBODY_LIKE_PATH_SCALE = INBODY_LIKE_PATH_SCALE_MALE;
  */
 export const INBODY_LIKE_PATH_Z1_GAMMA = 0.4;
 
-export const INBODY_LIKE_FORMULA_VERSION = 'inbody-like-v4-2026-10-fc';
+/** v5: fat_control / ideal BFM femenino = LookInBody (Bethania 2026-10-02). Path scales sin cambio. */
+export const INBODY_LIKE_FORMULA_VERSION = 'inbody-like-v5-2026-10-fc-f';
 
 const HYDRATION_FFM = 0.73;
 const PROTEIN_OF_FFM = 0.18;
@@ -237,24 +238,28 @@ export function inbodyStandardFfmMaxKg(heightCm: number, sex: InbodyLikeSex): nu
 /**
  * Peso ideal LookInBody para controles.
  * Hombre: FFM_max / (1 − 0.15) — clava fat_control InBody (Luis 180 → 76.4 kg / BFM 11.5).
- * Mujer: IMC 21.5 (ya alineado con fat_control femenino en clínica).
+ * Mujer: FFM_max / (1 − 0.23) — simétrico; 167 cm → ~64.7 kg (antes IMC 21.5 → 60).
  */
 export function idealWeightKg(heightCm: number, sex: InbodyLikeSex): number {
-  if (sex === 'male') {
-    const pbf = IDEAL_PBF_MALE;
-    return r1(inbodyStandardFfmMaxKg(heightCm, sex) / (1 - pbf));
-  }
-  const h = heightCm / 100;
-  return r1(21.5 * h * h);
-}
-
-export function idealBfmKg(heightCm: number, sex: InbodyLikeSex): number {
-  const idealW = idealWeightKg(heightCm, sex);
   const pbf = sex === 'male' ? IDEAL_PBF_MALE : IDEAL_PBF_FEMALE;
-  return r2(idealW * pbf);
+  return r1(inbodyStandardFfmMaxKg(heightCm, sex) / (1 - pbf));
 }
 
-/** Rangos masa grasa estilo InBody 270 (no ±% del ideal Suite). */
+/**
+ * BFM objetivo LookInBody.
+ * Hombre: idealW × 15 %.
+ * Mujer: punto medio del rango Standard de grasa (167 cm → 15.6 = (12+19.2)/2),
+ * que clava fat_control Bethania InBody (−10.1).
+ */
+export function idealBfmKg(heightCm: number, sex: InbodyLikeSex): number {
+  if (sex === 'male') {
+    return r2(idealWeightKg(heightCm, sex) * IDEAL_PBF_MALE);
+  }
+  const { min, max } = inbodyFatMassRange(heightCm, sex);
+  return r2((min + max) / 2);
+}
+
+/** Rangos masa grasa estilo InBody 270 / LookInBody Standard. */
 function inbodyFatMassRange(
   heightCm: number,
   sex: InbodyLikeSex,
@@ -264,9 +269,8 @@ function inbodyFatMassRange(
     // 180 cm → 8.6–17.1 (tabla clínica)
     return { min: r1(-9.4 + 0.1 * h), max: r1(-15.3 + 0.18 * h) };
   }
-  // Mujer: ancla a ideal ± banda LookInBody (~fat_min/max 153→10.1–16.1)
-  const ideal = idealBfmKg(heightCm, sex);
-  return { min: r1(ideal * 0.75), max: r1(ideal * 1.4) };
+  // Mujer LookInBody: 167→12–19.2, 162→11.3–18.1, 170→12.4–19.9
+  return { min: r1(0.13 * h - 9.71), max: r1(0.23 * h - 19.21) };
 }
 
 export function buildInbodyLikeRanges(
@@ -393,7 +397,17 @@ export function computeInbodyLikeComposition(
   const idealSmm = r2(idealFfm * SMM_OF_FFM);
 
   const weightControlKg = r1(idealW - weightKg);
-  const fatControlKg = r1(idealBfm - bodyFatKg);
+  const ranges = buildInbodyLikeRanges(heightCm, sex, idealW);
+  // Fat Control = ideal − medido. Mujer LookInBody: 0 si BFM ∈ rango Standard
+  // (Marta 13.4 → 0; Bethania 25.7 → −10.1). Hombre: siempre ideal − medido (Luis −2.4).
+  let fatControlKg = r1(idealBfm - bodyFatKg);
+  if (
+    sex === 'female' &&
+    bodyFatKg >= ranges.fatKg.min &&
+    bodyFatKg <= ranges.fatKg.max
+  ) {
+    fatControlKg = 0;
+  }
   // LookInBody: si FFM/SMM ≥ ideal, control músculo = 0 (no “quitar músculo”).
   let muscleControlKg = r1(idealFfm - ffm);
   if (muscleControlKg < 0) muscleControlKg = 0;
@@ -405,8 +419,6 @@ export function computeInbodyLikeComposition(
     smmKg,
     idealSmmKg: idealSmm,
   });
-
-  const ranges = buildInbodyLikeRanges(heightCm, sex, idealW);
 
   return {
     weightKg: r2(weightKg),

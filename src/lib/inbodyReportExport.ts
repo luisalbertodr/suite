@@ -6,6 +6,7 @@ import {
   inbodyStatusLabel,
   normalizeInbodyMeasurement,
   resolveBodyFatMassRangeKg,
+  segmentEvalStatusLabel,
   type InbodyMeasurement,
   type InbodySegmentEntry,
 } from '@/lib/inbodyMeasurements';
@@ -415,20 +416,6 @@ function drawTextAtY(
   );
 }
 
-function evalCodeLabel(code: number | null | undefined): string {
-  if (code == null || Number.isNaN(code)) return '';
-  if (code <= 0) return 'Bajo';
-  if (code >= 2) return 'Alto';
-  return 'Normal';
-}
-
-function evalFromEntry(entry?: InbodySegmentEntry): number | null {
-  const code = entry?.eval_pct;
-  if (code != null && !Number.isNaN(code) && code <= 2) return code;
-  const pct = entry?.pct;
-  return pct == null || Number.isNaN(pct) ? null : pct;
-}
-
 function drawPatientInfo(
   ctx: CanvasRenderingContext2D,
   w: number,
@@ -583,12 +570,16 @@ function drawSegmentBlock(
       align: 'center',
       bold: true,
     });
-    drawText(ctx, evalCodeLabel(evalFromEntry(leanEntry)), leanPos.x, leanPos.y + lineGap / 2, {
-      size: fs(10),
-      align: 'center',
-    });
+    // Misma regla que «Análisis segmental» (90–110 % vs estándar → Normal)
+    const leanEval = segmentEvalStatusLabel(leanEntry as InbodySegmentEntry | undefined);
+    if (leanEval) {
+      drawText(ctx, leanEval, leanPos.x, leanPos.y + lineGap / 2, {
+        size: fs(10),
+        align: 'center',
+      });
+    }
 
-    const fatPct = fmt(fatEntry?.pct, 1, '%');
+    const fatPct = fmt(fatEntry?.pct ?? fatEntry?.eval_pct, 1, '%');
     const fatKg = fmt(fatEntry?.kg, 1);
     const fatLine = [fatPct, fatKg].filter(Boolean).join(' · ');
     if (fatLine) {
@@ -598,7 +589,7 @@ function drawSegmentBlock(
         bold: true,
       });
     }
-    const fatEval = evalCodeLabel(evalFromEntry(fatEntry as InbodySegmentEntry | undefined));
+    const fatEval = segmentEvalStatusLabel(fatEntry as InbodySegmentEntry | undefined);
     if (fatEval) {
       drawText(ctx, fatEval, fatPos.x, fatPos.y + lineGap / 2, { size: fs(10), align: 'center' });
     }
