@@ -120,37 +120,17 @@ export function scaleDeviceFromMeasurement(m: Pick<InbodyMeasurement, 'device' |
 }
 
 /**
- * MAC allowlist del gateway (mail):
- * - 60:30:F2:74:26:E2 → operativamente «Pesar+»
- * - 60:30:F2:74:22:B6 → operativamente «Pesar»
+ * MAC de las MorphoScan del gateway (mail), allowlist SCALE_MACS.
+ * «Pesar» escucha ambas; las etiquetas sirven solo para historial / diagnóstico.
  * Comparativas emparejadas (mismo paciente <15 min): Gemma +0,30 / Marta +0,30 / Luis +0,15.
  */
 export const MORPHO_SCALE_PLUS3_MAC = '6030F27426E2';
 export const MORPHO_SCALE_BASE_MAC = '6030F27422B6';
 
-export type MorphoWeighTarget = 'base' | 'plus3';
-
-/** MAC normalizada (12 hex) para la petición «Pesar» / «Pesar+». */
-export function morphoWeighTargetMac(target: MorphoWeighTarget): string {
-  return target === 'plus3' ? MORPHO_SCALE_PLUS3_MAC : MORPHO_SCALE_BASE_MAC;
-}
-
-export function morphoWeighButtonLabel(target: MorphoWeighTarget): 'Pesar' | 'Pesar+' {
-  return target === 'plus3' ? 'Pesar+' : 'Pesar';
-}
-
 export function normalizeMorphoScaleMac(mac: string | null | undefined): string {
   return String(mac ?? '')
     .replace(/[^0-9A-Fa-f]/g, '')
     .toUpperCase();
-}
-
-/** Etiqueta de botón según MAC guardada en la petición abierta. */
-export function morphoWeighLabelFromMac(mac: string | null | undefined): 'Pesar' | 'Pesar+' | null {
-  const n = normalizeMorphoScaleMac(mac);
-  if (n === MORPHO_SCALE_PLUS3_MAC) return 'Pesar+';
-  if (n === MORPHO_SCALE_BASE_MAC) return 'Pesar';
-  return null;
 }
 
 /** IDs del puente BLE / MorphoScan (no son DNI LookInBody). */
@@ -163,7 +143,6 @@ export function isScaleBridgeUserId(userId: string | null | undefined): boolean 
 export function morphoScaleUnitLabel(userId: string | null | undefined): 'Morpho+1' | 'Morpho' | null {
   const s = String(userId ?? '').toUpperCase().replace(/[^0-9A-Z]/g, '');
   if (!s) return null;
-  // La etiqueta “+1” (antes “+3”) depende del MAC “Pesar+”, sin heurísticas por sufijo.
   if (s.includes(MORPHO_SCALE_PLUS3_MAC)) return 'Morpho+1';
   if (s.includes(MORPHO_SCALE_BASE_MAC)) return 'Morpho';
   return null;

@@ -29,8 +29,8 @@
 #   systemd WatchdogSec=120 en ble-scale-sync — event loop congelado
 #   /usr/local/bin/suite-ble-gateway-watchdog.sh  (cron * * * *) — hung scan
 #
-# Botones Suite (src/lib/inbodyMeasurements.ts):
-#   «Pesar»   → 60:30:F2:74:22:B6
-#   «Pesar+»  → 60:30:F2:74:26:E2
+# Botón Suite «Pesar» (sin MAC fija):
+#   target_scale_mac = null → el gateway escucha ambas vía SCALE_MACS.
+#   Unidades: 60:30:F2:74:22:B6 y 60:30:F2:74:26:E2
 #
 # .env SCALE_MACS=MAC1,MAC2 (allowlist; ambas deben estar listadas)
