@@ -39,11 +39,7 @@ import {
   inbodySexLabel,
   isMorphoScanMeasurement,
   measurementSessionDeviceLabel,
-  morphoWeighButtonLabel,
-  morphoWeighLabelFromMac,
-  morphoWeighTargetMac,
   type InbodyMeasurement,
-  type MorphoWeighTarget,
 } from '@/lib/inbodyMeasurements';
 import {
   adaptMorphoMeasurementsForInbodyUi,
@@ -220,7 +216,6 @@ function ScaleWeighNowControls({
   }, [active?.status, active?.id]);
 
   const [profileOpen, setProfileOpen] = useState(false);
-  const [pendingWeighTarget, setPendingWeighTarget] = useState<MorphoWeighTarget>('base');
   const [savingProfile, setSavingProfile] = useState(false);
   const [formHeight, setFormHeight] = useState('');
   const [formBirth, setFormBirth] = useState('');
@@ -295,17 +290,13 @@ function ScaleWeighNowControls({
     })();
   }, [active?.status, active?.measurement_id, active?.matched_weight_kg, companyId, customerId, taxId, queryClient, toast]);
 
-  const beginWeigh = (
-    snapshot: {
-      height_cm: number;
-      age_years: number;
-      sex: ScaleSex;
-      profile_name: string;
-    },
-    target: MorphoWeighTarget,
-  ) => {
+  const beginWeigh = (snapshot: {
+    height_cm: number;
+    age_years: number;
+    sex: ScaleSex;
+    profile_name: string;
+  }) => {
     if (!companyId) return;
-    const scaleLabel = morphoWeighButtonLabel(target);
     start.mutate(
       {
         companyId,
@@ -314,13 +305,13 @@ function ScaleWeighNowControls({
         ageYears: snapshot.age_years,
         sex: snapshot.sex,
         profileName: snapshot.profile_name,
-        targetScaleMac: morphoWeighTargetMac(target),
+        targetScaleMac: null,
       },
       {
         onSuccess: () => {
           toast({
-            title: `Esperando báscula (${scaleLabel})`,
-            description: `Sube el paciente a la MorphoScan correcta en los próximos ${Math.round(SCALE_WEIGH_TTL_SECONDS / 60)} minutos.`,
+            title: 'Esperando báscula',
+            description: `Sube el paciente a cualquiera de las MorphoScan en los próximos ${Math.round(SCALE_WEIGH_TTL_SECONDS / 60)} minutos.`,
           });
         },
         onError: (e: Error) =>
@@ -333,15 +324,14 @@ function ScaleWeighNowControls({
     );
   };
 
-  const openProfileDialog = (target: MorphoWeighTarget) => {
-    setPendingWeighTarget(target);
+  const openProfileDialog = () => {
     setFormHeight(heightCm != null && heightCm > 0 ? String(heightCm) : '');
     setFormBirth(birthDate ? birthDate.slice(0, 10) : '');
     setFormSex(sexFromClinicalProfile(clinicalProfile) ?? '');
     setProfileOpen(true);
   };
 
-  const onClickWeighNow = (target: MorphoWeighTarget) => {
+  const onClickWeighNow = () => {
     if (!companyId) return;
     const missing = missingScaleProfileFields({
       heightCm,
@@ -349,7 +339,7 @@ function ScaleWeighNowControls({
       clinicalProfile,
     });
     if (missing.length > 0) {
-      openProfileDialog(target);
+      openProfileDialog();
       return;
     }
     try {
@@ -359,14 +349,14 @@ function ScaleWeighNowControls({
         sex: sexFromClinicalProfile(clinicalProfile)!,
         name: customerName,
       });
-      beginWeigh(snap, target);
+      beginWeigh(snap);
     } catch (e) {
       toast({
         title: 'Datos incompletos',
         description: e instanceof Error ? e.message : 'Revisa altura, edad y sexo.',
         variant: 'destructive',
       });
-      openProfileDialog(target);
+      openProfileDialog();
     }
   };
 
@@ -419,7 +409,7 @@ function ScaleWeighNowControls({
 
       void queryClient.invalidateQueries({ queryKey: ['customer_detail', customerId] });
       setProfileOpen(false);
-      beginWeigh(snap, pendingWeighTarget);
+      beginWeigh(snap);
     } catch (e) {
       toast({
         title: 'No se pudo guardar el perfil',
@@ -494,7 +484,7 @@ function ScaleWeighNowControls({
             ) : (
               <Scale className="h-4 w-4" />
             )}
-            <span className="ml-1.5">Guardar y {morphoWeighButtonLabel(pendingWeighTarget)}</span>
+            <span className="ml-1.5">Guardar y pesar</span>
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -502,52 +492,33 @@ function ScaleWeighNowControls({
   );
 
   const weighButtons = (variant: 'default' | 'outline' = 'default') => (
-    <div className="flex items-center gap-1.5">
-      {(['base', 'plus3'] as const).map((target) => {
-        const label = morphoWeighButtonLabel(target);
-        return (
-          <Button
-            key={target}
-            type="button"
-            variant={target === 'plus3' ? 'outline' : variant}
-            size={compact ? 'sm' : 'default'}
-            disabled={isLoading || start.isPending || savingProfile}
-            onClick={() => onClickWeighNow(target)}
-            title={
-              target === 'plus3'
-                ? 'Báscula Morpho+1 (~100–300 g más que la otra)'
-                : 'Báscula Morpho (referencia)'
-            }
-          >
-            {start.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Scale className="h-4 w-4" />
-            )}
-            <span className="ml-1.5">{label}</span>
-          </Button>
-        );
-      })}
-    </div>
+    <Button
+      type="button"
+      variant={variant}
+      size={compact ? 'sm' : 'default'}
+      disabled={isLoading || start.isPending || savingProfile}
+      onClick={() => onClickWeighNow()}
+      title="Escucha cualquiera de las dos MorphoScan"
+    >
+      {start.isPending ? (
+        <Loader2 className="h-4 w-4 animate-spin" />
+      ) : (
+        <Scale className="h-4 w-4" />
+      )}
+      <span className="ml-1.5">Pesar</span>
+    </Button>
   );
 
   if (!companyId) {
     return (
-      <div className="flex items-center gap-1.5">
-        <Button type="button" variant="outline" size={compact ? 'sm' : 'default'} disabled>
-          <Scale className="h-4 w-4" />
-          <span className="ml-1.5">Pesar</span>
-        </Button>
-        <Button type="button" variant="outline" size={compact ? 'sm' : 'default'} disabled>
-          <Scale className="h-4 w-4" />
-          <span className="ml-1.5">Pesar+</span>
-        </Button>
-      </div>
+      <Button type="button" variant="outline" size={compact ? 'sm' : 'default'} disabled>
+        <Scale className="h-4 w-4" />
+        <span className="ml-1.5">Pesar</span>
+      </Button>
     );
   }
 
   if (active?.status === 'open') {
-    const scaleLabel = morphoWeighLabelFromMac(active.target_scale_mac) ?? 'Pesar';
     const mm = Math.floor(secondsLeft / 60);
     const ss = String(secondsLeft % 60).padStart(2, '0');
     return (
@@ -558,7 +529,7 @@ function ScaleWeighNowControls({
             className={cn('tabular-nums gap-1.5 py-1.5 px-2.5', compact ? 'text-[10px]' : 'text-xs')}
           >
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            {weighLooksStale ? 'Sin respuesta' : 'Esperando'} {scaleLabel} {mm}:{ss}
+            {weighLooksStale ? 'Sin respuesta' : 'Esperando báscula'} {mm}:{ss}
           </Badge>
           <Button
             type="button"
@@ -895,7 +866,7 @@ export const ClienteInbodyTab: React.FC<Props> = ({
           <div>
             <p className="font-medium text-foreground">Sin mediciones de báscula</p>
             <p className="text-sm mt-1 max-w-sm mx-auto">
-              Pulsa «Pesar» o «Pesar+» y sube al paciente a la báscula elegida, o «Importar InBody» con un CSV de
+              Pulsa «Pesar» y sube al paciente a cualquiera de las MorphoScan, o «Importar InBody» con un CSV de
               Lookin&apos;Body.
             </p>
           </div>
