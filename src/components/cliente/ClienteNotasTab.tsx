@@ -1,6 +1,6 @@
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Textarea } from '@/components/ui/textarea';
+import { RichTextEditor } from '@/components/ui/rich-text-editor';
 
 interface Props {
   notes: string;
@@ -14,12 +14,11 @@ export const ClienteNotasTab: React.FC<Props> = ({ notes, onChange }) => {
         <CardTitle>Notas del Cliente</CardTitle>
       </CardHeader>
       <CardContent>
-        <Textarea
-          value={notes}
-          onChange={(e) => onChange(e.target.value)}
-          rows={10}
+        <RichTextEditor
+          value={notes || ''}
+          onChange={onChange}
           placeholder="Notas adicionales sobre el cliente..."
-          className="resize-none"
+          minHeightClass="min-h-[220px]"
         />
       </CardContent>
     </Card>
