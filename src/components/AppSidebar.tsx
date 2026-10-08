@@ -144,6 +144,12 @@ export const AppSidebar: React.FC = () => {
       permission: { resource: 'reports', action: 'read' }
     },
     {
+      label: 'BI',
+      path: '/bi',
+      icon: Grid3X3,
+      permission: { resource: 'reports', action: 'read' }
+    },
+    {
       label: 'Empresas',
       path: '/empresas',
       icon: Building2,
