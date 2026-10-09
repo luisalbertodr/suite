@@ -489,6 +489,22 @@ async function fulfillWeighRequest(
     .eq('status', 'open');
 }
 
+/** true si la toma no trae composición BIA usable (no debe cerrar «Pesar»). */
+function isWeightOnlyIngest(body: ScaleIngestBody, raw: Record<string, unknown>): boolean {
+  const fatSource = String(raw.fat_source ?? (body as Record<string, unknown>).fat_source ?? '');
+  if (raw.weight_only === true) return true;
+  if (fatSource === 'none' || fatSource === 'from_ffm') return true;
+  const pbf = pickMetric(body, ['pbf_pct', 'body_fat_pct', 'bodyFatPercent', 'bodyfat']);
+  const fatKg = pickMetric(body, ['body_fat_kg', 'bodyFatKg']);
+  // Tras normalizeIncomingBody, weight-only ya tiene pbf/fat borrados.
+  if (pbf == null && fatKg == null) {
+    const rawPbf = asNumber(raw.bodyFatPercent) ?? asNumber(raw.body_fat_pct) ?? asNumber(raw.pbf_pct);
+    const rawFatKg = asNumber(raw.body_fat_kg) ?? asNumber(raw.bodyFatKg);
+    return rawPbf == null && rawFatKg == null;
+  }
+  return false;
+}
+
 async function loadCustomerProfile(
   admin: SupabaseClient,
   _companyId: string,
@@ -1095,8 +1111,9 @@ serve(async (req) => {
   }
 
   let body: ScaleIngestBody;
+  let raw: Record<string, unknown>;
   try {
-    const raw = (await req.json()) as Record<string, unknown>;
+    raw = (await req.json()) as Record<string, unknown>;
     body = normalizeIncomingBody(raw, req);
   } catch {
     return err('JSON inválido');
@@ -1193,6 +1210,27 @@ serve(async (req) => {
   // Preferir company de la ficha (clientes compartidos); la UI lee por customer_id sin filtrar company.
   const measurementCompanyId = link.customerCompanyId || companyId;
 
+  const weightOnly = isWeightOnlyIngest(body, raw as Record<string, unknown>);
+
+  // Con «Pesar» abierto: ignorar weight-only para no cerrar el pending ni ensuciar el historial.
+  // El gateway reintentará y enviará la BIA completa.
+  if (weighRequest && weightOnly && device === 'morphoscan') {
+    console.warn(
+      `scale-ingest: deferred weight-only while weigh ${weighRequest.id} open (keep pending)`,
+    );
+    return json({
+      ok: true,
+      deferred: true,
+      reason: 'weight_only_while_pending',
+      linked: {
+        customer_id: link.customerId,
+        matched_by: 'weigh_request',
+        inbody_user_id: userId,
+        weigh_request_id: weighRequest.id,
+      },
+    });
+  }
+
   const row = buildRow(body, {
     companyId: measurementCompanyId,
     customerId: link.customerId,
@@ -1213,7 +1251,12 @@ serve(async (req) => {
     return err('Error al guardar la medición', 500, { detail: upsertError.message });
   }
 
-  if (weighRequest && link.matchedBy === 'weigh_request' && upserted?.id) {
+  const canFulfillWeigh =
+    Boolean(weighRequest && upserted?.id) &&
+    !weightOnly &&
+    (link.matchedBy === 'weigh_request' || link.customerId === weighRequest!.customer_id);
+
+  if (canFulfillWeigh && weighRequest) {
     const expectedMac = normalizeMac(weighRequest.target_scale_mac);
     const actualMac = macFromRequest(req, body);
     if (expectedMac && actualMac && expectedMac !== actualMac) {
@@ -1221,17 +1264,7 @@ serve(async (req) => {
         `scale-ingest: measurement from ${actualMac} ignored for weigh request (expected ${expectedMac})`,
       );
     } else {
-      await fulfillWeighRequest(admin, weighRequest.id, upserted.id, weightKg);
-    }
-  } else if (weighRequest && link.customerId === weighRequest.customer_id && upserted?.id) {
-    const expectedMac = normalizeMac(weighRequest.target_scale_mac);
-    const actualMac = macFromRequest(req, body);
-    if (expectedMac && actualMac && expectedMac !== actualMac) {
-      console.warn(
-        `scale-ingest: measurement from ${actualMac} ignored for weigh request (expected ${expectedMac})`,
-      );
-    } else {
-      await fulfillWeighRequest(admin, weighRequest.id, upserted.id, weightKg);
+      await fulfillWeighRequest(admin, weighRequest.id, upserted!.id, weightKg);
     }
   }
 
