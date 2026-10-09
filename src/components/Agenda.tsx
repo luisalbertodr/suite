@@ -5,15 +5,18 @@ import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import {
   Calendar as CalendarIcon,
+  CalendarDays,
   ChevronLeft,
   ChevronRight,
   AlertCircle,
   ClipboardPaste,
+  LayoutGrid,
   X,
 } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { AgendaGrid } from './AgendaGrid';
+import { AgendaScheduleXView } from './AgendaScheduleXView';
 import { AppointmentForm, type AppointmentFormInitialPrefill } from './AppointmentForm';
 import { EditAppointmentForm } from './EditAppointmentForm';
 import { AppointmentResourceConflictDialog } from './AppointmentResourceConflictDialog';
@@ -127,6 +130,17 @@ type CreateAppointmentData = {
   items?: AppointmentItemDraft[];
 };
 
+const AGENDA_ENGINE_KEY = 'suite.agenda.engine';
+type AgendaEngine = 'classic' | 'schedulex';
+
+function readStoredAgendaEngine(): AgendaEngine {
+  try {
+    return localStorage.getItem(AGENDA_ENGINE_KEY) === 'schedulex' ? 'schedulex' : 'classic';
+  } catch {
+    return 'classic';
+  }
+}
+
 // Generate a Tailwind bg class from a hex color
 const hexToTailwindBg = (hex: string, index: number): string => {
   const fallbacks = [
@@ -214,7 +228,17 @@ export const Agenda: React.FC = () => {
   const [appointmentFormSaving, setAppointmentFormSaving] = useState(false);
   const [resourceConflictDialogOpen, setResourceConflictDialogOpen] = useState(false);
   const [resourceConflictDialogMessages, setResourceConflictDialogMessages] = useState<string[]>([]);
+  const [agendaEngine, setAgendaEngine] = useState<AgendaEngine>(readStoredAgendaEngine);
   const processedMarketingLeadPrefillRef = useRef<string | null>(null);
+
+  const setAgendaEnginePersist = useCallback((next: AgendaEngine) => {
+    setAgendaEngine(next);
+    try {
+      localStorage.setItem(AGENDA_ENGINE_KEY, next);
+    } catch {
+      /* ignore */
+    }
+  }, []);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { clipboard, setPayload: setClipboard, clear: clearClipboard } = useAgendaAppointmentClipboard();
@@ -931,6 +955,28 @@ export const Agenda: React.FC = () => {
         </PopoverContent>
       </Popover>
       <AgendaTopBarFitExtras>
+        <div className="inline-flex h-7 items-center rounded-md border border-border/60 bg-muted/60 p-0.5">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className={`h-6 w-7 p-0 rounded-sm ${agendaEngine === 'classic' ? 'bg-background shadow-sm' : 'text-muted-foreground'}`}
+            title="Vista clásica (columnas por empleado)"
+            onClick={() => setAgendaEnginePersist('classic')}
+          >
+            <LayoutGrid className="w-3.5 h-3.5" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className={`h-6 w-7 p-0 rounded-sm ${agendaEngine === 'schedulex' ? 'bg-background shadow-sm' : 'text-muted-foreground'}`}
+            title="Vista Schedule-X (día/semana/mes)"
+            onClick={() => setAgendaEnginePersist('schedulex')}
+          >
+            <CalendarDays className="w-3.5 h-3.5" />
+          </Button>
+        </div>
         <span
           className={`inline-flex h-7 shrink-0 items-center rounded-md border px-2 text-[11px] font-medium tabular-nums ${
             syncBadge.tone === 'error'
@@ -979,6 +1025,7 @@ export const Agenda: React.FC = () => {
     </>
   ), [
     agendaBillingView,
+    agendaEngine,
     appointmentsFetching,
     clipboard,
     clearClipboard,
@@ -986,6 +1033,7 @@ export const Agenda: React.FC = () => {
     refetchAppointments,
     selectAgendaDate,
     selectedDate,
+    setAgendaEnginePersist,
     syncBadge,
   ]);
 
@@ -1822,26 +1870,41 @@ export const Agenda: React.FC = () => {
             </div>
           </div>
         ) : null}
-        <AgendaGrid
-          employees={filteredEmployees}
-          appointments={filteredAppointments}
-          onSlotClick={handleSlotClick}
-          onAppointmentClick={handleAppointmentClick}
-          onAppointmentMove={handleAppointmentMove}
-          appointmentClipboard={clipboard ? { mode: clipboard.mode } : null}
-          onAppointmentCopy={(apt) => void putAppointmentOnClipboard(apt, 'copy')}
-          onAppointmentCut={(apt) => void putAppointmentOnClipboard(apt, 'cut')}
-          onSlotPaste={(employeeId, time) => void pasteAppointmentAt(employeeId, time, selectedDateYmd)}
-          persistUserId={user?.id ?? null}
-          viewDateYmd={selectedDateYmd}
-          goToTodayRequestId={goToTodayRequestId}
-          scrollToTimeRequest={scrollToTimeRequest}
-          centerHours={centerHours}
-          employeeAgendaById={employeeAgendaById}
-          visibleFields={preferences.visibleFields}
-          slotMinutes={preferences.slotMinutes}
-          cellHeight={preferences.cellHeight}
-        />
+        {agendaEngine === 'schedulex' ? (
+          <AgendaScheduleXView
+            key={selectedDateYmd}
+            selectedDateYmd={selectedDateYmd}
+            employees={filteredEmployees}
+            appointments={filteredAppointments}
+            onSlotClick={handleSlotClick}
+            onAppointmentClick={handleAppointmentClick}
+            onSelectedDateChange={(ymd) => {
+              const d = parse(ymd, 'yyyy-MM-dd', new Date());
+              if (isValid(d)) selectAgendaDate(d);
+            }}
+          />
+        ) : (
+          <AgendaGrid
+            employees={filteredEmployees}
+            appointments={filteredAppointments}
+            onSlotClick={handleSlotClick}
+            onAppointmentClick={handleAppointmentClick}
+            onAppointmentMove={handleAppointmentMove}
+            appointmentClipboard={clipboard ? { mode: clipboard.mode } : null}
+            onAppointmentCopy={(apt) => void putAppointmentOnClipboard(apt, 'copy')}
+            onAppointmentCut={(apt) => void putAppointmentOnClipboard(apt, 'cut')}
+            onSlotPaste={(employeeId, time) => void pasteAppointmentAt(employeeId, time, selectedDateYmd)}
+            persistUserId={user?.id ?? null}
+            viewDateYmd={selectedDateYmd}
+            goToTodayRequestId={goToTodayRequestId}
+            scrollToTimeRequest={scrollToTimeRequest}
+            centerHours={centerHours}
+            employeeAgendaById={employeeAgendaById}
+            visibleFields={preferences.visibleFields}
+            slotMinutes={preferences.slotMinutes}
+            cellHeight={preferences.cellHeight}
+          />
+        )}
       </div>
 
       {/* Create form */}
