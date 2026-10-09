@@ -52,14 +52,15 @@ try {
 
 $closed = 0
 foreach ($proc in $targets) {
-    $pid = [int]$proc.ProcessId
+    # No usar $pid: en PowerShell es automático/read-only (PID del propio host) y tumba el cierre nocturno.
+    $procId = [int]$proc.ProcessId
     $session = [int]$proc.SessionId
     try {
-        Stop-Process -Id $pid -Force -ErrorAction Stop
+        Stop-Process -Id $procId -Force -ErrorAction Stop
         $closed++
-        Write-CloseLog -Root $root -Message "cerrado pid=$pid session=$session"
+        Write-CloseLog -Root $root -Message "cerrado pid=$procId session=$session"
     } catch {
-        Write-CloseLog -Root $root -Message "fallo pid=$pid session=$session: $($_.Exception.Message)"
+        Write-CloseLog -Root $root -Message "fallo pid=$procId session=$session: $($_.Exception.Message)"
     }
 }
 

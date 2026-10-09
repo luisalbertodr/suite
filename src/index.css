@@ -217,4 +217,14 @@
     min-height: 0;
     overflow: hidden;
   }
+
+  /* TipTap placeholder */
+  .tiptap p.is-editor-empty:first-child::before,
+  .ProseMirror p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder);
+    float: left;
+    height: 0;
+    pointer-events: none;
+    color: hsl(var(--muted-foreground));
+  }
 }

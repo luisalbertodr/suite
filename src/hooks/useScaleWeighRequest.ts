@@ -105,7 +105,8 @@ export function useStartScaleWeighRequest() {
       ageYears: number;
       sex: 'M' | 'F';
       profileName?: string | null;
-      targetScaleMac: string;
+      /** null = escuchar cualquiera de las Morpho del gateway (SCALE_MACS). */
+      targetScaleMac?: string | null;
     }) => {
       const {
         data: { user },
@@ -133,7 +134,7 @@ export function useStartScaleWeighRequest() {
           age_years: input.ageYears,
           sex: input.sex,
           profile_name: (input.profileName || 'Suite').trim().slice(0, 8) || 'Suite',
-          target_scale_mac: input.targetScaleMac,
+          target_scale_mac: input.targetScaleMac?.trim() || null,
         })
         .select(
           'id, company_id, customer_id, status, created_at, expires_at, fulfilled_at, measurement_id, matched_weight_kg, target_scale_mac, height_cm, age_years, sex, profile_name',

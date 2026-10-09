@@ -1,10 +1,10 @@
 import React from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { Skeleton } from '@/components/ui/skeleton';
 import { IbanInput } from '@/components/ui/iban-input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { RichTextEditor } from '@/components/ui/rich-text-editor';
 import { cn } from '@/lib/utils';
 import { formatAgeLabel } from '@/lib/patientAge';
 import { repairStyleText } from '@/lib/styleTextEncoding';
@@ -237,12 +237,12 @@ export const ClienteFichaTecnicaTab: React.FC<Props> = ({ customer, isLoading, o
         </div>
         <div className="sm:col-span-2 lg:col-span-3">
           <Label className={fieldLabel}>Notas</Label>
-          <Textarea
+          <RichTextEditor
             value={text(customer.notes)}
-            onChange={(e) => onUpdate('notes', e.target.value)}
-            rows={3}
+            onChange={(html) => onUpdate('notes', html)}
             placeholder="Notas internas..."
-            className="resize-none text-sm min-h-[72px] mt-0.5"
+            className="mt-0.5"
+            minHeightClass="min-h-[72px]"
           />
         </div>
       </div>

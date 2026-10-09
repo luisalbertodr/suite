@@ -6,6 +6,7 @@ import AgendaPage from '@/pages/AgendaPage';
 import PlanillasPage from '@/pages/PlanillasPage';
 import GestionDocumentalPage from '@/pages/GestionDocumentalPage';
 import ReportesPage from '@/pages/ReportesPage';
+import MetabaseBiPage from '@/pages/MetabaseBiPage';
 import RecursosCabinasPage from '@/pages/RecursosCabinasPage';
 
 /** Contenido principal: dock con keep-alive o rutas puntuales fuera del dock. */
@@ -34,6 +35,8 @@ export const SuiteMainContent: React.FC = () => {
       return <GestionDocumentalPage />;
     case '/reportes':
       return <ReportesPage />;
+    case '/bi':
+      return <MetabaseBiPage />;
     case '/recursos-cabinas':
       return <RecursosCabinasPage />;
     case '/proveedores':

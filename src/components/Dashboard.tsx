@@ -27,6 +27,7 @@ import {
   type DashboardRecentActivityType,
 } from '@/lib/dashboardRecentActivity';
 import { Reportes } from './Reportes';
+import { MetabaseBiPanel } from './MetabaseBiPanel';
 import { DashboardFamilySelector } from './DashboardFamilySelector';
 import { DashboardCommandBoard } from './DashboardCommandBoard';
 import { useRegisterTopBarContent } from '@/components/TopBarContentContext';
@@ -259,12 +260,13 @@ export const Dashboard: React.FC = () => {
   const canSeeIncentivesBoard = canSeeIncentiveDashboard(hasPermission);
   const canSeeResumen = canSeeStatistics || canSeeRecentActivity || canSeeIncentivesBoard;
   const dashboardTabs = useMemo(() => {
-    const tabs: Array<'resumen' | 'reportes'> = [];
+    const tabs: Array<'resumen' | 'reportes' | 'bi'> = [];
     if (canSeeResumen) tabs.push('resumen');
     if (canSeeReports) tabs.push('reportes');
+    if (canSeeReports) tabs.push('bi');
     return tabs;
   }, [canSeeResumen, canSeeReports]);
-  const [activeDashboardTab, setActiveDashboardTab] = useState<'resumen' | 'reportes'>('resumen');
+  const [activeDashboardTab, setActiveDashboardTab] = useState<'resumen' | 'reportes' | 'bi'>('resumen');
 
   useEffect(() => {
     if (permissionsLoading || dashboardTabs.length === 0) return;
@@ -586,7 +588,7 @@ export const Dashboard: React.FC = () => {
       ) : null}
       <Tabs
         value={activeDashboardTab}
-        onValueChange={(value) => setActiveDashboardTab(value as 'resumen' | 'reportes')}
+        onValueChange={(value) => setActiveDashboardTab(value as 'resumen' | 'reportes' | 'bi')}
         className="space-y-4"
       >
         <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
@@ -603,6 +605,12 @@ export const Dashboard: React.FC = () => {
                   <TabsTrigger value="reportes" className="text-sm px-3">
                     <BarChart3 className="w-4 h-4 mr-1.5" />
                     Reportes
+                  </TabsTrigger>
+                ) : null}
+                {canSeeReports ? (
+                  <TabsTrigger value="bi" className="text-sm px-3">
+                    <Activity className="w-4 h-4 mr-1.5" />
+                    BI
                   </TabsTrigger>
                 ) : null}
               </TabsList>
@@ -892,6 +900,12 @@ export const Dashboard: React.FC = () => {
         {canSeeReports ? (
         <TabsContent value="reportes" className="mt-0">
           <Reportes embedded />
+        </TabsContent>
+        ) : null}
+
+        {canSeeReports ? (
+        <TabsContent value="bi" className="mt-0">
+          <MetabaseBiPanel />
         </TabsContent>
         ) : null}
 

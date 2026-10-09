@@ -13,8 +13,9 @@ import { VerifactuStatus } from './VerifactuStatus';
 import { VerifactuCertificates } from './VerifactuCertificates';
 import { VerifactuXMLDocuments } from './VerifactuXMLDocuments';
 import { VerifactuQueueMonitor } from './VerifactuQueueMonitor';
-import { Plus, Search, FileText, Settings, History, File, ListOrdered, ChevronLeft, ChevronRight, Wallet } from 'lucide-react';
+import { Plus, Search, FileText, Settings, History, File, ListOrdered, ChevronLeft, ChevronRight, Wallet, LayoutGrid, Table2 } from 'lucide-react';
 import { MovimientosBancarios } from './MovimientosBancarios';
+import { FacturasInvoiceTable } from './FacturasInvoiceTable';
 import { format } from 'date-fns';
 import { TPV_SALE_INVOICE_PREFILL_KEY } from '@/lib/appointmentSales';
 import {
@@ -28,7 +29,34 @@ import { useCompanyFilter } from '@/hooks/useCompanyFilter';
 import { useWorkCenter } from '@/hooks/useWorkCenter';
 import { useBankMovementsAccess } from '@/hooks/useBankMovementsAccess';
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE_CARDS = 50;
+/** Tabla virtualizada: más filas por página para aprovechar scroll. */
+const PAGE_SIZE_TABLE = 200;
+const LIST_VIEW_KEY = 'suite.facturas.listView';
+
+type InvoiceListView = 'cards' | 'table';
+
+function readStoredListView(): InvoiceListView {
+  try {
+    const v = localStorage.getItem(LIST_VIEW_KEY);
+    return v === 'table' ? 'table' : 'cards';
+  } catch {
+    return 'cards';
+  }
+}
+
+function invoiceStatusClassName(status: string): string {
+  switch (status) {
+    case 'paid':
+      return 'bg-green-100 text-green-800';
+    case 'overdue':
+      return 'bg-red-100 text-red-800';
+    case 'pending':
+      return 'bg-yellow-100 text-yellow-800';
+    default:
+      return 'bg-gray-100 text-gray-800';
+  }
+}
 
 const INVOICE_LIST_SELECT = `
   id,
@@ -60,6 +88,7 @@ export const Facturas: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(0);
+  const [listView, setListView] = useState<InvoiceListView>(readStoredListView);
   const [activeTab, setActiveTab] = useState('invoices');
   const [budgetData, setBudgetData] = useState<any>(null);
   const { companyId, loading: companyLoading } = useCompanyFilter();
@@ -67,6 +96,17 @@ export const Facturas: React.FC = () => {
   const catalogCompanyId = catalogHostCompanyId ?? companyId;
   const { canAccess: canSeeMovimientos, loading: movimientosAccessLoading } =
     useBankMovementsAccess();
+  const pageSize = listView === 'table' ? PAGE_SIZE_TABLE : PAGE_SIZE_CARDS;
+
+  const setListViewPersist = useCallback((next: InvoiceListView) => {
+    setListView(next);
+    setPage(0);
+    try {
+      localStorage.setItem(LIST_VIEW_KEY, next);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   useEffect(() => {
     if (movimientosAccessLoading) return;
@@ -82,7 +122,7 @@ export const Facturas: React.FC = () => {
 
   useEffect(() => {
     setPage(0);
-  }, [debouncedSearch, companyId]);
+  }, [debouncedSearch, companyId, pageSize]);
 
   const billingCompanyIds = companyId ? [companyId] : [];
 
@@ -104,14 +144,14 @@ export const Facturas: React.FC = () => {
   }, [companyId]);
 
   const { data: listResult, isLoading, isFetching } = useQuery({
-    queryKey: ['invoices', debouncedSearch, companyId, page, billingCompanyIds.join(',')],
+    queryKey: ['invoices', debouncedSearch, companyId, page, pageSize, billingCompanyIds.join(',')],
     queryFn: async () => {
       if (!companyId || billingCompanyIds.length === 0) {
         return { rows: [] as any[], total: 0 };
       }
 
-      const from = page * PAGE_SIZE;
-      const to = from + PAGE_SIZE - 1;
+      const from = page * pageSize;
+      const to = from + pageSize - 1;
 
       let query = supabase
         .from('invoices')
@@ -144,7 +184,7 @@ export const Facturas: React.FC = () => {
 
   const invoices = listResult?.rows ?? [];
   const totalCount = listResult?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
 
   const { data: verifactuLogs } = useQuery({
     queryKey: ['verifactu-logs', companyId],
@@ -166,19 +206,6 @@ export const Facturas: React.FC = () => {
     },
     enabled: !!companyId && !companyLoading && activeTab === 'logs',
   });
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'paid':
-        return 'bg-green-100 text-green-800';
-      case 'overdue':
-        return 'bg-red-100 text-red-800';
-      case 'pending':
-        return 'bg-yellow-100 text-yellow-800';
-      default:
-        return 'bg-gray-100 text-gray-800';
-    }
-  };
 
   const handleFormClose = () => {
     setShowForm(false);
@@ -373,8 +400,8 @@ export const Facturas: React.FC = () => {
         </TabsList>
 
         <TabsContent value="invoices" className="space-y-4">
-          <div className="flex items-center space-x-4">
-            <div className="relative flex-1">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="relative min-w-[220px] flex-1">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
               <Input
                 placeholder="Número, nombre de cliente, DNI, teléfono o email…"
@@ -382,6 +409,28 @@ export const Facturas: React.FC = () => {
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-10"
               />
+            </div>
+            <div className="flex shrink-0 rounded-md border p-0.5">
+              <Button
+                type="button"
+                variant={listView === 'cards' ? 'secondary' : 'ghost'}
+                size="sm"
+                className="h-8 px-2.5"
+                onClick={() => setListViewPersist('cards')}
+                title="Vista tarjetas"
+              >
+                <LayoutGrid className="h-4 w-4" />
+              </Button>
+              <Button
+                type="button"
+                variant={listView === 'table' ? 'secondary' : 'ghost'}
+                size="sm"
+                className="h-8 px-2.5"
+                onClick={() => setListViewPersist('table')}
+                title="Vista tabla (TanStack)"
+              >
+                <Table2 className="h-4 w-4" />
+              </Button>
             </div>
           </div>
 
@@ -412,7 +461,14 @@ export const Facturas: React.FC = () => {
               {isFetching && (
                 <p className="text-xs text-muted-foreground text-center">Actualizando listado…</p>
               )}
-              {invoices.map((invoice) => (
+              {listView === 'table' ? (
+                <FacturasInvoiceTable
+                  invoices={invoices}
+                  onOpen={setSelectedInvoice}
+                  statusClassName={invoiceStatusClassName}
+                />
+              ) : (
+                invoices.map((invoice) => (
                 <Card key={invoice.id} className="hover:shadow-md transition-shadow cursor-pointer">
                   <CardHeader>
                     <div className="flex items-center justify-between">
@@ -429,7 +485,7 @@ export const Facturas: React.FC = () => {
                         </CardDescription>
                       </div>
                       <div className="flex items-center space-x-2">
-                        <Badge className={getStatusColor(invoice.status)}>
+                        <Badge className={invoiceStatusClassName(invoice.status)}>
                           {invoice.status === 'paid' ? 'Pagada' : 
                            invoice.status === 'overdue' ? 'Vencida' : 'Pendiente'}
                         </Badge>
@@ -460,12 +516,14 @@ export const Facturas: React.FC = () => {
                     </div>
                   </CardContent>
                 </Card>
-              ))}
+                ))
+              )}
 
-              {totalCount > PAGE_SIZE && (
+              {totalCount > pageSize && (
                 <div className="flex items-center justify-between pt-2 border-t">
                   <p className="text-sm text-muted-foreground">
                     {totalCount} factura{totalCount !== 1 ? 's' : ''} · Página {page + 1} de {totalPages}
+                    {listView === 'table' ? ' · hasta 200/página' : ''}
                   </p>
                   <div className="flex gap-2">
                     <Button
