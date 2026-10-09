@@ -395,7 +395,10 @@ function checksumOk(data: Buffer, frameLen: number): boolean {
  *   bone kg = [15:17] BE/1000
  * DF-BIA impedances (Ohm, BE/10) around [7..23]:
  *   20 kHz: T≈[7], LA≈[9], RA≈[11], RL≈[13], LL≈LE[12]
- *   100 kHz: LA≈[19], RA≈[21], RL/LL≈[23], T≈LE[16]
+ *   100 kHz: LA≈[19], RA≈[21], RL/LL≈[23], T≈BE[17]
+ *   (T@100 was wrongly LE[16] — overlaps bone BE[15:17]/1000 and often
+ *    fell below the 10 Ω gate → missing_100khz_segment on both scales.
+ *    When bone low-byte was large, LE[16] produced a false trunk > Z20.)
  *
  * IMPORTANT: bytes [0:4] are often `xx 11 00 00` (protocol header), NOT muscle.
  * Reading LE/100 there always yields ~43.5 kg across every body weight — that
@@ -521,7 +524,10 @@ function parseMsc04BodyFields(
     const la100 = be10(19);
     const ra100 = be10(21);
     const leg100 = be10(23);
-    const t100 = le10(16);
+    // Trunk @100 kHz = BE[17:19]/10. Do NOT use LE[16]: that overlaps bone
+    // BE[15:17] (low byte of bone + high byte of this field) and falsely
+    // misses or invents trunk (clinic: missing_100khz_segment on both MACs).
+    const t100 = be10(17);
     if (la100 >= 200 && la100 <= 600) z100.left_arm = Math.round(la100 * 10) / 10;
     if (ra100 >= 200 && ra100 <= 600) z100.right_arm = Math.round(ra100 * 10) / 10;
     if (leg100 >= 200 && leg100 <= 500) {
