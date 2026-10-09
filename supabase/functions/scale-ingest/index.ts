@@ -1011,7 +1011,8 @@ function assessMorphoScanDataQuality(input: {
         pathSegs += 1;
         const t = Math.log(50 / 20) / Math.log(100 / 20);
         pathSum += Math.exp(Math.log(a) + t * (Math.log(b) - Math.log(a)));
-        if (k === 'trunk' && b < 15) issues.push('trunk100_suspect');
+        // Morpho reales: tronco@100 ≈ 12–15 Ω. Solo basura/misparse < 10 Ω.
+        if (k === 'trunk' && b < 10) issues.push('trunk100_suspect');
       } else if (typeof b === 'number' && b > 0) {
         pathSegs += 1;
         pathSum += b;
@@ -1022,6 +1023,14 @@ function assessMorphoScanDataQuality(input: {
       }
     }
   }
+  let dualComplete = false;
+  if (z20 && z100) {
+    dualComplete = (['right_arm', 'trunk', 'right_leg'] as const).every((k) => {
+      const a = z20[k];
+      const b = z100[k];
+      return typeof a === 'number' && a > 0 && typeof b === 'number' && b > 0;
+    });
+  }
   if (pathSegs < 3) {
     issues.push('path_incomplete', 'no_path');
   } else if (z1 != null && z1 >= 100) {
@@ -1030,7 +1039,8 @@ function assessMorphoScanDataQuality(input: {
     const pathR = pathSum * (female ? 0.635 : 0.73);
     const z1R = z1 * (female ? 1.08 : 1.33);
     const rel = z1R > 0 ? Math.abs(pathR - z1R) / z1R : 0;
-    if (rel > 0.12) issues.push('path_z1_discord');
+    // Dual-freq completo: discrepancia path/z1 → warn (tronco@100 real baja path).
+    if (rel > 0.12) issues.push(dualComplete ? 'path_z1_warn' : 'path_z1_discord');
     else if (rel > 0.08) issues.push('path_z1_warn');
   }
 

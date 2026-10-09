@@ -167,6 +167,8 @@ export function estimatePathR50Ohm(
  * R efectiva ~50 kHz.
  * Preferir path segmentario; si path y z1 discrepan >12 % relativo, usar z1
  * (mapas Morpho a veces truncan tronco/pierna y el path se dispara).
+ * Excepción: mapa dual-freq completo (RA+T+RL @20+100) → preferir path
+ * (tronco@100 real ~12–14 Ω baja path vs z1 sin indicar corrupción).
  * Si pathR < z1R, aplicar (pathR/z1R)^γ para alinear TBW/fat_control con InBody
  * del mismo día (Luis 2026-10-02: −2.4 kg).
  */
@@ -184,8 +186,13 @@ export function resolveEffectiveR50Ohm(opts: {
   const path = estimatePathR50Ohm(opts.z20, opts.z100);
   if (path != null) {
     const pathR = r1(path * pathScaleForSex(opts.sex));
+    const dualComplete = (['right_arm', 'trunk', 'right_leg'] as const).every((k) => {
+      const a = opts.z20?.[k];
+      const b = opts.z100?.[k];
+      return a != null && a > 0 && b != null && b > 0;
+    });
     if (z1R != null && z1R > 0) {
-      if (Math.abs(pathR - z1R) / z1R > 0.12) {
+      if (Math.abs(pathR - z1R) / z1R > 0.12 && !dualComplete) {
         return z1R;
       }
       if (pathR < z1R && INBODY_LIKE_PATH_Z1_GAMMA > 0) {
