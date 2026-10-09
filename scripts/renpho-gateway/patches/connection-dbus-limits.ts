@@ -99,6 +99,7 @@ export function resetConnection(): void {
 /** Returns true if the error indicates a stale or broken D-Bus connection. */
 export function isStaleConnectionError(err: unknown): boolean {
   const msg = errMsg(err);
+  const lower = msg.toLowerCase();
   return (
     msg.includes('interface not found') ||
     msg.includes('not found in proxy') ||
@@ -108,7 +109,15 @@ export function isStaleConnectionError(err: unknown): boolean {
     // node-ble match-rule leak (max_match_rules_per_connection)
     msg.includes('LimitsExceeded') ||
     msg.includes('max_match_rules') ||
-    msg.includes('add more match rules')
+    msg.includes('add more match rules') ||
+    // MorphoScan / BlueZ: GattCharacteristic proxy dies mid-handshake (Gemma 2026-10-09).
+    // WriteValue "doesn't exist" leaves discovery wedged until D-Bus/HCI reset.
+    lower.includes('gatt_stale') ||
+    lower.includes('writevalue') ||
+    lower.includes("doesn't exist") ||
+    lower.includes('gattcharacteristic') ||
+    lower.includes('unknownobject') ||
+    lower.includes('no such property')
   );
 }
 

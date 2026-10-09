@@ -312,6 +312,32 @@ async function writeWithTimeout(
   }
 }
 
+/**
+ * BlueZ dropped the GATT characteristic proxy (common after rapid dual-scale
+ * reconnects). Retrying WriteValue is useless — caller must disconnect so
+ * scan.ts can reset D-Bus / power-cycle HCI.
+ */
+function isGattDeadError(err: unknown): boolean {
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  return (
+    msg.includes("doesn't exist") ||
+    msg.includes('unknownobject') ||
+    msg.includes('gattcharacteristic') ||
+    msg.includes('no such property') ||
+    msg.includes('not found in proxy') ||
+    msg.includes('interface not found') ||
+    msg.includes('not discovered')
+  );
+}
+
+function gattStaleError(label: string, cause: unknown): Error {
+  const detail = cause instanceof Error ? cause.message : String(cause);
+  return new Error(
+    `GATT_STALE: handshake write 0x${label} — characteristic proxy dead ` +
+      `(interface not found). ${detail}`,
+  );
+}
+
 /** Build a checksummed 55AA frame: cmd + payload. */
 function buildFrame(cmd: number, payload: number[]): number[] {
   const len = payload.length;
@@ -660,9 +686,11 @@ export class RenphoMsc04Adapter
     }
 
     if (!ctx.availableChars.has(CHR_WRITE)) {
+      this.persistExpect();
       throw new Error(
-        `Renpho R-MSC04: write characteristic (${CHR_WRITE}) not discovered. ` +
-          'Likely a transient GATT discovery race. Try again.',
+        `GATT_STALE: Renpho R-MSC04 write characteristic (${CHR_WRITE}) not discovered ` +
+          '(interface not found). Likely a transient GATT discovery race — ' +
+          'D-Bus/HCI reset on next scan.',
       );
     }
 
@@ -799,6 +827,20 @@ export class RenphoMsc04Adapter
         return;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
+        // Proxy GATT muerto: no insistir con withResponse (Gemma 2ª báscula 2026-10-09).
+        if (isGattDeadError(e)) {
+          bleLog.info(
+            `Renpho R-MSC04: handshake write 0x${label} GATT dead (${msg}) — abort frame`,
+          );
+          if (this.earlyBodyComp.length > 0 || this.orphanedBodyComp.length > 0) {
+            bleLog.info(
+              `Renpho R-MSC04: skip write 0x${label} (GATT dead) — body-comp already buffered`,
+            );
+            return;
+          }
+          this.persistExpect();
+          throw gattStaleError(label, e);
+        }
         const inProgress = /in progress/i.test(msg);
         bleLog.info(
           `Renpho R-MSC04: handshake write 0x${label} failed (${msg})` +
@@ -832,6 +874,10 @@ export class RenphoMsc04Adapter
               `Renpho R-MSC04: skip write 0x${label} (${msg2}) — body-comp already buffered`,
             );
             return;
+          }
+          if (isGattDeadError(e2)) {
+            this.persistExpect();
+            throw gattStaleError(label, e2);
           }
           throw e2 instanceof Error ? e2 : new Error(msg2);
         }

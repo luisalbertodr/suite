@@ -52,13 +52,16 @@ if ($LASTEXITCODE -ne 0) { throw "scp suite-ble-ondemand.service falló" }
 Write-Host "Subiendo parches gateway ..." -ForegroundColor Green
 Invoke-SuiteSsh "mkdir -p '$RemoteDir/patches'"
 $patchesDir = Join-Path $LocalDir "patches"
-foreach ($p in @("suite-pending.ts", "renpho-msc04.ts", "apply-gateway-ble-fixes.py")) {
+foreach ($p in @("suite-pending.ts", "renpho-msc04.ts", "apply-gateway-ble-fixes.py", "connection-dbus-limits.ts")) {
   $src = Join-Path $patchesDir $p
-  if (-not (Test-Path $src)) { throw "Falta parche $src" }
+  if (-not (Test-Path $src)) {
+    if ($p -eq "connection-dbus-limits.ts") { continue }
+    throw "Falta parche $src"
+  }
   & scp @SshArgs $src "${SshTarget}:${RemoteDir}/patches/$p"
   if ($LASTEXITCODE -ne 0) { throw "scp $p falló" }
 }
-Invoke-SuiteSsh "python3 '$RemoteDir/patches/apply-gateway-ble-fixes.py'"
+Invoke-SuiteSsh "sed -i 's/\r$//' '$RemoteDir/patches/'*.py '$RemoteDir/patches/'*.ts 2>/dev/null; python3 '$RemoteDir/patches/apply-gateway-ble-fixes.py'"
 
 $defaultMacs = "60:30:F2:74:26:E2,60:30:F2:74:22:B6"
 $existingMacs = (& ssh @SshArgs $SshTarget "grep -E '^SCALE_MACS=' '$RemoteDir/.env' 2>/dev/null | cut -d= -f2-").Trim()
