@@ -46,7 +46,7 @@ const ISSUE_LABELS: Record<MorphoTakeIssue, string> = {
   no_z1: 'Sin impedancia global (z1)',
   no_path: 'Sin path segmentario usable',
   path_incomplete: 'Path incompleto (falta brazo/tronco/pierna)',
-  trunk100_suspect: 'Tronco @100 kHz sospechoso (< 15 Ω)',
+  trunk100_suspect: 'Tronco @100 kHz sospechoso (< 10 Ω)',
   missing_100khz_segment: 'Falta segmento a 100 kHz',
   path_z1_discord: 'Path y z1 discrepan >12 %',
   path_z1_warn: 'Path y z1 discrepan 8–12 %',
@@ -90,7 +90,9 @@ function segmentFlags(z20: SegmentalOhms | null, z100: SegmentalOhms | null): Mo
     const b = z100?.[k];
     if (a != null && a > 0) present += 1;
     else if (b != null && b > 0) present += 1;
-    if (k === 'trunk' && b != null && b > 0 && b < 15) {
+    // Morpho reales suelen dar tronco@100 ≈ 12–15 Ω (Z100 < Z20). Solo
+    // marcar basura/misparse por debajo del gate de aceptación (10 Ω).
+    if (k === 'trunk' && b != null && b > 0 && b < 10) {
       issues.push('trunk100_suspect');
     }
     if (a != null && a > 0 && (b == null || !(b > 0))) {
@@ -122,13 +124,20 @@ function baseAssess(m: InbodyMeasurement): MorphoTakeQuality {
   const path = estimatePathR50Ohm(z20, z100);
   if (path == null) issues.push('no_path');
 
+  const dualComplete = (['right_arm', 'trunk', 'right_leg'] as const).every((k) => {
+    const a = z20?.[k];
+    const b = z100?.[k];
+    return a != null && a > 0 && b != null && b > 0;
+  });
+
   const sex = normalizeInbodyLikeSex(m.sex);
   if (path != null && z1 != null && z1 >= 100) {
     const pathR = path * pathScaleForSex(sex);
     const z1R = z1 * z1ScaleForSex(sex);
     if (z1R > 0) {
       const rel = Math.abs(pathR - z1R) / z1R;
-      if (rel > 0.12) issues.push('path_z1_discord');
+      // Dual-freq completo: path suele quedar bajo z1 (tronco@100 real) → warn, no bad.
+      if (rel > 0.12) issues.push(dualComplete ? 'path_z1_warn' : 'path_z1_discord');
       else if (rel > 0.08) issues.push('path_z1_warn');
     }
   }

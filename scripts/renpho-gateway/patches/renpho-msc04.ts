@@ -173,9 +173,18 @@ function msc04ResolveR50Ohm(opts: {
   );
   if (path != null) {
     const pathR = Math.round(path * msc04PathScale(opts.profile) * 10) / 10;
-    // Segmental maps can be truncated; if path drifts >12% from z1, trust z1.
+    const z20 = opts.impedanceMap?.['20khz'];
+    const z100 = opts.impedanceMap?.['100khz'];
+    const dualComplete = (['right_arm', 'trunk', 'right_leg'] as const).every((k) => {
+      const a = z20?.[k];
+      const b = z100?.[k];
+      return a != null && a > 0 && b != null && b > 0;
+    });
+    // Segmental maps truncated: if path drifts >12% from z1, trust z1.
+    // Dual-freq completo (RA+T+RL @20+100): preferir path — tronco@100 real
+    // (~12–14 Ω) baja path vs z1 sin indicar mapa corrupto.
     if (z1R != null && z1R > 0) {
-      if (Math.abs(pathR - z1R) / z1R > 0.12) {
+      if (Math.abs(pathR - z1R) / z1R > 0.12 && !dualComplete) {
         return { rOhm: z1R, source: 'z1' };
       }
       // path < z1 → mild shrink (path/z1)^γ — sync with inbodyLikeBia (Luis Oct −2.4).
