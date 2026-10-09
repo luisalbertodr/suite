@@ -269,23 +269,32 @@ function ScaleWeighNowControls({
         quality = assessMorphoTakeQuality(row, (siblings as InbodyMeasurement[]) ?? []);
       }
 
-      if (quality.needs_repeat || quality.grade !== 'good') {
+      if (quality.grade === 'bad') {
         toast({
-          title: quality.grade === 'bad' ? 'Medición errónea — repite' : 'Medición poco fiable — conviene repetir',
+          title: 'Medición errónea — repite',
           description:
             quality.message ||
-            `${weightLabel} guardado, pero la composición no es fiable. Baja, espera 5 s y vuelve a subirte (pies descalzos, mango firme, quieta hasta el bip).`,
+            `${weightLabel} no es usable (impedancia incompleta). Baja, espera 5 s y vuelve a subirte (pies descalzos, mango firme, quieta hasta el bip).`,
           variant: 'destructive',
+        });
+        return;
+      }
+
+      const fatBit =
+        row?.pbf_pct != null
+          ? ` · grasa ${formatInbodyNumber(row.pbf_pct, 1, ' %')}`
+          : '';
+      if (quality.grade === 'warn') {
+        toast({
+          title: 'Medición recibida',
+          description: `${weightLabel}${fatBit} vinculada. Contacto irregular — conviene repetir si el informe se ve raro.`,
         });
         return;
       }
 
       toast({
         title: 'Medición recibida',
-        description:
-          row?.pbf_pct != null
-            ? `${weightLabel} · grasa ${formatInbodyNumber(row.pbf_pct, 1, ' %')} vinculada a este cliente.`
-            : `${weightLabel} vinculada a este cliente.`,
+        description: `${weightLabel}${fatBit} vinculada a este cliente.`,
       });
     })();
   }, [active?.status, active?.measurement_id, active?.matched_weight_kg, companyId, customerId, taxId, queryClient, toast]);
