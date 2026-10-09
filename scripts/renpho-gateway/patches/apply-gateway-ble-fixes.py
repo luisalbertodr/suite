@@ -206,6 +206,63 @@ def copy_static_patches() -> None:
     shutil.copy2(PATCHES / "suite-pending.ts", ROOT / "src/suite-pending.ts")
     shutil.copy2(PATCHES / "renpho-msc04.ts", ROOT / "src/scales/renpho-msc04.ts")
     print("suite-pending.ts + renpho-msc04.ts copied")
+    patch_connection_stale_errors()
+
+
+def patch_connection_stale_errors() -> None:
+    """Amplía isStaleConnectionError para WriteValue/GATT_STALE (dual-scale)."""
+    conn = ROOT / "src/ble/handler-node-ble/connection.ts"
+    if not conn.is_file():
+        print("connection.ts: missing — skip stale-error patch")
+        return
+    text = conn.read_text(encoding="utf-8")
+    if "gatt_stale" in text.lower():
+        print("connection.ts: isStaleConnectionError already covers GATT_STALE")
+        return
+    needle = "msg.includes('add more match rules')\n  );"
+    insert = (
+        "msg.includes('add more match rules') ||\n"
+        "    // MorphoScan: GattCharacteristic proxy dies mid-handshake (dual-scale).\n"
+        "    lower.includes('gatt_stale') ||\n"
+        "    lower.includes('writevalue') ||\n"
+        "    lower.includes(\"doesn't exist\") ||\n"
+        "    lower.includes('gattcharacteristic') ||\n"
+        "    lower.includes('unknownobject') ||\n"
+        "    lower.includes('no such property')\n"
+        "  );"
+    )
+    if needle not in text:
+        # Try with lower already present
+        if "function isStaleConnectionError" in text and "const lower" not in text.split(
+            "function isStaleConnectionError"
+        )[1][:200]:
+            text = text.replace(
+                "export function isStaleConnectionError(err: unknown): boolean {\n"
+                "  const msg = errMsg(err);\n"
+                "  return (",
+                "export function isStaleConnectionError(err: unknown): boolean {\n"
+                "  const msg = errMsg(err);\n"
+                "  const lower = msg.toLowerCase();\n"
+                "  return (",
+                1,
+            )
+        if needle not in text:
+            print("connection.ts: could not patch isStaleConnectionError (pattern mismatch)")
+            return
+    if "const lower = msg.toLowerCase()" not in text.split("isStaleConnectionError")[1][:240]:
+        text = text.replace(
+            "export function isStaleConnectionError(err: unknown): boolean {\n"
+            "  const msg = errMsg(err);\n"
+            "  return (",
+            "export function isStaleConnectionError(err: unknown): boolean {\n"
+            "  const msg = errMsg(err);\n"
+            "  const lower = msg.toLowerCase();\n"
+            "  return (",
+            1,
+        )
+    text = text.replace(needle, insert, 1)
+    conn.write_text(text, encoding="utf-8")
+    print("connection.ts: isStaleConnectionError covers GATT_STALE / WriteValue")
 
 
 def find_loop_file() -> pathlib.Path:

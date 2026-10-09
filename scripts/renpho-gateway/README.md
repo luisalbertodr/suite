@@ -28,6 +28,8 @@
 #   suite-ble-ondemand.service — lifecycle start/stop
 #   systemd WatchdogSec=120 en ble-scale-sync — event loop congelado
 #   /usr/local/bin/suite-ble-gateway-watchdog.sh  (cron * * * *) — hung scan
+#   Con «Pesar» abierto: stale 45s + HCI soft-reset (evita wedge tras GATT_STALE dual-scale)
+#   renpho-msc04: WriteValue "doesn't exist" → GATT_STALE (no reintentar proxy muerto)
 #
 # Botón Suite «Pesar» (sin MAC fija):
 #   target_scale_mac = null → el gateway escucha ambas vía SCALE_MACS.
