@@ -1,7 +1,7 @@
 #!/bin/bash
 # Controlador bajo demanda de ble-scale-sync (MorphoScan).
 #
-# - Al aparecer «Pesar» en Suite → start/restart fresco del bridge.
+# - Al aparecer «Pesar» en Suite → start del bridge (NO reinicia si ya está activo).
 # - Tras IDLE_STOP_SEC sin pending (default 10 min) → stop.
 # - Un proceso ligero (suite-ble-ondemand.service) llama a este script en bucle.
 #
@@ -31,13 +31,18 @@ fetch_pending() {
   cid=$(grep '^SUITE_COMPANY_ID=' "$ENV_FILE" | cut -d= -f2- | tr -d '\r')
   url=$(grep '^SCALE_INGEST_URL=' "$ENV_FILE" | cut -d= -f2- | tr -d '\r')
   url=${url:-https://supabase.lipoout.com/functions/v1/scale-ingest}
-  curl -sS -m 10 \
+  # Importante: no devolver pending:false en fallo de red (eso borraba armed_sig y
+  # provocaba restart a mitad de pesaje).
+  if ! curl -sS -m 10 \
     -H "X-Scale-Ingest-Secret: $secret" \
     -H "X-Suite-Company-Id: $cid" \
-    "${url}?pending=1" || echo '{"pending":false,"error":"curl_failed"}'
+    "${url}?pending=1"; then
+    echo '{"pending":null,"error":"curl_failed"}'
+  fi
 }
 
-# Imprime: pending_bool|signature  (signature vacía si no pending)
+# Imprime: state|signature
+#   state = true | false | unknown
 parse_pending() {
   python3 - "$1" <<'PY'
 import json, hashlib, sys
@@ -45,7 +50,10 @@ raw = sys.argv[1]
 try:
     d = json.loads(raw)
 except Exception:
-    print("false|")
+    print("unknown|")
+    raise SystemExit(0)
+if d.get("error") and d.get("pending") is None:
+    print("unknown|")
     raise SystemExit(0)
 # Arrancar aunque ready=false (calienta el bridge mientras Suite completa perfil).
 if not bool(d.get("pending")):
@@ -68,16 +76,16 @@ print(f"true|{sig}")
 PY
 }
 
-ensure_started_fresh() {
+# Arranca el bridge si está parado. Si ya está activo, NO reinicia (evita cortar BLE).
+ensure_started() {
   local why="$1"
-  log "START $UNIT ($why)"
   systemctl reset-failed "$UNIT" 2>/dev/null || true
   if systemctl is-active --quiet "$UNIT"; then
-    systemctl restart "$UNIT"
-  else
-    systemctl start "$UNIT"
+    log "KEEP $UNIT already active ($why)"
+    return 0
   fi
-  # Espera breve a Type=notify READY
+  log "START $UNIT ($why)"
+  systemctl start "$UNIT"
   local i
   for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
     if systemctl is-active --quiet "$UNIT"; then
@@ -93,7 +101,6 @@ ensure_started_fresh() {
 ensure_stopped() {
   local why="$1"
   if ! systemctl is-active --quiet "$UNIT" && ! systemctl is-failed --quiet "$UNIT" 2>/dev/null; then
-    # Ya parado.
     return 0
   fi
   log "STOP $UNIT ($why)"
@@ -110,6 +117,12 @@ tick() {
   is_pending=${parsed%%|*}
   sig=${parsed#*|}
 
+  # Fallo temporal de red/API: no tocar armed ni parar el bridge.
+  if [[ "$is_pending" == "unknown" ]]; then
+    log "PENDING_FETCH_UNKNOWN keep armed/unit"
+    return 0
+  fi
+
   if [[ "$is_pending" == "true" ]]; then
     echo "$now" > "$LAST_PENDING_FILE"
     armed=""
@@ -117,18 +130,19 @@ tick() {
       armed=$(cat "$ARMED_FILE" 2>/dev/null || true)
     fi
     if [[ "$armed" != "$sig" ]]; then
-      ensure_started_fresh "new pending sig=$sig"
+      # Nueva petición «Pesar»: arrancar si hace falta, sin matar una sesión BLE en curso.
+      ensure_started "new pending sig=$sig"
       echo "$sig" > "$ARMED_FILE"
       return 0
     fi
     if ! systemctl is-active --quiet "$UNIT"; then
-      ensure_started_fresh "pending open but unit down sig=$sig"
+      ensure_started "pending open but unit down sig=$sig"
       echo "$sig" > "$ARMED_FILE"
     fi
     return 0
   fi
 
-  # Sin pending: limpiar arma; parar tras gracia.
+  # Sin pending real: limpiar arma; parar tras gracia.
   rm -f "$ARMED_FILE"
   last_pending=0
   if [[ -f "$LAST_PENDING_FILE" ]]; then
@@ -143,7 +157,6 @@ tick() {
   fi
 
   if [[ "$last_pending" -eq 0 ]]; then
-    # Activo sin historial de pending (p.ej. enable antiguo) → parar.
     ensure_stopped "no pending history (ondemand idle)"
     return 0
   fi
