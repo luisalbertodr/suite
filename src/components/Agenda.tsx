@@ -954,29 +954,36 @@ export const Agenda: React.FC = () => {
           />
         </PopoverContent>
       </Popover>
+      {/* Fuera de FitExtras: si no cabe ancho, Sync/Actualizar se ocultan pero la vista no. */}
+      <div
+        className="inline-flex h-7 shrink-0 items-center rounded-md border border-border/60 bg-muted/60 p-0.5"
+        role="group"
+        aria-label="Motor de agenda"
+      >
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className={`h-6 w-7 p-0 rounded-sm ${agendaEngine === 'classic' ? 'bg-background shadow-sm' : 'text-muted-foreground'}`}
+          title="Vista clásica (columnas por empleado)"
+          aria-pressed={agendaEngine === 'classic'}
+          onClick={() => setAgendaEnginePersist('classic')}
+        >
+          <LayoutGrid className="w-3.5 h-3.5" />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className={`h-6 w-7 p-0 rounded-sm ${agendaEngine === 'schedulex' ? 'bg-background shadow-sm' : 'text-muted-foreground'}`}
+          title="Vista Schedule-X (día/semana/mes)"
+          aria-pressed={agendaEngine === 'schedulex'}
+          onClick={() => setAgendaEnginePersist('schedulex')}
+        >
+          <CalendarDays className="w-3.5 h-3.5" />
+        </Button>
+      </div>
       <AgendaTopBarFitExtras>
-        <div className="inline-flex h-7 items-center rounded-md border border-border/60 bg-muted/60 p-0.5">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className={`h-6 w-7 p-0 rounded-sm ${agendaEngine === 'classic' ? 'bg-background shadow-sm' : 'text-muted-foreground'}`}
-            title="Vista clásica (columnas por empleado)"
-            onClick={() => setAgendaEnginePersist('classic')}
-          >
-            <LayoutGrid className="w-3.5 h-3.5" />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className={`h-6 w-7 p-0 rounded-sm ${agendaEngine === 'schedulex' ? 'bg-background shadow-sm' : 'text-muted-foreground'}`}
-            title="Vista Schedule-X (día/semana/mes)"
-            onClick={() => setAgendaEnginePersist('schedulex')}
-          >
-            <CalendarDays className="w-3.5 h-3.5" />
-          </Button>
-        </div>
         <span
           className={`inline-flex h-7 shrink-0 items-center rounded-md border px-2 text-[11px] font-medium tabular-nums ${
             syncBadge.tone === 'error'
