@@ -2643,12 +2643,87 @@ serve(async (req) => {
         }
         // Waha expone /api/{session}/auth/qr?format=image (devuelve PNG) o
         // ?format=raw (devuelve el código de texto). Probamos image primero.
-        // Si la sesión está FAILED (QR agotado), reiniciar y volver a pedir el QR.
+        // Si la sesión está FAILED (QR agotado o auth 401 por móvil desvinculado),
+        // reiniciar; si sigue fallando, logout+purge y arrancar QR limpio.
         const fetchQrImage = async (): Promise<Response> =>
           wahaFetch(
             cfg,
             `/api/${encodeURIComponent(sessionName)}/auth/qr?format=image`,
           );
+        const waitForSessionStatus = async (
+          wanted: string[],
+          attempts = 10,
+          delayMs = 1500,
+        ): Promise<string> => {
+          let last = '';
+          for (let i = 0; i < attempts; i++) {
+            await new Promise((r) => setTimeout(r, delayMs));
+            try {
+              const s = await wahaJson<{ status?: string }>(
+                cfg,
+                `/api/sessions/${encodeURIComponent(sessionName)}`,
+              );
+              last = (s.status ?? '').toUpperCase();
+              if (wanted.includes(last)) return last;
+            } catch {
+              /* keep waiting */
+            }
+          }
+          return last;
+        };
+        const startWahaSession = async () => {
+          try {
+            await wahaJson(cfg, `/api/sessions/${encodeURIComponent(sessionName)}/start`, {
+              method: 'POST',
+              body: JSON.stringify({}),
+            });
+          } catch {
+            await wahaJson(cfg, `/api/sessions/start`, {
+              method: 'POST',
+              body: JSON.stringify({ name: sessionName }),
+            }).catch(() => undefined);
+          }
+        };
+        const logoutAndFreshStart = async (reason: string) => {
+          try {
+            await wahaJson(cfg, `/api/sessions/${encodeURIComponent(sessionName)}/logout`, {
+              method: 'POST',
+              body: JSON.stringify({ apps: { purge: true } }),
+            });
+          } catch {
+            /* sesión ya sin credenciales o STOPPED */
+          }
+          await updateCfg({
+            last_status: 'STARTING',
+            last_status_message: reason,
+            last_status_at: new Date().toISOString(),
+            me_jid: null,
+            me_pushname: null,
+            qr_data_url: null,
+          });
+          await startWahaSession();
+          await waitForSessionStatus(['SCAN_QR_CODE', 'WORKING', 'FAILED', 'STOPPED']);
+        };
+
+        let liveStatus = '';
+        try {
+          const s = await wahaJson<{ status?: string }>(
+            cfg,
+            `/api/sessions/${encodeURIComponent(sessionName)}`,
+          );
+          liveStatus = (s.status ?? '').toUpperCase();
+        } catch {
+          /* ignore */
+        }
+
+        // Auth caducada (p. ej. móvil averiado / 401): restart reutiliza credenciales
+        // muertas y vuelve a FAILED. Ir directo a logout+QR limpio.
+        if (liveStatus === 'FAILED') {
+          await logoutAndFreshStart(
+            'Sesión caducada (auth rechazada). Generando QR para vincular de nuevo…',
+          );
+        }
+
         let resp = await fetchQrImage();
         if (!resp.ok) {
           const text = await resp.text();
@@ -2670,36 +2745,22 @@ serve(async (req) => {
               } catch {
                 /* ignore */
               }
-              try {
-                await wahaJson(cfg, `/api/sessions/${encodeURIComponent(sessionName)}/start`, {
-                  method: 'POST',
-                  body: JSON.stringify({}),
-                });
-              } catch {
-                await wahaJson(cfg, `/api/sessions/start`, {
-                  method: 'POST',
-                  body: JSON.stringify({ name: sessionName }),
-                }).catch(() => undefined);
-              }
+              await startWahaSession();
             }
             await updateCfg({
               last_status: 'STARTING',
               last_status_message: 'QR caducado: regenerando…',
               last_status_at: new Date().toISOString(),
             });
-            // Esperar a que pase a SCAN_QR_CODE
-            for (let i = 0; i < 8; i++) {
-              await new Promise((r) => setTimeout(r, 1500));
-              try {
-                const s = await wahaJson<{ status?: string }>(
-                  cfg,
-                  `/api/sessions/${encodeURIComponent(sessionName)}`,
-                );
-                const st = (s.status ?? '').toUpperCase();
-                if (st === 'SCAN_QR_CODE' || st === 'WORKING') break;
-              } catch {
-                /* keep waiting */
-              }
+            const afterRestart = await waitForSessionStatus(
+              ['SCAN_QR_CODE', 'WORKING', 'FAILED', 'STOPPED'],
+              8,
+            );
+            // Si el restart reintentó credenciales inválidas (401), hace falta logout.
+            if (afterRestart === 'FAILED' || afterRestart === 'STOPPED') {
+              await logoutAndFreshStart(
+                'Credenciales WAHA inválidas. Nueva vinculación QR…',
+              );
             }
             resp = await fetchQrImage();
           }
