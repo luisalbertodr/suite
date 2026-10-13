@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  spotifyd:
+    container_name: spotifyd
+    image: hvalev/spotifyd-pulseaudio:latest
+    restart: unless-stopped
+    network_mode: host
+    privileged: true
+    user: "0:0"
+    group_add:
+      - audio
+    devices:
+      - /dev/snd:/dev/snd
+    command:
+      - spotifyd
+      - --no-daemon
+      - --config-path
+      - /etc/spotifyd.conf
+      - --backend
+      - alsa
+      - --device
+      - default
+      - --device-name
+      - Clinica-Lipoout
+      - --bitrate
+      - "320"
+      - --volume-controller
+      - soft-volume
+      - --device-type
+      - speaker
+      - -v
+    volumes:
+      - /tmp/spotifyd_cache:/root/.cache/spotifyd
+      - /tmp/spotifyd_cache/spotifyd.conf:/etc/spotifyd.conf:ro
