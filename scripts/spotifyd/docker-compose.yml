@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   spotifyd:
     container_name: spotifyd
@@ -33,3 +31,5 @@ services:
     volumes:
       - /tmp/spotifyd_cache:/root/.cache/spotifyd
       - /tmp/spotifyd_cache/spotifyd.conf:/etc/spotifyd.conf:ro
+    labels:
+      - com.portainer.stack.name=spotifyd
