@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { ShapeStream, Shape } from '@electric-sql/client';
 import { useAuth } from '@/hooks/useAuth';
 import { getElectricProxyUrl, type ServiceStatusRow } from '@/lib/electricSync';
 import { supabase } from '@/lib/supabase';
@@ -11,8 +10,9 @@ type State = {
 };
 
 /**
- * F6 piloto: sync live de suite_service_status vía Electric shape proxy.
- * Fallback a lectura Supabase si Electric no responde.
+ * F6 piloto: lee suite_service_status.
+ * Intenta shape proxy Electric (sin @electric-sql/client: evita lookbehind en bundle legacy Safari).
+ * Fallback: Supabase REST.
  */
 export function useElectricServiceStatus(enabled = true): State {
   const { session } = useAuth();
@@ -21,9 +21,17 @@ export function useElectricServiceStatus(enabled = true): State {
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
-    let cleanup: (() => void) | undefined;
 
-    const loadFallback = async () => {
+    const mapRows = (data: Record<string, unknown>[]): ServiceStatusRow[] =>
+      data.map((r) => ({
+        service_key: String(r.service_key ?? ''),
+        status: String(r.status ?? 'unknown'),
+        last_error: (r.last_error as string | null) ?? null,
+        updated_at: (r.updated_at as string | null) ?? null,
+        latency_ms: typeof r.latency_ms === 'number' ? r.latency_ms : null,
+      }));
+
+    const loadSupabase = async () => {
       const { data, error } = await supabase
         .from('suite_service_status')
         .select('service_key, status, last_error, updated_at, latency_ms')
@@ -33,48 +41,54 @@ export function useElectricServiceStatus(enabled = true): State {
         setState({ rows: [], mode: 'error', error: error.message });
         return;
       }
-      setState({ rows: (data || []) as ServiceStatusRow[], mode: 'supabase' });
+      setState({ rows: mapRows((data || []) as Record<string, unknown>[]), mode: 'supabase' });
     };
 
-    const startElectric = async () => {
+    const tryElectricSnapshot = async () => {
       const proxy = getElectricProxyUrl();
       const token = session?.access_token;
       if (!proxy || !token) {
-        await loadFallback();
+        await loadSupabase();
         return;
       }
-
       try {
-        const stream = new ShapeStream({
-          url: proxy,
-          params: { table: 'suite_service_status' },
+        const url = new URL(proxy);
+        url.searchParams.set('table', 'suite_service_status');
+        url.searchParams.set('offset', '-1');
+        const res = await fetch(url.toString(), {
           headers: {
             Authorization: `Bearer ${token}`,
             apikey: (import.meta.env.VITE_SUPABASE_ANON_KEY as string) || '',
+            Accept: 'application/json',
           },
         });
-        const shape = new Shape(stream);
-        cleanup = shape.subscribe(({ rows }) => {
-          if (cancelled) return;
-          const mapped = (rows as Record<string, unknown>[]).map((r) => ({
-            service_key: String(r.service_key ?? ''),
-            status: String(r.status ?? 'unknown'),
-            last_error: (r.last_error as string | null) ?? null,
-            updated_at: (r.updated_at as string | null) ?? null,
-            latency_ms: typeof r.latency_ms === 'number' ? r.latency_ms : null,
-          }));
-          setState({ rows: mapped, mode: 'electric' });
-        });
-        // Si no hay datos en unos segundos, fallback
-        window.setTimeout(() => {
-          if (!cancelled) {
-            setState((prev) => {
-              if (prev.mode === 'electric' && prev.rows.length > 0) return prev;
-              void loadFallback();
-              return prev;
-            });
+        if (!res.ok) {
+          await loadSupabase();
+          return;
+        }
+        const payload = (await res.json()) as unknown;
+        // Shape protocol: array of messages; extract insert/update values
+        const rows: Record<string, unknown>[] = [];
+        const list = Array.isArray(payload) ? payload : [];
+        for (const msg of list) {
+          if (!msg || typeof msg !== 'object') continue;
+          const m = msg as { headers?: { operation?: string }; value?: Record<string, unknown> };
+          if (m.value && (m.headers?.operation === 'insert' || m.headers?.operation === 'update' || !m.headers?.operation)) {
+            rows.push(m.value);
           }
-        }, 4000);
+        }
+        if (cancelled) return;
+        if (rows.length === 0) {
+          await loadSupabase();
+          return;
+        }
+        // Dedupe by service_key (last wins)
+        const byKey = new Map<string, Record<string, unknown>>();
+        for (const r of rows) {
+          const k = String(r.service_key ?? '');
+          if (k) byKey.set(k, r);
+        }
+        setState({ rows: mapRows([...byKey.values()]), mode: 'electric' });
       } catch (e) {
         if (!cancelled) {
           setState({
@@ -82,15 +96,16 @@ export function useElectricServiceStatus(enabled = true): State {
             mode: 'error',
             error: e instanceof Error ? e.message : String(e),
           });
-          await loadFallback();
+          await loadSupabase();
         }
       }
     };
 
-    void startElectric();
+    void tryElectricSnapshot();
+    const id = window.setInterval(() => void tryElectricSnapshot(), 15_000);
     return () => {
       cancelled = true;
-      cleanup?.();
+      window.clearInterval(id);
     };
   }, [enabled, session?.access_token]);
 
