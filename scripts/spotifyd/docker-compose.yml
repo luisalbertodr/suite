@@ -27,9 +27,13 @@ services:
       - soft-volume
       - --device-type
       - speaker
+      - --zeroconf-port
+      - "57621"
+      - --cache-path
+      - /var/lib/spotifyd
       - -v
     volumes:
-      - /tmp/spotifyd_cache:/root/.cache/spotifyd
-      - /tmp/spotifyd_cache/spotifyd.conf:/etc/spotifyd.conf:ro
+      - /var/lib/spotifyd:/var/lib/spotifyd
+      - /var/lib/spotifyd/spotifyd.conf:/etc/spotifyd.conf:ro
     labels:
       - com.portainer.stack.name=spotifyd
