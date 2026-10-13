@@ -12,8 +12,10 @@ const DockKeepAliveContext = createContext<DockKeepAliveValue>({
 });
 
 export function DockKeepAliveProvider({ children }: { children: React.ReactNode }) {
-  // Agenda es la ruta por defecto: montarla desde el primer render evita barra superior vacía.
-  const [mountedKeys, setMountedKeys] = useState<Set<DockRouteKey>>(() => new Set(['agenda']));
+  // Agenda + WhatsApp: conservar chat abierto al cambiar de pestaña del dock.
+  const [mountedKeys, setMountedKeys] = useState<Set<DockRouteKey>>(
+    () => new Set(['agenda', 'whatsapp']),
+  );
 
   const mountPanel = useCallback((key: DockRouteKey) => {
     setMountedKeys((prev) => {

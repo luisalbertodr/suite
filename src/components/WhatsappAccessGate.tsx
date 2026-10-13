@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Shield } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -8,8 +8,16 @@ export const WhatsappAccessGate: React.FC<{ children: React.ReactNode }> = ({ ch
   const { isSuperuser } = useAuth();
   const { hasPermission, loading: permLoading } = usePermissions();
   const { canRead: canReadMarketing, loading: marketingLoading } = useMarketingPermissions();
+  // Evita desmontar el chat al refrescar permisos (p. ej. al cambiar de pestaña del dock).
+  const allowedOnceRef = useRef(false);
 
-  if (permLoading || marketingLoading) {
+  const allowed =
+    isSuperuser || hasPermission('whatsapp', 'read') || canReadMarketing;
+  if (allowed) allowedOnceRef.current = true;
+
+  const loading = permLoading || marketingLoading;
+
+  if (loading && !allowedOnceRef.current) {
     return (
       <div className="flex items-center justify-center p-4">
         <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-600" />
@@ -17,10 +25,8 @@ export const WhatsappAccessGate: React.FC<{ children: React.ReactNode }> = ({ ch
     );
   }
 
-  const allowed =
-    isSuperuser || hasPermission('whatsapp', 'read') || canReadMarketing;
-
-  if (!allowed) {
+  // Durante un refresh de permisos, si ya hubo acceso, mantener el chat montado.
+  if (!allowed && !loading) {
     return (
       <div className="flex items-center justify-center p-8">
         <div className="text-center">

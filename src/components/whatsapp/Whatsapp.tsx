@@ -27,6 +27,7 @@ import {
   fetchWhatsappChatIdByPhone,
   findLoadedChatForDeepLink,
 } from '@/lib/openSuiteWhatsappChat';
+import { readWhatsappOpenChat, writeWhatsappOpenChat } from '@/lib/whatsappOpenChat';
 
 import { WhatsappChatList } from './WhatsappChatList';
 
@@ -132,9 +133,39 @@ export const Whatsapp: React.FC = () => {
   /** Lead de Marketing al abrir desde tarjeta (hasta que el chat tenga marketing_lead_id en BD). */
   const [sessionLeadId, setSessionLeadId] = useState<string | null>(null);
   const [sessionLeadName, setSessionLeadName] = useState<string | null>(null);
+  /** No auto-seleccionar el primer chat hasta restaurar el abierto de la sesión. */
+  const [openChatRestored, setOpenChatRestored] = useState(false);
 
   const chatsRef = useRef(chats);
   chatsRef.current = chats;
+
+  useEffect(() => {
+    if (!companyId) {
+      setOpenChatRestored(false);
+      return;
+    }
+    const stored = readWhatsappOpenChat(companyId);
+    if (stored?.chatId) {
+      setSelectedChatId(stored.chatId);
+      if (stored.leadId) setSessionLeadId(stored.leadId);
+      if (stored.leadName) setSessionLeadName(stored.leadName);
+    }
+    setOpenChatRestored(true);
+  }, [companyId]);
+
+  useEffect(() => {
+    if (!companyId || !openChatRestored) return;
+    if (selectedChatId) {
+      writeWhatsappOpenChat({
+        companyId,
+        chatId: selectedChatId,
+        leadId: sessionLeadId,
+        leadName: sessionLeadName,
+      });
+    } else {
+      writeWhatsappOpenChat(null);
+    }
+  }, [companyId, openChatRestored, selectedChatId, sessionLeadId, sessionLeadName]);
 
   const effectiveLeadId = useMemo(() => {
     const fromChat = chats.find(
@@ -534,6 +565,8 @@ export const Whatsapp: React.FC = () => {
 
   useEffect(() => {
 
+    if (!openChatRestored) return;
+
     if (pendingDeepLink) return;
 
     if (selectedChatId) return;
@@ -542,7 +575,7 @@ export const Whatsapp: React.FC = () => {
 
     setSelectedChatId(chats[0].chat_id);
 
-  }, [chats, selectedChatId, pendingDeepLink]);
+  }, [chats, selectedChatId, pendingDeepLink, openChatRestored]);
 
 
 
