@@ -105,21 +105,48 @@ function sortWhatsappMessages(rows: WhatsappMessageRow[]): WhatsappMessageRow[] 
 
 function dedupeWhatsappMessages(rows: WhatsappMessageRow[]): WhatsappMessageRow[] {
   const byKey = new Map<string, WhatsappMessageRow>();
+  const prefer = (a: WhatsappMessageRow, b: WhatsappMessageRow) => {
+    if (!a.waha_message_id && b.waha_message_id) return b;
+    if (a.id.startsWith('pending-') && !b.id.startsWith('pending-')) return b;
+    return a;
+  };
   for (const m of rows) {
     const suffix = m.waha_message_id?.includes('_')
       ? m.waha_message_id.split('_').pop()
       : m.waha_message_id;
     const key = suffix
       ? `id:${suffix}`
-      : `fb:${m.chat_id}:${m.from_me}:${m.body ?? ''}:${m.timestamp}`;
+      : `fb:${m.from_me ? '1' : '0'}:${(m.body ?? m.caption ?? '').trim()}:${Math.floor(parseMessageTime(m) / 5000)}`;
     const prev = byKey.get(key);
     if (!prev) {
       byKey.set(key, m);
       continue;
     }
-    if (!prev.waha_message_id && m.waha_message_id) byKey.set(key, m);
+    byKey.set(key, prefer(prev, m));
   }
-  return sortWhatsappMessages([...byKey.values()]);
+  // Segunda pasada: mismo texto saliente en ventana corta (eco webhook / optimistic).
+  const list = [...byKey.values()];
+  const out: WhatsappMessageRow[] = [];
+  for (const m of sortWhatsappMessages(list)) {
+    const body = (m.body ?? m.caption ?? '').trim();
+    if (m.from_me && body) {
+      const dup = out.find((x) => {
+        if (!x.from_me) return false;
+        const xb = (x.body ?? x.caption ?? '').trim();
+        if (xb !== body) return false;
+        return Math.abs(parseMessageTime(x) - parseMessageTime(m)) <= 15_000;
+      });
+      if (dup) {
+        const keep = prefer(dup, m);
+        if (keep !== dup) {
+          out[out.indexOf(dup)] = keep;
+        }
+        continue;
+      }
+    }
+    out.push(m);
+  }
+  return sortWhatsappMessages(out);
 }
 
 /** Solo corrige desfase ≤1s al append en vivo (mismo segundo / reloj). */
@@ -201,6 +228,20 @@ function appendMessageToCache(
       )
     ) {
       return list;
+    }
+    // Sustituir optimistic pendiente con el mismo texto en vez de acumular duplicados.
+    const body = (row.body ?? row.caption ?? '').trim();
+    if (row.from_me && body) {
+      const pendingIdx = list.findIndex((m) => {
+        if (!m.id.startsWith('pending-') || !m.from_me) return false;
+        const mb = (m.body ?? m.caption ?? '').trim();
+        return mb === body && Math.abs(parseMessageTime(m) - parseMessageTime(row)) <= 30_000;
+      });
+      if (pendingIdx >= 0) {
+        const next = [...list];
+        next[pendingIdx] = row;
+        return dedupeWhatsappMessages(next);
+      }
     }
     const adjusted = adjustIncomingBeforeAppend(list, row);
     return dedupeWhatsappMessages([...list, adjusted]);
