@@ -286,12 +286,6 @@ export const WhatsappChatView: React.FC<Props> = ({
     }
   };
 
-  const displayName = displayNameForChat(
-    chat.chat_id,
-    chat.name,
-    leadName ?? customerName,
-    chat.raw,
-  );
   const isGroup = chat.is_group || isGroupJid(chat.chat_id);
   const isTestWaChat = isWhatsappTestChatId(chat.chat_id, waAutomationSettings);
   const effectiveCustomerId =
@@ -300,6 +294,13 @@ export const WhatsappChatView: React.FC<Props> = ({
   const crmContactName = isTestWaChat
     ? (leadName ?? null)
     : (customerName ?? leadName ?? null);
+  // Preferir ficha Suite frente al push name de WA (a menudo solo emoji).
+  const displayName = displayNameForChat(
+    chat.chat_id,
+    crmContactName || chat.name,
+    leadName ?? customerName,
+    chat.raw,
+  );
   const effectiveMarketingLeadId = marketingLeadId ?? chat.marketing_lead_id;
   const showDepositActions =
     !isGroup &&

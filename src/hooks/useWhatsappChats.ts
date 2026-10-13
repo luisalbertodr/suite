@@ -48,15 +48,32 @@ export const useWhatsappChats = () => {
     refetchIntervalInBackground: true,
     queryFn: async (): Promise<WhatsappChatRow[]> => {
       if (!companyId) return [];
-      const { data, error } = await supabase
-        .from('whatsapp_chats')
-        .select(WHATSAPP_CHAT_LIST_COLUMNS)
-        .eq('company_id', companyId)
-        .eq('archived', false)
-        .order('last_message_at', { ascending: false, nullsFirst: false })
-        .limit(300);
-      if (error) throw error;
-      return (data ?? []).filter((c) => !isSystemChatJid(c.chat_id));
+      // Lista reciente + todos los no leídos (el badge puede contar chats fuera del top 300).
+      const [recentRes, unreadRes] = await Promise.all([
+        supabase
+          .from('whatsapp_chats')
+          .select(WHATSAPP_CHAT_LIST_COLUMNS)
+          .eq('company_id', companyId)
+          .eq('archived', false)
+          .order('last_message_at', { ascending: false, nullsFirst: false })
+          .limit(300),
+        supabase
+          .from('whatsapp_chats')
+          .select(WHATSAPP_CHAT_LIST_COLUMNS)
+          .eq('company_id', companyId)
+          .eq('archived', false)
+          .gt('unread_count', 0)
+          .order('last_message_at', { ascending: false, nullsFirst: false })
+          .limit(100),
+      ]);
+      if (recentRes.error) throw recentRes.error;
+      if (unreadRes.error) throw unreadRes.error;
+      const byId = new Map<string, WhatsappChatRow>();
+      for (const c of [...(unreadRes.data ?? []), ...(recentRes.data ?? [])]) {
+        if (isSystemChatJid(c.chat_id)) continue;
+        byId.set(c.chat_id, c);
+      }
+      return [...byId.values()];
     },
   });
 

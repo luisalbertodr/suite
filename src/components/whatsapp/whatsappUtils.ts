@@ -152,6 +152,8 @@ export function isGoodChatDisplayName(name: string | null | undefined): boolean 
   const n = name.trim();
   if (looksLikeJid(n)) return false;
   if (n === 'Grupo') return false;
+  // Solo emoji / símbolos (p. ej. "🧘‍♀️✨"): no sustituye al nombre del cliente.
+  if (!/[\p{L}\p{N}]/u.test(n)) return false;
   return true;
 }
 

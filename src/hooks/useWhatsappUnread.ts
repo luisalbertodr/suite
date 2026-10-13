@@ -10,12 +10,18 @@ async function fetchWhatsappUnreadTotal(companyId: string): Promise<number> {
   if (error) {
     const { data: rows, error: fallbackErr } = await supabase
       .from('whatsapp_chats')
-      .select('unread_count')
+      .select('unread_count, chat_id')
       .eq('company_id', companyId)
       .eq('archived', false)
       .gt('unread_count', 0);
     if (fallbackErr) throw fallbackErr;
-    return (rows ?? []).reduce((acc, row) => acc + (row.unread_count ?? 0), 0);
+    return (rows ?? []).reduce((acc, row) => {
+      const id = (row.chat_id ?? '').toLowerCase();
+      if (id === 'status@broadcast' || id.endsWith('@broadcast') || id.endsWith('@newsletter')) {
+        return acc;
+      }
+      return acc + (row.unread_count ?? 0);
+    }, 0);
   }
   return Number(data ?? 0);
 }

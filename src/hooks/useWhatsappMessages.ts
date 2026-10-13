@@ -24,7 +24,7 @@ const MESSAGE_LIST_COLUMNS =
   'id,company_id,chat_id,waha_message_id,from_jid,from_me,type,body,caption,media_url,media_mime_type,media_filename,media_size,ack,quoted_message_id,timestamp,created_at,updated_at,raw';
 
 /** Mensajes recientes en BD (rápido). Historial completo se pagina aparte. */
-const MESSAGE_PAGE_SIZE = 100;
+const MESSAGE_PAGE_SIZE = 50;
 /** Página ligera vía proxy (solo últimos mensajes del proveedor). */
 const RECENT_PROVIDER_LIMIT = 35;
 const RECENT_POLL_MS = 45_000;
@@ -349,13 +349,11 @@ export const useWhatsappMessages = (
   });
 
   const openSyncKeyRef = useRef('');
-  const forceRetryRef = useRef(false);
   useEffect(() => {
     if (!enabled || !chatId) return;
     const syncKey = chatIds.slice().sort().join('|');
     if (openSyncKeyRef.current === syncKey) return;
     openSyncKeyRef.current = syncKey;
-    forceRetryRef.current = false;
 
     const cached = queryClient.getQueryData<WhatsappMessageRow[]>(key);
     const skipRecent = shouldSkipRecentProviderSync(cached, historySyncedAt, lastMessageAt);
@@ -364,27 +362,12 @@ export const useWhatsappMessages = (
       if (isOpenwa && (cached?.length ?? 0) > 0) return;
       if (skipRecent) return;
 
-      refreshFromWaha.mutate('recent', {
-        onSuccess: (res) => {
-          if ((res.count ?? 0) > 0) return;
-          const latest = queryClient.getQueryData<WhatsappMessageRow[]>(key);
-          if (latest && latest.length > 0) return;
-          if (historySyncedAt) return;
-          if (forceRetryRef.current) return;
-          forceRetryRef.current = true;
-          refreshFromWaha.mutate('auto', { onError: () => undefined });
-        },
-        onError: () => {
-          const latest = queryClient.getQueryData<WhatsappMessageRow[]>(key);
-          if (latest && latest.length > 0) return;
-          if (historySyncedAt || forceRetryRef.current) return;
-          forceRetryRef.current = true;
-          refreshFromWaha.mutate('auto', { onError: () => undefined });
-        },
-      });
+      // Solo recientes al abrir: el sync completo de historiales largos bloquea la UI.
+      // El usuario puede forzar «Importar desde Waha» si hace falta.
+      refreshFromWaha.mutate('recent', { onError: () => undefined });
     };
 
-    const delayMs = cached?.length ? 2800 : 800;
+    const delayMs = cached?.length ? 400 : 150;
     const timer = window.setTimeout(runSync, delayMs);
     return () => window.clearTimeout(timer);
   }, [enabled, chatId, chatIds.join('|'), historySyncedAt, lastMessageAt, isOpenwa]); // eslint-disable-line react-hooks/exhaustive-deps

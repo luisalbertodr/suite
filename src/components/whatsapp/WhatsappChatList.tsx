@@ -251,12 +251,18 @@ export const WhatsappChatList: React.FC<Props> = ({
 
     const qNorm = normalizeSearchText(searchTrim);
     const qDigits = searchTrim.replace(/\D/g, '');
-    if (!qNorm && qDigits.length < 3) {
-      return list.sort((a, b) => {
+    const sortChats = (rows: WhatsappChatRow[]) =>
+      rows.sort((a, b) => {
+        const ua = (a.unread_count ?? 0) > 0 ? 1 : 0;
+        const ub = (b.unread_count ?? 0) > 0 ? 1 : 0;
+        if (ua !== ub) return ub - ua;
         const ta = a.last_message_at ? Date.parse(a.last_message_at) : 0;
         const tb = b.last_message_at ? Date.parse(b.last_message_at) : 0;
         return tb - ta;
       });
+
+    if (!qNorm && qDigits.length < 3) {
+      return sortChats(list);
     }
 
     const lookup = {
@@ -266,13 +272,7 @@ export const WhatsappChatList: React.FC<Props> = ({
       phoneLabelByChatId,
       leadNameById,
     };
-    return list
-      .filter((c) => chatMatchesSearch(c, qNorm, qDigits, lookup))
-      .sort((a, b) => {
-        const ta = a.last_message_at ? Date.parse(a.last_message_at) : 0;
-        const tb = b.last_message_at ? Date.parse(b.last_message_at) : 0;
-        return tb - ta;
-      });
+    return sortChats(list.filter((c) => chatMatchesSearch(c, qNorm, qDigits, lookup)));
   }, [
     chats,
     remoteSearchQuery.data,
@@ -411,7 +411,8 @@ export const WhatsappChatList: React.FC<Props> = ({
                 phoneLabel !== displayName &&
                 !displayName.includes(phoneLabel);
               const isCustomer = !!linkedCustomerId;
-              const hasUnread = (c.unread_count ?? 0) > 0 && !isActive;
+              // Negrita mientras haya no leídos; al abrir se marca leído y deja de estar en negrita.
+              const hasUnread = (c.unread_count ?? 0) > 0;
               return (
                 <li key={c.id}>
                   <button
@@ -434,8 +435,8 @@ export const WhatsappChatList: React.FC<Props> = ({
                         <p
                           className={`flex min-w-0 flex-1 items-center gap-1.5 truncate text-sm ${
                             hasUnread
-                              ? 'font-semibold text-[#111b21] dark:text-zinc-50'
-                              : 'font-medium text-[#111b21] dark:text-zinc-100'
+                              ? 'font-bold text-[#111b21] dark:text-zinc-50'
+                              : 'font-normal text-[#111b21] dark:text-zinc-100'
                           }`}
                         >
                           {isGroup ? (
