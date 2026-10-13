@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Building2, Home, LayoutDashboard, Users, ShoppingBag, Settings, FileText, BarChart2, Truck, Receipt, Package, Calendar, FolderOpen, Grid3X3, LogOut } from 'lucide-react';
+import { Building2, Home, LayoutDashboard, Users, ShoppingBag, Settings, FileText, BarChart2, Truck, Receipt, Package, Calendar, FolderOpen, Grid3X3, LogOut, Activity } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { usePermissions } from '@/hooks/usePermissions';
 import { canAccessDashboard } from '@/lib/menuPermissions';
@@ -148,6 +148,12 @@ export const AppSidebar: React.FC = () => {
       path: '/bi',
       icon: Grid3X3,
       permission: { resource: 'reports', action: 'read' }
+    },
+    {
+      label: 'Jobs',
+      path: '/jobs',
+      icon: Activity,
+      permission: { resource: 'settings', action: 'read' }
     },
     {
       label: 'Empresas',

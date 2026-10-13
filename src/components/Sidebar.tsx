@@ -2,7 +2,7 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { X, Building2 } from 'lucide-react';
-import { Home, LayoutDashboard, Users, ShoppingBag, Settings, FileText, BarChart2, Truck, Receipt, Package, Calendar, FolderOpen, Grid3X3 } from 'lucide-react';
+import { Home, LayoutDashboard, Users, ShoppingBag, Settings, FileText, BarChart2, Truck, Receipt, Package, Calendar, FolderOpen, Grid3X3, Activity } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { usePermissions } from '@/hooks/usePermissions';
 import { canAccessDashboard } from '@/lib/menuPermissions';
@@ -102,6 +102,12 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
       path: '/bi',
       icon: Grid3X3,
       permission: { resource: 'reports', action: 'read' }
+    },
+    {
+      label: 'Jobs',
+      path: '/jobs',
+      icon: Activity,
+      permission: { resource: 'settings', action: 'read' }
     },
     {
       label: 'Empresas',

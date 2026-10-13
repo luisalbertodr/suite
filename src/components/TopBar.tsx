@@ -37,6 +37,7 @@ const ROUTE_TITLES: Record<string, string> = {
   '/gestion-documental': 'Gestión Documental',
   '/reportes': 'Reportes',
   '/bi': 'BI (Metabase)',
+  '/jobs': 'Jobs y sync',
   '/configuracion': 'Configuración',
   '/recursos-cabinas': 'Recursos y Cabinas',
   '/asistencia': 'Fichaje',
