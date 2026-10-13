@@ -92,24 +92,31 @@ export const WhatsappMessageInput: React.FC<Props> = ({
       ...(replyId ? { reply_to_message_id: replyId } : {}),
     }) as SendMessageInput;
 
+  const sendInFlightRef = useRef(false);
+
   const sendText = async () => {
     const value = text.trim();
-    if (!value || disabled) return;
+    if (!value || disabled || sending || sendInFlightRef.current) return;
+    sendInFlightRef.current = true;
+    // Vaciar al instante evita un segundo Enter con el mismo texto.
+    setText('');
     try {
       await onSend(buildSendPayload({ type: 'text', text: value }));
-      setText('');
       onClearReply?.();
       requestAnimationFrame(() => textareaRef.current?.focus());
     } catch (e) {
+      setText(value);
       const msg = e instanceof Error ? e.message : 'No se pudo enviar';
       toast({ title: 'Error', description: msg, variant: 'destructive' });
+    } finally {
+      sendInFlightRef.current = false;
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      sendText();
+      void sendText();
     }
   };
 

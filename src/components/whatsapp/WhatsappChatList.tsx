@@ -72,7 +72,12 @@ function chatMatchesSearch(
       c.last_message_preview ?? '',
     ].join(' '),
   );
-  if (qNorm && haystack.includes(qNorm)) return true;
+  if (qNorm) {
+    if (haystack.includes(qNorm)) return true;
+    // "natalia rod" / varias palabras: todas deben aparecer (orden libre).
+    const words = qNorm.split(' ').filter((w) => w.length >= 2);
+    if (words.length > 1 && words.every((w) => haystack.includes(w))) return true;
+  }
   if (qDigits.length >= 3) {
     const digitHay = [
       c.chat_id,
@@ -168,22 +173,29 @@ export const WhatsappChatList: React.FC<Props> = ({
       if (chatErr) throw chatErr;
 
       const byCustomerIds = new Set<string>();
-      // Clientes pueden estar en el catálogo (otra company_id); buscar por nombre/tel y luego por customer_id en chats.
-      const customerOr = [
-        `name.ilike.${quoted}`,
+      // Clientes: nombre (palabras) + teléfonos / phone_norm.
+      const nameParts = safe
+        .split(/\s+/)
+        .map((p) => p.trim())
+        .filter((p) => p.length >= 2)
+        .slice(0, 4);
+      const customerOrParts = [
+        safe ? `name.ilike.${quoted}` : null,
+        ...nameParts.map((p) => `name.ilike."%${p.replace(/[%_,."'\\]/g, '')}%"`),
         digits.length >= 3
-          ? `phone.ilike."%${digits}%",phone_mobile.ilike."%${digits}%",phone_home.ilike."%${digits}%"`
+          ? `phone.ilike."%${digits}%",phone_mobile.ilike."%${digits}%",phone_home.ilike."%${digits}%",phone_norm.ilike."%${digits.slice(-9)}%"`
           : null,
-      ]
-        .filter(Boolean)
-        .join(',');
-      const { data: customers } = await supabase
-        .from('customers')
-        .select('id')
-        .is('archived_at', null)
-        .or(customerOr)
-        .limit(40);
-      for (const row of customers ?? []) byCustomerIds.add(row.id);
+      ].filter(Boolean) as string[];
+      const customerOr = customerOrParts.join(',');
+      if (customerOr) {
+        const { data: customers } = await supabase
+          .from('customers')
+          .select('id, name')
+          .is('archived_at', null)
+          .or(customerOr)
+          .limit(60);
+        for (const row of customers ?? []) byCustomerIds.add(row.id);
+      }
 
       const leadOr = [
         `first_name.ilike.${quoted}`,
@@ -236,6 +248,7 @@ export const WhatsappChatList: React.FC<Props> = ({
 
   const filtered = useMemo(() => {
     const remote = remoteSearchQuery.data ?? [];
+    const remoteIds = new Set(remote.map((c) => c.chat_id));
     const byId = new Map<string, WhatsappChatRow>();
     for (const c of chats) byId.set(c.chat_id, c);
     for (const c of remote) {
@@ -272,7 +285,13 @@ export const WhatsappChatList: React.FC<Props> = ({
       phoneLabelByChatId,
       leadNameById,
     };
-    return sortChats(list.filter((c) => chatMatchesSearch(c, qNorm, qDigits, lookup)));
+    // Los hits remotos (BD por cliente/lead) ya son válidos: no filtrarlos otra vez
+    // con nombres CRM que aún no están cargados en la lista local.
+    return sortChats(
+      list.filter(
+        (c) => remoteIds.has(c.chat_id) || chatMatchesSearch(c, qNorm, qDigits, lookup),
+      ),
+    );
   }, [
     chats,
     remoteSearchQuery.data,
