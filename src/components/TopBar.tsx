@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { User, LogOut, Settings, ChevronDown, Moon, Sun, Palette } from 'lucide-react';
+import { User, LogOut, Settings, ChevronDown, Moon, Sun, Palette, Workflow } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from 'next-themes';
@@ -286,6 +286,12 @@ export const TopBar: React.FC = () => {
             <DropdownMenuItem className="text-xs" onClick={() => navigate('/configuracion')}>
               <Settings className="h-3.5 w-3.5 mr-2" />
               Configuración
+            </DropdownMenuItem>
+          ) : null}
+          {canSeeSettings ? (
+            <DropdownMenuItem className="text-xs" onClick={() => navigate('/jobs')}>
+              <Workflow className="h-3.5 w-3.5 mr-2" />
+              Jobs y sync
             </DropdownMenuItem>
           ) : null}
           {canSeeSettings ? (

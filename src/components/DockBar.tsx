@@ -15,6 +15,7 @@ import {
   LayoutDashboard,
   PanelBottom,
   PanelLeft,
+  Workflow,
 } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useWhatsappUnread } from '@/hooks/useWhatsappUnread';
@@ -58,6 +59,13 @@ const dockItems: DockItem[] = [
   { label: 'Marketing', path: '/marketing', icon: Megaphone, color: 'text-rose-500', permission: { resource: 'marketing', action: 'read' } },
   { label: 'WhatsApp', path: '/whatsapp', icon: MessageCircle, color: 'text-emerald-600', permission: { resource: 'whatsapp', action: 'read' } },
   { label: 'Dashboard', path: '/inicio', icon: LayoutDashboard, color: 'text-indigo-500', dashboardAccess: true },
+  {
+    label: 'Jobs',
+    path: '/jobs',
+    icon: Workflow,
+    color: 'text-cyan-500',
+    permission: { resource: 'settings', action: 'read' },
+  },
 ];
 
 function isDockItemActive(pathname: string, itemPath: string): boolean {
@@ -92,7 +100,12 @@ export const DockBar: React.FC = () => {
   const visibleItems = dockItems.filter((item) => {
     // No fall-open en Marketing/WhatsApp/Dashboard: evita flash de pestañas sin permiso.
     if (permissionsLoading) {
-      if (item.path === '/marketing' || item.path === '/whatsapp' || item.path === '/inicio') {
+      if (
+        item.path === '/marketing' ||
+        item.path === '/whatsapp' ||
+        item.path === '/inicio' ||
+        item.path === '/jobs'
+      ) {
         return false;
       }
       return true;
