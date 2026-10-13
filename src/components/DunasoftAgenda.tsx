@@ -5,15 +5,18 @@ import { format, addDays, subDays, parse, isValid } from 'date-fns';
 import { es } from 'date-fns/locale';
 import {
   Calendar as CalendarIcon,
+  CalendarDays,
   ChevronLeft,
   ChevronRight,
   AlertCircle,
+  LayoutGrid,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AgendaGrid } from '@/components/AgendaGrid';
+import { AgendaScheduleXView } from '@/components/AgendaScheduleXView';
 import { DunasoftAppointmentDetailDialog } from '@/components/DunasoftAppointmentDetailDialog';
 import {
   DunasoftAppointmentForm,
@@ -75,6 +78,17 @@ import type { TrackingFamily } from '@/lib/treatmentTracking';
 import { createQuestionnaire, openQuestionnaireKiosk } from '@/lib/questionnaireApi';
 import { useToast } from '@/hooks/use-toast';
 
+const AGENDA_ENGINE_KEY = 'suite.agenda.engine';
+type AgendaEngine = 'classic' | 'schedulex';
+
+function readStoredAgendaEngine(): AgendaEngine {
+  try {
+    return localStorage.getItem(AGENDA_ENGINE_KEY) === 'schedulex' ? 'schedulex' : 'classic';
+  } catch {
+    return 'classic';
+  }
+}
+
 function normalizeStyleEmployeeCode(value: unknown): string {
   return String(value ?? '').trim().replace(/^0+/, '') || '0';
 }
@@ -127,6 +141,15 @@ export const DunasoftAgenda: React.FC = () => {
   });
 
   const [datePickerOpen, setDatePickerOpen] = useState(false);
+  const [agendaEngine, setAgendaEngine] = useState<AgendaEngine>(readStoredAgendaEngine);
+  const setAgendaEnginePersist = useCallback((next: AgendaEngine) => {
+    setAgendaEngine(next);
+    try {
+      localStorage.setItem(AGENDA_ENGINE_KEY, next);
+    } catch {
+      /* ignore quota */
+    }
+  }, []);
   const [goToTodayRequestId, setGoToTodayRequestId] = useState(0);
   const [scrollToTimeRequest, setScrollToTimeRequest] = useState<{
     requestId: number;
@@ -535,6 +558,34 @@ export const DunasoftAgenda: React.FC = () => {
             />
           </PopoverContent>
         </Popover>
+        <div
+          className="inline-flex h-7 shrink-0 items-center rounded-md border border-border/60 bg-muted/60 p-0.5"
+          role="group"
+          aria-label="Motor de agenda"
+        >
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className={`h-6 w-7 p-0 rounded-sm ${agendaEngine === 'classic' ? 'bg-background shadow-sm' : 'text-muted-foreground'}`}
+            title="Vista clásica (columnas por empleado)"
+            aria-pressed={agendaEngine === 'classic'}
+            onClick={() => setAgendaEnginePersist('classic')}
+          >
+            <LayoutGrid className="w-3.5 h-3.5" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className={`h-6 w-7 p-0 rounded-sm ${agendaEngine === 'schedulex' ? 'bg-background shadow-sm' : 'text-muted-foreground'}`}
+            title="Vista Schedule-X (día/semana/mes)"
+            aria-pressed={agendaEngine === 'schedulex'}
+            onClick={() => setAgendaEnginePersist('schedulex')}
+          >
+            <CalendarDays className="w-3.5 h-3.5" />
+          </Button>
+        </div>
         <AgendaTopBarFitExtras>
           <span
             className={`inline-flex h-7 shrink-0 items-center rounded-md border px-2 text-[11px] font-medium tabular-nums ${
@@ -561,11 +612,13 @@ export const DunasoftAgenda: React.FC = () => {
       </>
     ),
     [
+      agendaEngine,
       datePickerOpen,
       handleRefresh,
       isFetching,
       selectAgendaDate,
       selectedDate,
+      setAgendaEnginePersist,
       syncBadge,
     ],
   );
@@ -775,28 +828,43 @@ export const DunasoftAgenda: React.FC = () => {
             isDayLoading ? 'opacity-60' : ''
           }`}
         >
-          <AgendaGrid
-            employees={employees}
-            appointments={appointments}
-            onSlotClick={handleSlotClick}
-            onAppointmentClick={handleAppointmentClick}
-            onAppointmentMove={handleAppointmentMove}
-            persistUserId={user?.id}
-            viewDateYmd={selectedDateYmd}
-            goToTodayRequestId={goToTodayRequestId}
-            scrollToTimeRequest={scrollToTimeRequest}
-            centerHours={DEFAULT_AGENDA_CENTER_HOURS}
-            employeeAgendaById={employeeAgendaById}
-            slotMinutes={15}
-            visibleFields={{
-              clientName: true,
-              service: true,
-              description: true,
-              timeRange: true,
-              status: true,
-              legacyCodes: true,
-            }}
-          />
+          {agendaEngine === 'schedulex' ? (
+            <AgendaScheduleXView
+              key={selectedDateYmd}
+              selectedDateYmd={selectedDateYmd}
+              employees={employees}
+              appointments={appointments}
+              onSlotClick={handleSlotClick}
+              onAppointmentClick={handleAppointmentClick}
+              onSelectedDateChange={(ymd) => {
+                const d = parse(ymd, 'yyyy-MM-dd', new Date());
+                if (isValid(d)) selectAgendaDate(d);
+              }}
+            />
+          ) : (
+            <AgendaGrid
+              employees={employees}
+              appointments={appointments}
+              onSlotClick={handleSlotClick}
+              onAppointmentClick={handleAppointmentClick}
+              onAppointmentMove={handleAppointmentMove}
+              persistUserId={user?.id}
+              viewDateYmd={selectedDateYmd}
+              goToTodayRequestId={goToTodayRequestId}
+              scrollToTimeRequest={scrollToTimeRequest}
+              centerHours={DEFAULT_AGENDA_CENTER_HOURS}
+              employeeAgendaById={employeeAgendaById}
+              slotMinutes={15}
+              visibleFields={{
+                clientName: true,
+                service: true,
+                description: true,
+                timeRange: true,
+                status: true,
+                legacyCodes: true,
+              }}
+            />
+          )}
         </div>
       )}
 
