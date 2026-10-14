@@ -187,6 +187,24 @@
   .suite-h-whatsapp {
     height: calc(var(--suite-vh) - var(--suite-topbar-h, 3rem));
   }
+
+  /*
+   * WhatsApp (md+): el dock desplaza el panel en vez de flotar encima.
+   * En móvil se mantiene overlay para maximizar el chat.
+   */
+  @media (min-width: 768px) {
+    html:not(.suite-dock-collapsed):not(.suite-dock-vertical) .suite-h-whatsapp {
+      height: calc(
+        var(--suite-vh) - var(--suite-topbar-h, 3rem) -
+          var(--suite-dock-clearance-bottom, 6.5rem)
+      );
+    }
+
+    html:not(.suite-dock-collapsed).suite-dock-vertical .suite-whatsapp-dock-pad {
+      padding-left: var(--suite-dock-clearance-start, 5.25rem);
+      box-sizing: border-box;
+    }
+  }
   .suite-h-agenda-viewport {
     /* Solo TopBar: el dock flota encima y no reserva altura. */
     height: calc(var(--suite-vh) - var(--suite-topbar-h, 3rem));
