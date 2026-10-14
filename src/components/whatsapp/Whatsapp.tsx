@@ -28,6 +28,7 @@ import {
   findLoadedChatForDeepLink,
 } from '@/lib/openSuiteWhatsappChat';
 import { readWhatsappOpenChat, writeWhatsappOpenChat } from '@/lib/whatsappOpenChat';
+import { useRoutePanelActive } from '@/contexts/RoutePanelContext';
 
 import { WhatsappChatList } from './WhatsappChatList';
 
@@ -107,6 +108,7 @@ function buildStubWhatsappChat(
 export const Whatsapp: React.FC = () => {
 
   const { toast } = useToast();
+  const panelActive = useRoutePanelActive();
 
   const {
 
@@ -573,9 +575,13 @@ export const Whatsapp: React.FC = () => {
 
     if (chats.length === 0) return;
 
+    // No auto-abrir el primer chat con WhatsApp oculto (keep-alive):
+    // eso disparaba mark-read sin que el usuario lo viera.
+    if (!panelActive) return;
+
     setSelectedChatId(chats[0].chat_id);
 
-  }, [chats, selectedChatId, pendingDeepLink, openChatRestored]);
+  }, [chats, selectedChatId, pendingDeepLink, openChatRestored, panelActive]);
 
 
 

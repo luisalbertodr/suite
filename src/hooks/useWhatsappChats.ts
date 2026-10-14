@@ -10,6 +10,7 @@ import {
   jidsSameContact,
 } from '@/components/whatsapp/whatsappUtils';
 import { chatsQueryKey, createDebouncedInvalidate } from '@/lib/whatsappQueryCache';
+import { isWhatsappRouteActive } from '@/lib/whatsappActivity';
 import type { Database } from '@/integrations/supabase/types';
 
 export type WhatsappChatRow = Database['public']['Tables']['whatsapp_chats']['Row'];
@@ -151,9 +152,12 @@ export const useWhatsappChats = () => {
   refreshFromWahaRef.current = refreshFromWaha;
 
   // Refresco periódico desde proveedor (WAHA). OpenWA usa BD + webhooks (getChats bloquea Puppeteer).
+  // Solo con WhatsApp visible: en background puede pisar unread_count con el de WAHA.
   useEffect(() => {
     if (!companyId || isOpenwa) return;
     const tick = () => {
+      if (!isWhatsappRouteActive()) return;
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       if (refreshFromWahaRef.current.isPending) return;
       refreshFromWahaRef.current.mutate(undefined, { onError: () => undefined });
     };
