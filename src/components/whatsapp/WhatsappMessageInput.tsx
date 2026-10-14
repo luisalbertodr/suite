@@ -43,11 +43,25 @@ interface Props {
 }
 
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
+/** Tope del composer al crecer hacia arriba (~40% viewport, máx. 12rem). */
+const COMPOSER_MAX_PX = () =>
+  typeof window !== 'undefined'
+    ? Math.min(192, Math.max(96, Math.round(window.innerHeight * 0.4)))
+    : 192;
 
 function formatRecordingTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
   return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function autosizeComposer(el: HTMLTextAreaElement | null) {
+  if (!el) return;
+  el.style.height = 'auto';
+  const max = COMPOSER_MAX_PX();
+  const next = Math.min(el.scrollHeight, max);
+  el.style.height = `${Math.max(42, next)}px`;
+  el.style.overflowY = el.scrollHeight > max ? 'auto' : 'hidden';
 }
 
 export const WhatsappMessageInput: React.FC<Props> = ({
@@ -80,6 +94,10 @@ export const WhatsappMessageInput: React.FC<Props> = ({
       mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
     };
   }, []);
+
+  useEffect(() => {
+    autosizeComposer(textareaRef.current);
+  }, [text, replyTo]);
 
   const replyId = replyTo?.waha_message_id ?? undefined;
 
@@ -353,7 +371,7 @@ export const WhatsappMessageInput: React.FC<Props> = ({
         </div>
       ) : null}
 
-      <div className="wa-send-bar mx-3 mb-2 mt-1 flex h-[52px] items-center gap-3 px-3">
+      <div className="wa-send-bar mx-3 mb-2 mt-1 flex min-h-[52px] items-end gap-3 px-3 py-1.5">
         <input
           ref={imageInputRef}
           type="file"
@@ -441,14 +459,14 @@ export const WhatsappMessageInput: React.FC<Props> = ({
             </Button>
           </div>
         ) : (
-          <div className="flex flex-1 items-center gap-2">
+          <div className="flex min-w-0 flex-1 items-end gap-2">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className={`h-9 w-9 shrink-0 rounded-full ${theme.textIcon}`}
+                  className={`mb-0.5 h-9 w-9 shrink-0 self-end rounded-full ${theme.textIcon}`}
                   disabled={disabled || sending}
                 >
                   <Paperclip className="h-5 w-5" />
@@ -476,7 +494,7 @@ export const WhatsappMessageInput: React.FC<Props> = ({
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className={`h-9 w-9 shrink-0 rounded-full ${theme.textIcon}`}
+                  className={`mb-0.5 h-9 w-9 shrink-0 self-end rounded-full ${theme.textIcon}`}
                   disabled={disabled || sending}
                   title="Emojis"
                 >
@@ -511,12 +529,15 @@ export const WhatsappMessageInput: React.FC<Props> = ({
             <Textarea
               ref={textareaRef}
               value={text}
-              onChange={(e) => setText(e.target.value)}
+              onChange={(e) => {
+                setText(e.target.value);
+                autosizeComposer(e.target);
+              }}
               onKeyDown={handleKeyDown}
               placeholder={disabled ? 'Selecciona un chat…' : 'Escribe un mensaje'}
               disabled={disabled || sending}
               rows={1}
-              className={`min-h-[42px] max-h-32 flex-1 resize-none rounded-lg border-0 px-3 py-2 text-sm shadow-none outline-none placeholder:text-[#667781] focus-visible:ring-1 focus-visible:ring-[#25d366] ${theme.inputBg}`}
+              className={`max-h-[min(40vh,12rem)] min-h-[42px] flex-1 resize-none overflow-y-hidden rounded-lg border-0 px-3 py-2.5 text-sm leading-5 shadow-none outline-none placeholder:text-[#667781] focus-visible:ring-1 focus-visible:ring-[#25d366] ${theme.inputBg}`}
             />
 
             {text.trim() ? (
@@ -526,7 +547,7 @@ export const WhatsappMessageInput: React.FC<Props> = ({
                 disabled={disabled || sending}
                 variant="ghost"
                 size="icon"
-                className={`h-9 w-9 shrink-0 rounded-full ${theme.textIcon} hover:bg-black/5`}
+                className={`mb-0.5 h-9 w-9 shrink-0 self-end rounded-full ${theme.textIcon} hover:bg-black/5`}
                 title="Enviar"
               >
                 {sending ? (
@@ -542,7 +563,7 @@ export const WhatsappMessageInput: React.FC<Props> = ({
                 disabled={disabled || sending}
                 variant="ghost"
                 size="icon"
-                className={`h-9 w-9 shrink-0 rounded-full ${theme.textIcon} hover:bg-black/5`}
+                className={`mb-0.5 h-9 w-9 shrink-0 self-end rounded-full ${theme.textIcon} hover:bg-black/5`}
                 title="Grabar nota de voz"
               >
                 <Mic className="h-5 w-5" />
