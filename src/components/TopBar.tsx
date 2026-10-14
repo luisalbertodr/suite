@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { User, LogOut, Settings, ChevronDown, Moon, Sun, Palette, Workflow } from 'lucide-react';
+import { User, LogOut, Settings, ChevronDown, Moon, Sun, Palette, Workflow, Grid3X3 } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from 'next-themes';
@@ -68,6 +68,7 @@ export const TopBar: React.FC = () => {
   const { user, signOut } = useAuth();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
   const canSeeSettings = permissionsLoading || hasPermission('settings', 'read');
+  const canSeeReports = permissionsLoading || hasPermission('reports', 'read');
   const { theme, resolvedTheme } = useTheme();
   const { loading: companyLoading } = useCompanyFilter();
   const { displayName, logoUrlLight, logoUrlDark, isLoading: brandingLoading } = useWorkCenterBranding();
@@ -286,6 +287,12 @@ export const TopBar: React.FC = () => {
             <DropdownMenuItem className="text-xs" onClick={() => navigate('/configuracion')}>
               <Settings className="h-3.5 w-3.5 mr-2" />
               Configuración
+            </DropdownMenuItem>
+          ) : null}
+          {canSeeReports ? (
+            <DropdownMenuItem className="text-xs" onClick={() => navigate('/bi')}>
+              <Grid3X3 className="h-3.5 w-3.5 mr-2" />
+              BI (Metabase)
             </DropdownMenuItem>
           ) : null}
           {canSeeSettings ? (

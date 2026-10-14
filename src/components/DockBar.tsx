@@ -16,6 +16,7 @@ import {
   PanelBottom,
   PanelLeft,
   Workflow,
+  Grid3X3,
 } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useWhatsappUnread } from '@/hooks/useWhatsappUnread';
@@ -59,6 +60,13 @@ const dockItems: DockItem[] = [
   { label: 'Marketing', path: '/marketing', icon: Megaphone, color: 'text-rose-500', permission: { resource: 'marketing', action: 'read' } },
   { label: 'WhatsApp', path: '/whatsapp', icon: MessageCircle, color: 'text-emerald-600', permission: { resource: 'whatsapp', action: 'read' } },
   { label: 'Dashboard', path: '/inicio', icon: LayoutDashboard, color: 'text-indigo-500', dashboardAccess: true },
+  {
+    label: 'BI',
+    path: '/bi',
+    icon: Grid3X3,
+    color: 'text-teal-500',
+    permission: { resource: 'reports', action: 'read' },
+  },
   {
     label: 'Jobs',
     path: '/jobs',
@@ -104,6 +112,7 @@ export const DockBar: React.FC = () => {
         item.path === '/marketing' ||
         item.path === '/whatsapp' ||
         item.path === '/inicio' ||
+        item.path === '/bi' ||
         item.path === '/jobs'
       ) {
         return false;
