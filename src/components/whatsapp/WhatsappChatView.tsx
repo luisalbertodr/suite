@@ -105,6 +105,15 @@ export const WhatsappChatView: React.FC<Props> = ({
 }) => {
   const theme = useWhatsappTheme();
   const { toast } = useToast();
+  const panelActive = useRoutePanelActive();
+  const [docVisible, setDocVisible] = useState(
+    () => typeof document === 'undefined' || document.visibilityState === 'visible',
+  );
+  useEffect(() => {
+    const onVis = () => setDocVisible(document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
   const sessionLimitsQuery = useWhatsappSessionLimits(true);
   const { companyId, loading: companyLoading } = useWhatsappCompanyId();
   const { data: waAutomationSettings } = useWhatsappAutomationSettings();
@@ -162,19 +171,32 @@ export const WhatsappChatView: React.FC<Props> = ({
     setSessionUnreadCount(chat.unread_count ?? 0);
   }, [chat.chat_id]);
 
-  // Cuando entramos al chat, marcamos como leído (la sync la gestiona useWhatsappMessages).
+  // Solo marcar leído con WhatsApp visible (no keep-alive oculto / otra pestaña).
   const markReadAttemptedRef = useRef<string | null>(null);
   useEffect(() => {
     markReadAttemptedRef.current = null;
   }, [chat.chat_id]);
 
   useEffect(() => {
+    if (!panelActive) markReadAttemptedRef.current = null;
+  }, [panelActive]);
+
+  useEffect(() => {
     if (!chat.chat_id || companyLoading || !companyId) return;
+    if (!panelActive || !docVisible) return;
     if ((chat.unread_count ?? 0) <= 0) return;
     if (markReadAttemptedRef.current === chat.chat_id) return;
     markReadAttemptedRef.current = chat.chat_id;
     onMarkRead?.(chat.chat_id);
-  }, [chat.chat_id, chat.unread_count, companyId, companyLoading, onMarkRead]);
+  }, [
+    chat.chat_id,
+    chat.unread_count,
+    companyId,
+    companyLoading,
+    onMarkRead,
+    panelActive,
+    docVisible,
+  ]);
 
   // Auto-scroll al final cuando llegan mensajes
   useEffect(() => {
@@ -353,8 +375,6 @@ export const WhatsappChatView: React.FC<Props> = ({
     () => (isGroup ? buildGroupSenderDirectory(messages) : {}),
     [isGroup, messages],
   );
-
-  const panelActive = useRoutePanelActive();
 
   const { loading: prefetchLoading, ready: prefetchReady, getPrefetchMedia } =
     useWhatsappMediaPrefetch(chat.chat_id, relatedChatIds, messages, { enabled: panelActive });
