@@ -5116,6 +5116,35 @@ export type Database = {
           marketing_lead_id: string | null
         }[]
       }
+      search_whatsapp_chats: {
+        Args: {
+          p_company_id: string
+          p_query: string
+          p_limit?: number
+        }
+        Returns: {
+          id: string
+          company_id: string
+          chat_id: string
+          name: string | null
+          is_group: boolean | null
+          profile_picture_url: string | null
+          last_message_preview: string | null
+          last_message_at: string | null
+          last_message_from_me: boolean | null
+          unread_count: number | null
+          pinned: boolean | null
+          archived: boolean | null
+          history_synced_at: string | null
+          oldest_message_at: string | null
+          customer_id: string | null
+          marketing_lead_id: string | null
+          created_at: string | null
+          updated_at: string | null
+          matched_customer_id: string | null
+          matched_customer_name: string | null
+        }[]
+      }
     }
     Enums: {
       app_role: "admin" | "user" | "superuser"

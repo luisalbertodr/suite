@@ -21,9 +21,9 @@ import {
 import { useWhatsappTheme } from './WhatsappThemeContext';
 import { Check, CheckCheck } from 'lucide-react';
 import type { WhatsappChatRow } from '@/hooks/useWhatsappChats';
-import { WHATSAPP_CHAT_LIST_COLUMNS } from '@/hooks/useWhatsappChats';
 import { useWhatsappCompanyId } from '@/hooks/useWhatsappCompanyId';
 import { supabase } from '@/lib/supabase';
+import { isCustomerSearchQueryReady } from '@/lib/customerSearch';
 
 function normalizeSearchText(value: string): string {
   return value
@@ -33,6 +33,11 @@ function normalizeSearchText(value: string): string {
     .replace(/\s+/g, ' ')
     .trim();
 }
+
+type WhatsappChatSearchHit = WhatsappChatRow & {
+  matched_customer_id?: string | null;
+  matched_customer_name?: string | null;
+};
 
 function chatMatchesSearch(
   c: WhatsappChatRow,
@@ -146,113 +151,91 @@ export const WhatsappChatList: React.FC<Props> = ({
   const [filter, setFilter] = useState<ChatFilter>('all');
 
   const searchTrim = search.trim();
-  const searchReady = searchTrim.length >= 2;
+  /** Misma barra que clientes (≥3 letras/dígitos) o texto corto para nombre WA / preview. */
+  const searchReady =
+    searchTrim.length >= 2 || isCustomerSearchQueryReady(searchTrim);
 
-  /** Búsqueda en BD: la lista local solo trae los ~N más recientes. */
+  /** Búsqueda en BD: misma lógica CRM que TopBar + vínculo por teléfono. */
   const remoteSearchQuery = useQuery({
     queryKey: ['whatsapp-chats-search', companyId, searchTrim],
     enabled: !!companyId && searchReady,
     staleTime: 15_000,
-    queryFn: async (): Promise<WhatsappChatRow[]> => {
-      if (!companyId) return [];
-      const q = searchTrim;
-      const digits = q.replace(/\D/g, '');
-      const safe = q.replace(/[%_,."'\\]/g, '');
-      if (!safe && digits.length < 3) return [];
-      const pattern = safe ? `%${safe}%` : `%${digits}%`;
-      const quoted = `"${pattern}"`;
-
-      const { data: byChat, error: chatErr } = await supabase
-        .from('whatsapp_chats')
-        .select(WHATSAPP_CHAT_LIST_COLUMNS)
-        .eq('company_id', companyId)
-        .eq('archived', false)
-        .or(`name.ilike.${quoted},chat_id.ilike.${quoted},last_message_preview.ilike.${quoted}`)
-        .order('last_message_at', { ascending: false, nullsFirst: false })
-        .limit(80);
-      if (chatErr) throw chatErr;
-
-      const byCustomerIds = new Set<string>();
-      // Clientes: nombre (palabras) + teléfonos / phone_norm.
-      const nameParts = safe
-        .split(/\s+/)
-        .map((p) => p.trim())
-        .filter((p) => p.length >= 2)
-        .slice(0, 4);
-      const customerOrParts = [
-        safe ? `name.ilike.${quoted}` : null,
-        ...nameParts.map((p) => `name.ilike."%${p.replace(/[%_,."'\\]/g, '')}%"`),
-        digits.length >= 3
-          ? `phone.ilike."%${digits}%",phone_mobile.ilike."%${digits}%",phone_home.ilike."%${digits}%",phone_norm.ilike."%${digits.slice(-9)}%"`
-          : null,
-      ].filter(Boolean) as string[];
-      const customerOr = customerOrParts.join(',');
-      if (customerOr) {
-        const { data: customers } = await supabase
-          .from('customers')
-          .select('id, name')
-          .is('archived_at', null)
-          .or(customerOr)
-          .limit(60);
-        for (const row of customers ?? []) byCustomerIds.add(row.id);
+    queryFn: async (): Promise<{
+      chats: WhatsappChatRow[];
+      customerNameById: Record<string, string>;
+      customerIdByChatId: Record<string, string>;
+    }> => {
+      if (!companyId) {
+        return { chats: [], customerNameById: {}, customerIdByChatId: {} };
       }
 
-      const leadOr = [
-        `first_name.ilike.${quoted}`,
-        `last_name.ilike.${quoted}`,
-        digits.length >= 3 ? `phone.ilike."%${digits}%"` : null,
-      ]
-        .filter(Boolean)
-        .join(',');
-      const { data: leads } = await supabase
-        .from('marketing_leads')
-        .select('id')
-        .eq('company_id', companyId)
-        .or(leadOr)
-        .limit(40);
+      const { data, error } = await supabase.rpc('search_whatsapp_chats', {
+        p_company_id: companyId,
+        p_query: searchTrim,
+        p_limit: 80,
+      });
+      if (error) throw error;
 
-      const leadIds = (leads ?? []).map((l) => l.id);
-      const extra: WhatsappChatRow[] = [];
+      const hits = (data ?? []) as WhatsappChatSearchHit[];
+      const customerNameById: Record<string, string> = {};
+      const customerIdByChatId: Record<string, string> = {};
+      const chatsOut: WhatsappChatRow[] = [];
 
-      if (byCustomerIds.size > 0) {
-        const { data } = await supabase
-          .from('whatsapp_chats')
-          .select(WHATSAPP_CHAT_LIST_COLUMNS)
-          .eq('company_id', companyId)
-          .eq('archived', false)
-          .in('customer_id', [...byCustomerIds])
-          .order('last_message_at', { ascending: false, nullsFirst: false })
-          .limit(80);
-        extra.push(...((data ?? []) as WhatsappChatRow[]));
-      }
-      if (leadIds.length > 0) {
-        const { data } = await supabase
-          .from('whatsapp_chats')
-          .select(WHATSAPP_CHAT_LIST_COLUMNS)
-          .eq('company_id', companyId)
-          .eq('archived', false)
-          .in('marketing_lead_id', leadIds)
-          .order('last_message_at', { ascending: false, nullsFirst: false })
-          .limit(80);
-        extra.push(...((data ?? []) as WhatsappChatRow[]));
-      }
-
-      const map = new Map<string, WhatsappChatRow>();
-      for (const row of [...(byChat ?? []), ...extra] as WhatsappChatRow[]) {
+      for (const row of hits) {
         if (isSystemChatJid(row.chat_id)) continue;
-        map.set(row.chat_id, row);
+        const matchedId = row.matched_customer_id ?? row.customer_id ?? null;
+        const matchedName = row.matched_customer_name?.trim() || null;
+        if (matchedId && matchedName) customerNameById[matchedId] = matchedName;
+        if (matchedId) customerIdByChatId[row.chat_id] = matchedId;
+
+        const {
+          matched_customer_id: _mId,
+          matched_customer_name: _mName,
+          ...rest
+        } = row;
+        chatsOut.push({
+          ...(rest as WhatsappChatRow),
+          customer_id: row.customer_id ?? matchedId,
+        });
       }
-      return [...map.values()];
+
+      return { chats: chatsOut, customerNameById, customerIdByChatId };
     },
   });
 
+  const remoteHits = remoteSearchQuery.data?.chats ?? [];
+  const remoteCustomerNames = remoteSearchQuery.data?.customerNameById ?? {};
+  const remoteCustomerIds = remoteSearchQuery.data?.customerIdByChatId ?? {};
+
+  const displayCustomerNameById = useMemo(
+    () => ({ ...(customerNameById ?? {}), ...remoteCustomerNames }),
+    [customerNameById, remoteCustomerNames],
+  );
+  const displayCustomerIdByChatId = useMemo(
+    () => ({ ...(customerIdByChatId ?? {}), ...remoteCustomerIds }),
+    [customerIdByChatId, remoteCustomerIds],
+  );
+  const displayCustomerNameByChatId = useMemo(() => {
+    const out = { ...(customerNameByChatId ?? {}) };
+    for (const [chatId, custId] of Object.entries(remoteCustomerIds)) {
+      const n = remoteCustomerNames[custId];
+      if (n) out[chatId] = n;
+    }
+    return out;
+  }, [customerNameByChatId, remoteCustomerIds, remoteCustomerNames]);
+
   const filtered = useMemo(() => {
-    const remote = remoteSearchQuery.data ?? [];
+    const remote = remoteHits;
     const remoteIds = new Set(remote.map((c) => c.chat_id));
     const byId = new Map<string, WhatsappChatRow>();
     for (const c of chats) byId.set(c.chat_id, c);
     for (const c of remote) {
-      if (!byId.has(c.chat_id)) byId.set(c.chat_id, c);
+      const prev = byId.get(c.chat_id);
+      byId.set(c.chat_id, {
+        ...(prev ?? c),
+        ...c,
+        customer_id: c.customer_id ?? prev?.customer_id ?? null,
+      });
     }
     let list = [...byId.values()];
 
@@ -279,14 +262,13 @@ export const WhatsappChatList: React.FC<Props> = ({
     }
 
     const lookup = {
-      customerNameById,
-      customerIdByChatId,
-      customerNameByChatId,
+      customerNameById: displayCustomerNameById,
+      customerIdByChatId: displayCustomerIdByChatId,
+      customerNameByChatId: displayCustomerNameByChatId,
       phoneLabelByChatId,
       leadNameById,
     };
-    // Los hits remotos (BD por cliente/lead) ya son válidos: no filtrarlos otra vez
-    // con nombres CRM que aún no están cargados en la lista local.
+    // Hits del RPC CRM/teléfono ya son válidos (incl. chats sin customer_id previo).
     return sortChats(
       list.filter(
         (c) => remoteIds.has(c.chat_id) || chatMatchesSearch(c, qNorm, qDigits, lookup),
@@ -294,12 +276,12 @@ export const WhatsappChatList: React.FC<Props> = ({
     );
   }, [
     chats,
-    remoteSearchQuery.data,
+    remoteHits,
     searchTrim,
     filter,
-    customerNameById,
-    customerIdByChatId,
-    customerNameByChatId,
+    displayCustomerNameById,
+    displayCustomerIdByChatId,
+    displayCustomerNameByChatId,
     phoneLabelByChatId,
     leadNameById,
   ]);
@@ -403,11 +385,11 @@ export const WhatsappChatList: React.FC<Props> = ({
               const isActive = c.chat_id === selectedChatId;
               const isGroup = c.is_group || isGroupJid(c.chat_id);
               const linkedCustomerId =
-                c.customer_id ?? customerIdByChatId?.[c.chat_id] ?? null;
+                c.customer_id ?? displayCustomerIdByChatId[c.chat_id] ?? null;
               const customerName = linkedCustomerId
-                ? customerNameById?.[linkedCustomerId] ??
-                  customerNameByChatId?.[c.chat_id]
-                : undefined;
+                ? displayCustomerNameById[linkedCustomerId] ??
+                  displayCustomerNameByChatId[c.chat_id]
+                : displayCustomerNameByChatId[c.chat_id];
               const leadName = c.marketing_lead_id
                 ? leadNameById?.[c.marketing_lead_id]
                 : undefined;
