@@ -70,7 +70,8 @@ export const WhatsappSessionGate: React.FC<Props> = ({ config, onConnected }) =>
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config.last_status]);
 
-  // Si WAHA agota los QR → FAILED: reinicia sola la sesión para un QR nuevo.
+  // Si WAHA agota los QR o la auth caduca (móvil desvinculado/averiado) → FAILED:
+  // session.qr del proxy hace logout+purge cuando el restart no basta, y guarda un QR nuevo.
   useEffect(() => {
     const status = (config.last_status ?? '').toUpperCase();
     if (config.provider === 'meta' || (status !== 'FAILED' && status !== 'STOPPED')) return;
@@ -84,7 +85,16 @@ export const WhatsappSessionGate: React.FC<Props> = ({ config, onConnected }) =>
 
     (async () => {
       try {
-        // session.qr del proxy reinicia si hace falta y guarda el PNG nuevo.
+        // Con me_jid en FAILED las credenciales suelen estar muertas (401):
+        // logout primero evita el bucle restart→FAILED.
+        if (status === 'FAILED' && config.me_jid) {
+          try {
+            await sessionLogout.mutateAsync();
+          } catch {
+            /* ya sin sesión usable */
+          }
+          await sessionStart.mutateAsync();
+        }
         await fetchQr.mutateAsync();
       } catch {
         try {
@@ -157,7 +167,7 @@ export const WhatsappSessionGate: React.FC<Props> = ({ config, onConnected }) =>
               <CardDescription>
                 {config.provider === 'meta'
                   ? 'Meta Cloud API está como motor exclusivo (sin QR). En Configuración → WhatsApp pulsa «Activar híbrido WAHA + Meta» para recuperar el QR de WhatsApp Business y mantener Cloud API.'
-                  : 'Vincula WhatsApp Business con Suite escaneando el QR de WAHA (Ajustes → Dispositivos vinculados). El QR se renueva solo al caducar.'}
+                  : 'Vincula WhatsApp Business con Suite escaneando el QR (Ajustes → Dispositivos vinculados). Si el móvil principal se averió, restaura la cuenta en un móvil nuevo y vuelve a escanear; Suite limpia sola la sesión caducada.'}
               </CardDescription>
             </div>
           </div>
@@ -227,12 +237,16 @@ export const WhatsappSessionGate: React.FC<Props> = ({ config, onConnected }) =>
                   <p className="font-medium">
                     {config.provider === 'meta'
                       ? 'Motor Meta exclusivo (sin QR).'
-                      : 'La sesión WAHA no está activa.'}
+                      : isFailed
+                        ? 'Sesión caducada (hay que volver a vincular).'
+                        : 'La sesión WAHA no está activa.'}
                   </p>
                   <p className="text-xs">
                     {config.provider === 'meta'
                       ? 'Para escanear el QR de WhatsApp Business, activa el híbrido WAHA + Meta en Configuración → WhatsApp.'
-                      : 'Pulsa "Iniciar sesión" para arrancarla. Después aparecerá un código QR: en el móvil abre WhatsApp Business → Ajustes → Dispositivos vinculados → Vincular un dispositivo.'}
+                      : isFailed
+                        ? 'WhatsApp rechazó las credenciales guardadas (móvil desvinculado o averiado). Pulsa «Nueva vinculación QR», restaura WhatsApp Business en un móvil con el número de la clínica y escanea el código.'
+                        : 'Pulsa "Iniciar sesión" para arrancarla. Después aparecerá un código QR: en el móvil abre WhatsApp Business → Ajustes → Dispositivos vinculados → Vincular un dispositivo.'}
                   </p>
                 </div>
               </div>
