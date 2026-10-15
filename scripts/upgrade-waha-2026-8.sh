@@ -36,7 +36,7 @@ upsert_env WAHA_PROMETHEUS_ENABLED "True"
 upsert_env WAHA_EVENTS_DOWNLOAD_MEDIA "true"
 upsert_env WAHA_EVENTS_DOWNLOAD_MEDIA_MIMETYPES "audio,image/png,image/jpeg,image/webp"
 upsert_env WAHA_API_DOWNLOAD_MEDIA "true"
-upsert_env WAHA_API_DOWNLOAD_MEDIA_MIMETYPES "image,image/webp"
+upsert_env WAHA_API_DOWNLOAD_MEDIA_MIMETYPES "audio,image,image/webp,video"
 
 echo "=== Pull $IMAGE ==="
 docker pull "$IMAGE"

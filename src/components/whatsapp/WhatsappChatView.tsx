@@ -84,6 +84,8 @@ interface Props {
   leadNameById?: Record<string, string>;
   phoneLabelByChatId?: Record<string, string>;
   onMarkRead?: (chatId: string) => void;
+  /** Solo true tras clic explícito en la lista (no restore de sesión). */
+  allowMarkRead?: boolean;
   onBack?: () => void;
   onCreateCustomer?: () => void;
 }
@@ -100,6 +102,7 @@ export const WhatsappChatView: React.FC<Props> = ({
   leadNameById = {},
   phoneLabelByChatId = {},
   onMarkRead,
+  allowMarkRead = false,
   onBack,
   onCreateCustomer,
 }) => {
@@ -149,6 +152,7 @@ export const WhatsappChatView: React.FC<Props> = ({
   } = useWhatsappMessages(chat.chat_id, relatedChatIds, {
     historySyncedAt: chat.history_synced_at,
     lastMessageAt: chat.last_message_at,
+    providerSyncEnabled: panelActive && docVisible,
   });
   const scrollRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -183,6 +187,7 @@ export const WhatsappChatView: React.FC<Props> = ({
 
   useEffect(() => {
     if (!chat.chat_id || companyLoading || !companyId) return;
+    if (!allowMarkRead) return;
     if (!panelActive || !docVisible) return;
     if ((chat.unread_count ?? 0) <= 0) return;
     if (markReadAttemptedRef.current === chat.chat_id) return;
@@ -194,6 +199,7 @@ export const WhatsappChatView: React.FC<Props> = ({
     companyId,
     companyLoading,
     onMarkRead,
+    allowMarkRead,
     panelActive,
     docVisible,
   ]);
@@ -316,11 +322,11 @@ export const WhatsappChatView: React.FC<Props> = ({
   const crmContactName = isTestWaChat
     ? (leadName ?? null)
     : (customerName ?? leadName ?? null);
-  // Preferir ficha Suite frente al push name de WA (a menudo solo emoji).
+  // CRM/lead como 2º arg; push WA solo como fallback.
   const displayName = displayNameForChat(
     chat.chat_id,
-    crmContactName || chat.name,
-    leadName ?? customerName,
+    crmContactName,
+    chat.name,
     chat.raw,
   );
   const effectiveMarketingLeadId = marketingLeadId ?? chat.marketing_lead_id;

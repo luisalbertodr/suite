@@ -62,8 +62,8 @@ function chatMatchesSearch(
     '';
   const displayName = displayNameForChat(
     c.chat_id,
-    customerName || c.name || leadName,
-    leadName,
+    customerName ?? leadName ?? null,
+    c.name,
   );
   const haystack = normalizeSearchText(
     [
@@ -398,8 +398,8 @@ export const WhatsappChatList: React.FC<Props> = ({
                 : undefined;
               const displayName = displayNameForChat(
                 c.chat_id,
-                customerName || c.name || leadName,
-                leadName,
+                customerName ?? leadName ?? null,
+                c.name,
                 c.raw,
               );
               const phoneLabel = isGroup

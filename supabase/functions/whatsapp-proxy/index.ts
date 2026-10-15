@@ -377,15 +377,26 @@ async function downloadMediaViaMessage(
 
   const keyId = wahaMessageKeyId(messageId);
   if (keyId) {
-    for (const ext of ['webp', 'png', 'jpg', 'gif']) {
+    for (const ext of ['ogg', 'opus', 'mp3', 'm4a', 'webm', 'webp', 'png', 'jpg', 'gif']) {
       const resp = await wahaFetch(
         cfg,
         `/api/files/${encodeURIComponent(sessionName)}/${keyId}.${ext}`,
       );
       if (resp.ok) {
+        const ct = resp.headers.get('content-type');
+        const audioExt = /^(ogg|opus|mp3|m4a|webm)$/i.test(ext);
         return {
           buf: await resp.arrayBuffer(),
-          contentType: resp.headers.get('content-type'),
+          contentType:
+            ct && ct !== 'application/octet-stream'
+              ? ct
+              : audioExt
+                ? ext === 'mp3'
+                  ? 'audio/mpeg'
+                  : ext === 'm4a'
+                    ? 'audio/mp4'
+                    : 'audio/ogg'
+                : ct,
         };
       }
     }
@@ -3033,6 +3044,7 @@ serve(async (req) => {
               last_message_from_me: isOpenwa
                 ? false
                 : !!lastMessage?.fromMe,
+              // No bajar unread desde WAHA: solo mark_read (Suite) o webhook lo ponen a 0.
               unread_count: Number(c.unreadCount ?? c.unread_count ?? 0) || 0,
               pinned: !!c.pinned,
               archived: !!c.archived,
@@ -3041,6 +3053,29 @@ serve(async (req) => {
             if (chatName) row.name = chatName;
             return row;
           });
+          // Preservar unread local si WAHA reporta menos (lectura en móvil / sendSeen fantasma).
+          const chatIdsForUnread = rows
+            .map((r) => String(r.chat_id ?? ''))
+            .filter(Boolean);
+          if (chatIdsForUnread.length > 0) {
+            const { data: existingUnread } = await admin
+              .from('whatsapp_chats')
+              .select('chat_id, unread_count')
+              .eq('company_id', companyId)
+              .in('chat_id', chatIdsForUnread);
+            const prevById = new Map(
+              (existingUnread ?? []).map((r) => [
+                String(r.chat_id),
+                Number(r.unread_count ?? 0) || 0,
+              ]),
+            );
+            for (const row of rows) {
+              const id = String(row.chat_id ?? '');
+              const prev = prevById.get(id) ?? 0;
+              const incoming = Number(row.unread_count ?? 0) || 0;
+              row.unread_count = Math.max(prev, incoming);
+            }
+          }
           await admin
             .from('whatsapp_chats')
             .upsert(rows, { onConflict: 'company_id,chat_id' });
