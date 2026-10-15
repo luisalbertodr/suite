@@ -363,6 +363,10 @@ export function jidsSameContact(a: string | null | undefined, b: string | null |
   return !!(da && db && da === db);
 }
 
+/**
+ * Nombre mostrado: en 1:1 prioriza CRM/lead (`name`) frente al push name WA (`fallback`).
+ * En grupos: subject del raw, luego nombre guardado.
+ */
 export function displayNameForChat(
   chatId: string,
   name: string | null | undefined,
@@ -370,11 +374,21 @@ export function displayNameForChat(
   chatRaw?: unknown,
 ): string {
   const isGroup = isGroupJid(chatId);
-  const fromRaw = isGroup ? extractGroupNameFromChatRaw(chatRaw) : null;
-  const goodName = isGoodChatDisplayName(name) ? name!.trim() : null;
-  const n = fromRaw || goodName || fallback?.trim();
-  if (n && !looksLikeJid(n)) return n;
-  if (isGroup) return 'Grupo';
+  if (isGroup) {
+    const fromRaw = extractGroupNameFromChatRaw(chatRaw);
+    const goodName = isGoodChatDisplayName(name) ? name!.trim() : null;
+    const n = fromRaw || goodName || (isGoodChatDisplayName(fallback) ? fallback!.trim() : null);
+    if (n && !looksLikeJid(n)) return n;
+    return 'Grupo';
+  }
+
+  // 1:1 — CRM / lead primero (aunque sea corto); no mezclar con push WA.
+  const crm = name?.trim();
+  if (crm && !looksLikeJid(crm) && crm !== 'Grupo') return crm;
+
+  const wa = isGoodChatDisplayName(fallback) ? fallback!.trim() : null;
+  if (wa) return wa;
+
   if (isLidJid(chatId)) {
     const suffix = chatId.split('@')[0]?.slice(-4);
     return suffix ? `Contacto ···${suffix}` : 'Contacto';
@@ -743,7 +757,7 @@ export function extractMediaUrlFromWahaMessageRaw(raw: unknown): string | null {
   const tryMsg = (msg: unknown): string | null => {
     if (!msg || typeof msg !== 'object') return null;
     const u = unwrap(msg as Record<string, unknown>, 0);
-    for (const key of ['stickerMessage', 'imageMessage', 'videoMessage'] as const) {
+    for (const key of ['stickerMessage', 'imageMessage', 'videoMessage', 'audioMessage', 'pttMessage'] as const) {
       const node = u[key];
       if (node && typeof node === 'object') {
         const url = (node as Record<string, unknown>).url;

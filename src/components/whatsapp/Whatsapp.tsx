@@ -131,6 +131,8 @@ export const Whatsapp: React.FC = () => {
   const { companyId } = useWhatsappCompanyId();
 
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+  /** Chat donde el usuario hizo clic (permiso para mark-read; no el restaurado de sesión). */
+  const [engagedChatId, setEngagedChatId] = useState<string | null>(null);
 
   /** Lead de Marketing al abrir desde tarjeta (hasta que el chat tenga marketing_lead_id en BD). */
   const [sessionLeadId, setSessionLeadId] = useState<string | null>(null);
@@ -356,7 +358,10 @@ export const Whatsapp: React.FC = () => {
 
     const quickSelectId = chatIdParam ?? phoneJid;
 
-    if (quickSelectId) setSelectedChatId(quickSelectId);
+    if (quickSelectId) {
+      setSelectedChatId(quickSelectId);
+      setEngagedChatId(quickSelectId);
+    }
 
     if (!companyId) return;
 
@@ -453,6 +458,7 @@ export const Whatsapp: React.FC = () => {
         }
 
         setSelectedChatId(targetChatId);
+        setEngagedChatId(targetChatId);
 
         const res = await ensureChat.mutateAsync({
 
@@ -466,7 +472,10 @@ export const Whatsapp: React.FC = () => {
 
         const finalJid = res.chat_id ?? targetChatId;
 
-        if (finalJid !== targetChatId) setSelectedChatId(finalJid);
+        if (finalJid !== targetChatId) {
+          setSelectedChatId(finalJid);
+          setEngagedChatId(finalJid);
+        }
 
         await queryClient.fetchQuery({
 
@@ -752,6 +761,7 @@ export const Whatsapp: React.FC = () => {
 
             onSelect={(id) => {
               setSelectedChatId(id);
+              setEngagedChatId(id);
               const picked = displayChats.find((c) => c.chat_id === id);
               if (!picked?.marketing_lead_id) {
                 setSessionLeadId(null);
@@ -871,7 +881,17 @@ export const Whatsapp: React.FC = () => {
 
               onMarkRead={handleMarkRead}
 
-              onBack={() => setSelectedChatId(null)}
+              allowMarkRead={
+                !!selectedChatId &&
+                !!engagedChatId &&
+                (engagedChatId === selectedChatId ||
+                  jidsSameContact(engagedChatId, selectedChatId))
+              }
+
+              onBack={() => {
+                setSelectedChatId(null);
+                setEngagedChatId(null);
+              }}
 
               onCreateCustomer={
 
@@ -928,6 +948,7 @@ export const Whatsapp: React.FC = () => {
           onCreated={(jid) => {
 
             setSelectedChatId(jid);
+            setEngagedChatId(jid);
 
             refreshFromWaha.mutate();
 

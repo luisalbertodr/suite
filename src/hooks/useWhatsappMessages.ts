@@ -269,7 +269,12 @@ function shouldSkipRecentProviderSync(
 export const useWhatsappMessages = (
   chatId: string | null,
   relatedChatIds: string[] = [],
-  options?: { historySyncedAt?: string | null; lastMessageAt?: string | null },
+  options?: {
+    historySyncedAt?: string | null;
+    lastMessageAt?: string | null;
+    /** Si false, no poll/sync al proveedor (panel WA oculto). */
+    providerSyncEnabled?: boolean;
+  },
 ) => {
   const queryClient = useQueryClient();
   const { companyId, loading: companyLoading } = useWhatsappCompanyId();
@@ -277,6 +282,7 @@ export const useWhatsappMessages = (
   const isOpenwa = config?.provider === 'openwa';
   const historySyncedAt = options?.historySyncedAt ?? null;
   const lastMessageAt = options?.lastMessageAt ?? null;
+  const providerSyncEnabled = options?.providerSyncEnabled !== false;
 
   const chatIds = useMemo(() => {
     if (!chatId) return [];
@@ -391,7 +397,7 @@ export const useWhatsappMessages = (
 
   const openSyncKeyRef = useRef('');
   useEffect(() => {
-    if (!enabled || !chatId) return;
+    if (!enabled || !chatId || !providerSyncEnabled) return;
     const syncKey = chatIds.slice().sort().join('|');
     if (openSyncKeyRef.current === syncKey) return;
     openSyncKeyRef.current = syncKey;
@@ -411,10 +417,10 @@ export const useWhatsappMessages = (
     const delayMs = cached?.length ? 400 : 150;
     const timer = window.setTimeout(runSync, delayMs);
     return () => window.clearTimeout(timer);
-  }, [enabled, chatId, chatIds.join('|'), historySyncedAt, lastMessageAt, isOpenwa]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [enabled, chatId, chatIds.join('|'), historySyncedAt, lastMessageAt, isOpenwa, providerSyncEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!enabled || isOpenwa) return;
+    if (!enabled || isOpenwa || !providerSyncEnabled) return;
     const tick = () => {
       if (document.visibilityState !== 'visible') return;
       if (refreshFromWaha.isPending) return;
@@ -424,7 +430,7 @@ export const useWhatsappMessages = (
     };
     const timer = window.setInterval(tick, RECENT_POLL_MS);
     return () => window.clearInterval(timer);
-  }, [enabled, chatIds.join('|'), isOpenwa]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [enabled, chatIds.join('|'), isOpenwa, providerSyncEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sendMessage = useMutation({
     mutationFn: async (input: SendMessageInput) => {
