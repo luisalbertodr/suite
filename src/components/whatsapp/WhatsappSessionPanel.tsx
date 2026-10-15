@@ -83,6 +83,15 @@ export const WhatsappSessionPanel: React.FC<Props> = ({ config, onConnected }) =
     lastAutoRenewAtRef.current = now;
     (async () => {
       try {
+        // FAILED con me_jid = credenciales muertas (401); logout evita bucle restart.
+        if (status === 'FAILED' && config.me_jid) {
+          try {
+            await sessionLogout.mutateAsync();
+          } catch {
+            /* ya inutilizable */
+          }
+          await sessionStart.mutateAsync();
+        }
         await fetchQr.mutateAsync();
       } catch {
         try {
@@ -102,9 +111,10 @@ export const WhatsappSessionPanel: React.FC<Props> = ({ config, onConnected }) =
   const isWorking = status === 'WORKING';
   const isScanning = status === 'SCAN_QR_CODE';
   const isStarting = status === 'STARTING';
+  const isFailed = status === 'FAILED';
   const isRenewingQr =
     (status === 'FAILED' || (status === 'STOPPED' && !config.me_jid)) &&
-    (fetchQr.isPending || sessionStart.isPending);
+    (fetchQr.isPending || sessionStart.isPending || sessionLogout.isPending);
 
   const handleStart = async () => {
     try {
@@ -128,7 +138,8 @@ export const WhatsappSessionPanel: React.FC<Props> = ({ config, onConnected }) =
           <div>
             <h3 className="text-base font-semibold">Conectar WhatsApp</h3>
             <p className="text-sm text-muted-foreground">
-              Vincula tu cuenta para enviar y recibir mensajes desde aquí.
+              Vincula WhatsApp Business (Dispositivos vinculados). Si el móvil principal falló,
+              restaura la cuenta en otro y vuelve a escanear el QR.
             </p>
           </div>
         </div>
@@ -197,9 +208,15 @@ export const WhatsappSessionPanel: React.FC<Props> = ({ config, onConnected }) =
             <div className="flex items-start gap-2">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
               <div>
-                <p className="font-medium">La sesión Waha no está activa.</p>
+                <p className="font-medium">
+                  {isFailed
+                    ? 'Sesión caducada (hay que volver a vincular).'
+                    : 'La sesión Waha no está activa.'}
+                </p>
                 <p className="text-xs">
-                  Pulsa «Iniciar sesión» para arrancarla en el servidor Waha.
+                  {isFailed
+                    ? 'WhatsApp rechazó las credenciales (móvil desvinculado o averiado). Usa «Nueva vinculación QR» con WhatsApp Business en un móvil operativo.'
+                    : 'Pulsa «Iniciar sesión» para arrancarla en el servidor Waha.'}
                 </p>
               </div>
             </div>
@@ -207,6 +224,34 @@ export const WhatsappSessionPanel: React.FC<Props> = ({ config, onConnected }) =
         )}
 
         <div className="flex flex-wrap items-center justify-end gap-2">
+          {isFailed ? (
+            <Button
+              onClick={async () => {
+                try {
+                  await sessionLogout.mutateAsync();
+                  await sessionStart.mutateAsync();
+                  fetchQr.mutate(undefined, { onError: () => undefined });
+                  toast({
+                    title: 'QR renovado',
+                    description:
+                      'Escanea desde WhatsApp Business → Ajustes → Dispositivos vinculados.',
+                  });
+                } catch (e) {
+                  toast({
+                    title: 'No se pudo renovar el QR',
+                    description: e instanceof Error ? e.message : 'Error desconocido',
+                    variant: 'destructive',
+                  });
+                }
+              }}
+              disabled={sessionLogout.isPending || sessionStart.isPending}
+            >
+              <QrCode className="mr-2 h-4 w-4" />
+              {sessionLogout.isPending || sessionStart.isPending
+                ? 'Renovando…'
+                : 'Nueva vinculación QR'}
+            </Button>
+          ) : null}
           {!isWorking ? (
             <Button onClick={handleStart} disabled={sessionStart.isPending}>
               <Power className="mr-2 h-4 w-4" />
