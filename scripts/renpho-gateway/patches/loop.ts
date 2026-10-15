@@ -47,7 +47,11 @@ function isIdleFailure(err: unknown): boolean {
     msg.includes('le-connection-abort') ||
     msg.includes('max_match_rules') ||
     msg.includes('limitsexceeded') ||
-    msg.includes('add more match rules')
+    msg.includes('add more match rules') ||
+    // GATT proxy muerto → scan.ts hace reset; reintentar rápido con Pesar abierto.
+    msg.includes('gatt_stale') ||
+    msg.includes('writevalue') ||
+    msg.includes("doesn't exist")
   );
 }
 

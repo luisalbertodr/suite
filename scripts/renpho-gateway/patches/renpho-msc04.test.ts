@@ -117,7 +117,7 @@ describe('RenphoMsc04Adapter', () => {
         read: vi.fn(),
         subscribe: vi.fn(),
       } as unknown as ConnectionContext;
-      await expect(makeAdapter().onConnected(ctx)).rejects.toThrow(/not discovered/);
+      await expect(makeAdapter().onConnected(ctx)).rejects.toThrow(/GATT_STALE|not discovered/);
     });
   });
 
@@ -269,6 +269,30 @@ describe('RenphoMsc04Adapter', () => {
       expect(writes.filter((w) => w.withResponse === true)).toHaveLength(4);
       expect(writes.filter((w) => w.withResponse === false)).toHaveLength(4);
     }, 20_000);
+
+    it('aborts with GATT_STALE when WriteValue characteristic dies (no useless retries)', async () => {
+      const adapter = new RenphoMsc04Adapter();
+      const writes: Array<{ withResponse?: boolean }> = [];
+      const ctx = {
+        profile: defaultProfile(),
+        deviceAddress: '60:30:F2:74:22:B6',
+        availableChars: new Set<string>([uuid16(0x2a11)]),
+        write: vi.fn(async (_u: string, _d: number[] | Buffer, withResponse?: boolean) => {
+          writes.push({ withResponse });
+          throw new Error(
+            'Method "WriteValue" with signature "aya{sv}" on interface ' +
+              '"org.bluez.GattCharacteristic1" doesn\'t exist',
+          );
+        }),
+        read: vi.fn(),
+        subscribe: vi.fn(),
+      } as unknown as ConnectionContext;
+
+      await expect(adapter.onConnected(ctx)).rejects.toThrow(/GATT_STALE/);
+      // First frame dies on withResponse — must NOT fan out to noResponse retries ×4.
+      expect(writes.length).toBeLessThanOrEqual(2);
+      expect(writes.every((w) => w.withResponse === true)).toBe(true);
+    }, 15_000);
 
     it('replays orphaned body-comp after a hung handshake on the next connect', async () => {
       const adapter = new RenphoMsc04Adapter();
